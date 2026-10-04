@@ -10,7 +10,12 @@ import { cn } from '@/lib/utils';
 import { PRIORITY_OPTIONS, getEffortOptions, DEFAULT_EFFORT_MEASURE, getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 import { dropdownVariants } from '@/lib/motion';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
-import { parseTaskInput, parseTaskInputForSubmission, ParsedTask } from '@/lib/parse-task-input';
+import {
+  parseTaskInput,
+  parseTaskInputForSubmission,
+  ParsedTask,
+  SUBTASK_QUICK_ADD_METADATA,
+} from '@/lib/parse-task-input';
 import { extractPendingTasks as extractPendingTasksFromPaste, normalizePendingTaskText as normalizePasteText, splitCompoundTask } from '@/lib/paste-parser';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -355,10 +360,14 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const isVoiceStarting = voiceState === 'starting';
   const isVoiceActive = isVoiceStarting || isVoiceListening;
 
+  const activeInputMetadata = currentInputParentTaskId
+    ? SUBTASK_QUICK_ADD_METADATA
+    : undefined;
   const parseInput = useCallback((text: string) => parseTaskInput(text, {
     ...quickAddPreferences,
     projects: cachedProjects,
-  }), [quickAddPreferences, cachedProjects]);
+    metadata: activeInputMetadata,
+  }), [activeInputMetadata, quickAddPreferences, cachedProjects]);
   const parseInputForSubmit = useCallback((text: string) => parseTaskInputForSubmission(text, {
     ...quickAddPreferences,
     projects: cachedProjects,
@@ -1015,17 +1024,6 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     }
   }, []);
 
-  const acceptDateSuggestion = useCallback(() => {
-    if (!parsed?.dateSuggestion) return;
-    const matchedText = parsed.dateSuggestion.matchedText;
-    const matchIndex = input.toLowerCase().lastIndexOf(matchedText.toLowerCase());
-    if (matchIndex < 0) return;
-    const nextInput = `${input.slice(0, matchIndex)}/due:${input.slice(matchIndex)}`;
-    setInput(nextInput);
-    inputHandleRef.current?.setText(nextInput);
-    inputHandleRef.current?.focus();
-  }, [input, parsed]);
-
   const handleKeyDown = useCallback((e: KeyboardEvent): boolean => {
     // When template typeahead is open, arrow keys navigate and Enter/Tab select
     if (templateTypeahead) {
@@ -1423,6 +1421,8 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
               value={input}
               onChange={handleInputChange}
               naturalLanguageDates={quickAddPreferences.naturalLanguageDates}
+              projects={cachedProjects}
+              metadata={activeInputMetadata}
               onFocus={() => {
                 setIsFocused(true);
                 // When a list filter is active, pre-select that list as destination (no text prefix needed)
@@ -1619,7 +1619,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         </AnimatePresence>
 
         {/* Parse preview chips (hidden during list/template typeahead) */}
-        {isFocused && !listTypeahead && !templateTypeahead && !tagTypeahead && !projectTypeahead && !priorityTypeahead && !effortTypeahead && parsed && (parsed.dueDate || parsed.dateSuggestion || parsed.priority || parsed.tags.length > 0 || parsed.project || parsed.addToMyDay || parsed.estimatedDuration || parsed.recurrence) && (
+        {isFocused && !listTypeahead && !templateTypeahead && !tagTypeahead && !projectTypeahead && !priorityTypeahead && !effortTypeahead && parsed && (parsed.dueDate || parsed.dateSuggestion || parsed.priority || parsed.tags.length > 0 || parsed.project || parsed.addToMyDay || parsed.estimatedDuration || parsed.effort || parsed.planningHorizon || parsed.recurrence) && (
           <div className="flex items-center gap-2 mt-1.5 px-3 text-xs">
             <Sparkles size={12} className="text-blue-400" />
             {parsed.dueDateLabel && (
@@ -1628,17 +1628,9 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
               </span>
             )}
             {parsed.dateSuggestion && (
-              <button
-                type="button"
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                }}
-                onClick={acceptDateSuggestion}
-                className="inline-flex items-center gap-1 rounded border border-green-800/30 bg-green-900/20 px-2 py-0.5 text-green-300 transition-colors hover:bg-green-900/40"
-                title="Apply this date as the due date"
-              >
-                <Calendar size={12} /> Use {parsed.dateSuggestion.label}
-              </button>
+              <span className="inline-flex items-center gap-1 rounded border border-green-800/30 bg-green-900/20 px-2 py-0.5 text-green-300">
+                <Calendar size={12} /> {parsed.dateSuggestion.label}
+              </span>
             )}
             {parsed.priority && (
               <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border ${getTaskPriorityVisual(parsed.priority).badgeClass}`}>
@@ -1648,6 +1640,16 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
             {parsed.estimatedDuration && (
               <span className="inline-flex items-center gap-1 rounded border border-blue-800/30 bg-blue-900/30 px-2 py-0.5 text-blue-300 tabular-nums">
                 <Clock size={11} /> {parsed.estimatedDuration >= 60 ? `${parsed.estimatedDuration / 60}h` : `${parsed.estimatedDuration}m`}
+              </span>
+            )}
+            {parsed.effort && (
+              <span className="inline-flex items-center gap-1 rounded border border-violet-800/30 bg-violet-900/30 px-2 py-0.5 text-violet-300 tabular-nums">
+                ^{parsed.effort}
+              </span>
+            )}
+            {parsed.planningHorizon && (
+              <span className="inline-flex items-center gap-1 rounded border border-emerald-800/30 bg-emerald-900/30 px-2 py-0.5 text-emerald-300">
+                ~{parsed.planningHorizon}
               </span>
             )}
             {parsed.recurrenceLabel && (
@@ -1662,7 +1664,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
             ))}
             {parsed.project && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-pink-900/30 text-pink-300 border border-pink-800/30">
-                /{parsed.project}
+                +{parsed.project}
               </span>
             )}
             {parsed.addToMyDay && (

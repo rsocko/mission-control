@@ -507,6 +507,28 @@ describe('AI proposal acceptance through the subtask route', () => {
     });
   });
 
+  it('persists Quick Add metadata on a local subtask', async () => {
+    const { POST } = await import('@/app/api/tasks/[id]/subtasks/route');
+    const response = await POST(request({
+      title: 'Scheduled child',
+      priority: 'high',
+      planningHorizon: 'soon',
+      dueDate: '2026-10-03',
+      effort: 3,
+    }), { params: Promise.resolve({ id: 'parent' }) });
+
+    expect(response.status).toBe(200);
+    expect(mockCreateSubtask).toHaveBeenCalledWith({
+      task: expect.objectContaining({
+        title: 'Scheduled child',
+        priority: 'high',
+        planningHorizon: 'soon',
+        dueDate: '2026-10-03',
+        effort: 3,
+      }),
+    });
+  });
+
   it('creates remote-shaped subtasks locally without connector access in public demo mode', async () => {
     process.env.MC_PUBLIC_DEMO = 'true';
     mockParentTask({

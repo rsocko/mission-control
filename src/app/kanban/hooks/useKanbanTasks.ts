@@ -18,6 +18,7 @@ import type {
 } from '@/types/api';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import { TASK_PRIORITY_VISUALS } from '@/lib/constants/task-formatting';
+import { TASKS_REFRESH_REQUESTED_EVENT } from '@/lib/tasks/task-refresh-events';
 
 type ColumnResolver = KanbanColumnType[] | (() => KanbanColumnType[]);
 type BooleanResolver = boolean | (() => boolean);
@@ -156,6 +157,12 @@ export function useKanbanTasks({
       return () => window.clearTimeout(timeoutId);
     }
   }, [fetchData, syncProgress.refetchKey]);
+
+  useEffect(() => {
+    const listener = () => { void fetchData(true); };
+    window.addEventListener(TASKS_REFRESH_REQUESTED_EVENT, listener);
+    return () => window.removeEventListener(TASKS_REFRESH_REQUESTED_EVENT, listener);
+  }, [fetchData]);
 
   const getTasksForColumn = useCallback((column: KanbanColumnType) => {
     const now = new Date().toISOString();

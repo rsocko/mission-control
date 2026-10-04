@@ -28,7 +28,9 @@ export function snapshotsMatch(
     && current.snoozedUntil === expected.snoozedUntil
     && current.reminderAt === expected.reminderAt
     && current.effort === expected.effort
-    && current.tagIds.join('\0') === expected.tagIds.join('\0');
+    && current.tagIds.join('\0') === expected.tagIds.join('\0')
+    && (current.projectIds ?? []).join('\0') === (expected.projectIds ?? []).join('\0')
+    && (current.phaseIds ?? []).join('\0') === (expected.phaseIds ?? []).join('\0');
 }
 
 export function buildUndoPatch(

@@ -1,0 +1,1 @@
+ALTER TABLE `external_agents` ADD `auth_credential` text;

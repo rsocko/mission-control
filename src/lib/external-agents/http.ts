@@ -3,7 +3,7 @@ import 'server-only';
 import { apiError, ApiErrors } from '@/lib/api-error';
 import { isTrustedMutationRequest, safeEqual } from '@/lib/api/trusted-request';
 import { ExternalAgentError, isExternalAgentError } from './errors';
-import { getExternalAgent, resolveAgentCredential } from './registry';
+import { getExternalAgent, resolveExternalAgentCredential } from './registry';
 
 export function requireTrustedMutation(request: Request) {
   if (!isTrustedMutationRequest(request)) {
@@ -16,7 +16,7 @@ export async function requireAgentAuthentication(request: Request, agentId: stri
   if (!agent || !agent.enabled || agent.deletedAt) {
     throw new ExternalAgentError('External agent not found', 'NOT_FOUND', 404);
   }
-  const expected = resolveAgentCredential(agent.authCredentialRef);
+  const expected = await resolveExternalAgentCredential(agent);
   if (!expected) {
     throw new ExternalAgentError(
       'Agent authentication is not configured',

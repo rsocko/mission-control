@@ -356,13 +356,9 @@ connector-settings merge patch (`@/lib/connectors/shared/connector-config-store`
 
 Reachability findings for the remaining non-finance connectors:
 
-- **Rymessage** is notification-only and owns no Mission Control table. Its
-  durable state is generic connector settings plus Layer 2 notification
-  dedupe/reconciliation, so Layer 4 enables and proves that existing portable
-  path instead of inventing a table. Its optional source-side SQLite reader in
-  `rymessage-client.ts` opens *RyMessage's own* database file: that is external
-  connector transport, not a Mission Control backend fallback, and no port
-  imports it.
+- **Rymessage** now consumes only the Companion ActionV2 feed through its
+  backend-portable action repository. The former webhook, REST, and source-side
+  SQLite readers were removed during the canonical contract cutover.
 - **OWL** (`document-intelligence`) also owns no worker persistence table. Its
   normal task, source-list, source-tag, and notification writes already use the
   Layer 2 ports. Its scheduled triage importer is Layer 7 and its interactive
@@ -2046,19 +2042,19 @@ none of it.
 
 ### The cap
 
-Eleven routes and one shared library move behind the port:
+Ten routes and one shared library move behind the port:
 `/api/inbound-webhooks` (GET/POST), `/api/inbound-webhooks/[id]`
 (PATCH/DELETE), `/api/inbound-webhooks/[id]/log` (GET),
 `/api/inbound-webhooks/[id]/receive` (POST), `/api/integrations/n8n`
 (GET/POST/PUT), `/api/integrations/n8n/webhook` (POST),
-`/api/integrations/rymessage` (GET/POST), `/api/integrations/webhooks`
-(GET/POST), `/api/integrations/webhooks/[id]` (PATCH/DELETE),
+`/api/integrations/webhooks` (GET/POST),
+`/api/integrations/webhooks/[id]` (PATCH/DELETE),
 `/api/integrations/webhooks/[id]/test` (POST), `/api/webhooks/[connectorId]`
 (GET/POST), plus `src/lib/integrations/n8n.ts`.
 
-The final approved maximum is 48 paths: the 28-path implementation cap plus
+The historical approved maximum was 48 paths: the 28-path implementation cap plus
 20 test-only exact-current ratchet readers discovered across both main
-reconciliations and CI. The production and route scope did not expand.
+reconciliations and CI. Removing the RyMessage webhook reduced that scope.
 
 The port lives in `src/db/persistence/webhook-integrations.ts`, with
 `src/db/persistence/sqlite-webhook-integrations-repository.ts` and

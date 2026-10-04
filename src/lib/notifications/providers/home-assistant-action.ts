@@ -31,14 +31,16 @@ function isHomeAssistantActionConnector(
     && typeof connector.executeNotificationAction === 'function';
 }
 
-function homeAssistantActionStatus(error: unknown): 409 | 503 {
+function homeAssistantActionStatus(error: unknown): 401 | 403 | 409 | 503 {
+  const status = error instanceof Error && 'status' in error
+    ? error.status
+    : undefined;
   if (
     error instanceof Error
     && error.name === 'HomeAssistantActionError'
-    && 'status' in error
-    && (error.status === 409 || error.status === 503)
+    && (status === 401 || status === 403 || status === 409 || status === 503)
   ) {
-    return error.status;
+    return status;
   }
   return 503;
 }
@@ -71,6 +73,7 @@ export async function executeHomeAssistantProviderAction(
     'install_update',
     'skip_update',
     'dismiss_persistent_notification',
+    'restart_home_assistant',
     'ignore_repair',
   ].includes(action)) {
     return null;
@@ -100,6 +103,8 @@ export async function executeHomeAssistantProviderAction(
         action,
         confirmation: dismissed
           ? 'Dismissed in Home Assistant and Mission Control.'
+          : action === 'restart_home_assistant'
+            ? 'Restart complete. Home Assistant is back online.'
           : 'Home Assistant accepted the request. Mission Control will confirm it on the next poll.',
       },
     };

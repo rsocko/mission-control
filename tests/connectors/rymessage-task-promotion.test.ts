@@ -61,7 +61,6 @@ function page(
       sourceId: 'source',
       occurredAt: NOW,
       kind: 'upsert',
-      action: {} as never,
       projection: {
         action: {} as never,
         taskMaterializations: [{
@@ -110,10 +109,8 @@ function page(
 
 function client(): CompanionActionClient {
   return {
-    fetchPage: vi.fn(),
     fetchPageV2,
     validateMutationV2: vi.fn(() => true),
-    submitMutation: vi.fn(),
     submitMutationV2,
   };
 }

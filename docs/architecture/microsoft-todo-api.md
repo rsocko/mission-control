@@ -413,6 +413,19 @@ We use a hybrid:
 3. **Hidden list tasks**: Graph API direct access `/me/todo/lists/{id}/tasks` (for lists not in Graph listing but individually accessible)
 4. **Fallback**: Substrate `/taskfolders/{id}/tasks` (if Graph access fails for a specific list)
 
+### Recurrence Ownership
+
+Microsoft To Do owns imported recurrence series and their occurrences. It creates
+the successor after an occurrence is completed, and Mission Control mirrors every
+active occurrence returned by the source. Mission Control must not infer that a
+source-owned occurrence is stale or suppress it because another occurrence has a
+later due or completion date. A full sync therefore recovers any active upstream
+occurrence that was previously removed locally.
+
+Mission Control only performs recurrence cleanup or materialization for canonical
+rules whose occurrence owner is `mission-control`, such as completion-anchored
+local tasks.
+
 ---
 
 ## How the To Do Web App Works

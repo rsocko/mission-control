@@ -66,6 +66,42 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
         expect(params[8]).toEqual(['deleted-connector']);
       });
 
+      it('applies canonical current visibility to keyword and exact issue task reads', async () => {
+        const query = vi.fn().mockResolvedValue({ rows: [] });
+        const repository = new PostgresKeywordSearchRepository({ query } as never);
+
+        await repository.search('#42', { type: 'tasks', limit: 20 });
+
+        expect(query).toHaveBeenCalledTimes(2);
+        for (const [sql] of query.mock.calls as Array<[string, unknown[]]>) {
+          expect(sql).toContain('t.deleted_at IS NULL');
+          expect(sql).toContain("t.local_disposition = 'active'");
+          expect(sql).toContain(
+            'SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL',
+          );
+        }
+        expect(query.mock.calls[1][0]).toContain(
+          'NOT (t.connector_type = ANY($8::text[]))',
+        );
+      });
+
+      it('rebuilds the task projection from current-visible tasks only', async () => {
+        const query = vi.fn().mockResolvedValue({ rows: [] });
+        const release = vi.fn();
+        const repository = new PostgresKeywordSearchRepository({
+          connect: vi.fn().mockResolvedValue({ query, release }),
+        } as never);
+
+        await repository.rebuild();
+
+        const [sql, params] = query.mock.calls[2] as [string, unknown[]];
+        expect(sql).toContain('WHERE deleted_at IS NULL');
+        expect(sql).toContain("local_disposition = 'active'");
+        expect(sql).toContain('SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL');
+        expect(sql).toContain('NOT (connector_type = ANY($1::text[]))');
+        expect(params).toEqual([expect.any(Array)]);
+      });
+
       it('pushes date predicates before the task result limit', async () => {
         const query = vi.fn().mockResolvedValue({ rows: [] });
         const repository = new PostgresKeywordSearchRepository({ query } as never);

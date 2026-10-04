@@ -134,6 +134,34 @@
       "when": 1790738395508,
       "tag": "0018_chunky_phil_sheldon",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790817118838,
+      "tag": "0019_cleanup_orphan_external_bindings",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790826674054,
+      "tag": "0020_paperclip_provider_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790907499904,
+      "tag": "0021_tough_arachne",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791044042376,
+      "tag": "0022_exotic_ben_urich",
+      "breakpoints": true
     }
   ]
 }

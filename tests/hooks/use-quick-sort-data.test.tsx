@@ -36,7 +36,7 @@ describe('useQuickSortData background revalidation', () => {
       const url = String(input);
       if (url.includes('counts=true')) {
         return new Response(JSON.stringify({
-          counts: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 1, no_planning_horizon: 0 },
+          counts: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 1, no_planning_horizon: 0, no_project: 1 },
         }));
       }
       if (url.includes('/suggestions?')) {
@@ -73,7 +73,7 @@ describe('useQuickSortData background revalidation', () => {
       const url = String(input);
       if (url.includes('counts=true')) {
         return new Response(JSON.stringify({
-          counts: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 1, no_planning_horizon: 0 },
+          counts: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 1, no_planning_horizon: 0, no_project: 1 },
         }));
       }
       if (url.includes('/suggestions?')) {

@@ -17,6 +17,7 @@ beforeEach(() => {
     sourceRankings: [],
     tags: [],
     taskTags: [],
+    projectAffinities: [],
   });
   registerFakeTaskCorePersistence({ taskReads });
 });
@@ -89,6 +90,7 @@ describe('GET /api/tasks/quick-sort/suggestions', () => {
         updatedAt: '2026-08-01T00:00:00.000Z',
         connectorType: 'local',
         connectorInstanceId: 'local',
+        sourceListId: 'billing',
         sourceListName: 'Billing',
         assignee: null,
         snoozedUntil: null,
@@ -106,6 +108,7 @@ describe('GET /api/tasks/quick-sort/suggestions', () => {
         { id: 'tag-other', name: 'Other' },
       ],
       taskTags: [{ taskId: 'other-task', tagId: 'tag-billing' }],
+      projectAffinities: [],
     });
 
     const { GET } = await import('@/app/api/tasks/quick-sort/suggestions/route');
@@ -131,6 +134,135 @@ describe('GET /api/tasks/quick-sort/suggestions', () => {
             id: 'tag-billing',
             name: 'Billing',
             confidence: 0.7,
+          }],
+          projects: [],
+        },
+      },
+    });
+  });
+
+  it('suggests projects when a list cohort has a clear assignment pattern', async () => {
+    taskReads.getQuickSortSuggestionInputs.mockResolvedValue({
+      tasks: [{
+        id: 'task-1',
+        title: 'Ship billing update',
+        description: null,
+        priority: 'medium',
+        dueDate: null,
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-work',
+        sourceListId: 'billing',
+        sourceListName: 'Billing',
+        assignee: null,
+        snoozedUntil: null,
+        effort: 2,
+      }],
+      sourceRankings: [],
+      tags: [],
+      taskTags: [],
+      projectAffinities: [
+        {
+          taskId: 'peer-1',
+          connectorInstanceId: 'todo-work',
+          sourceListId: 'billing',
+          projectId: 'project-billing',
+          projectName: 'Billing Platform',
+          projectColor: '#06b6d4',
+        },
+        {
+          taskId: 'peer-2',
+          connectorInstanceId: 'todo-work',
+          sourceListId: 'billing',
+          projectId: 'project-billing',
+          projectName: 'Billing Platform',
+          projectColor: '#06b6d4',
+        },
+        {
+          taskId: 'peer-3',
+          connectorInstanceId: 'todo-work',
+          sourceListId: 'billing',
+          projectId: 'project-other',
+          projectName: 'Operations',
+          projectColor: '#64748b',
+        },
+      ],
+    });
+
+    const { GET } = await import('@/app/api/tasks/quick-sort/suggestions/route');
+    const response = await GET(new Request(
+      'http://localhost/api/tasks/quick-sort/suggestions?taskIds=task-1',
+    ));
+
+    await expect(response.json()).resolves.toMatchObject({
+      suggestions: {
+        'task-1': {
+          projects: [{
+            id: 'project-billing',
+            name: 'Billing Platform',
+            color: '#06b6d4',
+            confidence: 0.67,
+            reason: '2 of 3 items on Billing list',
+          }],
+        },
+      },
+    });
+  });
+
+  it('falls back to source peers when list evidence is sparse', async () => {
+    taskReads.getQuickSortSuggestionInputs.mockResolvedValue({
+      tasks: [{
+        id: 'task-1',
+        title: 'New work item',
+        description: null,
+        priority: 'medium',
+        dueDate: null,
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+        connectorType: 'github-issues',
+        connectorInstanceId: 'github-work',
+        sourceListId: 'new-repo',
+        sourceListName: 'New Repo',
+        assignee: null,
+        snoozedUntil: null,
+        effort: 2,
+      }],
+      sourceRankings: [],
+      tags: [],
+      taskTags: [],
+      projectAffinities: [
+        {
+          taskId: 'peer-1',
+          connectorInstanceId: 'github-work',
+          sourceListId: 'other-repo',
+          projectId: 'project-dev',
+          projectName: 'Development',
+          projectColor: '#6366f1',
+        },
+        {
+          taskId: 'peer-2',
+          connectorInstanceId: 'github-work',
+          sourceListId: 'third-repo',
+          projectId: 'project-dev',
+          projectName: 'Development',
+          projectColor: '#6366f1',
+        },
+      ],
+    });
+
+    const { GET } = await import('@/app/api/tasks/quick-sort/suggestions/route');
+    const response = await GET(new Request(
+      'http://localhost/api/tasks/quick-sort/suggestions?taskIds=task-1',
+    ));
+
+    await expect(response.json()).resolves.toMatchObject({
+      suggestions: {
+        'task-1': {
+          projects: [{
+            id: 'project-dev',
+            confidence: 1,
+            reason: '2 of 2 items on this source',
           }],
         },
       },

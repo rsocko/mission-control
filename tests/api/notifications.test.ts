@@ -580,6 +580,10 @@ describe('POST /api/notifications/[id]/snooze', () => {
   });
 
   it('accepts valid duration and snoozes', async () => {
+    mockWebPersistence.findNotificationForAction.mockResolvedValueOnce({
+      id: 'n1',
+      connectorType: 'home-assistant',
+    });
     const { POST } = await import('@/app/api/notifications/[id]/snooze/route');
     const req = new Request('http://localhost/api/notifications/n1/snooze', {
       method: 'POST',

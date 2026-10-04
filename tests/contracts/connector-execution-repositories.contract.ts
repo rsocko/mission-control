@@ -306,13 +306,28 @@ export function describeConnectorExecutionRepositoriesContract(
         input: {
           ...command.input,
           id: 'portable-notification-regenerated',
-          primaryActionId: 'portable-action-regenerated',
+          primaryActionId: 'portable-restart-action',
         },
-        actions: [{
-          ...command.actions[0],
-          id: 'portable-action-regenerated',
-          notificationId: 'portable-notification-regenerated',
-        }],
+        actions: [
+          {
+            ...command.actions[0],
+            id: 'portable-action-regenerated',
+            notificationId: 'portable-notification-regenerated',
+            isPrimary: false,
+            variant: 'secondary',
+            sortOrder: 1,
+          },
+          {
+            ...command.actions[0],
+            id: 'portable-restart-action',
+            notificationId: 'portable-notification-regenerated',
+            actionType: 'restart_service',
+            label: 'Restart',
+            payload: {},
+            isPrimary: true,
+            sortOrder: 0,
+          },
+        ],
       };
       const [second] = await harness.repositories.notifications.ingest([regeneratedCommand]);
       expect(first.created).toBe(true);
@@ -320,12 +335,12 @@ export function describeConnectorExecutionRepositoriesContract(
       expect(second.id).toBe(first.id);
       await expect(harness.notificationCounts(command.input.sourceId)).resolves.toEqual({
         notifications: 1,
-        actions: 1,
+        actions: 2,
         deliveries: 2,
       });
       await expect(harness.notificationActionState(command.input.sourceId)).resolves.toEqual({
-        primaryActionId: command.actions[0].id,
-        actionIds: [command.actions[0].id],
+        primaryActionId: 'portable-restart-action',
+        actionIds: [command.actions[0].id, 'portable-restart-action'],
       });
 
       const batchSourceId = 'portable-connector:notice-batch';

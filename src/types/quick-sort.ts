@@ -14,6 +14,8 @@ export interface QuickSortTaskSnapshot {
   reminderAt: string | null;
   effort: number | null;
   tagIds: string[];
+  projectIds?: string[];
+  phaseIds?: string[];
 }
 
 export interface QuickSortBeforeSnapshot extends QuickSortTaskSnapshot {

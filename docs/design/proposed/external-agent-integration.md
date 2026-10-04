@@ -2,7 +2,7 @@
 title: "External Agent Integration"
 status: proposed
 created: 2026-07-19
-last_reviewed: 2026-09-29
+last_reviewed: 2026-09-30
 category: design
 related:
   - "[Paperclip Adoption and Integration](paperclip-adoption-and-integration.md)"
@@ -46,7 +46,7 @@ Today, these hand-offs require manual copy-paste between tools. There is no prog
 3. **Human-in-the-loop by default** — Outbound dispatches require confirmation. Inbound results land in a review queue before being committed.
 4. **Leverage what exists** — Build on top of the existing inbound webhook system, the agent dispatch framework, and the phase proposal review UI.
 5. **Transport follows agent capability** — Some agents accept pushes; others, including Scout and a GitHub Copilot app local automation, must poll and claim queued work. The dispatch lifecycle is transport-independent.
-6. **Minimize disclosed context** — Preview and classify every payload. Sensitive content should remain in its tenant-managed execution environment whenever possible.
+6. **Deliberate disclosed context** — Preview and classify every payload. Eligible GitHub Cloud and Paperclip delegations require the complete canonical work contract described below; raw connector metadata and unrelated records remain excluded. Sensitive content should remain in its tenant-managed execution environment whenever possible.
 7. **Inference is not execution** — Copilot model access through Bifrost cannot read a repository, run commands, or open a PR. Coding execution requires an explicit execution adapter with repository and tool authority.
 8. **Execution locality is user-visible** — Never silently move work among MC-hosted, developer-workstation, and GitHub-hosted execution. The preview identifies where code and task context will be processed.
 
@@ -142,6 +142,7 @@ CREATE TABLE external_agents (
   endpoint        TEXT,                    -- URL to invoke (null for manual)
   auth_type       TEXT DEFAULT 'none',     -- 'none' | 'bearer' | 'hmac' | 'github-user' | 'github-app'
   auth_credential_ref TEXT,                -- reference to a secret manager entry; never the token itself
+  auth_credential TEXT,                    -- optional UI-managed credential; never serialized to clients
   capabilities    TEXT DEFAULT '{}',       -- JSON: { executionLocality, canAnalyzeCode, canWriteCode, canRunCommands, canPush, canCreatePR }
   input_format    TEXT DEFAULT 'mc-tasks', -- 'mc-tasks' | 'markdown' | 'custom-json'
   output_format   TEXT DEFAULT 'mc-tasks', -- 'mc-tasks' | 'mc-phases' | 'github-issues' | 'raw'
@@ -158,6 +159,7 @@ CREATE TABLE external_agents (
 |------|-------------|-----------------|-------------------|
 | `copilot-cloud` | GitHub-hosted Copilot cloud agent | `POST /agents/repos/{owner}/{repo}/tasks`; issue assignment is a compatibility path | Agent Tasks polling plus PR/issue webhooks |
 | `copilot-sdk-workspace` | MC-hosted Copilot SDK coding runtime | Provision isolated clone/worktree, then start a scoped SDK session | SDK events plus Git/PR references |
+| `paperclip` | Paperclip parent issue assigned to a configured Paperclip agent | `POST /api/companies/{companyId}/issues` with a stable MC idempotency key | Issue, heartbeat-run, approval, and work-product polling |
 | `webhook-roundtrip` | Any system that accepts a POST and calls back | POST to `endpoint` with MC context | Agent POSTs back to `inbound_webhook_id` |
 | `mcp` | MCP-compatible tool server | MCP tool invocation protocol | Inline response |
 | `pull-queue` | Agent without a supported inbound API, such as Scout or a Copilot app local automation | Agent polls MC and atomically claims a dispatch | Agent completes/fails through scoped MC tools |
@@ -169,12 +171,43 @@ CREATE TABLE external_agents (
 
 ### Context Serialization
 
-When dispatching work to an external agent, MC serializes relevant context:
+When dispatching work to an external agent, MC serializes a provider-neutral,
+reviewed context contract. GitHub Cloud and Paperclip require the full canonical
+task contract: task ID, title, full description, status, priority, tags, due
+date, effort, assignee, micro-status, planning horizon, source-list display
+name, hierarchy fields, and every descendant subtask/checklist item with its
+identity, full description, state, and sibling order. Project and phase context
+is included when the dispatch scope provides it.
+
+GitHub issue provenance is represented as a structured `sourceIssue` object
+containing the authoritative repository and issue number. The issue URL is
+included only when the connector's authoritative URL matches that exact
+repository/number identity; Mission Control does not invent a host.
+For GitHub Cloud this object is accepted only when the source repository exactly
+matches the dispatch repository (case-insensitive owner/name comparison).
+Cross-repository issue identity blocks the dispatch rather than being rewritten
+or inferred from title text.
+
+The contract deliberately excludes credentials, connector configuration and
+metadata blobs, activity logs, binary attachment content, and unrelated task
+records. Mission Control currently has no separate canonical task notes field;
+task descriptions and subtask/checklist descriptions are therefore the complete
+canonical work-content fields. Attachment metadata is also excluded until a
+source-authority and disclosure policy contract is defined for it.
+
+Each selected text value is limited to 65,536 characters and the reviewed
+payload is limited to 256 KiB. Per-dispatch instructions are limited to 32,000
+characters and destination always instructions to 16,000 characters. Exceeding
+a limit fails preview with an explicit error; required work content is never
+silently truncated.
 
 ```typescript
 interface AgentDispatchPayload {
-  // What MC wants the agent to do
+  // User-entered instructions for this dispatch
   instruction: string;
+
+  // Server-owned destination configuration, applied on every dispatch
+  alwaysInstructions: string;
 
   // Scope
   project?: { id: string; name: string; description: string };
@@ -193,7 +226,32 @@ interface AgentDispatchPayload {
     priority: string;
     status: string;
     tags: string[];
-    phase?: string;
+    dueDate?: string | null;
+    effort?: number | null;
+    assignee?: string | null;
+    microStatus?: string | null;
+    planningHorizon?: string | null;
+    sourceListName?: string | null;
+    siblingOrder?: number | null;
+    depth: number;
+    isChecklistItem: boolean;
+    sourceIssue?: {
+      type: 'github-issue';
+      repository: string;
+      issueNumber: number;
+      url: string;
+    };
+    subtasks: Array<{
+      id: string;
+      title: string;
+      description: string | null;
+      priority: string;
+      status: string;
+      tags: string[];
+      siblingOrder: number | null;
+      depth: number;
+      isChecklistItem: boolean;
+    }>;
   }>;
 
   // Optional: existing phase plan for context
@@ -229,11 +287,51 @@ The implemented API uses a durable two-step boundary:
    the reviewed preview. Retries reuse the selected locality and provider
    idempotency identity; they never fall back to another execution mode.
 
-Credential values are supplied server-side from
-`MC_EXTERNAL_AGENT_CREDENTIALS_JSON`, keyed by `auth_credential_ref`. Only the
-reference is stored in the registry, and neither the reference nor the
-credential value is returned in API responses or persisted payload/result
-logs.
+GitHub Copilot Cloud personal access tokens are entered directly in **Settings → AI &
+Agents**. Mission Control validates the token with GitHub, persists it in the
+destination's server-side credential field, and never returns it in API
+responses or persists it in payload/result logs. Existing installations may
+instead select the advanced deployment-secret-reference mode, which resolves
+`auth_credential_ref` from `MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. Paperclip
+bearer credentials continue to use deployment-secret references.
+
+Each GitHub Cloud or Paperclip destination may also define **Always
+instructions** in Settings. These are ordinary server-owned configuration, not
+credentials. They are length-validated, included in destination persistence,
+the payload and preview hash, and displayed separately from per-dispatch
+instructions in both configuration and review. Changing them invalidates any
+unconfirmed preview. They never bypass classification, field policy, locality,
+or confirmation.
+
+The review step displays the exact redacted payload for every fan-out item, in
+addition to the disclosed-field list. A destination whose configured allowlist
+cannot disclose the required rich task fields is shown as blocked with the
+missing fields named; Mission Control does not omit descriptions or subtasks and
+continue.
+
+Existing GitHub Cloud and Paperclip destinations are upgraded on registry read:
+required rich-context fields are appended deterministically to their existing
+allowlists and persisted through the same registry repository. Classification,
+retention, rate limits, provider configuration, and existing allowlist entries
+are preserved, so deployment does not require manual database repair.
+
+Classification is resolved across each root task and every disclosed descendant
+before preview persistence or transmission. A restricted descendant therefore
+blocks a standard-only destination even when its root is standard. Bulk preview
+isolates typed per-task disclosure failures: successful durable previews remain
+visible, while failed tasks return blocked entries with the actionable error
+code, HTTP status, and reason. Retrying the same operation reuses successful
+previews and does not create duplicates.
+
+Paperclip creates one parent issue per delegated canonical task. Its title is
+the canonical task title verbatim; Paperclip's current create-issue validator
+and PostgreSQL text column impose no title maximum, so Mission Control does not
+truncate it or derive it from the first instruction line. The issue description
+uses readable Markdown sections for per-dispatch instructions, destination
+always instructions, authoritative source provenance, full task content, and
+ordered subtasks/checklist items, followed by the reviewed canonical JSON for
+audit. Canonical subtasks remain context in the parent issue and are not
+expanded into child Paperclip issues.
 
 ```typescript
 // Request
@@ -263,16 +361,33 @@ logs.
 #### `copilot-cloud` (GitHub-hosted cloud agent)
 
 1. MC previews the exact prompt, repository, base ref, model selection, and whether a PR should be created.
-2. After confirmation, MC calls `POST /agents/repos/{owner}/{repo}/tasks` with `prompt`, optional `base_ref`, optional `model`, and `create_pull_request`.
-3. MC stores the returned GitHub agent task ID and polls its status. Supported states include `queued`, `in_progress`, `idle`, `waiting_for_user`, and terminal outcomes.
-4. PR/issue webhooks and the existing GitHub connector associate created branches and PRs with the dispatch.
-5. If the Agent Tasks API is unavailable, MC may assign an issue to `copilot-swe-agent[bot]` with an explicit `agent_assignment`; merely adding a `copilot` label is not a supported dispatch contract.
+2. Before transmission, MC validates the user credential, exact repository identity, base ref, Copilot repository eligibility, and Agent tasks read permission. The create request then validates write permission.
+3. After confirmation, MC calls `POST /agents/repos/{owner}/{repo}/tasks` with the reviewed context serialized into `prompt`, optional `base_ref`, optional `model`, and `create_pull_request`.
+4. MC stores the returned GitHub agent task ID and polls `GET /agents/repos/{owner}/{repo}/tasks/{task_id}`. `idle` maps to canonical `in_progress`; all other documented provider states map directly.
+5. The persisted provider task ID is the normal restart-reconciliation anchor. If a process stopped after GitHub accepted a create request but before that ID was stored, MC resumes the fenced attempt after its lease expires and scans recent Agent tasks for the dispatch marker in the exact prompt so a response-loss retry does not create duplicate work.
+6. Branch artifacts are recorded directly. Pull artifacts are resolved through the existing GitHub REST client, verified against the confirmed repository, and persisted as branch, commit, and PR references.
 
 The Agent Tasks API is public preview and currently accepts only user-to-server
 credentials, such as a PAT, OAuth user token, or GitHub App user token. GitHub
 App installation access tokens are not supported for this cloud-dispatch API.
-MC must report entitlement, repository-policy, and token-scope failures without
-falling back to another execution mode.
+Tokens remain server-side either in the destination credential field or behind
+`auth_credential_ref`; they are never included in previews, provider details,
+events, or API responses. MC reports credential, entitlement,
+repository-policy, token-scope, validation, and rate-limit failures with
+actionable errors and never falls back to another execution mode or repository.
+
+`POST /api/external-agents/reconcile` performs bounded reconciliation of all
+persisted active GitHub-hosted dispatches and is safe to run after process
+restart. Reading an individual dispatch also refreshes its provider state.
+GitHub does not currently expose an Agent Tasks cancellation endpoint. Once a
+provider task ID exists, MC returns `CANCELLATION_UNSUPPORTED` instead of
+claiming that the upstream task was cancelled; cancellation before submission
+remains local and durable.
+
+Issue assignment to `copilot-swe-agent[bot]` with an explicit
+`agent_assignment` remains a documented compatibility path, but this adapter
+does not silently switch to it when direct Agent Tasks dispatch fails. A
+`copilot` label alone is never a dispatch contract.
 
 #### `copilot-sdk-workspace` (MC-hosted workspace agent)
 
@@ -322,6 +437,17 @@ Or open VS Code with a pre-filled Copilot prompt via `vscode://` URI.
 
 This transport is preferred over a GitHub issue bridge for Scout because
 business M365 payloads should not be copied into a code-hosting work item.
+
+Scout setup provisions this as a second role linked to the existing Scout
+connector. The connector remains the inbound task source; the worker is an
+independently enabled execution destination with its own managed credential,
+disclosure policy, and audit history. Its dedicated MCP endpoint exposes only
+claim, progress, complete, and fail tools. Mission Control generates a setup
+prompt that instructs Scout to create the scheduled pickup automation and
+connect that endpoint without granting access to the general MC MCP tool
+surface. The user can explicitly reveal the prompt again from Scout settings;
+ordinary status reads never return its credential. Credential rotation remains
+a separate action because it invalidates an existing automation.
 
 ##### GitHub Copilot app pull-worker profile
 
@@ -514,44 +640,50 @@ Add an "External Agents" section to the AI page:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Dispatch Modal
+### Provider-neutral task delegation
 
-When the user clicks "Dispatch", a modal opens:
+**Delegate** is the stable task action. Configured GitHub Copilot Cloud and Paperclip
+routes are typed execution destinations; source connectors remain separate.
+Operators manage those destinations in **Settings → AI & Agents → Execution
+Destinations**. GitHub Copilot Cloud setup accepts and validates a personal access
+token directly; deployment-secret references remain available as an advanced
+and backward-compatible option. Paperclip references remain server-side in
+`MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. GitHub Copilot Cloud and Paperclip setup,
+validation, enablement, capability policy, and data
+classification policy are managed there. Paperclip route bindings are validated
+when saved and remain read-only during individual delegations.
+The same centered wizard opens from the task-detail header, task-row context
+menu, and task bulk-action bars:
 
-```
-┌───────────────────────────────────────────────┐
-│  Dispatch to GitHub Copilot Coding Agent       │
-│                                                │
-│  Execution:                                    │
-│  ● GitHub-hosted cloud agent                   │
-│  ○ MC-hosted isolated workspace                │
-│  ○ Copilot app worker: Developer workstation   │
-│                                                │
-│  Instruction:                                  │
-│  ┌──────────────────────────────────────────┐  │
-│  │ Analyze the codebase and break down the  │  │
-│  │ auth migration into implementable tasks  │  │
-│  └──────────────────────────────────────────┘  │
-│                                                │
-│  Scope:                                        │
-│  ○ Project: Mission Control (23 tasks)         │
-│  ○ Selected tasks (4 selected)                 │
-│  ○ Repository: your-org/mission-control          │
-│                                                │
-│  Include:                                      │
-│  ☑ Current task list                           │
-│  ☑ Phase plan (if exists)                      │
-│  ☑ Repository context                          │
-│                                                │
-│  [Preview Payload]   [Cancel]   [Dispatch ▸]   │
-└───────────────────────────────────────────────┘
-```
+1. **Destination** selects one configured execution route.
+2. **Configure and eligibility** displays destination-specific inputs plus exact
+   ready and blocked tasks.
+3. **Review** materializes durable disclosure previews. No provider receives
+   task context until the user explicitly confirms those previews.
 
-### Context Actions (right-click / ⌘K)
+GitHub-origin tasks stay locked to their exact source repository. Other tasks
+may select only repositories discovered from enabled GitHub connectors.
+Paperclip company, project, assignee, and adapter fields are bound during route
+setup and remain read-only during delegation. Bulk delegation fans out to one
+durable assignment per eligible task and reports every blocked task instead of
+silently skipping it.
 
-From any task list, project view, or phase plan:
-- **"Send to agent…"** — opens dispatch modal with the current scope pre-filled
-- **"Copy as agent context"** — serializes to clipboard for manual paste into Copilot Chat, Claude, etc.
+After delegation, task rows show one compact state badge. Task details show the
+destination, locality, canonical state, latest progress or blocker, base ref,
+attempt, and best output link. **More details** opens a focused run dialog with
+timeline, execution facts, provider IDs, outputs, disclosure, attempts, errors,
+refresh, retry, and cancellation controls. GitHub Agent Tasks has no true
+cancellation API: Mission Control can stop tracking while provider work may
+continue.
+
+The approved interaction study is preserved as a behavioral reference in
+[Task delegation UX study](task-delegation.html). It is not runtime code or a
+pixel-exact specification.
+
+### Context actions (right-click / command palette)
+
+From a task row, **Delegate** opens the same protected wizard with the task
+already bound. Manual context export remains a separate workflow.
 
 ### Result Import (manual flow)
 

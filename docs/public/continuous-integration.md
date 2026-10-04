@@ -6,7 +6,7 @@ policy, lint, run unit tests, smoke-test the worker runtime, and build the
 production application. Fork pull requests use a read-only `GITHUB_TOKEN`,
 receive no protected secrets, and cannot publish a container.
 
-The live PostgreSQL integration suite runs across three isolated database shards
+The live PostgreSQL integration suite runs across four isolated database shards
 and reports through a stable aggregate status check. A deterministic
 runtime-weighted partition keeps the long packaged-runtime tests on separate
 workers while assigning new files automatically. Test files remain serial within

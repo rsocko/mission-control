@@ -21,15 +21,21 @@ param revisionSuffix string
 @description('GitHub repository allowed to obtain an OIDC token for the demo environment.')
 param githubRepository string = 'rsocko/mission-control'
 
+@description('Immutable GitHub repository owner ID used by the repository OIDC subject.')
+param githubRepositoryOwnerId string = '16235839'
+
+@description('Immutable GitHub repository ID used by the repository OIDC subject.')
+param githubRepositoryId string = '1331642920'
+
 var tags = {
   application: 'mission-control'
   environment: 'demo'
   persistence: 'ephemeral'
 }
 
-var containerAppsOperatorRoleDefinitionId = subscriptionResourceId(
+var containerAppsContributorRoleDefinitionId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
-  'f3bd1b5c-91fa-40e7-afe7-0c11d331232c'
+  '358470bc-b998-42bd-ab17-a7e34c199c0f'
 )
 
 resource controlIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
@@ -46,7 +52,7 @@ resource githubEnvironmentCredential 'Microsoft.ManagedIdentity/userAssignedIden
       'api://AzureADTokenExchange'
     ]
     issuer: 'https://token.actions.githubusercontent.com'
-    subject: 'repo:${githubRepository}:environment:demo'
+    subject: 'repo:${split(githubRepository, '/')[0]}@${githubRepositoryOwnerId}/${split(githubRepository, '/')[1]}@${githubRepositoryId}:environment:demo'
   }
 }
 
@@ -193,12 +199,12 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = {
 }
 
 resource controlRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(app.id, controlIdentity.id, containerAppsOperatorRoleDefinitionId)
+  name: guid(app.id, controlIdentity.id, containerAppsContributorRoleDefinitionId)
   scope: app
   properties: {
     principalId: controlIdentity.properties.principalId
     principalType: 'ServicePrincipal'
-    roleDefinitionId: containerAppsOperatorRoleDefinitionId
+    roleDefinitionId: containerAppsContributorRoleDefinitionId
   }
 }
 

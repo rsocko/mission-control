@@ -375,7 +375,7 @@ for (const file of workflowFiles) {
     );
     assert.equal(
       postgresIntegrationShards.name,
-      'PostgreSQL integration worker (${{ matrix.shard }}/3)',
+      'PostgreSQL integration worker (${{ matrix.shard }}/4)',
       'PostgreSQL integration shards must not claim the required check name',
     );
     for (const invariant of [
@@ -390,8 +390,8 @@ for (const file of workflowFiles) {
     }
     assert.deepEqual(
       postgresIntegrationShards.strategy?.matrix?.shard,
-      [1, 2, 3],
-      'ci.yml must run three PostgreSQL integration shards',
+      [1, 2, 3, 4],
+      'ci.yml must run four PostgreSQL integration shards',
     );
     assert.equal(
       postgresIntegrationShards.strategy?.['fail-fast'],
@@ -439,7 +439,7 @@ for (const file of workflowFiles) {
       postgresIntegrationTests?.run,
       `set -euo pipefail
 mapfile -t test_files < <(
-  node scripts/select-postgres-integration-shard.mjs "\${{ matrix.shard }}" 3
+  node scripts/select-postgres-integration-shard.mjs "\${{ matrix.shard }}" 4
 )
 test "\${#test_files[@]}" -gt 0
 npm test -- --run --no-file-parallelism "\${test_files[@]}"
@@ -449,7 +449,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     const postgresTestFiles = (await readdir(path.resolve('tests', 'db')))
       .filter((testFile) => /^postgres-.*\.integration\.test\.ts$/u.test(testFile))
       .sort();
-    const postgresTestShards = partitionPostgresIntegrationTests(postgresTestFiles, 3);
+    const postgresTestShards = partitionPostgresIntegrationTests(postgresTestFiles, 4);
     assert.ok(
       postgresTestShards.every((testFiles) => testFiles.length > 0),
       'Every PostgreSQL integration shard must contain tests',
@@ -489,7 +489,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     assert.equal(
       pgvectorContainer?.if,
-      "github.event_name == 'workflow_dispatch' && matrix.shard == 2",
+      "github.event_name == 'workflow_dispatch' && matrix.shard == 3",
       'PostgreSQL container discovery must run only with the manual benchmark',
     );
     assert.equal(
@@ -499,7 +499,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     assert.equal(
       pgvectorBenchmark?.if,
-      "github.event_name == 'workflow_dispatch' && matrix.shard == 2",
+      "github.event_name == 'workflow_dispatch' && matrix.shard == 3",
       'The pgvector benchmark must run only on a light shard of manually dispatched CI',
     );
     assert.equal(
@@ -887,7 +887,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     const action = uses.slice(0, uses.indexOf('@'));
     assert.ok(
-      allowedActions.has(action) || (controlsDemoEnvironment && action === 'azure/login'),
+      allowedActions.has(action),
       `${file} uses action ${action}, which is not allowlisted`,
     );
   }

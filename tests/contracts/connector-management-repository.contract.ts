@@ -36,7 +36,16 @@ export interface ConnectorManagementContractHarness {
     migrations: number;
   }>;
   markWorkTodoIngested(connectorId: string): Promise<void>;
-  seedTask(connectorId: string, sourceListId: string): Promise<void>;
+  seedTask(
+    connectorId: string,
+    sourceListId: string,
+    options?: {
+      idSuffix?: string;
+      connectorType?: string;
+      localDisposition?: string;
+      deletedAt?: string | null;
+    },
+  ): Promise<void>;
   taskSourceListName(connectorId: string): Promise<string | null>;
   seedSyncHistory(records: readonly SyncHistoryRecord[]): Promise<void>;
 }
@@ -339,7 +348,25 @@ export function runConnectorManagementRepositoryContract(
         },
       ]);
       await harness.seedTask(todoId, 'todo-a');
+      await harness.seedTask(todoId, 'todo-a', {
+        idSuffix: 'deleted',
+        deletedAt: NOW,
+      });
+      await harness.seedTask(todoId, 'todo-a', {
+        idSuffix: 'handled',
+        localDisposition: 'handled',
+      });
+      await harness.seedTask(todoId, 'todo-a', {
+        idSuffix: 'notification',
+        connectorType: 'outlook-email',
+      });
 
+      const overview = await repository.getOverview(false);
+      expect(overview.openTaskCounts).toContainEqual({
+        connectorInstanceId: todoId,
+        sourceListId: 'todo-a',
+        count: 1,
+      });
       await expect(repository.getConnectorListSnapshot(todoId)).resolves.toMatchObject({
         connector: {
           id: todoId,
@@ -376,7 +403,7 @@ export function runConnectorManagementRepositoryContract(
         taskCounts: [{
           connectorInstanceId: todoId,
           sourceListId: 'todo-a',
-          count: 1,
+          count: 4,
         }],
       });
     });

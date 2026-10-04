@@ -51,6 +51,7 @@ const response = (tasks: Task[]): TaskResponse => ({
     myDay: 0,
     recentlyCreated: 0,
     recentlyClosed: 0,
+    recurring: 0,
     waiting: 0,
     inbox: tasks.length,
   },

@@ -35,6 +35,22 @@ import {
 import { supportsNotificationDismissalWriteback } from '@/lib/connectors/notification-writeback-contract';
 
 const PARTICIPATING_REASONS = ['author', 'comment', 'manual', 'state_change', 'subscribed'];
+const RYMESSAGE_TEMPLATE_KEY = 'rymessage.companion-action';
+const RYMESSAGE_TYPE_SQL = `CASE
+  WHEN connector_type = 'rymessage' AND template_key = '${RYMESSAGE_TEMPLATE_KEY}'
+  THEN COALESCE(
+    NULLIF(
+      'rymessage.' || lower(replace(replace(COALESCE(
+        json_extract(metadata, '$.semanticType'),
+        json_extract(metadata, '$.category'),
+        json_extract(metadata, '$.actionType')
+      ), '_', '-'), ' ', '-')),
+      'rymessage.'
+    ),
+    template_key
+  )
+  ELSE template_key
+END`;
 
 const NOTIFICATION_SELECT_COLUMNS = `
   id,
@@ -74,6 +90,15 @@ const NOTIFICATION_SELECT_COLUMNS = `
   group_key AS "groupKey",
   dedupe_key AS "dedupeKey",
   related_task_id AS "relatedTaskId",
+  CASE
+    WHEN related_task_id IS NULL THEN NULL
+    WHEN EXISTS (
+      SELECT 1 FROM tasks
+      WHERE tasks.id = notifications.related_task_id
+        AND tasks.deleted_at IS NULL
+    ) THEN 'available'
+    ELSE 'unavailable'
+  END AS "relatedTaskAvailability",
   related_project_id AS "relatedProjectId",
   related_entity_type AS "relatedEntityType",
   related_entity_id AS "relatedEntityId",
@@ -182,7 +207,9 @@ function buildWhereClauses(
     params.push(query.sourceAccount);
   }
   if (query.notificationType) {
-    conditions.push(`template_key = ?`);
+    conditions.push(query.notificationType === RYMESSAGE_TEMPLATE_KEY
+      ? `template_key = ?`
+      : `${RYMESSAGE_TYPE_SQL} = ?`);
     params.push(query.notificationType);
   }
   if (query.level) {
@@ -260,6 +287,54 @@ function buildWhereClauses(
     }
   }
   return conditions;
+}
+
+type NotificationFacetDimension =
+  | 'level'
+  | 'category'
+  | 'source'
+  | 'sourceAccount'
+  | 'notificationType'
+  | 'state'
+  | 'merchant'
+  | 'dateRange';
+
+function queryWithoutFacet(
+  query: NotificationQuery,
+  facet: NotificationFacetDimension,
+): NotificationQuery {
+  switch (facet) {
+    case 'source':
+      return { ...query, source: null, sourceAccount: null, notificationType: null };
+    case 'sourceAccount':
+      return { ...query, sourceAccount: null, notificationType: null };
+    default:
+      return { ...query, [facet]: null };
+  }
+}
+
+function sqliteFacetWhere(
+  query: NotificationQuery,
+  facet: NotificationFacetDimension,
+): { sql: string; params: unknown[] } {
+  const params: unknown[] = [];
+  const conditions = buildWhereClauses(queryWithoutFacet(query, facet), null, params);
+  return {
+    sql: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
+    params,
+  };
+}
+
+function sqliteCountWhere(
+  sqlite: Database.Database,
+  query: NotificationQuery,
+): number {
+  const params: unknown[] = [];
+  const conditions = buildWhereClauses(query, null, params);
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const row = sqlite.prepare(`SELECT COUNT(*) AS count FROM notifications ${where}`)
+    .get(...params) as { count: number };
+  return Number(row.count);
 }
 
 function normalizeWritebackSourceId(sourceId: string): string {
@@ -581,25 +656,26 @@ export function createSqliteNotificationWebRepository(
           AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
       `).get(now, now) as NotificationStats;
 
-      // Facets
+      // Facets apply every active filter except their own dimension.
+      const levelFacetWhere = sqliteFacetWhere(query, 'level');
       const levelFacets = sqlite.prepare(`
         SELECT level AS value, COUNT(*) AS count
-        FROM notifications WHERE ${inboxConditionSql()}
-          AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
+        FROM notifications ${levelFacetWhere.sql}
         GROUP BY level
-      `).all(now) as Array<{ value: string | null; count: number }>;
+      `).all(...levelFacetWhere.params) as Array<{ value: string | null; count: number }>;
+      const categoryFacetWhere = sqliteFacetWhere(query, 'category');
       const categoryFacets = sqlite.prepare(`
         SELECT category AS value, COUNT(*) AS count
-        FROM notifications WHERE ${inboxConditionSql()}
-          AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
+        FROM notifications ${categoryFacetWhere.sql}
         GROUP BY category
-      `).all(now) as Array<{ value: string | null; count: number }>;
+      `).all(...categoryFacetWhere.params) as Array<{ value: string | null; count: number }>;
+      const sourceFacetWhere = sqliteFacetWhere(query, 'source');
       const sourceFacets = sqlite.prepare(`
         SELECT connector_type AS value, COUNT(*) AS count
-        FROM notifications WHERE ${inboxConditionSql()}
-          AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
+        FROM notifications ${sourceFacetWhere.sql}
         GROUP BY connector_type
-      `).all(now) as Array<{ value: string | null; count: number }>;
+      `).all(...sourceFacetWhere.params) as Array<{ value: string | null; count: number }>;
+      const sourceAccountFacetWhere = sqliteFacetWhere(query, 'sourceAccount');
       const sourceAccountFacets = sqlite.prepare(`
         SELECT connector_instance_id AS key,
                connector_type AS source,
@@ -608,53 +684,51 @@ export function createSqliteNotificationWebRepository(
                  connector_instance_id
                ) AS label,
                COUNT(*) AS count
-        FROM notifications WHERE ${inboxConditionSql()}
-          AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
+        FROM notifications ${sourceAccountFacetWhere.sql}
         GROUP BY connector_instance_id, connector_type
-      `).all(now) as Array<{ key: string; label: string; source: string; count: number }>;
-      const typeFacetParams: unknown[] = [now];
-      const typeFacetConditions = [
-        inboxConditionSql(),
-        `connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
-        `template_key IS NOT NULL`,
-      ];
-      if (query.source) {
-        const sourceTypes = financeProviderFilterValues(query.source);
-        typeFacetConditions.push(
-          sourceTypes.length === 1
-            ? `connector_type = ?`
-            : `connector_type IN (${sourceTypes.map(() => '?').join(',')})`,
-        );
-        typeFacetParams.push(...sourceTypes);
-      }
-      if (query.sourceAccount) {
-        typeFacetConditions.push(`connector_instance_id = ?`);
-        typeFacetParams.push(query.sourceAccount);
-      }
+      `).all(...sourceAccountFacetWhere.params) as Array<{
+        key: string;
+        label: string;
+        source: string;
+        count: number;
+      }>;
+      const typeFacetWhere = sqliteFacetWhere(query, 'notificationType');
       const notificationTypeFacets = sqlite.prepare(`
-        SELECT template_key AS key, COUNT(*) AS count
+        SELECT ${RYMESSAGE_TYPE_SQL} AS key, COUNT(*) AS count
         FROM notifications
-        WHERE ${typeFacetConditions.join(' AND ')}
-        GROUP BY template_key
-        ORDER BY COUNT(*) DESC, template_key ASC
-      `).all(...typeFacetParams) as Array<{ key: string; count: number }>;
-      const stateFacets = sqlite.prepare(`
-        SELECT state AS value, COUNT(*) AS count
-        FROM notifications WHERE connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
-        GROUP BY state
-      `).all() as Array<{ value: string | null; count: number }>;
+        ${typeFacetWhere.sql}${typeFacetWhere.sql ? ' AND' : ' WHERE'} ${RYMESSAGE_TYPE_SQL} IS NOT NULL
+        GROUP BY ${RYMESSAGE_TYPE_SQL}
+        ORDER BY COUNT(*) DESC, key ASC
+      `).all(...typeFacetWhere.params) as Array<{ key: string; count: number }>;
+      const stateBaseQuery = queryWithoutFacet(query, 'state');
+      const stateFacets = (['unread', 'read', 'dismissed'] as const).map(value => ({
+        value,
+        count: sqliteCountWhere(sqlite, { ...stateBaseQuery, state: value }),
+      }));
+      const dateRangeBaseQuery = queryWithoutFacet(query, 'dateRange');
+      const dateRangeFacets = Object.fromEntries(
+        ([
+          ['any', null],
+          ['today', 'today'],
+          ['week', 'week'],
+          ['month', 'month'],
+        ] as const).map(([key, dateRange]) => [
+          key,
+          sqliteCountWhere(sqlite, { ...dateRangeBaseQuery, dateRange }),
+        ]),
+      );
+      const merchantFacetWhere = sqliteFacetWhere(query, 'merchant');
       const rawMerchantFacets = sqlite.prepare(`
         SELECT json_extract(presentation, '$.financeMerchantKey') AS key,
                MIN(json_extract(presentation, '$.financeMerchantLabel')) AS label,
                COUNT(*) AS count
         FROM notifications
-        WHERE ${inboxConditionSql()}
-          AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
-          AND ${merchantMetadataCondition()}
+        ${merchantFacetWhere.sql}${merchantFacetWhere.sql ? ' AND' : ' WHERE'}
+          ${merchantMetadataCondition()}
         GROUP BY json_extract(presentation, '$.financeMerchantKey')
         ORDER BY COUNT(*) DESC, json_extract(presentation, '$.financeMerchantKey') ASC
         LIMIT ${MAX_NOTIFICATION_MERCHANT_FACETS}
-      `).all(now) as Array<{ key: string; label: string; count: number }>;
+      `).all(...merchantFacetWhere.params) as Array<{ key: string; label: string; count: number }>;
 
       // Matching count
       const unpaginatedParams: unknown[] = [];
@@ -706,6 +780,7 @@ export function createSqliteNotificationWebRepository(
           })),
           state: toRecord(stateFacets),
           merchant: normalizedMerchantFacets,
+          dateRange: dateRangeFacets,
         },
         matchingCount: Number(matchingRow.count),
       };
@@ -1180,6 +1255,15 @@ export function createSqliteNotificationWebRepository(
           category, template_key AS templateKey, state,
           read_state AS readState, disposition, source_state AS sourceState,
           navigation_target AS navigationTarget, related_task_id AS relatedTaskId,
+          CASE
+            WHEN related_task_id IS NULL THEN NULL
+            WHEN EXISTS (
+              SELECT 1 FROM tasks
+              WHERE tasks.id = notifications.related_task_id
+                AND tasks.deleted_at IS NULL
+            ) THEN 'available'
+            ELSE 'unavailable'
+          END AS relatedTaskAvailability,
           related_project_id AS relatedProjectId, group_key AS groupKey,
           metadata, presentation,
           last_source_activity_at AS lastSourceActivityAt,

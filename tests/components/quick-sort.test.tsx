@@ -61,7 +61,7 @@ describe('Quick Sort planning horizon queue', () => {
     const onSelect = vi.fn();
     render(
       <ModeSelector
-        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_planning_horizon: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_planning_horizon: 4, no_project: 5 }}
         onSelect={onSelect}
       />,
     );
@@ -70,14 +70,90 @@ describe('Quick Sort planning horizon queue', () => {
 
     expect(screen.getByText('Tasks not yet placed in Next, Soon, Later, or Someday')).toBeDefined();
     expect(screen.getAllByTestId('animated-counter').map((counter) => counter.textContent))
-      .toEqual(['1', '1', '2', '3', '4']);
+      .toEqual(['1', '1', '2', '3', '5', '4']);
     expect(onSelect).toHaveBeenCalledWith('no_planning_horizon');
+  });
+
+  it('assigns an unorganized task to a project or one of its phases', () => {
+    const onApplyProject = vi.fn();
+    render(
+      <QuickSortActions
+        task={task}
+        mode="no_project"
+        onViewTask={vi.fn()}
+        onSkip={vi.fn()}
+        onMarkDone={vi.fn()}
+        onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
+        onApplyPriority={vi.fn()}
+        onApplyEffort={vi.fn()}
+        onApplyTag={vi.fn()}
+        onApplyPlanningHorizon={vi.fn()}
+        onApplyProject={onApplyProject}
+        suggestion={{
+          priority: null,
+          effort: null,
+          tags: [],
+          projects: [{
+            id: 'project-1',
+            name: 'Mission Control',
+            color: '#06b6d4',
+            confidence: 0.75,
+            reason: '3 of 4 items on Work list',
+          }],
+        }}
+        allTags={[]}
+        projects={[{
+          id: 'project-1',
+          name: 'Mission Control',
+          color: '#06b6d4',
+          phases: [{ id: 'phase-1', name: 'Delivery', color: '#22d3ee' }],
+        }]}
+        projectsLoading={false}
+        tagsLoading={false}
+        recentTagIds={[]}
+        busy={false}
+      />,
+    );
+
+    expect(screen.getByText('Suggested from similar items')).toBeInTheDocument();
+    expect(screen.getByText('3 of 4 items on Work list')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: /Mission Control/i })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Delivery' }));
+
+    expect(onApplyProject).toHaveBeenCalledWith(
+      'project-1',
+      'Mission Control',
+      'phase-1',
+      'Delivery',
+    );
+  });
+
+  it('labels project assignment clearly and uses the Projects navigation icon', () => {
+    const { container } = render(
+      <ModeSelector
+        counts={{
+          no_priority: 1,
+          quadrant: 1,
+          no_effort: 1,
+          no_tags: 1,
+          no_project: 1,
+          no_planning_horizon: 1,
+        }}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const projectQueue = screen.getByRole('button', { name: /Add to Project/i });
+    expect(projectQueue).toBeEnabled();
+    expect(projectQueue.querySelector('.lucide-chart-network')).not.toBeNull();
+    expect(container.querySelector('.lucide-folder-kanban')).toBeNull();
   });
 
   it('marks the active desktop queue as selected', () => {
     render(
       <ModeSelector
-        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_planning_horizon: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_planning_horizon: 4, no_project: 5 }}
         onSelect={vi.fn()}
         selectedMode="no_effort"
       />,
@@ -90,7 +166,7 @@ describe('Quick Sort planning horizon queue', () => {
   it('disables empty queues and all queues during an in-flight update', () => {
     const { rerender } = render(
       <ModeSelector
-        counts={{ no_priority: 1, quadrant: 1, no_effort: 0, no_tags: 3, no_planning_horizon: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 0, no_tags: 3, no_planning_horizon: 4, no_project: 5 }}
         onSelect={vi.fn()}
       />,
     );
@@ -100,7 +176,7 @@ describe('Quick Sort planning horizon queue', () => {
 
     rerender(
       <ModeSelector
-        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_planning_horizon: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_planning_horizon: 4, no_project: 5 }}
         onSelect={vi.fn()}
         disabled
       />,

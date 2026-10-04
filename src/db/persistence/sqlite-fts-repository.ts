@@ -1,5 +1,5 @@
 import db, { sqlite } from '@/db';
-import { notifications, tasks } from '@/db/schema';
+import { notifications } from '@/db/schema';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import {
   mergeSearchFacetRows,
@@ -176,7 +176,21 @@ export async function rebuildSearchIndex() {
   sqlite.exec(CREATE_TASKS_FTS);
   sqlite.exec(CREATE_ALERTS_FTS);
 
-  const taskRows = await db.select().from(tasks);
+  const taskRows = sqlite.prepare(`
+    SELECT
+      id,
+      title,
+      description,
+      source_list_name AS sourceListName,
+      connector_type AS connectorType
+    FROM tasks
+    WHERE deleted_at IS NULL
+      AND local_disposition = 'active'
+      AND connector_instance_id NOT IN (
+        SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+      )
+      AND connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
+  `).all(...NOTIFICATION_ONLY_CONNECTOR_TYPES) as SearchableTaskRecord[];
   const notificationRows = await db.select().from(notifications);
 
   const taskTx = sqlite.transaction((rows: SearchableTaskRecord[]) => {
@@ -253,6 +267,12 @@ function searchTasks(
         FROM tasks_fts
         INNER JOIN tasks t ON t.id = tasks_fts.entityId
         WHERE tasks_fts MATCH ?
+          AND t.deleted_at IS NULL
+          AND t.local_disposition = 'active'
+          AND t.connector_instance_id NOT IN (
+            SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+          )
+          AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
           AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
           AND (? IS NULL OR t.status = ?)
           AND (? IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= ?)
@@ -264,8 +284,6 @@ function searchTasks(
           AND (? = 0 OR LOWER(t.status) <> 'done')
           AND (? = 0 OR (
             t.parent_id IS NULL
-            AND t.local_disposition = 'active'
-            AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
             AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
           ))
         ORDER BY title_match_rank, rank, LOWER(t.title), t.id
@@ -276,6 +294,7 @@ function searchTasks(
       queryText,
       queryText,
       query,
+      ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
       source,
       source,
       source,
@@ -287,7 +306,6 @@ function searchTasks(
       filters.dueBefore ?? null,
       filters.excludeDone ? 1 : 0,
       filters.universeEligible ? 1 : 0,
-      ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
       JSON.stringify(filters.excludeConnectorInstanceIds ?? []),
       limit,
     ) as Array<{
@@ -356,6 +374,11 @@ function searchTasksByIssueNumber(
         FROM tasks t
         WHERE t.connector_type = 'github-issues'
           AND t.source_id LIKE ?
+          AND t.deleted_at IS NULL
+          AND t.local_disposition = 'active'
+          AND t.connector_instance_id NOT IN (
+            SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+          )
           AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
           AND (? IS NULL OR t.status = ?)
           AND (? IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= ?)
@@ -367,8 +390,6 @@ function searchTasksByIssueNumber(
           AND (? = 0 OR LOWER(t.status) <> 'done')
           AND (? = 0 OR (
             t.parent_id IS NULL
-            AND t.local_disposition = 'active'
-            AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
             AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
           ))
         ORDER BY t.updated_at DESC
@@ -388,7 +409,6 @@ function searchTasksByIssueNumber(
       filters.dueBefore ?? null,
       filters.excludeDone ? 1 : 0,
       filters.universeEligible ? 1 : 0,
-      ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
       JSON.stringify(filters.excludeConnectorInstanceIds ?? []),
       limit,
     ) as Array<{
@@ -560,6 +580,11 @@ function taskFacetRows(
       FROM tasks t
       WHERE t.connector_type = 'github-issues'
         AND t.source_id LIKE ?
+        AND t.deleted_at IS NULL
+        AND t.local_disposition = 'active'
+        AND t.connector_instance_id NOT IN (
+          SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+        )
         AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
         AND (? IS NULL OR t.status = ?)
         AND (? IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= ?)
@@ -571,8 +596,6 @@ function taskFacetRows(
         AND (? = 0 OR LOWER(t.status) <> 'done')
         AND (? = 0 OR (
           t.parent_id IS NULL
-          AND t.local_disposition = 'active'
-          AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
           AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
         ))
     `;
@@ -588,7 +611,6 @@ function taskFacetRows(
     filters.dueBefore ?? null,
     filters.excludeDone ? 1 : 0,
     filters.universeEligible ? 1 : 0,
-    ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
     JSON.stringify(filters.excludeConnectorInstanceIds ?? []),
   ];
   const rows = sqlite.prepare(`
@@ -597,6 +619,12 @@ function taskFacetRows(
       FROM tasks_fts
       INNER JOIN tasks t ON t.id = tasks_fts.entityId
       WHERE tasks_fts MATCH ?
+        AND t.deleted_at IS NULL
+        AND t.local_disposition = 'active'
+        AND t.connector_instance_id NOT IN (
+          SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+        )
+        AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
         AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
         AND (? IS NULL OR t.status = ?)
         AND (? IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= ?)
@@ -608,8 +636,6 @@ function taskFacetRows(
         AND (? = 0 OR LOWER(t.status) <> 'done')
         AND (? = 0 OR (
           t.parent_id IS NULL
-          AND t.local_disposition = 'active'
-          AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
           AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
         ))
       ${exactIssueUnion}
@@ -621,6 +647,7 @@ function taskFacetRows(
     ORDER BY count DESC, value COLLATE NOCASE
   `).all(
     matchQuery,
+    ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
     ...commonParameters,
     ...(issueNumber === null
       ? []

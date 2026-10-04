@@ -18,8 +18,10 @@ import {
   type ScheduledTask,
   type SourceList,
   type SuggestionGroups,
+  type SuggestionTask,
 } from '@/components/today/types';
 import type { LocalDisposition, TaskEditPolicy, TaskField } from '@/types';
+import { createOptimisticMyDayItem } from '@/lib/utils/my-day-view';
 import {
   canEditTaskField,
   canRemoveTask,
@@ -53,6 +55,25 @@ function removeTaskFromSuggestions(suggestions: SuggestionGroups, taskId: string
   const next = { ...suggestions };
   for (const key of Object.keys(next) as (keyof SuggestionGroups)[]) {
     next[key] = next[key].filter((task) => task.id !== taskId);
+  }
+  return next;
+}
+
+function findSuggestedTask(suggestions: SuggestionGroups, taskId: string): SuggestionTask | undefined {
+  return Object.values(suggestions).flat().find((task) => task.id === taskId);
+}
+
+function restoreTaskToSuggestions(
+  current: SuggestionGroups,
+  previous: SuggestionGroups,
+  taskId: string,
+): SuggestionGroups {
+  const next = { ...current };
+  for (const key of Object.keys(next) as (keyof SuggestionGroups)[]) {
+    const previousTask = previous[key].find((task) => task.id === taskId);
+    if (previousTask && !next[key].some((task) => task.id === taskId)) {
+      next[key] = [...next[key], previousTask];
+    }
   }
   return next;
 }
@@ -106,6 +127,32 @@ export function useTodayActions({
   };
 
   async function addToDay(taskId: string) {
+    const previousSuggestions = suggestions;
+    const suggestedTask = findSuggestedTask(suggestions, taskId);
+    const optimisticItem = suggestedTask
+      ? createOptimisticMyDayItem({
+          taskId,
+          title: suggestedTask.title,
+          status: suggestedTask.status,
+          priority: suggestedTask.priority,
+          dueDate: suggestedTask.dueDate,
+          connectorType: suggestedTask.connectorType,
+          connectorInstanceId: suggestedTask.connectorInstanceId,
+          sourceId: suggestedTask.sourceId,
+          sourceListName: suggestedTask.sourceListName,
+          localDisposition: suggestedTask.localDisposition,
+          taskSourceModel: suggestedTask.taskSourceModel,
+          editPolicy: suggestedTask.editPolicy,
+        }, items.length + 1)
+      : null;
+
+    if (optimisticItem) {
+      setItems((current) => current.some((item) => item.taskId === taskId)
+        ? current
+        : [...current, optimisticItem]);
+      setSuggestions((current) => removeTaskFromSuggestions(current, taskId));
+    }
+
     try {
       const res = await fetch('/api/my-day', {
         method: 'POST',
@@ -119,8 +166,16 @@ export function useTodayActions({
       if (data.writeBack?.attempted && !data.writeBack?.success) {
         toast.warning('Added to My Day locally, but failed to sync to Microsoft To Do');
       }
-      fetchData();
+      void fetchData({ skipSync: true });
     } catch (error) {
+      if (optimisticItem) {
+        setItems((current) => current.filter((item) => item.id !== optimisticItem.id));
+        setSuggestions((current) => restoreTaskToSuggestions(
+          current,
+          previousSuggestions,
+          taskId,
+        ));
+      }
       toast.error(error instanceof Error ? error.message : 'Failed to add task to My Day');
     }
   }

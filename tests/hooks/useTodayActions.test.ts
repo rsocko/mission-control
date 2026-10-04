@@ -131,6 +131,98 @@ describe('useTodayActions completion', () => {
     expect(fetchData).not.toHaveBeenCalled();
   });
 
+  it('moves a suggestion into My Day before persistence and skips remote reconciliation', async () => {
+    vi.useRealTimers();
+    let resolveRequest!: (response: {
+      ok: boolean;
+      json: () => Promise<Record<string, unknown>>;
+    }) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => {
+      resolveRequest = resolve;
+    })));
+    const fetchData = vi.fn(async () => {});
+    const { result } = renderHook(() => {
+      const [items, setItems] = useState<MyDayItem[]>([]);
+      const [suggestions, setSuggestions] = useState<SuggestionGroups>(
+        suggestionsWithYesterdayTask('suggestion-1'),
+      );
+      const actions = useTodayActions({
+        items,
+        setItems,
+        suggestions,
+        setSuggestions,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { items, suggestions, actions };
+    });
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.actions.addToDay('suggestion-1');
+    });
+
+    expect(result.current.items).toMatchObject([{
+      taskId: 'suggestion-1',
+      title: 'Suggested task',
+    }]);
+    expect(result.current.suggestions.yesterday).toEqual([]);
+    expect(fetchData).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRequest({
+        ok: true,
+        json: async () => ({ id: 'my-day-1', writeBack: { attempted: true, success: true } }),
+      });
+      await request;
+    });
+
+    expect(fetchData).toHaveBeenCalledWith({ skipSync: true });
+  });
+
+  it('restores a suggestion when adding it to My Day fails', async () => {
+    vi.useRealTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ error: 'Add was rejected' }),
+    })));
+    const fetchData = vi.fn(async () => {});
+    const { result } = renderHook(() => {
+      const [items, setItems] = useState<MyDayItem[]>([]);
+      const [suggestions, setSuggestions] = useState<SuggestionGroups>(
+        suggestionsWithYesterdayTask('suggestion-1'),
+      );
+      const actions = useTodayActions({
+        items,
+        setItems,
+        suggestions,
+        setSuggestions,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { items, suggestions, actions };
+    });
+
+    await act(async () => {
+      await result.current.actions.addToDay('suggestion-1');
+    });
+
+    expect(result.current.items).toEqual([]);
+    expect(result.current.suggestions.yesterday).toHaveLength(1);
+    expect(mocks.toastError).toHaveBeenCalledWith('Add was rejected');
+    expect(fetchData).not.toHaveBeenCalled();
+  });
+
   it('deduplicates completion requests while a task is in flight', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
     const fetchData = vi.fn(async () => {});

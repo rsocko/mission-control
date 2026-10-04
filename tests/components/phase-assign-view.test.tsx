@@ -10,6 +10,15 @@ import type {
 import { COLOR_PRESETS } from '@/lib/constants/colors';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
+const useSortableMock = vi.hoisted(() => vi.fn(() => ({
+  attributes: {},
+  listeners: {},
+  setNodeRef: vi.fn(),
+  transform: null,
+  transition: null,
+  isDragging: false,
+})));
+
 vi.mock('@dnd-kit/core', () => ({
   DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DragOverlay: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -18,14 +27,7 @@ vi.mock('@dnd-kit/core', () => ({
 
 vi.mock('@dnd-kit/sortable', () => ({
   SortableContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useSortable: () => ({
-    attributes: {},
-    listeners: {},
-    setNodeRef: vi.fn(),
-    transform: null,
-    transition: null,
-    isDragging: false,
-  }),
+  useSortable: useSortableMock,
   verticalListSortingStrategy: {},
 }));
 
@@ -136,6 +138,44 @@ function renderView(
 }
 
 describe('PhaseAssignView phase names', () => {
+  it('marks unassigned task rows as part of the unassigned drop target', () => {
+    useSortableMock.mockClear();
+    render(
+      <PhaseAssignView
+        phases={[phase]}
+        unassignedTasks={[task]}
+        phaseEntries={{ [phase.id]: [] }}
+        sensors={[]}
+        collisionDetection={vi.fn()}
+        tasks={[task]}
+        myDayTaskIds={new Set()}
+        completingIds={new Set()}
+        selectedTaskId={null}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+        onSelectTask={vi.fn()}
+        onDoubleClickTask={vi.fn()}
+        onOpenTaskNotes={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onRenamePhase={vi.fn()}
+        savingPhaseIds={new Set()}
+        phaseMutationPending={false}
+        createPhaseDisabled={false}
+        onCreatePhase={vi.fn()}
+        onCreateNewTask={vi.fn()}
+        onLinkExistingTask={vi.fn()}
+        activeDragId={null}
+        getTaskContextActions={() => taskContextActions}
+        phaseMenuItems={[{ id: phase.id, name: phase.name }]}
+      />,
+    );
+
+    expect(useSortableMock).toHaveBeenCalledWith({
+      id: `task:${task.id}`,
+      data: { type: 'task', dropTargetId: 'unassigned-drop' },
+    });
+  });
+
   it('uses the project color when a phase inherits its color', () => {
     const inheritedPhase = { ...phase, color: null };
     renderView(vi.fn(), inheritedPhase, COLOR_PRESETS[3]);

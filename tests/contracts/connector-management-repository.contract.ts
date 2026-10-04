@@ -36,7 +36,16 @@ export interface ConnectorManagementContractHarness {
     migrations: number;
   }>;
   markWorkTodoIngested(connectorId: string): Promise<void>;
-  seedTask(connectorId: string, sourceListId: string): Promise<void>;
+  seedTask(
+    connectorId: string,
+    sourceListId: string,
+    options?: {
+      idSuffix?: string;
+      connectorType?: string;
+      localDisposition?: string;
+      deletedAt?: string | null;
+    },
+  ): Promise<void>;
   taskSourceListName(connectorId: string): Promise<string | null>;
   seedSyncHistory(records: readonly SyncHistoryRecord[]): Promise<void>;
 }
@@ -339,7 +348,25 @@ export function runConnectorManagementRepositoryContract(
         },
       ]);
       await harness.seedTask(todoId, 'todo-a');
+      await harness.seedTask(todoId, 'todo-a', {
+        idSuffix: 'deleted',
+        deletedAt: NOW,
+      });
+      await harness.seedTask(todoId, 'todo-a', {
+        idSuffix: 'handled',
+        localDisposition: 'handled',
+      });
+      await harness.seedTask(todoId, 'todo-a', {
+        idSuffix: 'notification',
+        connectorType: 'outlook-email',
+      });
 
+      const overview = await repository.getOverview(false);
+      expect(overview.openTaskCounts).toContainEqual({
+        connectorInstanceId: todoId,
+        sourceListId: 'todo-a',
+        count: 1,
+      });
       await expect(repository.getConnectorListSnapshot(todoId)).resolves.toMatchObject({
         connector: {
           id: todoId,
@@ -376,7 +403,7 @@ export function runConnectorManagementRepositoryContract(
         taskCounts: [{
           connectorInstanceId: todoId,
           sourceListId: 'todo-a',
-          count: 1,
+          count: 4,
         }],
       });
     });
@@ -525,6 +552,32 @@ export function runConnectorManagementRepositoryContract(
           errors: ['failed'],
           details: [{ id: `${PREFIX}-history-2` }],
         }],
+      });
+    });
+
+    it('reports the latest sync attempt separately from the latest successful sync', async () => {
+      const repository = harness.repository();
+      const connectorId = `${PREFIX}-outcome`;
+      await repository.createConnector(connector(connectorId));
+      await harness.seedSyncHistory([
+        history(`${PREFIX}-outcome-success`, '2099-09-04T01:00:00.000Z', {
+          connectorId,
+        }),
+        history(`${PREFIX}-outcome-failure`, '2099-09-04T02:00:00.000Z', {
+          connectorId,
+          success: false,
+          errors: ['offline'],
+        }),
+      ]);
+
+      const overview = await repository.getOverview(false);
+
+      expect(overview.syncOutcomes.find(outcome => outcome.connectorId === connectorId)).toEqual({
+        connectorId,
+        lastSyncAt: '2099-09-04T02:00:00.000Z',
+        lastSyncedAt: '2099-09-04T01:00:00.000Z',
+        success: false,
+        error: 'offline',
       });
     });
 

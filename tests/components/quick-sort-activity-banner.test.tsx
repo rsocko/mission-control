@@ -24,6 +24,7 @@ describe('Quick Sort activity banner', () => {
             no_effort: 3,
             no_tags: 2,
             no_planning_horizon: 1,
+            no_project: 2,
           },
         },
         streak: 5,
@@ -34,6 +35,6 @@ describe('Quick Sort activity banner', () => {
 
     expect(await screen.findByText(/tasks sorted this week/)).toBeDefined();
     expect(screen.getAllByTestId('animated-counter').map((counter) => counter.textContent))
-      .toEqual(['10', '5', '4', '1', '3', '2', '1']);
+      .toEqual(['10', '5', '4', '1', '3', '2', '1', '2']);
   });
 });

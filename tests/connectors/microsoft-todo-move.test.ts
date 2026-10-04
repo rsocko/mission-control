@@ -166,9 +166,16 @@ describe('Microsoft To Do list moves', () => {
     }]);
   });
 
-  it('rejects checklist identities in parent task operations', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+  it('routes promoted checklist updates through the checklist endpoint', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: input.toString(), init });
+      return Response.json({
+        id: 'check/item+=',
+        displayName: 'Promoted item',
+        isChecked: false,
+      });
+    }));
 
     const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
     const connector = new MicrosoftTodoConnector();
@@ -176,14 +183,64 @@ describe('Microsoft To Do list moves', () => {
 
     await expect(connector.updateTask(
       'AQMk/source+=:AAMk/task+=:check/item+=',
-      { title: 'Do not update the parent' },
+      { title: 'Promoted item', status: 'todo', priority: 'high' },
+    )).resolves.toMatchObject({
+      sourceId: 'AQMk/source+=:AAMk/task+=:check/item+=',
+      title: 'Promoted item',
+      isChecklistItem: true,
+    });
+    expect(calls).toEqual([{
+      url: 'https://graph.microsoft.com/v1.0/me/todo/lists/AQMk%2Fsource%2B%3D/tasks/AAMk%2Ftask%2B%3D/checklistItems/check%2Fitem%2B%3D',
+      init: expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ displayName: 'Promoted item', isChecked: false }),
+      }),
+    }]);
+  });
+
+  it('routes promoted checklist completion through the checklist endpoint', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: input.toString(), init });
+      return Response.json({
+        id: 'check/item+=',
+        displayName: 'Promoted item',
+        isChecked: true,
+      });
+    }));
+
+    const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
+    const connector = new MicrosoftTodoConnector();
+    await connector.initialize(config);
+
+    await connector.completeTask('AQMk/source+=:AAMk/task+=:check/item+=');
+
+    expect(calls).toEqual([{
+      url: 'https://graph.microsoft.com/v1.0/me/todo/lists/AQMk%2Fsource%2B%3D/tasks/AAMk%2Ftask%2B%3D/checklistItems/check%2Fitem%2B%3D',
+      init: expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ isChecked: true }),
+      }),
+    }]);
+  });
+
+  it('rejects checklist identities in parent-only operations', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
+    const connector = new MicrosoftTodoConnector();
+    await connector.initialize(config);
+
+    await expect(connector.listAttachments(
+      'AQMk/source+=:AAMk/task+=:check/item+=',
     )).rejects.toThrow(
       'Microsoft To Do checklist item ID cannot be used as a parent task ID',
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('denies unowned recurrence create, update, and delete writes', async () => {
+  it('denies provider-owned recurrence create and update writes but allows deletion', async () => {
     const providerTask = {
       id: 'provider-task',
       title: 'Provider series',
@@ -199,6 +256,9 @@ describe('Microsoft To Do list moves', () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: input.toString(), init });
+      if (init?.method === 'DELETE') {
+        return new Response(null, { status: 204 });
+      }
       return Response.json(providerTask);
     }));
     const { mapGraphTask } = await import(
@@ -223,10 +283,13 @@ describe('Microsoft To Do list moves', () => {
     await expect(connector.updateTask('list-1:provider-task', {
       metadata,
     })).rejects.toThrow('denied for provider-owned series');
-    await expect(connector.deleteTask('list-1:provider-task'))
-      .rejects.toThrow('denied for provider-owned series');
+    await expect(connector.deleteTask('list-1:provider-task')).resolves.toBeUndefined();
 
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0].init?.method).toBeUndefined();
+    expect(calls[1]).toEqual({
+      url: 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/provider-task',
+      init: expect.objectContaining({ method: 'DELETE' }),
+    });
   });
 });

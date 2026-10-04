@@ -92,20 +92,24 @@ runConnectorManagementRepositoryContract(
         ['2026-09-04T04:02:00.000Z', connectorId],
       );
     },
-    async seedTask(connectorId, sourceListId) {
+    async seedTask(connectorId, sourceListId, options = {}) {
       await pool.query(
         `
           INSERT INTO tasks (
             id, source_id, connector_type, connector_instance_id, title,
-            created_at, updated_at, last_synced_at, source_list_id, source_list_name
-          ) VALUES ($1, $2, 'test', $3, 'Contract task', $4, $4, $4, $5, 'Old name')
+            created_at, updated_at, last_synced_at, source_list_id, source_list_name,
+            local_disposition, deleted_at
+          ) VALUES ($1, $2, $3, $4, 'Contract task', $5, $5, $5, $6, 'Old name', $7, $8)
         `,
         [
-          `${connectorId}-task`,
-          `${connectorId}-remote-task`,
+          `${connectorId}-${options.idSuffix ?? 'task'}`,
+          `${connectorId}-remote-${options.idSuffix ?? 'task'}`,
+          options.connectorType ?? 'test',
           connectorId,
           '2026-09-04T04:00:00.000Z',
           sourceListId,
+          options.localDisposition ?? 'active',
+          options.deletedAt ?? null,
         ],
       );
     },

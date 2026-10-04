@@ -65,6 +65,7 @@ function getRequestTimeoutMs(): number {
 async function fetchWithTimeout(
   input: string,
   options?: RequestInit,
+  fetcher?: typeof fetch,
 ): Promise<Response> {
   const controller = new AbortController();
   const upstreamSignal = options?.signal;
@@ -82,7 +83,7 @@ async function fetchWithTimeout(
   }, timeoutMs);
 
   try {
-    return await fetch(input, { ...options, signal: controller.signal });
+    return await (fetcher ?? fetch)(input, { ...options, signal: controller.signal });
   } catch (error) {
     if (upstreamSignal?.aborted) {
       throw upstreamSignal.reason instanceof Error
@@ -349,6 +350,7 @@ export interface GitHubClient {
 export function createGitHubClient(
   token: string,
   configuredOrigin = DEFAULT_GITHUB_API_ORIGIN,
+  fetcher?: typeof fetch,
 ): GitHubClient {
   const origin = normalizeGitHubOrigin(configuredOrigin);
 
@@ -364,7 +366,7 @@ export function createGitHubClient(
             'Content-Type': 'application/json',
             ...(options?.headers || {}),
           },
-        }),
+        }, fetcher),
       `REST ${path}`,
       options?.signal,
     );
@@ -385,7 +387,7 @@ export function createGitHubClient(
           },
           body: JSON.stringify({ query, variables }),
           signal: options?.signal,
-        }),
+        }, fetcher),
       'GraphQL',
       options?.signal,
     );

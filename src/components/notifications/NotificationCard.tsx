@@ -9,6 +9,7 @@ import {
   Server, CheckSquare, DollarSign, Home, AtSign, Package, Truck,
   GitPullRequest, Shield, BarChart3, Zap, Archive, LoaderCircle, BellOff,
   RefreshCw,
+  Unlink,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from '@/lib/toast';
@@ -27,9 +28,45 @@ import {
   NOTIFICATION_SOURCE_ICONS,
   NOTIFICATION_SOURCE_LABELS,
 } from '@/types/dashboard';
-import { formatNotificationCategoryLabel } from '@/lib/notifications/categories';
+import {
+  formatNotificationCategoryLabel,
+  formatNotificationTypeLabel,
+} from '@/lib/notifications/categories';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { AssistantMarkdown } from '@/components/ai/AssistantMarkdown';
+import { RyMessagePromotionDialog } from './RyMessagePromotionDialog';
+
+interface NotificationActionExecutionResult {
+  success: boolean;
+  error?: string;
+  result?: {
+    type?: string;
+    confirmation?: string;
+    taskData?: Record<string, unknown>;
+  };
+}
+
+function promotionSeed(
+  result: NotificationActionExecutionResult,
+): React.ComponentProps<typeof RyMessagePromotionDialog>['seed'] | null {
+  if (result.result?.type !== 'rymessage_promote') return null;
+  const data = result.result.taskData;
+  if (
+    !data
+    || typeof data.title !== 'string'
+    || typeof data.actionId !== 'string'
+    || typeof data.connectorId !== 'string'
+    || typeof data.sourceNotificationId !== 'string'
+  ) return null;
+  return {
+    title: data.title,
+    body: typeof data.body === 'string' ? data.body : null,
+    priority: typeof data.priority === 'string' ? data.priority : 'none',
+    actionId: data.actionId,
+    connectorId: data.connectorId,
+    sourceNotificationId: data.sourceNotificationId,
+  };
+}
 
 // ─── ICON MAPS ──────────────────────────────────────────────────────────────
 
@@ -72,7 +109,12 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number; classNam
   install_update: RefreshCw,
   skip_update: ArrowRight,
   dismiss_persistent_notification: X,
+  restart_home_assistant: RefreshCw,
   ignore_repair: EyeOff,
+  rymessage_promote: Plus,
+  rymessage_mark_handled: CheckCircle,
+  rymessage_unlink: Unlink,
+  rymessage_dismiss: X,
 };
 
 function NotificationActionConfirmation({
@@ -106,12 +148,14 @@ function NotificationActionConfirmation({
       message={
         action?.actionType === 'install_update'
           ? `Install ${String(metadata.latestVersion || 'this update')} on ${String(metadata.instanceName || 'Home Assistant')}? Home Assistant acceptance will be confirmed on the next poll.`
+          : action?.actionType === 'restart_home_assistant'
+            ? `Restart ${String(metadata.instanceName || 'Home Assistant')} now? Automations and connected devices may be briefly unavailable while it comes back online.`
           : action?.actionType === 'dismiss_persistent_notification'
             ? `Dismiss this notification in ${String(metadata.instanceName || 'Home Assistant')} and remove it from Mission Control?`
           : `${action?.label || 'Apply this action'} in ${String(metadata.instanceName || 'Home Assistant')}? Mission Control will confirm the final state on the next poll.`
       }
       confirmLabel={action?.label || 'Confirm'}
-      confirmVariant="warning"
+      confirmVariant={action?.actionType === 'restart_home_assistant' ? 'danger' : 'warning'}
       onCancel={cancel}
       onConfirm={confirm}
     >
@@ -141,7 +185,7 @@ interface NotificationCardProps {
   onExecuteAction?: (
     actionId: string,
     params?: Record<string, unknown>,
-  ) => void | Promise<{ success: boolean; error?: string }>;
+  ) => void | Promise<NotificationActionExecutionResult>;
 }
 
 interface PresentationMetadataChip {
@@ -487,11 +531,31 @@ function useNotificationDisplay(notification: NotificationItem) {
     || humanizeIdentifier(notification.connectorType)
     || 'Mission Control';
   const aiSummary = typeof metadata.aiSummary === 'string' ? metadata.aiSummary : null;
+  const messageExcerpt = typeof metadata.messageExcerpt === 'string'
+    && metadata.messageExcerpt.trim()
+    ? metadata.messageExcerpt.trim()
+    : null;
+  const semanticType = notification.connectorType === 'rymessage'
+    ? (
+      typeof metadata.semanticType === 'string' && metadata.semanticType.trim()
+        ? metadata.semanticType.trim()
+        : typeof metadata.category === 'string' && metadata.category.trim()
+          ? metadata.category.trim()
+          : typeof metadata.actionType === 'string' && metadata.actionType.trim()
+            ? metadata.actionType.trim()
+            : null
+    )
+    : null;
 
   return {
     presentation,
     sourceName,
-    displayBody: aiSummary || notification.body,
+    displayBody: notification.connectorType === 'rymessage'
+      ? messageExcerpt || notification.body
+      : aiSummary || notification.body,
+    classificationLabel: semanticType
+      ? formatNotificationTypeLabel(`rymessage.${semanticType}`)
+      : formatNotificationCategoryLabel(notification.category),
     metadataChips: getMetadataChips(presentation, metadata),
     richContent: presentation.richContent,
   };
@@ -515,6 +579,7 @@ export function NotificationCard({
   const [acceptedSourceActionFor, setAcceptedSourceActionFor] = useState<string | null>(null);
   const acceptedSourceAction = acceptedSourceActionFor === notification.id;
   const [confirmationAction, setConfirmationAction] = useState<NotificationAction | null>(null);
+  const [promotion, setPromotion] = useState<React.ComponentProps<typeof RyMessagePromotionDialog>['seed'] | null>(null);
   const levelConfig = NOTIFICATION_LEVELS[notification.level] || NOTIFICATION_LEVELS.fyi;
   const LevelIcon = LEVEL_ICONS[notification.level] || Info;
   const CategoryIcon = CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
@@ -526,10 +591,21 @@ export function NotificationCard({
     displayBody,
     metadataChips,
     richContent,
+    classificationLabel,
   } = useNotificationDisplay(notification);
   const presentationSubtitle = presentation.subtitle || null;
   const subjectIcon = presentation.subjectIcon?.trim() || undefined;
   const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
+  const compactSecondaryText = notification.connectorType === 'rymessage'
+    ? displayBody || richContent?.primaryText
+    : null;
+  const compactContextStats = notification.connectorType === 'rymessage'
+    ? (richContent?.stats ?? []).filter(stat => (
+        stat.label === 'Confidence'
+        || (stat.label === 'Lifecycle' && stat.value !== 'Visible')
+      )).slice(0, 2)
+    : [];
+  const taskUnavailable = notification.relatedTaskAvailability === 'unavailable';
 
   const primaryAction = useMemo(() =>
     notification.actions?.find(a => a.isPrimary),
@@ -555,11 +631,19 @@ export function NotificationCard({
         : await onExecuteAction(action.id);
       if (result?.success === false) {
         toast.error(result.error || `${action.label} failed`);
-      } else if (
-        notification.connectorType === 'home-assistant'
-        && action.requiresConfirmation
-      ) {
-        setAcceptedSourceActionFor(notification.id);
+      } else {
+        const seed = result ? promotionSeed(result) : null;
+        if (seed) {
+          setPromotion(seed);
+        } else if (
+          notification.connectorType === 'home-assistant'
+          && action.requiresConfirmation
+        ) {
+          setAcceptedSourceActionFor(notification.id);
+        }
+        if (result?.result?.confirmation) {
+          toast.success(result.result.confirmation);
+        }
       }
     } catch {
       toast.error(`${action.label} failed`);
@@ -580,6 +664,7 @@ export function NotificationCard({
   };
 
   return (
+    <>
     <motion.div
       layout
       initial={{ opacity: 0, y: 8 }}
@@ -636,8 +721,14 @@ export function NotificationCard({
             </p>
           )}
 
+          {(compact || panel) && compactSecondaryText && (
+            <p className="mt-1 truncate text-xs leading-relaxed text-[var(--text-tertiary)]">
+              {compactSecondaryText}
+            </p>
+          )}
+
           {/* Rows stay compact; full content belongs in the detail surface. */}
-          {displayBody && !compact && !richContent && (
+          {displayBody && !compact && (!richContent || notification.connectorType === 'rymessage') && (
             <p className="text-xs text-[var(--text-tertiary)] mt-1 leading-relaxed line-clamp-2">
               {displayBody}
             </p>
@@ -670,12 +761,21 @@ export function NotificationCard({
             <span className="text-[var(--text-muted)]" aria-hidden="true">·</span>
             <span className="text-xs text-[var(--text-muted)] flex items-center gap-1">
               <CategoryIcon size={10} className="opacity-60" />
-              {formatNotificationCategoryLabel(notification.category)}
+              {classificationLabel}
             </span>
             <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-md ${levelConfig.pillClass}`}>
               <LevelIcon size={10} />
               {levelConfig.label}
             </span>
+            {compactContextStats.map(stat => (
+              <span
+                key={stat.label}
+                className="text-xs text-[var(--text-muted)]"
+                title={stat.label}
+              >
+                {stat.value}
+              </span>
+            ))}
             <span className="text-xs text-[var(--text-muted)]">
               {formatTimeAgo(notification.receivedAt)}
             </span>
@@ -684,6 +784,16 @@ export function NotificationCard({
               notification={notification}
             />
           </div>
+
+          {taskUnavailable && !compact && (
+            <div
+              role="status"
+              className="mt-2 flex items-center gap-1.5 text-xs text-amber-400"
+            >
+              <Unlink size={12} aria-hidden="true" />
+              Related task is no longer available
+            </div>
+          )}
 
           {/* Actions row — severity-colored buttons */}
           {!compact && (primaryAction || (!panel && secondaryActions.length > 0)) && (
@@ -788,6 +898,8 @@ export function NotificationCard({
         }}
       />
     </motion.div>
+    {promotion && <RyMessagePromotionDialog seed={promotion} onClose={() => setPromotion(null)} />}
+    </>
   );
 }
 
@@ -796,7 +908,7 @@ export interface NotificationDetailProps {
   onExecuteAction: (
     actionId: string,
     params?: Record<string, unknown>,
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<NotificationActionExecutionResult>;
   onMarkRead?: () => void | Promise<void>;
   onDismiss?: () => void | Promise<void>;
   onArchive?: () => void | Promise<void>;
@@ -911,6 +1023,7 @@ export function NotificationDetail({
   const [acceptedSourceActionFor, setAcceptedSourceActionFor] = useState<string | null>(null);
   const acceptedSourceAction = acceptedSourceActionFor === notification.id;
   const [confirmationAction, setConfirmationAction] = useState<NotificationAction | null>(null);
+  const [promotion, setPromotion] = useState<React.ComponentProps<typeof RyMessagePromotionDialog>['seed'] | null>(null);
   const levelConfig = NOTIFICATION_LEVELS[notification.level] || NOTIFICATION_LEVELS.fyi;
   const LevelIcon = LEVEL_ICONS[notification.level] || Info;
   const CategoryIcon = CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
@@ -921,11 +1034,13 @@ export function NotificationDetail({
     displayBody,
     metadataChips,
     richContent,
+    classificationLabel,
   } = useNotificationDisplay(notification);
   const subjectIcon = presentation.subjectIcon?.trim() || undefined;
   const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
   const primaryAction = notification.actions?.find(action => action.isPrimary);
   const secondaryActions = notification.actions?.filter(action => !action.isPrimary).slice(0, 3) || [];
+  const taskUnavailable = notification.relatedTaskAvailability === 'unavailable';
 
   const executeAction = async (
     action: NotificationAction,
@@ -937,16 +1052,20 @@ export function NotificationDetail({
         ? await onExecuteAction(action.id, params)
         : await onExecuteAction(action.id);
       if (result.success) {
-        if (
+        const seed = promotionSeed(result);
+        if (seed) {
+          setPromotion(seed);
+        } else if (
           notification.connectorType === 'home-assistant'
           && action.requiresConfirmation
         ) {
           setAcceptedSourceActionFor(notification.id);
         }
         toast.success(
-          notification.connectorType === 'home-assistant'
-            ? `${action.label} request accepted`
-            : `${action.label} completed`,
+          result.result?.confirmation
+            || (notification.connectorType === 'home-assistant'
+              ? `${action.label} request accepted`
+              : `${action.label} completed`),
         );
       } else {
         toast.error(result.error || `${action.label} failed`);
@@ -970,6 +1089,7 @@ export function NotificationDetail({
   };
 
   return (
+    <>
     <div className={`flex min-h-0 flex-col bg-[var(--surface-1)] ${className}`}>
       <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
         <div className="flex min-w-0 items-center gap-3">
@@ -985,7 +1105,7 @@ export function NotificationDetail({
           <div className="min-w-0">
             <p className="truncate text-xs font-semibold text-[var(--text-secondary)]">{sourceName}</p>
             <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-              {formatNotificationCategoryLabel(notification.category)} · {formatTimeAgo(notification.receivedAt)}
+              {classificationLabel} · {formatTimeAgo(notification.receivedAt)}
             </p>
           </div>
         </div>
@@ -1045,6 +1165,19 @@ export function NotificationDetail({
         {richContent && (
           <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
             <RichNotificationContent content={richContent} />
+          </div>
+        )}
+
+        {taskUnavailable && (
+          <div
+            role="status"
+            className="mt-4 flex items-start gap-2 rounded-md border border-amber-800/40 bg-amber-950/20 px-3 py-2 text-sm text-amber-300"
+          >
+            <Unlink size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>
+              The related task is no longer available. This notification remains for history,
+              but task actions have been removed.
+            </span>
           </div>
         )}
 
@@ -1145,6 +1278,8 @@ export function NotificationDetail({
         }}
       />
     </div>
+    {promotion && <RyMessagePromotionDialog seed={promotion} onClose={() => setPromotion(null)} />}
+    </>
   );
 }
 
@@ -1193,9 +1328,17 @@ function RichNotificationContent({ content }: { content: NotificationRichContent
   return (
     <div className="mt-1.5 space-y-1.5">
       {(content.primaryText || content.secondaryText) && (
-        <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="text-[var(--text-secondary)] font-medium">{content.primaryText}</span>
-          <span className="text-[var(--text-muted)]">{content.secondaryText}</span>
+        <div className="space-y-1 text-xs">
+          {content.primaryText && (
+            <p className="whitespace-pre-wrap break-words font-medium leading-5 text-[var(--text-secondary)]">
+              {content.primaryText}
+            </p>
+          )}
+          {content.secondaryText && (
+            <p className="whitespace-pre-wrap break-words leading-5 text-[var(--text-muted)]">
+              {content.secondaryText}
+            </p>
+          )}
         </div>
       )}
       {content.progress && (
@@ -1230,7 +1373,9 @@ function RichNotificationContent({ content }: { content: NotificationRichContent
         </div>
       )}
       {!content.progress && content.footerText && (
-        <p className="text-xs text-[var(--text-muted)]">{content.footerText}</p>
+        <p className="break-words text-xs leading-5 text-[var(--text-muted)]">
+          {content.footerText}
+        </p>
       )}
       {content.links?.filter(link => isSafeExternalUrl(link.url)).map(link => (
         <a
@@ -1414,7 +1559,7 @@ function ActionButton({
       `}
     >
       {isLoading ? <LoaderCircle size={12} className="animate-spin" /> : <Icon size={12} />}
-      <span>{action.label}</span>
+      <span>{isLoading && action.actionType === 'restart_home_assistant' ? 'Restarting…' : action.label}</span>
       {action.opensExternal && <ExternalLink size={9} className="opacity-60" />}
       {isAiSuggested && (
         <span className="absolute -top-1.5 -right-1.5 flex items-center gap-0.5 text-[9px] bg-purple-900/60 text-purple-300 px-1 py-0 rounded-full border border-purple-700/40">

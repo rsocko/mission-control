@@ -5,6 +5,7 @@ import {
   getRecurringSeriesKey,
   getRecurringTitleKey,
   inferRecurringTitleKeys,
+  isMissionControlOwnedRecurrence,
   isMatchingRecurringSuccessor,
   shouldSuppressNonRecurringDuplicate,
   shouldSuppressRecurringMyDaySuccessor,
@@ -24,6 +25,43 @@ describe('recurring task reconciliation', () => {
         metadata: { recurrence: 'weekly', recurrenceIdentity: '{"type":"weekly","interval":1,"daysOfWeek":["monday"],"dayOfMonth":null,"month":null}' },
       }));
     expect(getRecurringSeriesKey({ ...base, metadata: {} })).toBeNull();
+  });
+
+  it('distinguishes Mission Control recurrence from provider-owned recurrence', () => {
+    const missionControlRule = canonicalizeLegacyRecurrence({
+      recurrence: 'every 4 days',
+      mode: 'completion',
+      startDate: '2026-08-01',
+      timezone: 'UTC',
+      seriesIdentity: {
+        kind: 'mission-control',
+        stableId: 'mc-series',
+      },
+    });
+    const providerRule = canonicalizeLegacyRecurrence({
+      recurrence: 'monthly',
+      mode: 'schedule',
+      startDate: '2026-08-01',
+      timezone: 'UTC',
+      seriesIdentity: {
+        kind: 'connector',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-1',
+        externalSeriesId: 'provider-series',
+        stability: 'provider',
+      },
+      source: {
+        owner: 'connector',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-1',
+        support: { status: 'supported', reasons: [] },
+        raw: {},
+      },
+    });
+
+    expect(isMissionControlOwnedRecurrence({ canonicalRecurrence: missionControlRule })).toBe(true);
+    expect(isMissionControlOwnedRecurrence({ canonicalRecurrence: providerRule })).toBe(false);
+    expect(isMissionControlOwnedRecurrence(recurringMetadata)).toBe(false);
   });
 
   it('keeps legacy and canonical Microsoft rows compatible during migration', () => {
@@ -310,6 +348,17 @@ describe('recurring task reconciliation', () => {
     ];
     const historyTasks = [
       { title: 'Water plants', sourceListId: 'list', status: 'done', dueDate: '2026-08-19', completedAt: '2026-08-19T20:00:00Z', metadata: recurringMetadata },
+    ];
+
+    expect(findOrphanedRecurringTasks(openTasks, historyTasks)).toEqual([]);
+  });
+
+  it('keeps an overdue successor when the prior occurrence was completed late', () => {
+    const openTasks = [
+      { id: 'august', sourceId: 'source-august', title: 'Avery Rent', sourceListId: 'school-kids', dueDate: '2026-08-28', updatedAt: '2026-09-02', metadata: recurringMetadata },
+    ];
+    const historyTasks = [
+      { title: 'Avery Rent', sourceListId: 'school-kids', status: 'done', dueDate: '2026-07-28', completedAt: '2026-09-02T04:00:00Z', metadata: recurringMetadata },
     ];
 
     expect(findOrphanedRecurringTasks(openTasks, historyTasks)).toEqual([]);

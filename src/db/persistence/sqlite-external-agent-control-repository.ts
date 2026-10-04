@@ -30,7 +30,8 @@ const ACTIVE_RESULT = new Set<AgentDispatchStatus>([
 const AGENT_COLUMNS = `
   id, name, type, transport, execution_locality AS executionLocality,
   description, endpoint, auth_type AS authType,
-  auth_credential_ref AS authCredentialRef, capabilities,
+  auth_credential_ref AS authCredentialRef, provider_config AS providerConfig,
+  capabilities,
   input_format AS inputFormat, output_format AS outputFormat,
   inbound_webhook_id AS inboundWebhookId, data_policy AS dataPolicy,
   enabled, created_at AS createdAt, updated_at AS updatedAt,
@@ -66,6 +67,7 @@ function agentFromRow(row: Row): ExternalAgentRecord {
   return {
     ...(row as unknown as ExternalAgentRecord),
     enabled: Boolean(row.enabled),
+    providerConfig: json(row.providerConfig, {}),
     capabilities: json(row.capabilities, {}),
     dataPolicy: json(row.dataPolicy, {
       allowedClassifications: [],
@@ -163,6 +165,7 @@ function destinationMatches(
     && current.endpoint === expected.endpoint
     && current.authType === expected.authType
     && current.authCredentialRef === expected.authCredentialRef
+    && canonical(current.providerConfig) === canonical(expected.providerConfig)
     && current.inboundWebhookId === expected.inboundWebhookId
     && canonical(current.capabilities) === canonical(expected.capabilities)
     && canonical(current.dataPolicy) === canonical(expected.dataPolicy)
@@ -279,6 +282,7 @@ function agentValues(record: ExternalAgentCreateRecord | ExternalAgentUpdateReco
     record.endpoint,
     record.authType,
     record.authCredentialRef,
+    JSON.stringify(record.providerConfig),
     JSON.stringify(record.capabilities),
     record.inputFormat,
     record.outputFormat,
@@ -309,32 +313,49 @@ export function createSqliteExternalAgentControlRepository(
       `).get(id) as Row | undefined;
       return row ? agentFromRow(row) : null;
     },
-    async create(record) {
+    async getCredential(id) {
+      const row = sqlite.prepare(`
+        SELECT auth_credential AS credential
+        FROM external_agents
+        WHERE id = ? AND deleted_at IS NULL
+      `).get(id) as { credential: string | null } | undefined;
+      return row?.credential ?? null;
+    },
+    async create(record, credential = null) {
       sqlite.transaction(() => {
         assertProtectedInboundWebhook(sqlite, record.inboundWebhookId);
         sqlite.prepare(`
           INSERT INTO external_agents (
             id, name, type, transport, execution_locality, description, endpoint,
-            auth_type, auth_credential_ref, capabilities, input_format, output_format,
+            auth_type, auth_credential_ref, auth_credential, provider_config, capabilities,
+            input_format, output_format,
             inbound_webhook_id, data_policy, enabled, created_at, updated_at, deleted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(record.id, ...agentValues(record).slice(0, 14), record.createdAt,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(record.id, ...agentValues(record).slice(0, 8), credential,
+          ...agentValues(record).slice(8, 15), record.createdAt,
           record.updatedAt, record.deletedAt);
       }).immediate();
       return (await registry.get(record.id, true))!;
     },
-    async update(id, record) {
+    async update(id, record, credential) {
       sqlite.transaction(() => {
         assertProtectedInboundWebhook(sqlite, record.inboundWebhookId);
         sqlite.prepare(`
           UPDATE external_agents SET
             name = ?, type = ?, transport = ?, execution_locality = ?,
             description = ?, endpoint = ?, auth_type = ?, auth_credential_ref = ?,
-            capabilities = ?, input_format = ?, output_format = ?,
+            auth_credential = CASE WHEN ? THEN ? ELSE auth_credential END,
+            provider_config = ?, capabilities = ?, input_format = ?, output_format = ?,
             inbound_webhook_id = ?, data_policy = ?, enabled = ?,
             updated_at = ?, deleted_at = ?
           WHERE id = ? AND deleted_at IS NULL
-        `).run(...agentValues(record), id);
+        `).run(
+          ...agentValues(record).slice(0, 8),
+          credential !== undefined ? 1 : 0,
+          credential ?? null,
+          ...agentValues(record).slice(8),
+          id,
+        );
       }).immediate();
       return registry.get(id);
     },
@@ -366,20 +387,70 @@ export function createSqliteExternalAgentControlRepository(
       }
       const taskRows = ids.size
         ? sqlite.prepare(`
-            SELECT id, title, description, priority, status,
-                   connector_type AS connectorType
+            SELECT id, source_id AS sourceId,
+                   json_extract(metadata, '$.url') AS sourceUrl,
+                   title, description, priority, status,
+                   connector_type AS connectorType, due_date AS dueDate, effort,
+                   assignee, micro_status AS microStatus,
+                   planning_horizon AS planningHorizon,
+                   source_list_name AS sourceListName,
+                   sibling_order AS siblingOrder, depth,
+                   is_checklist_item AS isChecklistItem
             FROM tasks WHERE id IN (${[...ids].map(() => '?').join(', ')})
             ORDER BY id
           `).all(...ids) as AgentPayloadSnapshot['tasks']
         : [];
+      const subtaskRows = ids.size
+        ? sqlite.prepare(`
+            WITH RECURSIVE hierarchy (
+              rootId, id, sourceId, sourceUrl, connectorType, title, description,
+              priority, status, dueDate, effort, assignee, microStatus,
+              planningHorizon, sourceListName, siblingOrder, depth, isChecklistItem,
+              treeOrder
+            ) AS (
+              SELECT id, id, source_id, json_extract(metadata, '$.url'),
+                     connector_type, title, description, priority, status, due_date,
+                     effort, assignee, micro_status, planning_horizon,
+                     source_list_name, sibling_order, depth, is_checklist_item, ''
+              FROM tasks
+              WHERE id IN (${[...ids].map(() => '?').join(', ')})
+              UNION ALL
+              SELECT h.rootId, t.id, t.source_id, json_extract(t.metadata, '$.url'),
+                     t.connector_type, t.title, t.description, t.priority, t.status,
+                     t.due_date, t.effort, t.assignee, t.micro_status,
+                     t.planning_horizon, t.source_list_name, t.sibling_order, t.depth,
+                     t.is_checklist_item,
+                     h.treeOrder || '/' || printf(
+                       '%020d:%s',
+                       COALESCE(t.sibling_order, 2147483647),
+                       t.id
+                     )
+              FROM tasks t
+              INNER JOIN hierarchy h ON t.parent_id = h.id
+              WHERE t.deleted_at IS NULL
+            )
+            SELECT rootId, id, sourceId, sourceUrl, connectorType, title, description,
+                   priority, status, dueDate, effort, assignee, microStatus,
+                   planningHorizon, sourceListName, siblingOrder, depth, isChecklistItem
+            FROM hierarchy
+            WHERE id != rootId
+            ORDER BY rootId, treeOrder
+          `).all(...ids) as Array<
+            AgentPayloadSnapshot['tasks'][number]['subtasks'][number] & { rootId: string }
+          >
+        : [];
       const tagsByTask = new Map<string, string[]>();
-      if (taskRows.length) {
+      const contentIds = [
+        ...taskRows.map(({ id }) => id),
+        ...subtaskRows.map(({ id }) => id),
+      ];
+      if (contentIds.length) {
         const tagRows = sqlite.prepare(`
           SELECT tt.task_id AS taskId, t.name
           FROM task_tags tt INNER JOIN tags t ON t.id = tt.tag_id
-          WHERE tt.task_id IN (${taskRows.map(() => '?').join(', ')})
+          WHERE tt.task_id IN (${contentIds.map(() => '?').join(', ')})
           ORDER BY tt.task_id, t.name
-        `).all(...taskRows.map(({ id }) => id)) as Array<{ taskId: string; name: string }>;
+        `).all(...contentIds) as Array<{ taskId: string; name: string }>;
         for (const row of tagRows) {
           tagsByTask.set(row.taskId, [...(tagsByTask.get(row.taskId) ?? []), row.name]);
         }
@@ -410,7 +481,21 @@ export function createSqliteExternalAgentControlRepository(
       }
         return {
           project,
-          tasks: taskRows.map((task) => ({ ...task, tags: tagsByTask.get(task.id) ?? [] })),
+          tasks: taskRows.map((task) => ({
+            ...task,
+            isChecklistItem: Boolean(task.isChecklistItem),
+            tags: tagsByTask.get(task.id) ?? [],
+            subtasks: subtaskRows
+              .filter(({ rootId }) => rootId === task.id)
+              .map(({ rootId, ...subtask }) => {
+                void rootId;
+                return {
+                  ...subtask,
+                  isChecklistItem: Boolean(subtask.isChecklistItem),
+                  tags: tagsByTask.get(subtask.id) ?? [],
+                };
+              }),
+          })),
           phases: phaseRows.map(({ id, ...phase }) => ({
             ...phase,
             taskIds: itemsByPhase.get(id) ?? [],
@@ -457,12 +542,46 @@ export function createSqliteExternalAgentControlRepository(
         predicates.push('external_agent_id = ?');
         values.push(options.agentId);
       }
+      if (options.taskIds?.length) {
+        predicates.push(`
+          EXISTS (
+            SELECT 1 FROM json_each(agent_dispatches.scope, '$.taskIds')
+            WHERE json_each.value IN (${options.taskIds.map(() => '?').join(', ')})
+          )
+        `);
+        values.push(...options.taskIds);
+      }
       values.push(Math.min(Math.max(options.limit ?? 100, 1), 500));
       const rows = sqlite.prepare(`
         SELECT ${DISPATCH_COLUMNS} FROM agent_dispatches
         ${predicates.length ? `WHERE ${predicates.join(' AND ')}` : ''}
         ORDER BY created_at DESC LIMIT ?
       `).all(...values) as Row[];
+      return rows.map(dispatchFromRow);
+    },
+    async listLatestByTaskIds(taskIds) {
+      const unique = [...new Set(taskIds)];
+      if (!unique.length) return [];
+      const values = unique.map(() => '(?)').join(', ');
+      const rows = sqlite.prepare(`
+        WITH requested(task_id) AS (VALUES ${values}),
+        ranked AS (
+          SELECT
+            ad.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY requested.task_id
+              ORDER BY ad.created_at DESC, ad.id DESC
+            ) AS task_rank
+          FROM requested
+          CROSS JOIN agent_dispatches ad
+          INNER JOIN json_each(ad.scope, '$.taskIds') scoped_task
+            ON scoped_task.value = requested.task_id
+        )
+        SELECT ${DISPATCH_COLUMNS}
+        FROM ranked
+        WHERE task_rank = 1
+        ORDER BY created_at DESC, id DESC
+      `).all(...unique) as Row[];
       return rows.map(dispatchFromRow);
     },
     async findPreview(agentId, idempotencyKey) {
@@ -480,6 +599,28 @@ export function createSqliteExternalAgentControlRepository(
           { id: string; previewHash: string } | undefined;
         if (duplicate) {
           return { ...duplicate, created: false };
+        }
+        if (record.idempotencyKey.startsWith('task-delegation:')) {
+          const taskIds = record.scope.taskIds ?? [];
+          const active = taskIds.length
+            ? sqlite.prepare(`
+              SELECT ad.id
+              FROM agent_dispatches ad, json_each(ad.scope, '$.taskIds') task
+              WHERE ad.status IN (
+                'needs_confirmation', 'queued', 'claimed', 'in_progress',
+                'waiting_for_user'
+              )
+                AND task.value IN (${taskIds.map(() => '?').join(', ')})
+              LIMIT 1
+            `).get(...taskIds) as { id: string } | undefined
+            : undefined;
+          if (active) {
+            throw new ExternalAgentError(
+              'Task already has an active delegation',
+              'CONFLICT',
+              409,
+            );
+          }
         }
         sqlite.prepare(`
           INSERT INTO agent_dispatches (
@@ -652,7 +793,7 @@ export function createSqliteExternalAgentControlRepository(
           expireOne(sqlite, current, input.now);
           return 'expired' as const;
         }
-        const terminal = input.status === 'completed' || input.status === 'failed';
+        const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
         const updated = sqlite.prepare(`
           UPDATE agent_dispatches SET
             status = ?, provider_task_id = COALESCE(?, provider_task_id),
@@ -812,7 +953,7 @@ export function createSqliteExternalAgentControlRepository(
             );
           }
         }
-        const terminal = input.status === 'completed' || input.status === 'failed';
+        const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
         const updated = sqlite.prepare(`
           UPDATE agent_dispatches SET
             status = ?, provider_task_id = COALESCE(?, provider_task_id),

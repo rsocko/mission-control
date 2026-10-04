@@ -12,12 +12,17 @@ import {
 } from '@/lib/notifications/providers';
 import { executeHomeAssistantProviderAction } from '@/lib/notifications/providers/home-assistant-action';
 import { syncLogger } from '@/lib/logger';
+import { queueCompanionActionMutation } from '@/lib/connectors/rymessage/companion-action-service';
+import { stableCompanionOperationId } from '@/lib/connectors/rymessage/operation-id';
+import { unlinkRyMessageMaterialization } from '@/lib/connectors/rymessage/task-promotion';
+import { isUnavailableTaskAction } from '@/lib/notifications/task-association';
 
 const REMIND_LATER_DURATIONS = ['15m', '1h', 'tomorrow_morning'] as const;
 const HOME_ASSISTANT_MUTATING_ACTIONS = new Set([
   'install_update',
   'skip_update',
   'dismiss_persistent_notification',
+  'restart_home_assistant',
   'ignore_repair',
 ]);
 type RemindLaterDuration = typeof REMIND_LATER_DURATIONS[number];
@@ -96,6 +101,9 @@ export async function POST(
 
     const now = new Date().toISOString();
     const payload = parseActionPayload(action.payload);
+    if (isUnavailableTaskAction(notification, { ...action, payload })) {
+      return ApiErrors.conflict('The related task is no longer available');
+    }
     const requiresProviderClaim = notification.connectorType === 'home-assistant'
       && HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType);
     if (requiresProviderClaim) {
@@ -111,6 +119,57 @@ export async function POST(
           { status: 409 },
         );
       }
+    }
+    if (
+      notification.connectorType === 'rymessage'
+      && (
+        action.actionType === 'rymessage_mark_handled'
+        || action.actionType === 'rymessage_dismiss'
+      )
+    ) {
+      const companionActionId = String(payload.actionId || '');
+      const connectorId = String(payload.connectorId || '');
+      const baseRevision = Number(payload.revision);
+      if (!companionActionId || !connectorId || !Number.isSafeInteger(baseRevision)) {
+        return ApiErrors.conflict('RyMessage action identity is incomplete');
+      }
+      await queueCompanionActionMutation(connectorId, {
+        contractVersion: '2.0',
+        operationId: stableCompanionOperationId(
+          `rymessage:${
+            action.actionType === 'rymessage_dismiss' ? 'dismissed' : 'handled'
+          }:${connectorId}:${companionActionId}:${baseRevision}`,
+        ),
+        actionId: companionActionId,
+        baseRevision,
+        mutation: {
+          kind: 'action.lifecycle',
+          state: action.actionType === 'rymessage_dismiss' ? 'dismissed' : 'handled',
+        },
+      });
+    }
+    if (
+      notification.connectorType === 'rymessage'
+      && action.actionType === 'rymessage_unlink'
+    ) {
+      const companionActionId = String(payload.actionId || '');
+      const connectorId = String(payload.connectorId || '');
+      const relationId = String(payload.relationId || '');
+      const expectedRevision = Number(payload.revision);
+      if (
+        !companionActionId
+        || !connectorId
+        || !relationId
+        || !Number.isSafeInteger(expectedRevision)
+      ) {
+        return ApiErrors.conflict('RyMessage relation identity is incomplete');
+      }
+      await unlinkRyMessageMaterialization({
+        connectorId,
+        actionId: companionActionId,
+        relationId,
+        expectedRevision,
+      });
     }
 
     registerDefaultNotificationProviders();

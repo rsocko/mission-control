@@ -393,10 +393,30 @@ export default function RecurrencePicker({
             </div>
           )}
 
-          {/* Summary label */}
+        </div>
+      )}
+
+      {value !== 'none' && (
+        <div className="flex flex-wrap items-center gap-2">
           <p className="text-xs text-[var(--text-muted)] italic">
             {getRecurrenceDisplayLabel(value)}
           </p>
+          {controlState && (
+            <span
+              className={`inline-flex min-h-6 items-center rounded-full border px-2 text-xs font-semibold ${
+                controlState.owner === 'provider'
+                  ? 'border-amber-400/30 bg-amber-500/10 text-amber-200'
+                  : 'border-blue-400/25 bg-blue-500/[0.08] text-blue-200'
+              }`}
+              title={controlState.owner === 'provider'
+                ? 'The source creates and advances recurring occurrences'
+                : 'Mission Control creates and advances recurring occurrences'}
+            >
+              {controlState.owner === 'provider'
+                ? 'Managed at source'
+                : 'Managed by Mission Control'}
+            </span>
+          )}
         </div>
       )}
 

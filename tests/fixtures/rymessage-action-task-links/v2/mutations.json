@@ -1,0 +1,83 @@
+{
+  "path": "/v2/integrations/action-feed/mutations",
+  "requests": {
+    "registerCreationIntent": {
+      "contractVersion": "2.0",
+      "operationId": "00000000-0000-4000-8000-000000000021",
+      "actionId": "00000000-0000-4000-8000-000000000001",
+      "expectedRevision": 1,
+      "mutation": {
+        "kind": "creation-intent.register",
+        "intentId": "00000000-0000-4000-8000-000000000011",
+        "draft": {
+          "title": "Review local follow-up",
+          "notes": "Choose the final provider in Mission Control.",
+          "dueAt": "2026-01-03T03:04:05.000Z",
+          "reminderAt": "2026-01-03T02:04:05.000Z",
+          "priority": true
+        }
+      }
+    },
+    "attachManager": {
+      "contractVersion": "2.0",
+      "operationId": "00000000-0000-4000-8000-000000000022",
+      "actionId": "00000000-0000-4000-8000-000000000001",
+      "expectedRevision": 2,
+      "mutation": {
+        "kind": "materialization.attach-manager",
+        "relationId": "a9e4e78b-c88b-53e5-aebe-55a71cb22701",
+        "underlying": {
+          "providerId": "github",
+          "providerAccountId": "installation-1",
+          "providerContainerId": "rsocko/rymessage",
+          "providerTaskId": "1093"
+        },
+        "snapshot": {
+          "providerLabel": "GitHub",
+          "providerIconKey": "github",
+          "title": "Implement provider-neutral action links",
+          "status": "in-progress",
+          "providerVersion": "etag-3",
+          "openUrl": "https://github.com/rsocko/rymessage/issues/1093",
+          "observedAt": "2026-01-02T03:05:05.000Z",
+          "availability": "live"
+        },
+        "managerTaskId": "github-1093",
+        "managerVersion": "7",
+        "managerCanonicalUrl": "https://mission-control.example/tasks/github-1093"
+      }
+    },
+    "unlink": {
+      "contractVersion": "2.0",
+      "operationId": "00000000-0000-4000-8000-000000000023",
+      "actionId": "00000000-0000-4000-8000-000000000001",
+      "expectedRevision": 3,
+      "mutation": {
+        "kind": "materialization.unlink",
+        "relationId": "a9e4e78b-c88b-53e5-aebe-55a71cb22701"
+      }
+    }
+  },
+  "receipts": {
+    "applied": {
+      "operationId": "00000000-0000-4000-8000-000000000022",
+      "actionId": "00000000-0000-4000-8000-000000000001",
+      "outcome": "applied",
+      "revision": 3,
+      "relationId": "a9e4e78b-c88b-53e5-aebe-55a71cb22701"
+    },
+    "duplicate": {
+      "operationId": "00000000-0000-4000-8000-000000000022",
+      "actionId": "00000000-0000-4000-8000-000000000001",
+      "outcome": "duplicate",
+      "revision": 3,
+      "relationId": "a9e4e78b-c88b-53e5-aebe-55a71cb22701"
+    },
+    "conflict": {
+      "operationId": "00000000-0000-4000-8000-000000000024",
+      "actionId": "00000000-0000-4000-8000-000000000001",
+      "outcome": "conflict",
+      "revision": 3
+    }
+  }
+}

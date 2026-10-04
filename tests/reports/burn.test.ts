@@ -70,9 +70,14 @@ function report(
 }
 
 describe('burn report reconstruction', () => {
-  it('marks values before a migration baseline as partial instead of inventing history', () => {
+  it('keeps observed values before a migration baseline visible and marks them partial', () => {
     const result = report({
       events: [
+        baseline(
+          'task-0',
+          '2026-07-01T12:00:00.000Z',
+          { projectIds: ['project-1'] },
+        ),
         baseline(
           'task-1',
           '2026-07-02T12:00:00.000Z',
@@ -84,11 +89,15 @@ describe('burn report reconstruction', () => {
 
     expect(result.partialHistory).toBe(true);
     expect(result.completeFromDate).toBe('2026-07-02');
-    expect(result.points[0].total).toBeNull();
-    expect(result.points[1]).toMatchObject({
-      date: '2026-07-02',
+    expect(result.points[0]).toMatchObject({
       total: 1,
       remaining: 1,
+      partial: true,
+    });
+    expect(result.points[1]).toMatchObject({
+      date: '2026-07-02',
+      total: 2,
+      remaining: 2,
       partial: true,
     });
   });
@@ -149,7 +158,7 @@ describe('burn report reconstruction', () => {
   });
 
   it.each(['done', 'cancelled'])(
-    'keeps pre-migration history partial for a migrated %s task without a closure date',
+    'shows best-known pre-migration history as partial for a migrated %s task without a closure date',
     (status) => {
       const result = report({
         startDate: '2026-07-09',
@@ -173,7 +182,12 @@ describe('burn report reconstruction', () => {
 
       expect(result.partialHistory).toBe(true);
       expect(result.completeFromDate).toBe('2026-08-07');
-      expect(result.points.find((point) => point.date === '2026-07-10')?.total).toBeNull();
+      expect(result.points.find((point) => point.date === '2026-07-10')).toMatchObject({
+        total: 1,
+        completed: 0,
+        remaining: 1,
+        partial: true,
+      });
     },
   );
 
@@ -197,6 +211,27 @@ describe('burn report reconstruction', () => {
     });
 
     expect(result.points.map((point) => point.total)).toEqual([0, 1, 1, 0, 0]);
+  });
+
+  it('preserves pre-deletion points while excluding a soft-deleted task from later snapshots', () => {
+    const result = report({
+      events: [
+        baseline('task-1', '2026-07-01T08:00:00.000Z', {
+          projectIds: ['project-1'],
+        }),
+      ],
+      tasks: [{
+        id: 'task-1',
+        title: 'Deleted later',
+        createdAt: '2026-07-01T08:00:00.000Z',
+        completedAt: null,
+        deletedAt: '2026-07-04T10:00:00.000Z',
+      }],
+    });
+
+    expect(result.points.map((point) => point.total)).toEqual([1, 1, 1, 0, 0]);
+    expect(result.points.at(-1)?.remainingTaskIds).toEqual([]);
+    expect(result.tasks).toEqual([]);
   });
 
   it('treats recently organized project tasks as scoped from their creation dates', () => {

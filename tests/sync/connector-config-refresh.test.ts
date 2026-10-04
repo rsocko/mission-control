@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Pool } from 'pg';
 import type { IConnector } from '@/lib/connectors';
 import type { ConnectorConfig, FetchTaskOptions } from '@/types';
+import { createPostgresConnectorExecutionRepositories } from '@/db/postgres/repositories';
 
 const mocks = vi.hoisted(() => ({
   cronSchedule: vi.fn(),
@@ -23,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   },
   upsertSourceLists: vi.fn(),
   upsertTasks: vi.fn(),
+  assertConnectorSupported: vi.fn(),
   readHierarchyObservation: vi.fn((task: { sourceId: string }) => ({
     kind: 'complete',
     observation: { childSourceId: task.sourceId, parent: null },
@@ -137,7 +140,7 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
       support: {
         allowsLegacyWorkflow: vi.fn(() => true),
         assertConfigSupported: vi.fn(),
-        assertConnectorSupported: vi.fn(),
+        assertConnectorSupported: mocks.assertConnectorSupported,
         listEnabledGitHubConfigs: vi.fn(async () => mocks.dependencyPollConfigs),
         listConnectorTaskIdentities: vi.fn(async () => []),
         listConnectorTaskIds: vi.fn(async () => []),
@@ -444,6 +447,7 @@ describe('connector settings refresh before sync', () => {
     mocks.getDependencyHealth.mockResolvedValue(new Map());
     mocks.dependencyPollConfigs.length = 0;
     mocks.reconcileDependencies.mockResolvedValue({ failed: 0 });
+    mocks.assertConnectorSupported.mockImplementation(() => undefined);
     mocks.runWithLease.mockImplementation(
       async (_connectorId: string, _operationType: string, operation: () => unknown) =>
         operation(),
@@ -530,6 +534,45 @@ describe('connector settings refresh before sync', () => {
     );
     expect(mocks.staleConnector.fetchSourceLists).not.toHaveBeenCalled();
     expect(mocks.staleConnector.fetchTasks).not.toHaveBeenCalled();
+  });
+
+  it('dispatches RyMessage reconciliation through the PostgreSQL worker execution path', async () => {
+    const postgresSupport = createPostgresConnectorExecutionRepositories({} as Pool).support;
+    mocks.assertConnectorSupported.mockImplementation((connector: IConnector) => {
+      postgresSupport.assertConnectorSupported(connector);
+    });
+    const reconcileRyMessage = vi.fn(async () => ({
+      itemsAdded: 1,
+      itemsUpdated: 0,
+      itemsRemoved: 0,
+      notificationsAdded: 0,
+      status: 'fresh' as const,
+    }));
+    mocks.replaceConnector.mockResolvedValue({
+      id: 'rymessage-1',
+      type: 'rymessage',
+      displayName: 'RyMessage',
+      icon: 'message',
+      capabilities: repositoryConfig.capabilities,
+      initialize: vi.fn(),
+      testConnection: vi.fn(),
+      dispose: vi.fn(),
+      fetchSourceLists: vi.fn(async () => []),
+      fetchTasks: vi.fn(async function* () {
+        yield [];
+      }),
+      fetchNotifications: vi.fn(async () => []),
+      getLastSyncToken: vi.fn(async () => null),
+      syncDomainData: reconcileRyMessage,
+    } as IConnector);
+
+    const result = await createScheduler().runSyncLocally('rymessage-1', { full: true });
+
+    expect(result.success).toBe(true);
+    expect(reconcileRyMessage).toHaveBeenCalledOnce();
+    expect(mocks.assertConnectorSupported).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'rymessage' }),
+    );
   });
 });
 

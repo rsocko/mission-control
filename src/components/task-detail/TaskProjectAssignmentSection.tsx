@@ -89,8 +89,8 @@ export function TaskProjectAssignmentSection({
       mode === 'dialog' && 'col-start-2 row-start-2',
       mode === 'workspace' && 'col-start-2 row-start-2',
     )}>
-      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
-        <h3 className="text-xs font-semibold text-[var(--text-secondary)]">Projects &amp; phases</h3>
+      <div className="flex min-h-11 items-center justify-between border-b border-[var(--border-subtle)] px-3">
+        <h3 className="text-sm font-semibold text-[var(--text-secondary)]">Projects &amp; phases</h3>
         <Select
           value=""
           onValueChange={handleAddProject}

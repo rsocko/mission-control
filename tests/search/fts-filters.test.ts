@@ -142,10 +142,10 @@ describe('FTS authoritative filters', () => {
 
     expect(facets.sources).toEqual(expect.arrayContaining([
       { value: 'Other project', count: 55 },
-      { value: 'Project Alpha', count: 7 },
+      { value: 'Project Alpha', count: 5 },
     ]));
     expect(facets.statuses).toEqual(expect.arrayContaining([
-      { value: 'todo', count: 61 },
+      { value: 'todo', count: 59 },
       { value: 'in_progress', count: 1 },
     ]));
     expect(facets.sources.length).toBeLessThanOrEqual(50);
@@ -162,10 +162,10 @@ describe('FTS authoritative filters', () => {
 
     expect(facets.sources).toEqual(expect.arrayContaining([
       { value: 'Other project', count: 55 },
-      { value: 'Project Alpha', count: 7 },
+      { value: 'Project Alpha', count: 5 },
     ]));
     expect(facets.statuses).toEqual(expect.arrayContaining([
-      { value: 'todo', count: 6 },
+      { value: 'todo', count: 4 },
       { value: 'in_progress', count: 1 },
     ]));
   });

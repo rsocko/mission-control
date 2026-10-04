@@ -15,6 +15,7 @@ import type {
 import type { SourceListRecord } from './connector-execution';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from './value-codecs';
 import { normalizeContextAppearance } from '@/lib/context-appearance';
+import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 
 type SqliteDatabase = Database.Database;
 type SqliteDrizzle = BetterSQLite3Database<typeof schema>;
@@ -243,11 +244,17 @@ export function createSqliteConnectorManagementRepository(
           source_list_id AS sourceListId,
           count(*) AS count
         FROM tasks
-        WHERE status NOT IN ('done', 'cancelled')
+        WHERE deleted_at IS NULL
+          AND local_disposition = 'active'
+          AND connector_instance_id NOT IN (
+            SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+          )
+          AND connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
+          AND status NOT IN ('done', 'cancelled')
           AND parent_id IS NULL
           AND is_checklist_item = 0
         GROUP BY connector_instance_id, source_list_id
-      `).all() as ConnectorOverviewResult['openTaskCounts'];
+      `).all(...NOTIFICATION_ONLY_CONNECTOR_TYPES) as ConnectorOverviewResult['openTaskCounts'];
       const syncRows = database.prepare(`
         WITH ranked AS (
           SELECT
@@ -263,11 +270,12 @@ export function createSqliteConnectorManagementRepository(
               OVER (PARTITION BY connector_id) AS lastSyncedAt
           FROM sync_log
         )
-        SELECT connectorId, lastSyncedAt, success, errors
+        SELECT connectorId, syncedAt AS lastSyncAt, lastSyncedAt, success, errors
         FROM ranked
         WHERE rn = 1
       `).all() as Array<{
         connectorId: string;
+        lastSyncAt: string;
         lastSyncedAt: string | null;
         success: number;
         errors: unknown;
@@ -280,6 +288,7 @@ export function createSqliteConnectorManagementRepository(
           const errors = decodeLenientJsonArray(row.errors);
           return {
             connectorId: row.connectorId,
+            lastSyncAt: row.lastSyncAt,
             lastSyncedAt: row.lastSyncedAt,
             success: row.success !== 0,
             error: errors.length > 0 ? String(errors[0]) : null,
@@ -306,12 +315,18 @@ export function createSqliteConnectorManagementRepository(
           SELECT source_list_id AS sourceListId, count(*) AS count
           FROM tasks
           WHERE connector_instance_id = ?
+            AND deleted_at IS NULL
+            AND local_disposition = 'active'
+            AND connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
             AND status NOT IN ('done', 'cancelled')
             AND parent_id IS NULL
             AND is_checklist_item = 0
           GROUP BY source_list_id
           ORDER BY source_list_id ASC
-        `).all(connectorId) as Array<{ sourceListId: string | null; count: number }>;
+        `).all(
+          connectorId,
+          ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
+        ) as Array<{ sourceListId: string | null; count: number }>;
         const groups = database.prepare(`
           SELECT id, name, sort_order AS sortOrder
           FROM list_groups

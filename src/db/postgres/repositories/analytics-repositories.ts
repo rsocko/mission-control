@@ -501,9 +501,11 @@ function createInsightsRepository(pool: Pool): InsightsAnalyticsRepository {
     async workActivityIn({ startInclusive, endExclusive }) {
       const params = [startInclusive, endExclusive];
       const relevant = `task.depth = 0 AND task.is_checklist_item = false
-        AND (task.${OPEN_TASK_CONDITION}
+        AND ((task.deleted_at IS NULL AND task.${OPEN_TASK_CONDITION})
           OR (task.status = 'done' AND ${withinInstantRange('task.completed_at', 1, 2)}))`;
-      const counts = `count(*) FILTER (WHERE task.${OPEN_TASK_CONDITION})::int AS active,
+      const counts = `count(*) FILTER (
+          WHERE task.deleted_at IS NULL AND task.${OPEN_TASK_CONDITION}
+        )::int AS active,
         count(*) FILTER (
           WHERE task.status = 'done' AND ${withinInstantRange('task.completed_at', 1, 2)}
         )::int AS closed`;
@@ -696,7 +698,9 @@ function createInsightsRepository(pool: Pool): InsightsAnalyticsRepository {
         `SELECT count(*)::int AS count
          FROM task_projects membership
          INNER JOIN tasks task ON membership.task_id = task.id
-         WHERE membership.project_id = $1 AND task.${OPEN_TASK_CONDITION}`,
+         WHERE membership.project_id = $1
+           AND task.deleted_at IS NULL
+           AND task.${OPEN_TASK_CONDITION}`,
         [projectId],
       );
       return Number(rows[0]?.count ?? 0);

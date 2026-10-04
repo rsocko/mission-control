@@ -203,15 +203,15 @@ function GeneralSettingsSection() {
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-sm text-[var(--text-primary)]">Natural-language date suggestions</div>
+              <div className="text-sm text-[var(--text-primary)]">Natural-language due dates</div>
               <p className="text-xs text-[var(--text-tertiary)]">
-                Suggest trailing dates such as “next Friday” without applying them automatically.
+                Apply trailing dates such as “next Friday” when creating a task.
               </p>
             </div>
             <button
               type="button"
               role="switch"
-              aria-label="Natural-language date suggestions"
+              aria-label="Natural-language due dates"
               aria-checked={quickAddPreferences.naturalLanguageDates}
               onClick={() => updateQuickAddPreferences({ naturalLanguageDates: !quickAddPreferences.naturalLanguageDates })}
               className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${

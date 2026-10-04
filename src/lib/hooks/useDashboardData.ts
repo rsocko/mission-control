@@ -50,6 +50,7 @@ import {
   resolveGroupLoadOffset,
   updateGroupCountsForTaskChange,
 } from '@/lib/tasks/task-grouping';
+import { TASKS_REFRESH_REQUESTED_EVENT } from '@/lib/tasks/task-refresh-events';
 
 function isRecentQuickFilter(quickFilter: string | null): boolean {
   return quickFilter === 'recentlyCreated' || quickFilter === 'recentlyClosed';
@@ -467,17 +468,20 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
         setRefreshTrigger((n) => n + 1);
       }, 3000);
     };
+    const handleTasksRefresh = () => setRefreshTrigger((n) => n + 1);
     let writeThroughRefetchTimer: number | undefined;
 
     window.addEventListener('mission-control:sort-change', handleSortChange);
     window.addEventListener('mission-control:group-change', handleGroupChange);
     window.addEventListener('mission-control:density-change', handleDensityChange);
     window.addEventListener('mission-control:task-added', handleTaskAdded);
+    window.addEventListener(TASKS_REFRESH_REQUESTED_EVENT, handleTasksRefresh);
     return () => {
       window.removeEventListener('mission-control:sort-change', handleSortChange);
       window.removeEventListener('mission-control:group-change', handleGroupChange);
       window.removeEventListener('mission-control:density-change', handleDensityChange);
       window.removeEventListener('mission-control:task-added', handleTaskAdded);
+      window.removeEventListener(TASKS_REFRESH_REQUESTED_EVENT, handleTasksRefresh);
       if (writeThroughRefetchTimer) window.clearTimeout(writeThroughRefetchTimer);
     };
   }, []);

@@ -444,6 +444,9 @@ function requirePostgresDailyPlanningPersistence(): NonNullable<
 const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
   tasks: {
     get: (id) => requirePostgresRepositories().tasks.get(id),
+    findByProviderIdentity: (input) => (
+      requirePostgresRepositories().tasks.findByProviderIdentity!(input)
+    ),
     upsert: (task) => requirePostgresRepositories().tasks.upsert(task),
     delete: (id) => requirePostgresRepositories().tasks.delete(id),
   },

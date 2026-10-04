@@ -106,6 +106,11 @@ export function hasRecurrenceEvidence(task: { metadata: unknown }): boolean {
   return hasRecurringIdentity(task) || getRecurrenceLabel(task.metadata) !== null;
 }
 
+export function isMissionControlOwnedRecurrence(metadata: unknown): boolean {
+  const recurrence = readRecurrenceMetadata(parseMetadata(metadata));
+  return recurrence.rule?.source.owner === 'mission-control';
+}
+
 export function shouldSuppressNonRecurringDuplicate(
   task: {
     title: string;
@@ -268,9 +273,9 @@ function recurrenceSeriesIds(task: { metadata: unknown }): string[] {
  * Microsoft To Do occasionally ends up with two independent recurrence chains
  * sharing the same title (e.g. the task was duplicated upstream, or a chain
  * was recreated after being deleted). Once one chain has a completed
- * occurrence dated after another chain's still-open occurrence, the open one
- * is a stale leftover that will never be completed by the user going forward
- * — the active series has already moved past it. This is distinct from
+ * occurrence whose due date is after another chain's still-open occurrence,
+ * the open one is a stale leftover that will never be completed by the user
+ * going forward — the active series has already moved past it. This is distinct from
  * findOpenRecurringTaskDuplicates, which only reconciles open rows against
  * each other and never looks at completed history.
  */
@@ -278,14 +283,15 @@ export function findOrphanedRecurringTasks(
   openTasks: RecurringTaskCandidate[],
   historyTasks: RecurringTaskHistoryCandidate[],
 ): RecurringTaskCandidate[] {
-  const latestCompletionBySeriesKey = new Map<string, string>();
+  const latestCompletedDueDateBySeriesKey = new Map<string, string>();
   for (const task of historyTasks) {
-    if (task.status !== 'done' || !task.completedAt) continue;
+    if (task.status !== 'done' || !task.completedAt || !task.dueDate) continue;
     for (const seriesId of recurrenceSeriesIds(task)) {
       const key = `${getRecurringTitleKey(task)}::${seriesId}`;
-      const existing = latestCompletionBySeriesKey.get(key);
-      if (!existing || task.completedAt > existing) {
-        latestCompletionBySeriesKey.set(key, task.completedAt);
+      const completedDueDate = task.dueDate.slice(0, 10);
+      const existing = latestCompletedDueDateBySeriesKey.get(key);
+      if (!existing || completedDueDate > existing) {
+        latestCompletedDueDateBySeriesKey.set(key, completedDueDate);
       }
     }
   }
@@ -293,14 +299,14 @@ export function findOrphanedRecurringTasks(
   const orphaned: RecurringTaskCandidate[] = [];
   for (const task of openTasks) {
     if (!task.dueDate) continue;
-    const latestCompletion = recurrenceSeriesIds(task)
-      .map(seriesId => latestCompletionBySeriesKey.get(
+    const latestCompletedDueDate = recurrenceSeriesIds(task)
+      .map(seriesId => latestCompletedDueDateBySeriesKey.get(
         `${getRecurringTitleKey(task)}::${seriesId}`,
       ))
       .filter((value): value is string => value !== undefined)
       .sort()
       .at(-1);
-    if (latestCompletion && latestCompletion.slice(0, 10) > task.dueDate) {
+    if (latestCompletedDueDate && latestCompletedDueDate > task.dueDate.slice(0, 10)) {
       orphaned.push(task);
     }
   }

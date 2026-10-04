@@ -92,6 +92,24 @@ function makeNotification(overrides?: Partial<NotificationItem>): NotificationIt
 
 describe('NotificationCard — DI Rich Cards', () => {
   describe('Source identity and metadata', () => {
+    it('explains when a historical notification no longer has an available task', () => {
+      const notification = makeNotification({
+        relatedTaskId: 'deleted-task',
+        relatedTaskAvailability: 'unavailable',
+      });
+
+      const { rerender } = render(<NotificationCard notification={notification} />);
+      expect(screen.getByText('Related task is no longer available')).toBeDefined();
+
+      rerender(
+        <NotificationDetail
+          notification={notification}
+          onExecuteAction={vi.fn(async () => ({ success: true }))}
+        />,
+      );
+      expect(screen.getByText(/This notification remains for history/)).toBeDefined();
+    });
+
     it('shows a human-friendly source name and accessible brand identity', () => {
       const notification = makeNotification({
         connectorType: 'github-issues',

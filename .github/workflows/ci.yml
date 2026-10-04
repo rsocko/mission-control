@@ -534,7 +534,7 @@ jobs:
         run: npm run test:persisted-state
 
   postgres-integration-shards:
-    name: PostgreSQL integration worker (${{ matrix.shard }}/3)
+    name: PostgreSQL integration worker (${{ matrix.shard }}/4)
     if: >-
       always() &&
       (needs.changes.result != 'success' ||
@@ -548,7 +548,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
@@ -604,7 +604,7 @@ jobs:
         run: npm run build:worker
 
       - name: Locate pgvector service container
-        if: github.event_name == 'workflow_dispatch' && matrix.shard == 2
+        if: github.event_name == 'workflow_dispatch' && matrix.shard == 3
         shell: bash
         run: |
           set -euo pipefail
@@ -619,13 +619,13 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t test_files < <(
-            node scripts/select-postgres-integration-shard.mjs "${{ matrix.shard }}" 3
+            node scripts/select-postgres-integration-shard.mjs "${{ matrix.shard }}" 4
           )
           test "${#test_files[@]}" -gt 0
           npm test -- --run --no-file-parallelism "${test_files[@]}"
 
       - name: Run pgvector 100k benchmark gate
-        if: github.event_name == 'workflow_dispatch' && matrix.shard == 2
+        if: github.event_name == 'workflow_dispatch' && matrix.shard == 3
         env:
           MC_BENCHMARK_DIMENSIONS: 1536
           MC_BENCHMARK_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable

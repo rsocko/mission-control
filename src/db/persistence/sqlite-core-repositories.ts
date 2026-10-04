@@ -252,6 +252,30 @@ export class SqliteTaskRepository implements TaskRepository {
     };
   }
 
+  async findByProviderIdentity(input: {
+    connectorInstanceId: string;
+    providerTaskId: string;
+    providerContainerId?: string;
+  }): Promise<TaskItem | null> {
+    const row = this.database.prepare(`
+      SELECT id FROM tasks
+      WHERE connector_instance_id = ?
+        AND source_id = ?
+        AND (
+          (? IS NULL AND source_list_id IS NULL)
+          OR source_list_id = ?
+        )
+      ORDER BY id
+      LIMIT 1
+    `).get(
+      input.connectorInstanceId,
+      input.providerTaskId,
+      input.providerContainerId ?? null,
+      input.providerContainerId ?? null,
+    ) as { id: string } | undefined;
+    return row ? this.getSync(row.id) : null;
+  }
+
   async get(id: string): Promise<TaskItem | null> {
     return this.getSync(id);
   }

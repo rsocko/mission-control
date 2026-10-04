@@ -128,7 +128,7 @@ export const workTodoOutboundChanges = sqliteTable('work_todo_outbound_changes',
 
 // ─── RYMESSAGE COMPANION ACTION FEED ───────────────────────────────────────
 
-export const rymessageActionFeedState = sqliteTable('rymessage_action_feed_state', {
+export const rymessageActionV2FeedState = sqliteTable('rymessage_action_v2_feed_state', {
   connectorId: text('connector_id')
     .primaryKey()
     .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
@@ -143,13 +143,12 @@ export const rymessageActionFeedState = sqliteTable('rymessage_action_feed_state
   updatedAt: text('updated_at').notNull(),
 });
 
-export const rymessageActionProjections = sqliteTable('rymessage_action_projections', {
+export const rymessageActionV2Projections = sqliteTable('rymessage_action_v2_projections', {
   connectorId: text('connector_id')
     .notNull()
     .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
   actionId: text('action_id').notNull(),
   sourceId: text('source_id').notNull(),
-  stableKey: text('stable_key'),
   revision: integer('revision').notNull(),
   payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>(),
   payloadDigest: text('payload_digest').notNull(),
@@ -161,55 +160,10 @@ export const rymessageActionProjections = sqliteTable('rymessage_action_projecti
   updatedAt: text('updated_at').notNull(),
 }, (table) => [
   primaryKey({ columns: [table.connectorId, table.actionId] }),
-  uniqueIndex('idx_rymessage_action_source').on(table.connectorId, table.sourceId),
-  index('idx_rymessage_action_generation')
-    .on(table.connectorId, table.lastSeenGeneration, table.tombstonedAt),
+  uniqueIndex('idx_rymessage_action_v2_source').on(table.connectorId, table.sourceId),
 ]);
 
-export const rymessageActionMaterializations = sqliteTable(
-  'rymessage_action_materializations',
-  {
-    connectorId: text('connector_id')
-      .notNull()
-      .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
-    materializationId: text('materialization_id').notNull(),
-    actionId: text('action_id').notNull(),
-    actionRevision: integer('action_revision').notNull(),
-    revision: integer('revision').notNull(),
-    provider: text('provider').$type<'microsoft-todo'>().notNull(),
-    providerAccountId: text('provider_account_id').notNull(),
-    providerListId: text('provider_list_id').notNull(),
-    providerTaskId: text('provider_task_id').notNull(),
-    state: text('state').notNull(),
-    providerTaskStatusSnapshot: text('provider_task_status_snapshot'),
-    providerVersionSnapshot: text('provider_version_snapshot'),
-    lastObservedAt: text('last_observed_at'),
-    localTaskId: text('local_task_id'),
-    relationState: text('relation_state')
-      .$type<'pending-import' | 'linked' | 'conflict' | 'deleted' | 'link-broken'>()
-      .notNull(),
-    conflictCode: text('conflict_code'),
-    createdAt: text('created_at').notNull(),
-    updatedAt: text('updated_at').notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.connectorId, table.materializationId] }),
-    uniqueIndex('idx_rymessage_materialization_provider_identity').on(
-      table.connectorId,
-      table.provider,
-      table.providerAccountId,
-      table.providerListId,
-      table.providerTaskId,
-    ),
-    index('idx_rymessage_materialization_action').on(table.connectorId, table.actionId),
-    index('idx_rymessage_materialization_relation').on(
-      table.connectorId,
-      table.relationState,
-    ),
-  ],
-);
-
-export const rymessageActionReceipts = sqliteTable('rymessage_action_receipts', {
+export const rymessageActionV2Receipts = sqliteTable('rymessage_action_v2_receipts', {
   connectorId: text('connector_id')
     .notNull()
     .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
@@ -222,22 +176,17 @@ export const rymessageActionReceipts = sqliteTable('rymessage_action_receipts', 
   receivedAt: text('received_at').notNull(),
 }, (table) => [
   primaryKey({ columns: [table.connectorId, table.eventId] }),
-  index('idx_rymessage_receipt_operation').on(table.connectorId, table.operationId),
-  index('idx_rymessage_receipt_retention').on(table.connectorId, table.receivedAt),
+  index('idx_rymessage_action_v2_receipt_retention').on(table.connectorId, table.receivedAt),
 ]);
 
-export const rymessageActionOutboundMutations = sqliteTable(
-  'rymessage_action_outbound_mutations',
+export const rymessageActionV2OutboundMutations = sqliteTable(
+  'rymessage_action_v2_outbound_mutations',
   {
     connectorId: text('connector_id')
       .notNull()
       .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
     operationId: text('operation_id').notNull(),
     actionId: text('action_id').notNull(),
-    baseRevision: integer('base_revision').notNull(),
-    expectedFieldRevisions: text('expected_field_revisions', { mode: 'json' })
-      .$type<Record<string, number>>()
-      .notNull(),
     mutation: text('mutation', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
     mutationDigest: text('mutation_digest').notNull(),
     status: text('status')
@@ -250,19 +199,17 @@ export const rymessageActionOutboundMutations = sqliteTable(
     attemptCount: integer('attempt_count').notNull().default(0),
     receipt: text('receipt', { mode: 'json' }).$type<Record<string, unknown>>(),
     lastErrorCode: text('last_error_code'),
-    lastError: text('last_error'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.connectorId, table.operationId] }),
-    index('idx_rymessage_mutation_ready').on(
+    index('idx_rymessage_action_v2_mutation_ready').on(
       table.connectorId,
       table.status,
       table.availableAt,
       table.leaseExpiresAt,
     ),
-    index('idx_rymessage_mutation_action').on(table.connectorId, table.actionId),
   ],
 );
 

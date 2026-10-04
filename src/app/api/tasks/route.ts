@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { listTaskDelegationSummaries } from '@/lib/external-agents/task-delegation';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import { logWriteThrough } from '@/lib/sync/write-through-log';
 import { CAPABILITY_DEFAULTS } from '@/lib/connectors/capabilities';
@@ -55,6 +56,11 @@ import {
   taskCollectionGroupReturnsEmpty,
 } from '@/lib/tasks/core/filter-spec';
 import type { TaskCoreTaskRow, TaskListSortField } from '@/lib/tasks/core/contracts';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import {
+  claimRyMessagePromotionIntent,
+  fulfillRyMessagePromotionIntent,
+} from '@/lib/connectors/rymessage/task-promotion';
 
 const VALID_PRIORITIES = ['critical', 'high', 'medium', 'low', 'none'];
 
@@ -137,6 +143,7 @@ export async function GET(request: Request) {
           myDay: 0,
           recentlyCreated: 0,
           recentlyClosed: 0,
+          recurring: 0,
           waiting: 0,
           inbox: 0,
         },
@@ -239,7 +246,10 @@ export async function GET(request: Request) {
       for (const score of scoredRows) scoredById.set(score.taskId, score);
     }
 
-    const editPolicies = await resolveTaskEditPolicies(result, connectorEditPolicyContexts);
+    const [editPolicies, delegationSummaries] = await Promise.all([
+      resolveTaskEditPolicies(result, connectorEditPolicyContexts),
+      listTaskDelegationSummaries(result.map(({ id }) => id)),
+    ]);
     const smartScoreBudgetReached = sortBy === 'smartScore'
       && collection.total > SMART_SCORE_CANDIDATE_LIMIT;
     if (smartScoreBudgetReached) {
@@ -281,6 +291,7 @@ export async function GET(request: Request) {
           projectPhaseMemberships: task.projectPhaseMemberships,
           linkedSourceCount: task.linkedSourceCount || 0,
           editPolicy: requireTaskEditPolicy(editPolicies, task.id),
+          delegation: delegationSummaries.get(task.id) ?? null,
           ...(scored ? {
             smartScore: Number.isFinite(scored.score.total) ? scored.score.total : 0,
             scoreBreakdown: scored.score,
@@ -314,6 +325,13 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let idempotentTaskId: string | null = null;
+  let promotionIdentity: {
+    actionId: string;
+    intentId: string;
+    connectorId: string;
+    expectedRevision?: number;
+  } | null = null;
   try {
     const body = await request.json();
     const {
@@ -344,6 +362,16 @@ export async function POST(request: Request) {
     const triageItemId = typeof body.triageItemId === 'string' && body.triageItemId
       ? body.triageItemId
       : null;
+    const idempotencyKey = typeof body.idempotencyKey === 'string'
+      ? body.idempotencyKey
+      : null;
+    if (
+      idempotencyKey
+      && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+        .test(idempotencyKey)
+    ) {
+      return ApiErrors.badRequest('idempotencyKey must be a canonical UUID');
+    }
     if (typeof title !== 'string' || !title.trim()) {
       return ApiErrors.badRequest('title is required');
     }
@@ -364,11 +392,57 @@ export async function POST(request: Request) {
       return ApiErrors.badRequest('planningHorizon must be now, next, later, someday, or null');
     }
 
-    const id = crypto.randomUUID();
+    const id = idempotencyKey || crypto.randomUUID();
+    idempotentTaskId = idempotencyKey ? id : null;
     const now = new Date().toISOString();
     const metadata: Record<string, unknown> = {};
     if (recurrence) metadata.recurrence = recurrence;
     if (triageItemId) metadata.triageItemId = triageItemId;
+    if (idempotencyKey) {
+      metadata.creationIdempotencyKey = idempotencyKey;
+      if (body.rymessagePromotion && typeof body.rymessagePromotion === 'object') {
+        const promotion = body.rymessagePromotion as Record<string, unknown>;
+        if (
+          typeof promotion.actionId !== 'string'
+          || typeof promotion.notificationId !== 'string'
+          || typeof promotion.connectorId !== 'string'
+        ) {
+          return ApiErrors.badRequest(
+            'rymessagePromotion requires actionId, notificationId, and connectorId',
+          );
+        }
+        promotionIdentity = {
+          actionId: promotion.actionId,
+          intentId: idempotencyKey,
+          connectorId: promotion.connectorId,
+        };
+        metadata.rymessagePromotion = {
+          ...promotionIdentity,
+          notificationId: promotion.notificationId,
+        };
+      }
+      const existing = await getCorePersistenceRepositories().tasks.get(id);
+      if (existing) {
+        const existingMetadata = existing.metadata && typeof existing.metadata === 'object'
+          ? existing.metadata as Record<string, unknown>
+          : {};
+        if (existingMetadata.creationIdempotencyKey !== idempotencyKey) {
+          return ApiErrors.conflict('idempotencyKey is already in use');
+        }
+        if (
+          promotionIdentity
+          && existing.syncStatus === 'synced'
+        ) {
+          await fulfillRyMessagePromotionIntent(promotionIdentity, existing);
+        }
+        return NextResponse.json({ id, replayed: true }, { status: 200 });
+      }
+      if (promotionIdentity) {
+        promotionIdentity.expectedRevision = await claimRyMessagePromotionIntent(
+          promotionIdentity,
+        );
+      }
+    }
     metadata.missionControlTaskId = id;
 
     const resolvedConnectorType = typeof connectorType === 'string' ? connectorType : 'local';
@@ -594,9 +668,30 @@ export async function POST(request: Request) {
         connectorInstanceId: committedTask.connectorInstanceId,
         metadata,
         tagNames: createResult.sourceTagNames,
+        promotionIdentity,
       }).catch((error) => {
         logger.error({ err: error, taskId: id }, 'Write-through task creation failed unexpectedly');
       });
+    } else if (promotionIdentity) {
+      try {
+        await fulfillRyMessagePromotionIntent(promotionIdentity, {
+          id: committedTask.id,
+          sourceId: committedTask.sourceId,
+          connectorType: committedTask.connectorType,
+          connectorInstanceId: committedTask.connectorInstanceId,
+          ...(committedTask.sourceListId
+            ? { sourceListId: committedTask.sourceListId }
+            : {}),
+          title: committedTask.title,
+          status: 'todo',
+          updatedAt: committedTask.updatedAt,
+        });
+      } catch (error) {
+        logger.warn(
+          { err: error, taskId: id },
+          'Task created but RyMessage materialization fulfillment requires reconciliation',
+        );
+      }
     }
 
     try {
@@ -608,6 +703,18 @@ export async function POST(request: Request) {
     const [editPolicy] = (await resolveTaskEditPolicies([committedTask])).values();
     return NextResponse.json({ id, editPolicy }, { status: 201 });
   } catch (error) {
+    if (idempotentTaskId) {
+      const existing = await getCorePersistenceRepositories().tasks.get(idempotentTaskId);
+      const existingMetadata = existing?.metadata && typeof existing.metadata === 'object'
+        ? existing.metadata as Record<string, unknown>
+        : {};
+      if (existingMetadata.creationIdempotencyKey === idempotentTaskId) {
+        return NextResponse.json(
+          { id: idempotentTaskId, replayed: true },
+          { status: 200 },
+        );
+      }
+    }
     return ApiErrors.internal('Failed to create task', error);
   }
 }
@@ -624,6 +731,12 @@ async function writeThroughCreate(params: {
   connectorInstanceId: string;
   metadata: Record<string, unknown>;
   tagNames?: string[];
+  promotionIdentity?: {
+    actionId: string;
+    intentId: string;
+    connectorId: string;
+    expectedRevision?: number;
+  } | null;
 }) {
   let pushLeaseToken: string | null = null;
   try {
@@ -695,6 +808,23 @@ async function writeThroughCreate(params: {
       params.createdFromSourceId,
     );
     if (!finalized) return;
+
+    if (params.promotionIdentity) {
+      try {
+        await fulfillRyMessagePromotionIntent(params.promotionIdentity, {
+          ...created,
+          id: params.id,
+          connectorType: connector.type,
+          connectorInstanceId: params.connectorInstanceId,
+          sourceListId: params.sourceListId,
+        });
+      } catch (error) {
+        logger.warn(
+          { err: error, taskId: params.id },
+          'Provider task created but RyMessage materialization fulfillment requires reconciliation',
+        );
+      }
+    }
 
     try {
       await persistCreatedTaskIdentity({

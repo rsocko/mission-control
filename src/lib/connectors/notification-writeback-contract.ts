@@ -7,6 +7,7 @@ export type NotificationWritebackAction =
 const NOTIFICATION_DISMISSAL_WRITEBACK_CONNECTORS = new Set([
   'document-intelligence',
   'github-issues',
+  'rymessage',
 ]);
 
 export function supportsNotificationDismissalWriteback(connectorType: string): boolean {

@@ -142,6 +142,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     clearTaskNotesRequest,
     detailMode,
     handleAddToMyDay,
+    handleCompleteTask,
     handleRemoveFromMyDay,
     myDayTaskIds,
     notesOpenRequest,
@@ -746,6 +747,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
               }
               void loadProjectDetail({ background: true });
             }}
+            onComplete={() => handleCompleteTask(selectedTaskId)}
             onSubtaskCountChange={(done, total) => {
               setTasks((current) =>
                 current.map((task) =>

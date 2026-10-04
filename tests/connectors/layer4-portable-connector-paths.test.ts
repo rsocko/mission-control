@@ -2,9 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ConnectorCapabilities, ConnectorConfig } from '@/types';
 
 /**
- * Layer 4 reachability proof for the non-finance connectors that own *no*
- * worker persistence table: Rymessage (notification-only) and OWL
- * (`document-intelligence`).
+ * Layer 4 reachability proof for OWL (`document-intelligence`), which owns no
+ * worker persistence table.
  *
  * Their normal production paths must run entirely on remote transport plus the
  * portable Layer 2 list/task/tag/notification ports, so they work unchanged on
@@ -40,72 +39,6 @@ const CAPABILITIES = {
   tags: true,
   tagWriteBack: false,
 } as ConnectorCapabilities;
-
-describe('Layer 4 portable connector paths — Rymessage', () => {
-  const config: ConnectorConfig = {
-    id: 'rymessage-portable',
-    type: 'rymessage',
-    name: 'RyMessage',
-    enabled: true,
-    syncMode: 'poll',
-    capabilities: CAPABILITIES,
-    // Inert placeholder credential aimed at a stubbed local transport.
-    credentials: {},
-    settings: {
-      mode: 'rest',
-      restUrl: 'http://rymessage.invalid:9999',
-      apiKey: 'inert-test-key',
-      minConfidence: 0.5,
-    },
-    syncedLists: [],
-  };
-
-  it('maps Action Center records to notifications without Mission Control persistence', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify([{
-      id: 'action-1',
-      stable_key: 'action-1',
-      chat_guid: 'chat-1',
-      action_type: 'reply',
-      kind: 'reply',
-      title: 'Confirm the vendor call',
-      summary: 'Reply to the scheduling request',
-      confidence_score: 0.92,
-      lifecycle_state: 'visible',
-      created_at: '2026-08-07T17:00:00.000Z',
-      updated_at: '2026-08-07T18:00:00.000Z',
-    }]), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-    try {
-      const { rymessageFactory } = await import('@/lib/connectors/rymessage');
-      const connector = rymessageFactory.create();
-      await connector.initialize(config);
-
-      const notifications = await connector.fetchNotifications!();
-      const lists = await connector.fetchSourceLists!();
-
-      expect(fetchMock).toHaveBeenCalled();
-      expect(notifications.length).toBeGreaterThan(0);
-      expect(notifications[0].connectorType).toBe('rymessage');
-      expect(lists).toEqual([expect.objectContaining({ sourceId: 'action-center' })]);
-      expect(sqliteTouch).not.toHaveBeenCalled();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('stays inert in webhook mode without reading any database', async () => {
-    const { rymessageFactory } = await import('@/lib/connectors/rymessage');
-    const connector = rymessageFactory.create();
-    await connector.initialize({
-      ...config,
-      settings: { mode: 'webhook', minConfidence: 0.5 },
-    });
-
-    await expect(connector.testConnection()).resolves.toMatchObject({ success: true });
-    await expect(connector.fetchNotifications!()).resolves.toEqual([]);
-    expect(sqliteTouch).not.toHaveBeenCalled();
-  });
-});
 
 describe('Layer 4 portable connector paths — OWL document intelligence', () => {
   const config: ConnectorConfig = {

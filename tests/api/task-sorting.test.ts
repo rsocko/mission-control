@@ -18,6 +18,9 @@ vi.mock('@/lib/smart-score', () => ({
 vi.mock('@/lib/logger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));
+vi.mock('@/lib/external-agents/task-delegation', () => ({
+  listTaskDelegationSummaries: vi.fn(async () => new Map()),
+}));
 vi.mock('@/lib/api-error', () => ({
   ApiErrors: {
     badRequest: vi.fn((message: string) =>
@@ -43,6 +46,7 @@ const EMPTY_COLLECTION = {
     myDay: 0,
     recentlyCreated: 0,
     recentlyClosed: 0,
+    recurring: 0,
     waiting: 0,
     inbox: 0,
   },

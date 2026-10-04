@@ -386,10 +386,9 @@ export function SubtaskSection({
           </SortableContext>
         </DndContext>
 
-        {/* Add subtask input */}
         {canCreateSubtasks && (
-          <div className="flex items-center gap-2 pt-1">
-            <Plus size={14} className="shrink-0 text-[var(--text-muted)]" />
+          <div className="input-glow mt-2 flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2.5">
+            <Plus size={14} className="shrink-0 text-[var(--accent-400)]" />
             <input
               type="text"
               value={newTitle}
@@ -401,7 +400,7 @@ export function SubtaskSection({
                 }
               }}
               placeholder="Add subtask…"
-              className="flex-1 text-xs bg-transparent text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+              className="min-w-0 flex-1 bg-transparent text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
             />
           </div>
         )}
@@ -412,10 +411,10 @@ export function SubtaskSection({
             onClick={() => setShowAiBreakdown(true)}
             disabled={showAiBreakdown}
             title="Suggest subtasks with AI"
-            className="mt-1 flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-violet-300 hover:bg-violet-500/10 disabled:cursor-not-allowed disabled:text-[var(--text-muted)] disabled:opacity-60"
+            className="mt-1 flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Sparkles size={12} aria-hidden="true" />
-            AI breakdown
+            Suggest subtasks with AI
           </button>
         )}
 

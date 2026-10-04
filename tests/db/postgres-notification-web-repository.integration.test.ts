@@ -194,19 +194,31 @@ function createPostgresContractSeed(pool: import('pg').Pool): NotificationWebCon
       await pool.query('DELETE FROM push_subscriptions');
       await pool.query('DELETE FROM notification_actions');
       await pool.query('DELETE FROM notifications');
+      await pool.query('DELETE FROM tasks');
+    },
+    async insertTask(row) {
+      const now = '2024-01-01T00:00:00.000Z';
+      await pool.query(`
+        INSERT INTO tasks (
+          id, source_id, connector_type, connector_instance_id, title,
+          created_at, updated_at, last_synced_at, deleted_at
+        ) VALUES ($1, $2, 'local', 'local', $1, $3, $3, $3, $4)
+      `, [row.id, `local:${row.id}`, now, row.deletedAt ?? null]);
     },
     async insertNotification(row: ContractSeedNotification) {
       await pool.query(
         `INSERT INTO notifications (
           id, source_id, connector_type, connector_instance_id,
-          title, received_at, sort_at, metadata, presentation, is_actionable
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          title, received_at, sort_at, metadata, presentation, is_actionable,
+          related_task_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           row.id, row.sourceId, row.connectorType, row.connectorInstanceId,
           row.title, row.receivedAt, row.sortAt,
           JSON.stringify(row.metadata ?? {}),
           JSON.stringify(row.presentation ?? {}),
           row.isActionable ?? false,
+          row.relatedTaskId ?? null,
         ],
       );
     },

@@ -64,6 +64,7 @@ import {
   compileCanonicalTaskFilter,
   compileQuickFilterCondition,
   enabledGitHubConnectorCondition,
+  getTaskSourceVisibilityConditions,
   withCondition,
   type PostgresCanonicalTaskFilterInputs,
 } from './task-core-filter';
@@ -72,6 +73,7 @@ import {
   reconcilePostgresTaskTransferIdentityRefreshInTransaction,
   resolvePostgresTaskTransferIdentityTargets,
 } from './task-transfer-identity';
+import { cleanupTaskAssociationsInTransaction } from './task-deletion';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from '@/db/persistence/value-codecs';
 import { eventSubscriptionMatches, parseEventTypes } from '@/db/persistence/event-outbox';
 import {
@@ -486,6 +488,7 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       myDay,
       recentlyCreated,
       recentlyClosed,
+      recurring,
       waiting,
       inbox,
     ] = await Promise.all([
@@ -499,6 +502,7 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       this.countWhere(withCondition(openWhere, quick('myDay'))),
       this.countWhere(withCondition(openWhere, quick('recentlyCreated'))),
       this.countWhere(withCondition(compiled.baseWhere, quick('recentlyClosed'))),
+      this.countWhere(withCondition(openWhere, quick('recurring'))),
       this.countWhere(withCondition(openWhere, quick('waiting'))),
       this.countWhere(withCondition(openWhere, quick('inbox'))),
     ]);
@@ -514,6 +518,7 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       myDay,
       recentlyCreated,
       recentlyClosed,
+      recurring,
       waiting,
       inbox,
     };
@@ -758,7 +763,11 @@ class PostgresTaskReadRepository implements TaskReadRepository {
     const [sourceTask] = await this.db
       .select({ id: tasks.id })
       .from(tasks)
-      .where(eq(tasks.id, input.taskId))
+      .where(and(
+        eq(tasks.id, input.taskId),
+        ...getTaskSourceVisibilityConditions(),
+        eq(tasks.localDisposition, 'active'),
+      ))
       .limit(1);
     if (!sourceTask) return null;
 
@@ -772,6 +781,8 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       sourceListName: tasks.sourceListName,
     }).from(tasks).where(and(
       ne(tasks.id, input.taskId),
+      ...getTaskSourceVisibilityConditions(),
+      eq(tasks.localDisposition, 'active'),
       normalizedQuery
         ? sql`${tasks.title} COLLATE "C" ILIKE ${`%${normalizedQuery}%`} ESCAPE ''`
         : undefined,
@@ -824,18 +835,24 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       sourceId: tasks.sourceId,
       connectorType: tasks.connectorType,
       createdAt: tasks.createdAt,
-    }).from(tasks).where(
+    }).from(tasks).where(and(
+      ...getTaskSourceVisibilityConditions(),
+      eq(tasks.localDisposition, 'active'),
       input.includeClosedTasks
         ? undefined
         : inArray(tasks.status, ['todo', 'in_progress']),
-    );
+    ));
   }
 
   async listDistinctTaskAssignees(): Promise<string[]> {
     const rows = await this.db
       .select({ assignee: tasks.assignee })
       .from(tasks)
-      .where(isNotNull(tasks.assignee))
+      .where(and(
+        ...getTaskSourceVisibilityConditions(),
+        eq(tasks.localDisposition, 'active'),
+        isNotNull(tasks.assignee),
+      ))
       .groupBy(tasks.assignee)
       .orderBy(asc(sql`${tasks.assignee} COLLATE "C"`));
     return rows.map((row) => row.assignee!);
@@ -1029,11 +1046,12 @@ class PostgresTaskReadRepository implements TaskReadRepository {
         .where(and(...scope, condition));
       return Number(row?.count ?? 0);
     };
-    const [noPriority, noEffort, noTags, noPlanningHorizon] = await Promise.all([
+    const [noPriority, noEffort, noTags, noPlanningHorizon, noProject] = await Promise.all([
       countWhere(eq(tasks.priority, 'none')),
       countWhere(isNull(tasks.effort)),
       countWhere(sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`),
       countWhere(isNull(tasks.planningHorizon)),
+      countWhere(sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`),
     ]);
     return {
       no_priority: noPriority,
@@ -1041,6 +1059,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       no_effort: noEffort,
       no_tags: noTags,
       no_planning_horizon: noPlanningHorizon,
+      no_project: noProject,
     };
   }
 
@@ -1058,6 +1077,8 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       conditions.push(isNull(tasks.effort));
     } else if (input.mode === 'no_tags') {
       conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`);
+    } else if (input.mode === 'no_project') {
+      conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`);
     } else {
       conditions.push(isNull(tasks.planningHorizon));
     }
@@ -1186,7 +1207,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
     taskIds: readonly string[],
   ): Promise<TaskQuickSortSuggestionInputs> {
     if (taskIds.length === 0) {
-      return { tasks: [], sourceRankings: [], tags: [], taskTags: [] };
+      return { tasks: [], sourceRankings: [], tags: [], taskTags: [], projectAffinities: [] };
     }
     const taskRows = await this.db.select({
       id: tasks.id,
@@ -1198,16 +1219,18 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       updatedAt: tasks.updatedAt,
       connectorType: tasks.connectorType,
       connectorInstanceId: tasks.connectorInstanceId,
+      sourceListId: tasks.sourceListId,
       sourceListName: tasks.sourceListName,
       assignee: tasks.assignee,
       snoozedUntil: tasks.snoozedUntil,
       effort: tasks.effort,
     }).from(tasks).where(inArray(tasks.id, [...taskIds]));
     if (taskRows.length === 0) {
-      return { tasks: [], sourceRankings: [], tags: [], taskTags: [] };
+      return { tasks: [], sourceRankings: [], tags: [], taskTags: [], projectAffinities: [] };
     }
 
-    const [rankingRows, tagRows, assignmentRows] = await Promise.all([
+    const connectorInstanceIds = [...new Set(taskRows.map((row) => row.connectorInstanceId))];
+    const [rankingRows, tagRows, assignmentRows, projectAffinityRows] = await Promise.all([
       this.db.select({
         id: sourceRankings.id,
         connectorType: sourceRankings.connectorType,
@@ -1223,6 +1246,25 @@ class PostgresTaskReadRepository implements TaskReadRepository {
         taskId: taskTags.taskId,
         tagId: taskTags.tagId,
       }).from(taskTags),
+      this.db.select({
+        taskId: tasks.id,
+        connectorInstanceId: tasks.connectorInstanceId,
+        sourceListId: tasks.sourceListId,
+        projectId: taskProjects.projectId,
+        projectName: hubProjects.name,
+        projectColor: hubProjects.color,
+      }).from(tasks)
+        .leftJoin(taskProjects, eq(taskProjects.taskId, tasks.id))
+        .leftJoin(hubProjects, eq(hubProjects.id, taskProjects.projectId))
+        .where(and(
+          inArray(tasks.connectorInstanceId, connectorInstanceIds),
+          isNull(tasks.deletedAt),
+          notInArray(tasks.status, [...CLOSED_TASK_STATUSES]),
+          or(
+            isNull(taskProjects.projectId),
+            and(eq(hubProjects.hidden, false), ne(hubProjects.status, 'completed')),
+          ),
+        )),
     ]);
     return {
       tasks: taskRows.map((row) => ({
@@ -1230,6 +1272,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
         description: row.description ?? null,
         priority: row.priority as TaskQuickSortSuggestionInputs['tasks'][number]['priority'],
         dueDate: row.dueDate ?? null,
+        sourceListId: row.sourceListId ?? null,
         sourceListName: row.sourceListName ?? null,
         assignee: row.assignee ?? null,
         snoozedUntil: row.snoozedUntil ?? null,
@@ -1238,6 +1281,10 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       sourceRankings: rankingRows,
       tags: tagRows,
       taskTags: assignmentRows,
+      projectAffinities: projectAffinityRows.map((row) => ({
+        ...row,
+        sourceListId: row.sourceListId ?? null,
+      })),
     };
   }
 }
@@ -1325,31 +1372,7 @@ async function deleteSingleTaskWithinTransaction(
   taskId: string,
 ): Promise<void> {
   await lockTaskTagMutation(tx);
-  await tx.delete(taskTags).where(eq(taskTags.taskId, taskId));
-  await tx.delete(projectAutoIncludeExclusions)
-    .where(eq(projectAutoIncludeExclusions.taskId, taskId));
-  await tx.delete(taskProjects).where(eq(taskProjects.taskId, taskId));
-  await tx.delete(taskSchedules).where(eq(taskSchedules.taskId, taskId));
-  await tx.delete(myDayItems).where(eq(myDayItems.taskId, taskId));
-  await tx.delete(myDayExclusions).where(eq(myDayExclusions.taskId, taskId));
-  await tx.delete(focusItems).where(eq(focusItems.taskId, taskId));
-  await tx.delete(weeklyOneThing).where(eq(weeklyOneThing.taskId, taskId));
-  await tx.delete(prioritySyncLog).where(eq(prioritySyncLog.taskId, taskId));
-  await tx.delete(quickSortLog).where(eq(quickSortLog.taskId, taskId));
-  await tx.delete(quickSortOperations).where(eq(quickSortOperations.taskId, taskId));
-  await tx.delete(taskLinkedSources).where(eq(taskLinkedSources.taskId, taskId));
-  await tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId));
-  await tx.delete(projectPhaseItems).where(eq(projectPhaseItems.taskId, taskId));
-  await tx.update(notifications)
-    .set({ relatedTaskId: null })
-    .where(eq(notifications.relatedTaskId, taskId));
-  await tx.update(taskRecurrenceBackfillDecisions)
-    .set({ taskId: null })
-    .where(eq(taskRecurrenceBackfillDecisions.taskId, taskId));
-  await tx.delete(taskDependencies).where(or(
-    eq(taskDependencies.taskId, taskId),
-    eq(taskDependencies.dependsOnTaskId, taskId),
-  ));
+  await cleanupTaskAssociationsInTransaction(tx, taskId);
   await tx.delete(tasks).where(eq(tasks.id, taskId));
 }
 
@@ -1509,11 +1532,6 @@ async function collectTaskGraphIds(
 class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteRepository {
   constructor(private readonly db: PostgresDatabase) {}
 
-  /**
-   * Unlike SQLite, the PostgreSQL schema has no `task_history_events`
-   * append-only DELETE trigger, so this path does not need the SQLite
-   * adapter's drop-trigger/recreate-trigger dance around the history purge.
-   */
   async hardDeleteScoutTask(taskId: string): Promise<ScoutHardDeleteOutcome> {
     return this.db.transaction(async (tx): Promise<ScoutHardDeleteOutcome> => {
       await lockTaskTagMutation(tx);
@@ -1551,6 +1569,9 @@ class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteReposi
         await tx.insert(taskIngestSuppressions).values(suppressions).onConflictDoNothing();
       }
 
+      await tx.execute(
+        sql`SELECT set_config('mission_control.suppress_task_history', 'on', true)`,
+      );
       await tx.delete(taskDependencies).where(or(
         inArray(taskDependencies.taskId, taskIds),
         inArray(taskDependencies.dependsOnTaskId, taskIds),
@@ -1634,7 +1655,6 @@ async function repointTaskReferences(
     sql`UPDATE priority_sync_log SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
     sql`UPDATE task_triage_log SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
     sql`UPDATE quick_sort_operations SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
-    sql`UPDATE rymessage_action_materializations SET local_task_id = ${successorTaskId} WHERE local_task_id = ${sourceTaskId}`,
     sql`UPDATE project_auto_include_exclusions SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
   ];
   for (const statement of simpleRepoints) await tx.execute(statement);
@@ -4806,6 +4826,12 @@ class PostgresTaskQuickSortRepository implements TaskQuickSortPersistenceReposit
       .where(eq(tasks.id, taskId));
     const task = rows[0];
     if (!task) return null;
+    const [projectRows, phaseRows] = await Promise.all([
+      this.db.select({ id: taskProjects.projectId }).from(taskProjects)
+        .where(eq(taskProjects.taskId, taskId)),
+      this.db.select({ id: projectPhaseItems.phaseId }).from(projectPhaseItems)
+        .where(eq(projectPhaseItems.taskId, taskId)),
+    ]);
     return {
       updatedAt: task.updatedAt,
       status: task.status,
@@ -4820,6 +4846,8 @@ class PostgresTaskQuickSortRepository implements TaskQuickSortPersistenceReposit
       reminderAt: task.reminderAt,
       effort: task.effort,
       tagIds: rows.flatMap((row) => row.tagId === null ? [] : [row.tagId]).sort(),
+      projectIds: projectRows.map((row) => row.id).sort(),
+      phaseIds: phaseRows.map((row) => row.id).sort(),
     };
   }
 

@@ -12,6 +12,7 @@ import { BackgroundAiToastProvider } from "@/components/BackgroundAiToastProvide
 import { UndoKeyboardProvider } from "@/components/UndoKeyboardProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
+import { TaskDelegationDialog } from "@/components/task-delegation/TaskDelegationDialog";
 import { APP_DARK_BACKGROUND, APP_DARK_CHROME } from "@/lib/brand";
 
 const geistSans = Geist({
@@ -86,6 +87,7 @@ export default function RootLayout({
           </ErrorBoundary>
         </AppShell>
         <PwaInstallPrompt />
+        <TaskDelegationDialog />
         <BackgroundAiToastProvider />
         <UndoKeyboardProvider />
         <Toaster />

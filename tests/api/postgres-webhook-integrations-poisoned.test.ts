@@ -554,58 +554,6 @@ describe('poisoned-SQLite webhook web surface', () => {
     expect(unsupported.status).toBe(400);
   });
 
-  it('serves the RyMessage lifecycle receiver without SQLite', async () => {
-    const route = await import('@/app/api/integrations/rymessage/route');
-
-    const info = await route.GET();
-    expect(info.status).toBe(200);
-    expect(await info.json()).toMatchObject({ authRequired: false });
-
-    const created = await route.POST(mutate('/api/integrations/rymessage', 'POST', {
-      event: 'action.created',
-      action: { id: 'a-1', stableKey: 'k-1', chatGuid: 'c', title: 'Reply needed' },
-    }));
-    expect(created.status).toBe(201);
-    expect(calls.ingestUpsertNotification).toHaveBeenCalledWith(expect.objectContaining({
-      match: { connectorType: 'rymessage', sourceId: 'rymessage:k-1' },
-    }));
-    expect(search.indexAlert).toHaveBeenCalled();
-
-    calls.ingestUpsertNotification.mockResolvedValue({
-      id: 'notification-1',
-      created: false,
-      search: searchProjection,
-    });
-    const updated = await route.POST(mutate('/api/integrations/rymessage', 'POST', {
-      event: 'action.updated',
-      action: { id: 'a-1', stableKey: 'k-1', chatGuid: 'c', title: 'Reply needed' },
-    }));
-    expect(updated.status).toBe(200);
-    expect(await updated.json()).toMatchObject({ action: 'updated' });
-
-    const dismissed = await route.POST(mutate('/api/integrations/rymessage', 'POST', {
-      event: 'action.dismissed',
-      action: { id: 'a-1', stableKey: 'k-1', chatGuid: 'c', title: 'Reply needed' },
-    }));
-    expect(dismissed.status).toBe(200);
-    expect(await dismissed.json()).toMatchObject({ action: 'deleted' });
-    expect(search.removeAlertFromIndex).toHaveBeenCalledWith('notification-1');
-    expect(search.publishSemanticEntityDelete).toHaveBeenCalledWith('alert', 'notification-1');
-
-    const snoozed = await route.POST(mutate('/api/integrations/rymessage', 'POST', {
-      event: 'action.snoozed',
-      action: { id: 'a-1', stableKey: 'k-1', chatGuid: 'c', title: 'x', snoozedUntil: 1 },
-    }));
-    expect(snoozed.status).toBe(200);
-    expect(calls.ingestSnoozeNotification).toHaveBeenCalled();
-
-    const unsupported = await route.POST(mutate('/api/integrations/rymessage', 'POST', {
-      event: 'action.exploded',
-      action: { id: 'a-1', stableKey: 'k-1', chatGuid: 'c', title: 'x' },
-    }));
-    expect(unsupported.status).toBe(400);
-  });
-
   it('serves outbound webhook configuration and the outbound test send', async () => {
     const collection = await import('@/app/api/integrations/webhooks/route');
     const detail = await import('@/app/api/integrations/webhooks/[id]/route');

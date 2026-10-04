@@ -1,13 +1,15 @@
 import {
-  COMPANION_ACTION_MAX_PAGE_ITEMS,
-  COMPANION_ACTION_EFFECTIVE_PAGE_ITEMS,
-  COMPANION_ACTION_MAX_WRITE_BYTES,
-  isCompanionActionFeedPage,
-  isCompanionActionMutationReceipt,
-  type CompanionActionFeedPage,
-  type CompanionActionMutationRequest,
-  type CompanionActionMutationReceipt,
-} from './action-contract';
+  COMPANION_ACTION_FEED_PATH_V2,
+  COMPANION_ACTION_V2_MAX_PAGE_ITEMS,
+  COMPANION_ACTION_V2_MAX_WRITE_BYTES,
+  isCompanionActionFeedPageV2,
+  isCompanionActionMutationRequestV2,
+  isCompanionActionMutationReceiptV2,
+  normalizeTrustedOrigin,
+  type CompanionActionFeedPageV2,
+  type CompanionActionMutationRequestV2,
+  type CompanionActionMutationReceiptV2,
+} from './action-contract-v2';
 
 const MAX_ERROR_BYTES = 8 * 1024;
 
@@ -23,11 +25,12 @@ export class CompanionActionHttpError extends Error {
 }
 
 export interface CompanionActionClient {
-  fetchPage(cursor: string | null, signal?: AbortSignal): Promise<CompanionActionFeedPage>;
-  submitMutation(
-    request: CompanionActionMutationRequest,
+  fetchPageV2(cursor: string | null, signal?: AbortSignal): Promise<CompanionActionFeedPageV2>;
+  validateMutationV2(request: CompanionActionMutationRequestV2): boolean;
+  submitMutationV2(
+    request: CompanionActionMutationRequestV2,
     signal?: AbortSignal,
-  ): Promise<CompanionActionMutationReceipt>;
+  ): Promise<CompanionActionMutationReceiptV2>;
 }
 
 export interface CompanionActionClientOptions {
@@ -35,6 +38,8 @@ export interface CompanionActionClientOptions {
   credential: string;
   fetchImpl?: typeof fetch;
   maxRetries?: number;
+  trustedMissionControlOrigin?: string;
+  trustedTaskOrigins?: readonly string[];
 }
 
 function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
@@ -69,6 +74,15 @@ export function createCompanionActionClient(
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxRetries = Math.min(Math.max(options.maxRetries ?? 3, 0), 5);
+  const normalizedTrustedOrigin = normalizeTrustedOrigin(
+    options.trustedMissionControlOrigin,
+  );
+  const trustedMutationOrigins = new Set([
+    ...(normalizedTrustedOrigin ? [normalizedTrustedOrigin] : []),
+    ...(options.trustedTaskOrigins ?? [])
+      .map(normalizeTrustedOrigin)
+      .filter((origin): origin is string => origin !== null),
+  ]);
 
   async function request(path: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
     let lastError: unknown;
@@ -102,16 +116,17 @@ export function createCompanionActionClient(
   }
 
   return {
-    async fetchPage(cursor, signal) {
+    validateMutationV2(mutation) {
+      return isCompanionActionMutationRequestV2(mutation, trustedMutationOrigins);
+    },
+
+    async fetchPageV2(cursor, signal) {
       const query = new URLSearchParams({
-        limit: String(Math.min(
-          COMPANION_ACTION_MAX_PAGE_ITEMS,
-          COMPANION_ACTION_EFFECTIVE_PAGE_ITEMS,
-        )),
+        limit: String(COMPANION_ACTION_V2_MAX_PAGE_ITEMS),
       });
       if (cursor) query.set('cursor', cursor);
       const response = await request(
-        `/v1/integrations/action-feed?${query.toString()}`,
+        `${COMPANION_ACTION_FEED_PATH_V2}?${query.toString()}`,
         { method: 'GET' },
         signal,
       );
@@ -124,44 +139,41 @@ export function createCompanionActionClient(
         );
       }
       const page = await response.json() as unknown;
-      if (!isCompanionActionFeedPage(page)) {
+      if (!isCompanionActionFeedPageV2(page, trustedMutationOrigins)) {
         throw new CompanionActionHttpError(502, 'contract_invalid', false);
       }
       return page;
     },
 
-    async submitMutation(mutation, signal) {
+    async submitMutationV2(mutation, signal) {
+      if (!this.validateMutationV2(mutation)) {
+        throw new CompanionActionHttpError(400, 'mutation_invalid', false);
+      }
       const body = JSON.stringify(mutation);
-      if (Buffer.byteLength(body, 'utf8') > COMPANION_ACTION_MAX_WRITE_BYTES) {
+      if (Buffer.byteLength(body, 'utf8') > COMPANION_ACTION_V2_MAX_WRITE_BYTES) {
         throw new CompanionActionHttpError(413, 'mutation_too_large', false);
       }
       const response = await request(
-        '/v1/integrations/action-feed/mutations',
+        `${COMPANION_ACTION_FEED_PATH_V2}/mutations`,
         { method: 'POST', body },
         signal,
       );
       const payload = await response.json().catch(() => null) as unknown;
-      if ((response.ok || response.status === 409) && isCompanionActionMutationReceipt(payload)) {
-        if (
-          payload.operationId !== mutation.operationId
-          || payload.actionId !== mutation.actionId
-        ) {
-          throw new CompanionActionHttpError(502, 'receipt_identity_mismatch', false);
-        }
+      if (
+        (response.ok || response.status === 409)
+        && isCompanionActionMutationReceiptV2(payload)
+        && payload.operationId === mutation.operationId
+        && payload.actionId === mutation.actionId
+      ) {
         return payload;
       }
-      const code = response.status === 409
-        && typeof payload === 'object'
-        && payload !== null
-        && 'error' in payload
-        && typeof payload.error === 'object'
-        && payload.error !== null
-        && 'code' in payload.error
-        && typeof payload.error.code === 'string'
-        ? payload.error.code.slice(0, 100)
-        : 'http_error';
+      const code = isCompanionActionMutationReceiptV2(payload)
+        ? 'receipt_identity_mismatch'
+        : await readErrorCode(new Response(JSON.stringify(payload), {
+            status: response.status,
+          }));
       throw new CompanionActionHttpError(
-        response.status,
+        response.ok ? 502 : response.status,
         code,
         response.status === 429 || response.status >= 500,
       );

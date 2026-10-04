@@ -152,6 +152,12 @@ describe('parseTaskInput recurrence integration', () => {
     expect(result.recurrenceLabel).toBeNull();
   });
 
+  it('keeps descriptive recurrence words inside the title', () => {
+    const result = parseTaskInput('Review daily active users');
+    expect(result.recurrence).toBeNull();
+    expect(result.title).toBe('Review daily active users');
+  });
+
   it('handles day list recurrence', () => {
     const result = parseTaskInput('gym every mon,wed,fri ~1h');
     expect(result.recurrence).toBe('weekly (monday, wednesday, friday)');

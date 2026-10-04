@@ -13,6 +13,7 @@ export type QuickFilterIcon =
   | 'user'
   | 'sparkles'
   | 'completed'
+  | 'repeat'
   | 'waiting'
   | 'no-date';
 
@@ -115,6 +116,15 @@ export const QUICK_FILTERS: readonly QuickFilterDefinition[] = [
     statKey: 'recentlyClosed',
     icon: 'completed',
     iconClassName: 'text-violet-400',
+    defaultVisibility: 'when-not-empty',
+  },
+  {
+    id: 'recurring',
+    label: 'Recurring',
+    description: 'Open tasks that repeat on a schedule or after completion',
+    statKey: 'recurring',
+    icon: 'repeat',
+    iconClassName: 'text-blue-400',
     defaultVisibility: 'when-not-empty',
   },
   {

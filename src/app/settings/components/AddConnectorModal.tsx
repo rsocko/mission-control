@@ -39,7 +39,7 @@ const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
 
 // --- Add Connector Modal --------------------------------------------------
 
-type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-home-assistant' | 'configure-other';
+type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-home-assistant' | 'configure-rymessage' | 'configure-other';
 
 function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [step, setStep] = useState<ConnectorSetupStep>('select');
@@ -66,6 +66,8 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
       setStep('configure-scout');
     } else if (type === 'home-assistant') {
       setStep('configure-home-assistant');
+    } else if (type === 'rymessage') {
+      setStep('configure-rymessage');
     } else {
       setStep('configure-other');
     }
@@ -144,6 +146,11 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
               <HomeAssistantSetup onBack={() => setStep('select')} onClose={onClose} onAdded={onAdded} />
             </motion.div>
           )}
+          {step === 'configure-rymessage' && (
+            <motion.div key="rymessage" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.15 }}>
+              <RyMessageSetup onBack={() => setStep('select')} onClose={onClose} onAdded={onAdded} />
+            </motion.div>
+          )}
           {step === 'configure-other' && (
             <motion.div key="other" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.15 }}>
               <div>
@@ -163,6 +170,169 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
         </AnimatePresence>
       </motion.div>
     </motion.div>
+  );
+}
+
+function RyMessageSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose: () => void; onAdded: () => void }) {
+  const creation = useConnectorCreation();
+  const [name, setName] = useState('RyMessage Companion');
+  const [companionBaseUrl, setCompanionBaseUrl] = useState('');
+  const [trustedOrigin, setTrustedOrigin] = useState(() => (
+    typeof window === 'undefined' ? '' : window.location.origin
+  ));
+  const [trustedTaskOrigins, setTrustedTaskOrigins] = useState('');
+  const [credentialEnv, setCredentialEnv] = useState('RYMESSAGE_COMPANION_ACTION_FEED_TOKEN');
+  const [status, setStatus] = useState<'idle' | 'testing' | 'creating' | 'success' | 'error'>('idle');
+  const [error, setError] = useState('');
+
+  async function testAndCreate() {
+    setStatus('testing');
+    setError('');
+    const settings = {
+      mode: 'companion',
+      companionBaseUrl: companionBaseUrl.trim(),
+      trustedMissionControlOrigin: trustedOrigin.trim(),
+      trustedTaskOrigins: trustedTaskOrigins
+        .split(/[\n,]/)
+        .map(origin => origin.trim())
+        .filter(Boolean),
+      credentialEnv: credentialEnv.trim() || 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN',
+    };
+    try {
+      const response = await fetch('/api/connectors/test-pre-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'rymessage', settings }),
+      });
+      const result = await response.json() as { success?: boolean; error?: string };
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Companion connection test failed');
+      }
+      setStatus('creating');
+      await creation.create({
+        type: 'rymessage',
+        name: name.trim() || 'RyMessage Companion',
+        enabled: true,
+        syncMode: 'poll',
+        pollIntervalMinutes: 5,
+        capabilities: {
+          read: true,
+          write: false,
+          delete: false,
+          sync: true,
+          lists: false,
+          subtasks: false,
+          tags: false,
+          tagWriteBack: false,
+          notificationOnly: true,
+        },
+        credentials: {},
+        settings,
+        syncedLists: [],
+      });
+      setStatus('success');
+    } catch (setupError) {
+      setStatus('error');
+      setError(setupError instanceof Error ? setupError.message : String(setupError));
+    }
+  }
+
+  if (status === 'success') {
+    return (
+      <div className="py-5 text-center">
+        <CheckCircle2 size={40} className="mx-auto mb-3 text-emerald-400" />
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">RyMessage Companion connected</h3>
+        <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--text-tertiary)]">
+          Canonical Action Center items will appear as Mission Control notifications.
+        </p>
+        <Button className="mt-5" onClick={onAdded}>Done</Button>
+      </div>
+    );
+  }
+
+  const busy = status === 'testing' || status === 'creating';
+  return (
+    <div>
+      <div className="mb-5 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          aria-label="Back to connector types"
+        >
+          <ChevronRight size={16} className="rotate-180" />
+        </button>
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--surface-2)]">
+          <ConnectorBrandIcon type="rymessage" size={18} />
+        </div>
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Connect RyMessage Companion</h3>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <label htmlFor="rymessage-name" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Display name</label>
+          <input id="rymessage-name" value={name} onChange={event => setName(event.target.value)}
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none" />
+        </div>
+        <div>
+          <label htmlFor="rymessage-base-url" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Companion base URL</label>
+          <input id="rymessage-base-url" type="url" value={companionBaseUrl} onChange={event => setCompanionBaseUrl(event.target.value)}
+            placeholder="http://rymessage-companion:8080"
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none" />
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">Reachable from both the Mission Control web and worker runtimes.</p>
+        </div>
+        <div>
+          <label htmlFor="rymessage-trusted-origin" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Mission Control trusted origin</label>
+          <input id="rymessage-trusted-origin" type="url" value={trustedOrigin} onChange={event => setTrustedOrigin(event.target.value)}
+            placeholder="https://mission-control.example.com"
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none" />
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">Must exactly match an origin provisioned in Companion; paths, queries, and fragments are not allowed.</p>
+        </div>
+        <div>
+          <label htmlFor="rymessage-task-origins" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Trusted task-link origins</label>
+          <textarea
+            id="rymessage-task-origins"
+            value={trustedTaskOrigins}
+            onChange={event => setTrustedTaskOrigins(event.target.value)}
+            placeholder={'https://github.com\nhttps://tasks.example.com'}
+            rows={2}
+            aria-describedby="rymessage-task-origins-hint"
+            className="input-glow w-full resize-y rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+          />
+          <p id="rymessage-task-origins-hint" className="mt-1 text-xs text-[var(--text-tertiary)]">Optional. One exact HTTP(S) origin per line for links included in task projections.</p>
+        </div>
+        <div>
+          <label htmlFor="rymessage-credential-env" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Bearer credential environment variable</label>
+          <input id="rymessage-credential-env" value={credentialEnv} onChange={event => setCredentialEnv(event.target.value)}
+            spellCheck={false}
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none" />
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">The bearer value stays environment-only and must be available to both runtimes.</p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
+        <p className="text-xs leading-5 text-[var(--text-tertiary)]">
+          Stop Companion before provisioning. Run its <code className="rounded bg-[var(--surface-2)] px-1 py-0.5 text-[var(--text-secondary)]">integrationAdmin.js provision</code> command with a stable manager instance ID and this exact trusted origin, then place the one-time credential JSON value in the environment variable above.
+        </p>
+      </div>
+
+      {status === 'error' && (
+        <div role="alert" className="mt-4 flex gap-2 rounded-lg border border-red-800/40 bg-red-950/30 p-3 text-sm text-red-300">
+          <XCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{error || creation.error || 'Connection failed'}</span>
+        </div>
+      )}
+
+      <div className="mt-5 flex justify-between gap-3">
+        <button type="button" onClick={onClose} disabled={busy}
+          className="px-3 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50">
+          Cancel
+        </button>
+        <Button onClick={testAndCreate} disabled={busy || !companionBaseUrl.trim() || !trustedOrigin.trim()}>
+          {busy ? <><Loader2 size={14} className="animate-spin" /> {status === 'testing' ? 'Testing connection' : 'Saving connector'}</> : <><Wifi size={14} /> Test and connect</>}
+        </Button>
+      </div>
+    </div>
   );
 }
 

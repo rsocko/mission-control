@@ -8,7 +8,7 @@ import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
 /**
  * GET /api/tasks/quick-sort/suggestions?taskIds=id1,id2,...
  *
- * Returns suggestions for priority, effort, and tags for the given task IDs.
+ * Returns suggestions for priority, effort, tags, and projects for the given task IDs.
  * Uses SmartScore for priority, title heuristics for effort, and tag frequency
  * analysis for tags. No LLM calls — fast and deterministic.
  */
@@ -27,6 +27,7 @@ export async function GET(request: Request) {
     sourceRankings: rankings,
     tags: allTags,
     taskTags: allTaskTags,
+    projectAffinities,
   } = await taskReads.getQuickSortSuggestionInputs(taskIds);
 
   if (taskRows.length === 0) {
@@ -51,6 +52,13 @@ export async function GET(request: Request) {
       priority: { value: string; confidence: number; reason: string } | null;
       effort: { value: number; confidence: number; reason: string } | null;
       tags: Array<{ id: string; name: string; confidence: number }>;
+      projects: Array<{
+        id: string;
+        name: string;
+        color: string;
+        confidence: number;
+        reason: string;
+      }>;
     }
   > = {};
 
@@ -168,10 +176,64 @@ export async function GET(request: Request) {
       }
     }
 
+    const sourcePeers = projectAffinities.filter((row) => (
+      row.taskId !== task.id
+      && row.connectorInstanceId === task.connectorInstanceId
+    ));
+    const listPeers = task.sourceListId
+      ? sourcePeers.filter((row) => row.sourceListId === task.sourceListId)
+      : [];
+    const listPeerCount = new Set(listPeers.map((row) => row.taskId)).size;
+    const cohort = listPeerCount >= 2 ? listPeers : sourcePeers;
+    const cohortTaskIds = new Set(cohort.map((row) => row.taskId));
+    const cohortSize = cohortTaskIds.size;
+    const projectTaskIds = new Map<string, Set<string>>();
+    const projectDetails = new Map<string, {
+      id: string;
+      name: string;
+      color: string;
+    }>();
+    for (const row of cohort) {
+      if (!row.projectId || !row.projectName || !row.projectColor) continue;
+      const members = projectTaskIds.get(row.projectId) ?? new Set<string>();
+      members.add(row.taskId);
+      projectTaskIds.set(row.projectId, members);
+      projectDetails.set(row.projectId, {
+        id: row.projectId,
+        name: row.projectName,
+        color: row.projectColor,
+      });
+    }
+    const rankedProjects = [...projectTaskIds.entries()]
+      .map(([projectId, members]) => ({
+        ...projectDetails.get(projectId)!,
+        members,
+        count: members.size,
+        share: cohortSize > 0 ? members.size / cohortSize : 0,
+      }))
+      .filter((project) => project.count >= 2 && project.share >= 0.2)
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .slice(0, 3);
+    const coveredTasks = new Set(rankedProjects.flatMap((project) => [...project.members]));
+    const hasClearPattern = cohortSize >= 2 && coveredTasks.size / cohortSize > 0.5;
+    const cohortLabel = listPeerCount >= 2
+      ? `${task.sourceListName ?? 'this'} list`
+      : 'this source';
+    const suggestedProjects = hasClearPattern
+      ? rankedProjects.map((project) => ({
+          id: project.id,
+          name: project.name,
+          color: project.color,
+          confidence: Number(project.share.toFixed(2)),
+          reason: `${project.count} of ${cohortSize} items on ${cohortLabel}`,
+        }))
+      : [];
+
     suggestions[task.id] = {
       priority: suggestedPriority,
       effort: suggestedEffort,
       tags: suggestedTags.slice(0, 3),
+      projects: suggestedProjects,
     };
   }
 

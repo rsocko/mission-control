@@ -994,7 +994,11 @@ function normalizeResult(input: DispatchResultInput) {
 export async function submitDispatchResult(
   dispatchId: string,
   input: DispatchResultInput,
-  authorization: { claimToken?: string; agentAuthenticated?: boolean },
+  authorization: {
+    claimToken?: string;
+    agentAuthenticated?: boolean;
+    allowCompletedProviderTaskUpdate?: boolean;
+  },
   options: { leaseMs?: number } = {},
 ) {
   const normalized = normalizeResult(input);
@@ -1017,6 +1021,8 @@ export async function submitDispatchResult(
         ? hashSecret(authorization.claimToken)
         : undefined,
       agentAuthenticated: authorization.agentAuthenticated,
+      allowCompletedProviderTaskUpdate:
+        authorization.allowCompletedProviderTaskUpdate,
     },
     leaseExpiresAt: new Date(
       nowDate.getTime() + positiveInteger(options.leaseMs, 120_000, 60 * 60_000),
@@ -1095,6 +1101,7 @@ export async function reconcileDispatch(
 ) {
   const dispatch = await getDispatch(id);
   if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
+  const agent = await getExternalAgent(dispatch.externalAgentId);
   const terminal = [
     'completed',
     'failed',
@@ -1102,8 +1109,12 @@ export async function reconcileDispatch(
     'dead_letter',
     'cancelled',
   ].includes(dispatch.status);
-  if (terminal) return dispatch;
-  const agent = await getExternalAgent(dispatch.externalAgentId);
+  const canRefreshCompletedCopilotTask = dispatch.status === 'completed'
+    && agent?.type === 'copilot-cloud'
+    && agent.enabled
+    && !agent.deletedAt
+    && Boolean(dispatch.providerTaskId);
+  if (terminal && !canRefreshCompletedCopilotTask) return dispatch;
   assertAgentEnabled(agent);
   if (agent.type === 'paperclip') {
     if (!dispatch.providerTaskId) return dispatch;
@@ -1146,6 +1157,9 @@ export async function reconcileDispatch(
     dispatch.providerTaskId,
     options.fetcher,
   );
+  if (dispatch.status === 'completed' && provider.status === 'completed') {
+    return dispatch;
+  }
   await submitDispatchResult(
     dispatch.id,
     {
@@ -1156,7 +1170,10 @@ export async function reconcileDispatch(
       providerDetail: provider.providerDetail,
       errorMessage: provider.errorMessage,
     },
-    { agentAuthenticated: true },
+    {
+      agentAuthenticated: true,
+      allowCompletedProviderTaskUpdate: dispatch.status === 'completed',
+    },
   );
   return (await getDispatch(id))!;
 }

@@ -941,7 +941,13 @@ export function createSqliteExternalAgentControlRepository(
             401,
           );
         }
-        if (TERMINAL.has(current.status)) {
+        const updatesCompletedProviderTask = current.status === 'completed'
+          && input.authorization.agentAuthenticated
+          && input.authorization.allowCompletedProviderTaskUpdate
+          && current.providerTaskId !== null
+          && input.providerTaskId === current.providerTaskId
+          && input.status !== 'completed';
+        if (TERMINAL.has(current.status) && !updatesCompletedProviderTask) {
           if (current.resultDigest === input.digest) {
             return { duplicate: true, status: current.status };
           }
@@ -951,11 +957,15 @@ export function createSqliteExternalAgentControlRepository(
             409,
           );
         }
-        if (current.deadlineAt && current.deadlineAt <= input.now) {
+        if (
+          !updatesCompletedProviderTask
+          && current.deadlineAt
+          && current.deadlineAt <= input.now
+        ) {
           expireOne(sqlite, current, input.now);
           return { duplicate: false, status: 'timed_out' as const, expired: true };
         }
-        if (!ACTIVE_RESULT.has(current.status)) {
+        if (!ACTIVE_RESULT.has(current.status) && !updatesCompletedProviderTask) {
           throw new ExternalAgentError(
             `Dispatch cannot accept results while ${current.status}`,
             'INVALID_TRANSITION',
@@ -981,7 +991,11 @@ export function createSqliteExternalAgentControlRepository(
             status = ?, provider_task_id = COALESCE(?, provider_task_id),
             provider_detail = COALESCE(?, provider_detail),
             result = COALESCE(?, result), result_digest = ?,
-            result_status = CASE WHEN ? = 'completed' THEN 'pending_review' ELSE result_status END,
+            result_status = CASE
+              WHEN ? = 'completed' THEN 'pending_review'
+              WHEN ? THEN NULL
+              ELSE result_status
+            END,
             error_message = ?,
             github_pull_request_url = COALESCE(?, github_pull_request_url),
             repository = COALESCE(?, repository), base_ref = COALESCE(?, base_ref),
@@ -995,7 +1009,8 @@ export function createSqliteExternalAgentControlRepository(
           input.status, input.providerTaskId ?? null,
           input.providerDetail ? JSON.stringify(input.providerDetail) : null,
           input.result ? JSON.stringify(input.result) : null, input.digest,
-          input.status, input.errorMessage, input.pullRequestUrl, input.repository,
+          input.status, updatesCompletedProviderTask ? 1 : 0,
+          input.errorMessage, input.pullRequestUrl, input.repository,
           input.baseRef, input.branchRef, input.commitSha,
           input.checks ? JSON.stringify(input.checks) : null,
           input.artifacts ? JSON.stringify(input.artifacts) : null,

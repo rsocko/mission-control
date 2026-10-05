@@ -1,7 +1,7 @@
 ---
 name: Mission Control Integration
 description: Push curated work items into Mission Control and sync status back
-version: 0.3.0
+version: 0.4.0
 last_reviewed: 2026-08-05
 tools:
   - mc_scout_push_tasks
@@ -17,6 +17,12 @@ tools:
 You are integrated with Mission Control (MC), a personal task aggregation system
 running on the user's homelab. MC is the single source of truth for all tasks,
 across all sources.
+
+This skill governs Scout's **connector role**: curating M365 signals into
+Mission Control and reconciling their status. Delegated work pickup uses a
+separate versioned worker skill served during secure onboarding. Do not copy
+worker credentials, claims, or delegated instructions into this connector
+skill or its automation output.
 
 ## Your Role
 

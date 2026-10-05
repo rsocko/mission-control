@@ -343,7 +343,7 @@ export function createPostgresExternalAgentControlRepository(
         return created;
       });
     },
-    async update(id, record: ExternalAgentUpdateRecord, credential) {
+    async update(id, record: ExternalAgentUpdateRecord, credential, expectedScoutOnboardingStatus) {
       return transaction(pool, async (client) => {
         await assertProtectedInboundWebhook(client, record.inboundWebhookId);
         const [updated] = await query<ExternalAgentRecord & QueryResultRow>(client, `
@@ -357,6 +357,9 @@ export function createPostgresExternalAgentControlRepository(
             inbound_webhook_id = $16, data_policy = $17::jsonb, enabled = $18,
             updated_at = $19, deleted_at = $20
           WHERE id = $1 AND deleted_at IS NULL
+            ${expectedScoutOnboardingStatus
+              ? `AND provider_config #>> '{scout,onboarding,status}' = $21`
+              : ''}
           RETURNING ${AGENT_COLUMNS}
         `, [
           id, record.name, record.type, record.transport, record.executionLocality,
@@ -366,6 +369,7 @@ export function createPostgresExternalAgentControlRepository(
           JSON.stringify(record.capabilities), record.inputFormat, record.outputFormat,
           record.inboundWebhookId, JSON.stringify(record.dataPolicy), record.enabled, record.updatedAt,
           record.deletedAt,
+          ...(expectedScoutOnboardingStatus ? [expectedScoutOnboardingStatus] : []),
         ]);
         return updated ?? null;
       });
@@ -879,9 +883,12 @@ export function createPostgresExternalAgentControlRepository(
           SELECT id FROM agent_dispatches
           WHERE external_agent_id = $1 AND transport = 'pull' AND status = 'queued'
             AND available_at <= $2 AND cancel_requested_at IS NULL
+            ${input.dispatchId ? 'AND id = $3' : ''}
           ORDER BY created_at ASC, id ASC
           FOR UPDATE SKIP LOCKED LIMIT 1
-        `, [input.agentId, input.now]);
+        `, input.dispatchId
+          ? [input.agentId, input.now, input.dispatchId]
+          : [input.agentId, input.now]);
         if (!candidate) return null;
         const current = await lockedState(client, candidate.id);
         if (!current || current.status !== 'queued') return null;
@@ -927,7 +934,12 @@ export function createPostgresExternalAgentControlRepository(
           dispatchId: candidate.id,
           attempt,
           leaseExpiresAt: input.leaseExpiresAt,
-          payload: current.payloadPreview,
+          payload: current.providerDetail?.resumeContext
+            ? {
+              ...current.payloadPreview,
+              resumeContext: current.providerDetail.resumeContext,
+            }
+            : current.payloadPreview,
         };
       });
     },
@@ -980,6 +992,7 @@ export function createPostgresExternalAgentControlRepository(
           }
         }
         const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
+        const waiting = input.status === 'waiting_for_user';
         const updated = await client.query(`
           UPDATE agent_dispatches SET
             status = $1, provider_task_id = COALESCE($2, provider_task_id),
@@ -992,9 +1005,10 @@ export function createPostgresExternalAgentControlRepository(
             branch_ref = COALESCE($10, branch_ref), commit_sha = COALESCE($11, commit_sha),
             checks = COALESCE($12::jsonb, checks),
             artifacts = COALESCE($13::jsonb, artifacts),
+            claim_token_hash = CASE WHEN $14 THEN NULL ELSE claim_token_hash END,
             lease_expires_at = CASE WHEN $14 THEN NULL ELSE $15 END,
-            completed_at = CASE WHEN $14 THEN $16 ELSE NULL END, updated_at = $16
-          WHERE id = $17 AND status = $18
+            completed_at = CASE WHEN $16 THEN $17 ELSE NULL END, updated_at = $17
+          WHERE id = $18 AND status = $19
         `, [
           input.status, input.providerTaskId ?? null,
           input.providerDetail ? JSON.stringify(input.providerDetail) : null,
@@ -1003,7 +1017,8 @@ export function createPostgresExternalAgentControlRepository(
           input.branchRef, input.commitSha,
           input.checks ? JSON.stringify(input.checks) : null,
           input.artifacts ? JSON.stringify(input.artifacts) : null,
-          terminal, input.leaseExpiresAt, input.now, input.dispatchId, current.status,
+          waiting, input.leaseExpiresAt,
+          terminal, input.now, input.dispatchId, current.status,
         ]);
         if (updated.rowCount !== 1) {
           throw new ExternalAgentError('Dispatch changed concurrently', 'CONFLICT', 409);
@@ -1030,6 +1045,9 @@ export function createPostgresExternalAgentControlRepository(
             providerState: input.providerState,
             providerTaskId: input.providerTaskId,
             resultDigest: input.digest,
+            ...(input.providerDetail?.interaction
+              ? { interaction: input.providerDetail.interaction }
+              : {}),
           },
           createdAt: input.now,
         });
@@ -1126,9 +1144,11 @@ export function createPostgresExternalAgentControlRepository(
           );
         }
         const updated = await client.query(`
-          UPDATE agent_dispatches SET status = 'waiting_for_user', updated_at = $1
-          WHERE id = $2 AND status = $3
-        `, [now, id, current.status]);
+          UPDATE agent_dispatches
+          SET status = 'waiting_for_user', provider_detail = $1::jsonb,
+              claim_token_hash = NULL, lease_expires_at = NULL, updated_at = $2
+          WHERE id = $3 AND status = $4
+        `, [JSON.stringify(detail), now, id, current.status]);
         if (updated.rowCount !== 1) {
           throw new ExternalAgentError('Dispatch changed concurrently', 'CONFLICT', 409);
         }
@@ -1142,6 +1162,82 @@ export function createPostgresExternalAgentControlRepository(
           toStatus: 'waiting_for_user',
           detail,
           createdAt: now,
+        });
+      });
+    },
+    async resolveInteraction(input) {
+      await transaction(pool, async (client) => {
+        const current = await lockedState(client, input.id);
+        const interaction = current?.providerDetail?.interaction;
+        if (
+          !current
+          || current.status !== 'waiting_for_user'
+          || !interaction
+          || typeof interaction !== 'object'
+          || Array.isArray(interaction)
+          || (interaction as Record<string, unknown>).id !== input.interactionId
+          || (interaction as Record<string, unknown>).status !== 'pending'
+        ) {
+          throw new ExternalAgentError(
+            'Dispatch has no matching pending interaction',
+            'INVALID_TRANSITION',
+            409,
+          );
+        }
+        const resolved = {
+          ...(interaction as Record<string, unknown>),
+          status: input.outcome,
+          resolvedAt: input.now,
+          ...(input.answer ? { answer: input.answer } : {}),
+        };
+        const resumesSameDispatch = (
+          interaction as Record<string, unknown>
+        ).continuationPolicy !== 'require_new_dispatch';
+        const providerDetail = {
+          ...current.providerDetail,
+          interaction: resolved,
+          ...(resumesSameDispatch
+            ? {
+              resumeContext: {
+                reason: 'interaction_resolved',
+                interactionId: input.interactionId,
+                outcome: input.outcome,
+                ...(input.answer ? { answer: input.answer } : {}),
+              },
+            }
+            : {}),
+        };
+        const updated = await client.query(`
+          UPDATE agent_dispatches
+          SET status = $1, provider_detail = $2::jsonb, available_at = $3,
+              claim_token_hash = NULL, lease_expires_at = NULL,
+              completed_at = $4, error_message = $5, updated_at = $3
+          WHERE id = $6 AND status = 'waiting_for_user'
+        `, [
+          resumesSameDispatch ? 'queued' : 'cancelled',
+          JSON.stringify(providerDetail),
+          input.now,
+          resumesSameDispatch ? null : input.now,
+          resumesSameDispatch ? null : 'Interaction resolved; a new dispatch is required',
+          input.id,
+        ]);
+        if (updated.rowCount !== 1) {
+          throw new ExternalAgentError('Dispatch changed concurrently', 'CONFLICT', 409);
+        }
+        await client.query(`
+          UPDATE agent_dispatch_attempts
+          SET status = 'interaction_resolved', completed_at = $1
+          WHERE dispatch_id = $2 AND attempt_number = $3
+        `, [input.now, input.id, current.attemptCount]);
+        await insertEvent(client, input.id, {
+          eventType: 'interaction_resolved',
+          fromStatus: 'waiting_for_user',
+          toStatus: resumesSameDispatch ? 'queued' : 'cancelled',
+          detail: {
+            interactionId: input.interactionId,
+            outcome: input.outcome,
+          },
+          createdAt: input.now,
         });
       });
     },

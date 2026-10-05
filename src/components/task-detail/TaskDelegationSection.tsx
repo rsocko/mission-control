@@ -66,6 +66,37 @@ interface RunDetail {
   }>;
 }
 
+interface PendingInteraction {
+  id: string;
+  kind: 'question' | 'approval';
+  status: 'pending';
+  prompt: string;
+  choices?: string[];
+}
+
+function pendingInteraction(detail: RunDetail | null): PendingInteraction | null {
+  const value = detail?.providerDetail?.interaction;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const interaction = value as Record<string, unknown>;
+  if (
+    typeof interaction.id !== 'string'
+    || (interaction.kind !== 'question' && interaction.kind !== 'approval')
+    || interaction.status !== 'pending'
+    || typeof interaction.prompt !== 'string'
+  ) return null;
+  const choices = Array.isArray(interaction.choices)
+    && interaction.choices.every((choice) => typeof choice === 'string')
+    ? interaction.choices as string[]
+    : undefined;
+  return {
+    id: interaction.id,
+    kind: interaction.kind,
+    status: 'pending',
+    prompt: interaction.prompt,
+    ...(choices ? { choices } : {}),
+  };
+}
+
 async function responseError(response: Response) {
   const body = await response.json().catch(() => null) as { error?: string } | null;
   return body?.error ?? `Request failed (${response.status})`;
@@ -261,6 +292,7 @@ function TaskDelegationRunDialog({
   const [loading, setLoading] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [interactionAnswer, setInteractionAnswer] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -272,6 +304,7 @@ function TaskDelegationRunDialog({
       if (!response.ok) throw new Error(await responseError(response));
       const body = await response.json() as { dispatch: RunDetail };
       setDetail(body.dispatch);
+      setInteractionAnswer('');
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Run details could not be loaded');
     } finally {
@@ -311,6 +344,47 @@ function TaskDelegationRunDialog({
     }
   };
 
+  const resolveInteraction = async (
+    interaction: PendingInteraction,
+    outcome: 'answered' | 'approved' | 'rejected',
+  ) => {
+    if (outcome === 'answered' && !interactionAnswer.trim()) {
+      setError('Enter or select an answer before continuing.');
+      return;
+    }
+    setBusyAction(`interaction-${outcome}`);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/external-agents/dispatches/${encodeURIComponent(assignment.dispatchId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'resolve_interaction',
+            interactionId: interaction.id,
+            outcome,
+            ...(outcome === 'answered' ? { answer: interactionAnswer.trim() } : {}),
+          }),
+        },
+      );
+      if (!response.ok) throw new Error(await responseError(response));
+      toast.success(
+        outcome === 'answered'
+          ? 'Answer sent to Scout'
+          : outcome === 'approved'
+            ? 'Scout request approved'
+            : 'Scout request rejected',
+      );
+      await Promise.all([load(), onUpdated()]);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Response could not be saved');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const interaction = pendingInteraction(detail);
   const references = [
     ...(assignment.checks ?? []).map((reference) => ({ ...reference, kind: 'Check' })),
     ...(assignment.artifacts ?? []).map((reference) => ({ ...reference, kind: 'Artifact' })),
@@ -353,6 +427,93 @@ function TaskDelegationRunDialog({
                         ?? 'No additional provider progress is available.'}
                     </p>
                   </section>
+
+                  {interaction && (
+                    <section className="rounded-lg border border-amber-500/30 bg-amber-950/25 p-4" aria-labelledby={`interaction-${interaction.id}`}>
+                      <div className="flex gap-3">
+                        <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-300" />
+                        <div className="min-w-0 flex-1">
+                          <h3 id={`interaction-${interaction.id}`} className="text-sm font-semibold text-amber-100">
+                            {interaction.kind === 'approval'
+                              ? 'Scout needs your approval'
+                              : 'Scout needs your answer'}
+                          </h3>
+                          <p className="mt-1 text-sm leading-relaxed text-amber-50/90">
+                            {interaction.prompt}
+                          </p>
+                          {interaction.kind === 'question' && (
+                            <div className="mt-3">
+                              {interaction.choices ? (
+                                <fieldset className="space-y-2">
+                                  <legend className="sr-only">Choose an answer</legend>
+                                  {interaction.choices.map((choice) => (
+                                    <label key={choice} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md border border-amber-700/40 px-3 text-xs text-amber-50 hover:bg-amber-900/30">
+                                      <input
+                                        type="radio"
+                                        name={`interaction-answer-${interaction.id}`}
+                                        value={choice}
+                                        checked={interactionAnswer === choice}
+                                        onChange={(event) => setInteractionAnswer(event.target.value)}
+                                        disabled={Boolean(busyAction)}
+                                        className="accent-[var(--accent)]"
+                                      />
+                                      {choice}
+                                    </label>
+                                  ))}
+                                </fieldset>
+                              ) : (
+                                <label className="block text-xs font-medium text-amber-100">
+                                  Answer
+                                  <textarea
+                                    value={interactionAnswer}
+                                    onChange={(event) => setInteractionAnswer(event.target.value)}
+                                    disabled={Boolean(busyAction)}
+                                    rows={3}
+                                    className="mt-1.5 w-full resize-y rounded-md border border-amber-700/40 bg-[var(--surface-0)] px-3 py-2 text-sm font-normal text-[var(--text-primary)] outline-none focus:border-[var(--accent)] disabled:opacity-50"
+                                  />
+                                </label>
+                              )}
+                              <button
+                                type="button"
+                                disabled={Boolean(busyAction) || !interactionAnswer.trim()}
+                                onClick={() => void resolveInteraction(interaction, 'answered')}
+                                className="mt-3 inline-flex min-h-9 items-center gap-1.5 rounded-md bg-[var(--accent-600)] px-3 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:opacity-50"
+                              >
+                                {busyAction === 'interaction-answered'
+                                  ? <Loader2 size={13} className="animate-spin" />
+                                  : <Send size={13} />}
+                                Send answer
+                              </button>
+                            </div>
+                          )}
+                          {interaction.kind === 'approval' && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                disabled={Boolean(busyAction)}
+                                onClick={() => void resolveInteraction(interaction, 'approved')}
+                                className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-[var(--accent-600)] px-3 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:opacity-50"
+                              >
+                                {busyAction === 'interaction-approved'
+                                  ? <Loader2 size={13} className="animate-spin" />
+                                  : <CheckCircle2 size={13} />}
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                disabled={Boolean(busyAction)}
+                                onClick={() => void resolveInteraction(interaction, 'rejected')}
+                                className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-red-500/40 px-3 text-xs font-medium text-red-200 hover:bg-red-950/40 disabled:opacity-50"
+                              >
+                                <X size={13} />
+                                Reject
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </section>
+                  )}
 
                   <section>
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Timeline</h3>

@@ -31,6 +31,8 @@ describe('public API rate limiting', () => {
     expect(limiter.check('a', policy, 0).allowed).toBe(true);
     expect(getPublicRateLimitPolicy('/api/triage/capture', 'POST')?.name).toBe('triage-capture');
     expect(getPublicRateLimitPolicy('/api/integrations/n8n/webhook', 'POST')?.name).toBe('n8n-webhook');
+    expect(getPublicRateLimitPolicy('/api/scout/worker/onboarding', 'POST')?.name)
+      .toBe('scout-worker-onboarding');
     expect(getPublicRateLimitPolicy('/api/triage/capture', 'GET')).toBeUndefined();
   });
 

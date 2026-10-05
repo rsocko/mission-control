@@ -4,6 +4,7 @@ import {
   getDispatch,
   markDispatchWaiting,
   reconcileDispatch,
+  resolveDispatchInteraction,
   retryDispatch,
   stopTrackingDispatch,
   reviewDispatchResult,
@@ -43,10 +44,14 @@ export async function PATCH(request: Request, { params }: Context) {
         | 'stop_tracking'
         | 'retry'
         | 'waiting_for_user'
+        | 'resolve_interaction'
         | 'accept'
         | 'reject'
         | 'partial';
       detail?: Record<string, unknown>;
+      interactionId?: string;
+      outcome?: 'answered' | 'approved' | 'rejected';
+      answer?: string;
     };
     let manualUrl: string | undefined;
     switch (body.action) {
@@ -61,6 +66,20 @@ export async function PATCH(request: Request, { params }: Context) {
         break;
       case 'waiting_for_user':
         await markDispatchWaiting(id, body.detail);
+        break;
+      case 'resolve_interaction':
+        if (!body.interactionId || !body.outcome) {
+          throw new ExternalAgentError(
+            'interactionId and outcome are required',
+            'VALIDATION_ERROR',
+            422,
+          );
+        }
+        await resolveDispatchInteraction(id, {
+          interactionId: body.interactionId,
+          outcome: body.outcome,
+          answer: body.answer,
+        });
         break;
       case 'accept':
         await reviewDispatchResult(id, 'accepted');

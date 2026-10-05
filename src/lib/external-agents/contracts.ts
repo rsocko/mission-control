@@ -50,6 +50,7 @@ export type ExternalAgentAuthType = (typeof EXTERNAL_AGENT_AUTH_TYPES)[number];
 export type AgentDataClassification = (typeof AGENT_DATA_CLASSIFICATIONS)[number];
 export type AgentDispatchStatus = (typeof AGENT_DISPATCH_STATUSES)[number];
 export type AgentResultStatus = (typeof AGENT_RESULT_STATUSES)[number];
+export type AgentDispatchActionType = 'submit' | 'reconcile' | 'cancel';
 
 export interface ExternalAgentCapabilities {
   canAnalyzeCode?: boolean;
@@ -288,6 +289,15 @@ export type AgentDispatchDetail = AgentDispatchRecord & {
   attempts: AgentDispatchAttemptRecord[];
   events: AgentDispatchEventRecord[];
 };
+
+export interface AgentDispatchActionRecord {
+  id: string;
+  dispatchId: string;
+  action: AgentDispatchActionType;
+  attemptCount: number;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+}
 
 export interface AgentPayloadSnapshot {
   project?: { id: string; name: string; description: string | null };

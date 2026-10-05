@@ -26,12 +26,9 @@ import {
 } from './registry';
 import {
   createDispatchPreview,
-  expireDispatches,
-  reconcileDispatch,
 } from './service';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 import { parseSourceId } from '@/lib/connectors/github-issues/issue-transformer';
-import { validatePaperclipConnection } from './paperclip';
 
 const CAPABILITY_ACTIONS: Array<[keyof ExternalAgentCapabilities, string]> = [
   ['canAnalyzeCode', 'analyze_code'],
@@ -139,6 +136,8 @@ export interface TaskDelegationSummary {
   providerState: string | null;
   providerUpdatedAt: string | null;
   outputWarning: string | null;
+  pullRequestState: 'draft' | 'open' | 'merged' | 'closed' | null;
+  pullRequestNumber: number | null;
   latestProgress: string | null;
   blocker: string | null;
   pendingApproval: boolean;
@@ -267,6 +266,8 @@ function assignmentSummary(
   const detail = record(dispatch.providerDetail);
   const executor = record(detail?.executor);
   const progress = record(detail?.progress);
+  const pullRequest = record(detail?.pullRequest);
+  const pullRequestState = text(pullRequest?.state);
   const pendingApprovals = Array.isArray(detail?.pendingApprovals)
     ? detail.pendingApprovals
     : [];
@@ -299,6 +300,15 @@ function assignmentSummary(
     providerState: text(detail?.state) ?? text(detail?.providerState),
     providerUpdatedAt: text(detail?.updatedAt),
     outputWarning: text(detail?.outputWarning),
+    pullRequestState: (
+      pullRequestState === 'draft'
+      || pullRequestState === 'open'
+      || pullRequestState === 'merged'
+      || pullRequestState === 'closed'
+    ) ? pullRequestState : null,
+    pullRequestNumber: typeof pullRequest?.number === 'number'
+      ? pullRequest.number
+      : null,
     latestProgress: text(progress?.message)
       ?? (dispatch.status === 'waiting_for_user' ? 'Waiting for your input or approval.' : null),
     blocker: firstBlocker(detail),
@@ -500,29 +510,11 @@ export async function getTaskDelegationContext(
       ),
     ] as const),
   ));
-  await expireDispatches();
-  let dispatches = await persistence.dispatches.list({
+  const dispatches = await persistence.dispatches.list({
     taskIds,
     limit: Math.min(taskIds.length * 10, 500),
   });
   const syncErrors: TaskDelegationContext['syncErrors'] = [];
-  for (const dispatch of dispatches) {
-    if (!dispatch.providerTaskId) continue;
-    try {
-      await reconcileDispatch(dispatch.id);
-    } catch (error) {
-      syncErrors.push({
-        dispatchId: dispatch.id,
-        message: error instanceof Error
-          ? error.message
-          : 'Delegation status could not be refreshed',
-      });
-    }
-  }
-  dispatches = await persistence.dispatches.list({
-    taskIds,
-    limit: Math.min(taskIds.length * 10, 500),
-  });
   const [targets, repositories] = await Promise.all([
     listExternalAgents({ includeDeleted: true }),
     configuredRepositories(),
@@ -745,11 +737,6 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
         422,
       );
     }
-    await validatePaperclipConnection({
-      endpoint: internal.endpoint,
-      credential: await resolveExternalAgentCredential(internal),
-      config: paperclipBinding,
-    });
   }
   const idempotencyKey = delegationIdempotencyKey(operationId, input.taskId);
   return createDispatchPreview({

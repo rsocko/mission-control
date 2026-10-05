@@ -3,7 +3,7 @@ import {
   cancelDispatch,
   getDispatch,
   markDispatchWaiting,
-  reconcileDispatch,
+  requestDispatchReconciliation,
   resolveDispatchInteraction,
   retryDispatch,
   stopTrackingDispatch,
@@ -49,10 +49,10 @@ export async function PATCH(request: Request, { params }: Context) {
       outcome?: 'answered' | 'approved' | 'rejected';
       answer?: string;
     };
-    let manualUrl: string | undefined;
+    let accepted = false;
     switch (body.action) {
       case 'refresh':
-        await reconcileDispatch(id);
+        accepted = await requestDispatchReconciliation(id);
         break;
       case 'cancel':
         await cancelDispatch(id);
@@ -61,7 +61,8 @@ export async function PATCH(request: Request, { params }: Context) {
         await stopTrackingDispatch(id);
         break;
       case 'retry':
-        ({ manualUrl } = await retryDispatch(id));
+        await retryDispatch(id);
+        accepted = true;
         break;
       case 'waiting_for_user':
         await markDispatchWaiting(id, body.detail);
@@ -94,8 +95,8 @@ export async function PATCH(request: Request, { params }: Context) {
     }
     return NextResponse.json({
       dispatch: publicDispatch(await getDispatch(id)),
-      manualUrl,
-    });
+      accepted,
+    }, { status: accepted ? 202 : 200 });
   } catch (error) {
     return externalAgentErrorResponse(error);
   }

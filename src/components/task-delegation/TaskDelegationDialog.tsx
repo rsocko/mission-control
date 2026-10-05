@@ -74,6 +74,12 @@ interface PreviewBatch {
   blockedCount: number;
 }
 
+interface ConfirmationProgress {
+  active: number;
+  completed: number;
+  total: number;
+}
+
 const STEP_ORDER: WizardStep[] = ['destination', 'configure', 'review'];
 const STEP_LABELS: Record<WizardStep, string> = {
   destination: 'Destination',
@@ -121,10 +127,8 @@ export function TaskDelegationDialog() {
   const [allowedActions, setAllowedActions] = useState<string[]>([]);
   const [operationId, setOperationId] = useState('');
   const [previewBatch, setPreviewBatch] = useState<PreviewBatch | null>(null);
-  const [confirmationProgress, setConfirmationProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
+  const [confirmationProgress, setConfirmationProgress] =
+    useState<ConfirmationProgress | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -322,14 +326,19 @@ export function TaskDelegationDialog() {
   const confirm = async () => {
     if (!previewBatch?.previews.length) return;
     setSubmitting(true);
-    setConfirmationProgress({ current: 1, total: previewBatch.previews.length });
+    setConfirmationProgress({
+      active: 1,
+      completed: 0,
+      total: previewBatch.previews.length,
+    });
     setError(null);
     const failures: string[] = [];
     const confirmedTaskIds: string[] = [];
     let confirmed = 0;
     for (const [index, preview] of previewBatch.previews.entries()) {
       setConfirmationProgress({
-        current: index + 1,
+        active: index + 1,
+        completed: index,
         total: previewBatch.previews.length,
       });
       try {
@@ -358,6 +367,12 @@ export function TaskDelegationDialog() {
         confirmedTaskIds.push(preview.taskId);
       } catch (confirmError) {
         failures.push(`${preview.taskId}: ${errorMessage(confirmError)}`);
+      } finally {
+        setConfirmationProgress({
+          active: Math.min(index + 2, previewBatch.previews.length),
+          completed: index + 1,
+          total: previewBatch.previews.length,
+        });
       }
     }
     setSubmitting(false);
@@ -373,7 +388,7 @@ export function TaskDelegationDialog() {
       return;
     }
     toast.success(
-      `${confirmed} task${confirmed === 1 ? '' : 's'} delegated to ${selectedTarget?.name}`,
+      `${confirmed} task${confirmed === 1 ? '' : 's'} queued for ${selectedTarget?.name}`,
     );
     setOpen(false);
   };
@@ -395,6 +410,7 @@ export function TaskDelegationDialog() {
         <Dialog.Content
           className="fixed left-1/2 top-1/2 z-[121] flex max-h-[min(760px,calc(100dvh-24px))] w-[min(760px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--surface-1)] shadow-2xl focus:outline-none"
           aria-describedby="task-delegation-description"
+          aria-busy={submitting}
         >
           <header className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-4 py-4 sm:px-5">
             <div>
@@ -498,6 +514,13 @@ export function TaskDelegationDialog() {
               />
             ) : null}
 
+            {step === 'review' && confirmationProgress && selectedTarget && (
+              <DelegationHandoffProgress
+                progress={confirmationProgress}
+                targetName={selectedTarget.name}
+              />
+            )}
+
             {error && (
               <div
                 role="alert"
@@ -566,9 +589,24 @@ export function TaskDelegationDialog() {
                   onClick={() => void confirm()}
                   className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-4 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                  {submitting ? (
+                    <>
+                      <Loader2
+                        size={13}
+                        className="animate-spin motion-reduce:hidden"
+                        aria-hidden="true"
+                      />
+                      <Send
+                        size={13}
+                        className="hidden motion-reduce:block"
+                        aria-hidden="true"
+                      />
+                    </>
+                  ) : (
+                    <Send size={13} />
+                  )}
                   {confirmationProgress
-                    ? `Starting ${confirmationProgress.current} of ${confirmationProgress.total}…`
+                    ? `Queueing ${confirmationProgress.active} of ${confirmationProgress.total}…`
                     : `Confirm and delegate ${previewBatch?.readyCount ?? 0}`}
                 </button>
               )}
@@ -577,6 +615,70 @@ export function TaskDelegationDialog() {
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+function DelegationHandoffProgress({
+  progress,
+  targetName,
+}: {
+  progress: ConfirmationProgress;
+  targetName: string;
+}) {
+  const percentage = Math.round((progress.completed / progress.total) * 100);
+  const message = progress.completed === 0
+    ? `Sending delegation ${progress.active} of ${progress.total} to the Mission Control worker.`
+    : progress.completed < progress.total
+      ? `${progress.completed} queued. Sending ${progress.active} of ${progress.total} to the worker.`
+      : `All ${progress.total} delegations are queued for the worker.`;
+
+  return (
+    <section
+      className="mt-4 rounded-lg border border-[var(--accent-500)]/35 bg-[var(--accent-500)]/8 p-3"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <div className="flex items-start gap-3">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-[var(--accent-500)]/15 text-[var(--accent-300)]">
+          <CloudCog
+            size={16}
+            className="animate-pulse motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="text-xs font-semibold text-[var(--text-primary)]">
+              Queueing work with {targetName}
+            </h3>
+            <span className="shrink-0 font-mono text-[11px] tabular-nums text-[var(--accent-300)]">
+              {progress.completed}/{progress.total}
+            </span>
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
+            {message}
+          </p>
+          <div
+            className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--surface-3)]"
+            role="progressbar"
+            aria-label="Delegation handoff progress"
+            aria-valuemin={0}
+            aria-valuemax={progress.total}
+            aria-valuenow={progress.completed}
+            aria-valuetext={`${progress.completed} of ${progress.total} queued`}
+          >
+            <div
+              className="h-full rounded-full bg-[var(--accent-400)] transition-[width] duration-300 ease-out motion-reduce:transition-none"
+              style={{ width: `${percentage}%` }}
+            />
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+            You can close this window. Queued work continues in the background.
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 

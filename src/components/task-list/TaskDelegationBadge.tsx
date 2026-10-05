@@ -16,20 +16,24 @@ const STATE_CLASSES: Record<TaskDelegationSummary['displayState'], string> = {
 };
 
 export function TaskDelegationBadge({ delegation }: { delegation: TaskDelegationSummary }) {
-  const stateLabel = delegation.pullRequestUrl
-    ? 'Review'
-    : delegation.displayState === 'waiting_for_user'
-      ? 'Waiting'
-      : delegation.displayState === 'preview'
-        ? 'Review'
-        : delegation.displayState.replaceAll('_', ' ');
-  const destinationLabel = delegation.pullRequestUrl
-    ? 'PR ready'
-    : delegation.targetType === 'copilot-cloud'
-      ? 'GitHub Copilot Cloud'
-      : delegation.targetType === 'paperclip'
-        ? 'Paperclip'
-        : delegation.targetName;
+  const completedWithPullRequest = delegation.displayState === 'completed'
+    && Boolean(delegation.pullRequestUrl);
+  let stateLabel = delegation.displayState.replaceAll('_', ' ');
+  let destinationLabel = delegation.targetName;
+
+  if (delegation.targetType === 'copilot-cloud') destinationLabel = 'GitHub Copilot Cloud';
+  if (delegation.targetType === 'paperclip') destinationLabel = 'Paperclip';
+  if (delegation.displayState === 'waiting_for_user') stateLabel = 'Waiting';
+  if (delegation.displayState === 'preview') stateLabel = 'Review';
+  if (delegation.pullRequestUrl) {
+    stateLabel = 'Review';
+    destinationLabel = 'PR ready';
+  }
+  if (completedWithPullRequest) {
+    stateLabel = 'Completed';
+    destinationLabel = 'PR created';
+  }
+
   const label = `${stateLabel} · ${destinationLabel}`;
   return (
     <span

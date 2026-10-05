@@ -48,9 +48,9 @@ export async function POST(request: Request, { params }: Context) {
       TaskDelegationPreviewInput,
       'taskId' | 'callbackBaseUrl'
     >;
-    if (!body.agentId || !body.instruction?.trim() || !body.operationId?.trim()) {
+    if (!body.agentId || !body.operationId?.trim()) {
       throw new ExternalAgentError(
-        'agentId, instruction, and operationId are required',
+        'agentId and operationId are required',
         'VALIDATION_ERROR',
         422,
       );

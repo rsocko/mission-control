@@ -434,6 +434,7 @@ describe('TaskDelegationDialog', () => {
   });
 
   it('does not materialize a preview before Review and confirms each durable assignment', async () => {
+    const confirmation = deferred<Awaited<ReturnType<typeof response>>>();
     const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.startsWith('/api/tasks/delegation?')) {
@@ -483,7 +484,7 @@ describe('TaskDelegationDialog', () => {
         }, 201);
       }
       if (url === '/api/external-agents/dispatch' && init?.method === 'POST') {
-        return response({ dispatch: { status: 'queued' } });
+        return confirmation.promise;
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -496,9 +497,6 @@ describe('TaskDelegationDialog', () => {
     expect(within(dialog).getByRole('radio', { name: /GitHub Copilot Cloud/ })).toBeChecked();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Configure' }));
 
-    fireEvent.change(within(dialog).getByLabelText('Per-dispatch instructions'), {
-      target: { value: 'Implement and test the parser fix' },
-    });
     expect(fetcher).not.toHaveBeenCalledWith(
       '/api/tasks/delegation',
       expect.objectContaining({ method: 'POST' }),
@@ -514,6 +512,9 @@ describe('TaskDelegationDialog', () => {
     );
 
     fireEvent.click(confirmButton);
+    expect(await within(dialog).findByRole('button', {
+      name: 'Starting 1 of 1…',
+    })).toBeDisabled();
     await waitFor(() => {
       expect(fetcher).toHaveBeenCalledWith(
         '/api/external-agents/dispatch',
@@ -527,6 +528,9 @@ describe('TaskDelegationDialog', () => {
         }),
       );
     });
-    expect(toast.success).toHaveBeenCalledWith('1 task delegated to GitHub Copilot Cloud');
+    confirmation.resolve(await response({ dispatch: { status: 'queued' } }));
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('1 task delegated to GitHub Copilot Cloud');
+    });
   });
 });

@@ -37,11 +37,10 @@ export async function POST(request: Request) {
       !Array.isArray(body.taskIds)
       || !body.taskIds.length
       || !body.agentId
-      || !body.instruction?.trim()
       || !body.operationId?.trim()
     ) {
       throw new ExternalAgentError(
-        'taskIds, agentId, instruction, and operationId are required',
+        'taskIds, agentId, and operationId are required',
         'VALIDATION_ERROR',
         422,
       );

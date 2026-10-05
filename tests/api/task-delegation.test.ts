@@ -487,6 +487,22 @@ describe('provider-neutral task delegation API', () => {
     ).rejects.toMatchObject({ code: 'PREVIEW_MISMATCH' });
   });
 
+  it('uses the task details when per-dispatch instructions are omitted', async () => {
+    await createCloudAgent();
+    const preview = await delegation.previewTaskDelegation({
+      taskId: 'task-github',
+      agentId: 'github-cloud',
+      operationId: 'task-details-only',
+      repository: 'octo/source',
+      allowedActions: ['write_code'],
+    });
+
+    expect(preview.payloadPreview).toMatchObject({
+      instruction: 'Complete the delegated task using the task details provided.',
+      tasks: [{ id: 'task-github' }],
+    });
+  });
+
   it('atomically prevents concurrent operations from reserving the same task', async () => {
     await createCloudAgent();
     const input = {

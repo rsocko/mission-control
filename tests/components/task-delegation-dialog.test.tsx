@@ -175,10 +175,18 @@ describe('TaskDelegationDialog disclosure review', () => {
     expect(await screen.findByText('GitHub Cloud')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
     expect(screen.getByText('Run focused tests before handoff.')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Per-dispatch instructions'), {
+    const instructionInput = screen.getByLabelText('Per-dispatch instructions');
+    const reviewButton = screen.getByRole('button', { name: 'Review 1 delegation' });
+    expect(instructionInput).not.toBeRequired();
+    expect(instructionInput).toHaveAccessibleDescription(
+      'Add guidance only when the task details do not fully describe the desired outcome.',
+    );
+    expect(reviewButton).toBeEnabled();
+    fireEvent.change(instructionInput, {
       target: { value: 'Fix the parser and add coverage.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
+    expect(reviewButton).toBeEnabled();
+    fireEvent.click(reviewButton);
 
     expect(await screen.findByText('Effective reviewed context')).toBeInTheDocument();
     expect(screen.getByText(/Standard because GitHub Issues uses the active policy default/))

@@ -63,6 +63,13 @@ export function loadConfig(filePath = configPath()) {
     throw new Error(`${filePath} must define a services object`);
   }
 
+  if (
+    config.retentionDays !== undefined &&
+    (!Number.isFinite(config.retentionDays) || config.retentionDays <= 0)
+  ) {
+    throw new Error(`${filePath} retentionDays must be a finite positive number`);
+  }
+
   for (const [name, service] of Object.entries(config.services)) {
     if (!Array.isArray(service.command) || service.command.length === 0) {
       throw new Error(`Service "${name}" must define a non-empty command array`);

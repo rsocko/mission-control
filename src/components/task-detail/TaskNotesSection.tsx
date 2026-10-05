@@ -64,7 +64,7 @@ export function TaskNotesSection({
     )}>
       <div className="mb-2 flex items-center gap-2">
         <FileText size={14} className="text-[var(--text-tertiary)]" />
-        <h3 className="text-sm font-semibold text-[var(--text-secondary)]">Notes</h3>
+        <h3 className="text-sm font-semibold text-[var(--text-heading)]">Notes</h3>
         <div className="ml-auto flex items-center gap-1">
           {!editingDesc && (
             <Tooltip content={canEditDescription ? 'Edit notes' : descriptionBlockedReason}>

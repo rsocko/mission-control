@@ -371,7 +371,7 @@ export function TaskRelationshipsSection({
             <Link2 size={14} className="text-[var(--text-tertiary)]" aria-hidden="true" />
             <h3
               id={`task-relationships-${taskId}`}
-              className="text-sm font-semibold text-[var(--text-secondary)]"
+              className="text-sm font-semibold text-[var(--text-heading)]"
             >
               Relationships
             </h3>

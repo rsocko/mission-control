@@ -213,14 +213,22 @@ a parent issue with:
 Use Paperclip's REST/OpenAPI surface first. MCP is useful for interactive tool
 use, but REST provides a simpler durable dispatch and reconciliation contract.
 
-The implemented provider registers an API origin, server-only credential
-reference, company UUID, assignee-agent UUID, optional Paperclip project UUID,
-and optional required adapter type. Registration verifies `/api/health` and
-the configured assignee before persistence. A confirmed dispatch creates one
-parent issue with `idempotencyKey: mission-control:{dispatchId}` and assigns it
-to the configured Paperclip agent. Assignment is Paperclip's execution trigger;
-MC does not checkout the issue, invoke the runtime directly, or import child
-issues.
+The implemented provider registers an API origin, a server-owned direct
+credential or deployment-secret reference, and default company, assignee,
+optional project, and optional adapter guard. Setup first checks the URL and
+credential, then discovers accessible companies, projects, agents, and adapter
+types for selection. Registration verifies `/api/health`, the selected
+assignee, and any selected project before persistence.
+
+The saved route values are delegation defaults rather than immutable bindings.
+The delegation review flow can select another discovered company, project,
+agent, or adapter guard for one dispatch without changing Settings. The
+effective selection is validated again and persisted in the dispatch scope so
+creation, reconciliation, and cancellation use the same route. A confirmed
+dispatch creates one parent issue with
+`idempotencyKey: mission-control:{dispatchId}` and assigns it to the effective
+Paperclip agent. Assignment is Paperclip's execution trigger; MC does not
+checkout the issue, invoke the runtime directly, or import child issues.
 
 The contract is pinned to `paperclipai/paperclip` commit
 `0d3e7bf6ac69c6a41995e62e7a38ca99dcbc8dfd`. The generated OpenAPI document is

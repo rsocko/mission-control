@@ -22,8 +22,23 @@ interface PaperclipAgent {
   id: string;
   companyId: string;
   name?: string;
+  title?: string;
+  role?: string;
   status?: string;
   adapterType?: string;
+}
+
+interface PaperclipCompany {
+  id: string;
+  name?: string;
+  status?: string;
+}
+
+interface PaperclipProject {
+  id: string;
+  companyId?: string;
+  name?: string;
+  status?: string;
 }
 
 interface PaperclipWorkProduct {
@@ -79,6 +94,24 @@ interface PaperclipRun {
 export interface PaperclipDispatchInput {
   dispatchId: string;
   payload: Record<string, unknown>;
+}
+
+export interface PaperclipDiscovery {
+  health: {
+    status: unknown;
+    version: unknown;
+    deploymentMode: unknown;
+  };
+  companies: Array<{ id: string; name: string; status: string | null }>;
+  projects: Array<{ id: string; name: string; status: string | null }>;
+  agents: Array<{
+    id: string;
+    name: string;
+    title: string | null;
+    role: string | null;
+    status: string | null;
+    adapterType: string | null;
+  }>;
 }
 
 export interface PaperclipProviderState {
@@ -250,6 +283,19 @@ export async function validatePaperclipConnection(connection: PaperclipConnectio
       422,
     );
   }
+  if (config.projectId) {
+    const project = await request<PaperclipProject>(
+      connection,
+      `/projects/${encodeURIComponent(config.projectId)}`,
+    );
+    if (project.id !== config.projectId || project.companyId !== config.companyId) {
+      throw new ExternalAgentError(
+        'Paperclip project is not in the configured company',
+        'PROVIDER_SCOPE_MISMATCH',
+        422,
+      );
+    }
+  }
   return {
     health: {
       status: health.status,
@@ -263,6 +309,107 @@ export async function validatePaperclipConnection(connection: PaperclipConnectio
       status: agent.status ?? null,
       adapterType: agent.adapterType ?? null,
     },
+  };
+}
+
+function arrayResponse<T extends { id: string }>(value: unknown, label: string): T[] {
+  if (!Array.isArray(value) || value.some((item) =>
+    !item || typeof item !== 'object' || Array.isArray(item)
+    || typeof (item as { id?: unknown }).id !== 'string')) {
+    throw new ExternalAgentError(
+      `Paperclip returned an invalid ${label} response`,
+      'PROVIDER_RESPONSE_INVALID',
+      502,
+    );
+  }
+  return value as T[];
+}
+
+export async function discoverPaperclip(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  companyId?: string,
+): Promise<PaperclipDiscovery> {
+  const health = await request<Record<string, unknown>>(
+    { ...connection, config: { companyId: '', assigneeAgentId: '' } },
+    '/health',
+  );
+  if (health.status !== 'ok') {
+    throw new ExternalAgentError(
+      `Paperclip is not ready (status: ${String(health.status ?? 'unknown')})`,
+      'PROVIDER_UNAVAILABLE',
+      503,
+    );
+  }
+  const companies = arrayResponse<PaperclipCompany>(
+    await request<unknown>(
+      { ...connection, config: { companyId: '', assigneeAgentId: '' } },
+      '/companies',
+    ),
+    'companies',
+  );
+  if (!companyId) {
+    return {
+      health: {
+        status: health.status,
+        version: health.version ?? health.serverVersion ?? null,
+        deploymentMode: health.deploymentMode ?? null,
+      },
+      companies: companies.map((company) => ({
+        id: company.id,
+        name: company.name ?? company.id,
+        status: company.status ?? null,
+      })),
+      projects: [],
+      agents: [],
+    };
+  }
+  if (!companies.some(({ id }) => id === companyId)) {
+    throw new ExternalAgentError(
+      'Paperclip company is not accessible with this credential',
+      'PROVIDER_SCOPE_MISMATCH',
+      422,
+    );
+  }
+  const scopedConnection = {
+    ...connection,
+    config: { companyId: '', assigneeAgentId: '' },
+  };
+  const [projectsValue, agentsValue] = await Promise.all([
+    request<unknown>(
+      scopedConnection,
+      `/companies/${encodeURIComponent(companyId)}/projects`,
+    ),
+    request<unknown>(
+      scopedConnection,
+      `/companies/${encodeURIComponent(companyId)}/agents`,
+    ),
+  ]);
+  const projects = arrayResponse<PaperclipProject>(projectsValue, 'projects');
+  const agents = arrayResponse<PaperclipAgent>(agentsValue, 'agents');
+  return {
+    health: {
+      status: health.status,
+      version: health.version ?? health.serverVersion ?? null,
+      deploymentMode: health.deploymentMode ?? null,
+    },
+    companies: companies.map((company) => ({
+      id: company.id,
+      name: company.name ?? company.id,
+      status: company.status ?? null,
+    })),
+    projects: projects.map((project) => ({
+      id: project.id,
+      name: project.name ?? project.id,
+      status: project.status ?? null,
+    })),
+    agents: agents.map((agent) => ({
+      id: agent.id,
+      name: agent.name ?? agent.id,
+      title: agent.title ?? null,
+      role: agent.role ?? null,
+      status: agent.status ?? null,
+      adapterType: agent.adapterType ?? null,
+    })),
   };
 }
 

@@ -116,4 +116,109 @@ describe('TaskDelegationDialog disclosure review', () => {
       )).toBeInTheDocument();
     });
   });
+
+  it('uses destination Paperclip bindings as overridable dispatch defaults', async () => {
+      let previewRequest: Record<string, unknown> | null = null;
+      const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+          return response({
+            taskIds: ['task-1'],
+            tasks: [{ id: 'task-1', title: 'Paperclip task', connectorType: 'local' }],
+            targets: [{
+              id: 'paperclip-route',
+              name: 'Paperclip',
+              type: 'paperclip',
+              description: null,
+              alwaysInstructions: '',
+              executionLocality: 'external',
+              allowedActions: ['write_code'],
+              hasCredential: true,
+              paperclipBinding: {
+                companyId: '11111111-1111-4111-8111-111111111111',
+                projectId: null,
+                assigneeAgentId: '33333333-3333-4333-8333-333333333333',
+                requiredAdapterType: 'claude-local',
+              },
+              repositories: [],
+              eligibility: [{
+                taskId: 'task-1',
+                title: 'Paperclip task',
+                connectorType: 'local',
+                ready: true,
+                blocker: null,
+                repository: null,
+                repositoryLocked: false,
+              }],
+            }],
+            assignments: [],
+            syncErrors: [],
+          });
+        }
+        if (url === '/api/external-agents/paperclip/discover' && init?.method === 'POST') {
+          return response({
+            companies: [{
+              id: '11111111-1111-4111-8111-111111111111',
+              name: 'Acme',
+              status: 'active',
+            }],
+            projects: [{
+              id: '22222222-2222-4222-8222-222222222222',
+              name: 'Project Alpha',
+              status: 'active',
+            }],
+            agents: [{
+              id: '33333333-3333-4333-8333-333333333333',
+              name: 'Engineer',
+              title: 'Software Engineer',
+              role: 'engineer',
+              status: 'idle',
+              adapterType: 'claude-local',
+            }],
+          });
+        }
+        if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+          previewRequest = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return response({
+            previews: [{
+              taskId: 'task-1',
+              dispatchId: 'dispatch-1',
+              previewHash: 'preview-hash',
+              processingLocation: 'external',
+              dataClassification: 'standard',
+              disclosedFields: ['instruction'],
+              allowedActions: ['write_code'],
+              payloadPreview: { instruction: 'Implement the change.' },
+            }],
+            blocked: [],
+            readyCount: 1,
+            blockedCount: 0,
+          }, 201);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      });
+      vi.stubGlobal('fetch', fetcher);
+
+      render(<TaskDelegationDialog />);
+      openTaskDelegation(['task-1']);
+      expect(await screen.findByText('Paperclip')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+      expect(await screen.findByRole('combobox', { name: 'Paperclip project' }))
+        .toBeInTheDocument();
+      fireEvent.click(screen.getByRole('combobox', { name: 'Paperclip project' }));
+      fireEvent.click(screen.getByRole('option', { name: 'Project Alpha' }));
+      fireEvent.change(screen.getByLabelText('Per-dispatch instructions'), {
+        target: { value: 'Implement the change.' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
+
+      await waitFor(() => expect(previewRequest).toMatchObject({
+        paperclipBinding: {
+          companyId: '11111111-1111-4111-8111-111111111111',
+          projectId: '22222222-2222-4222-8222-222222222222',
+          assigneeAgentId: '33333333-3333-4333-8333-333333333333',
+          requiredAdapterType: 'claude-local',
+        },
+      }));
+  });
 });

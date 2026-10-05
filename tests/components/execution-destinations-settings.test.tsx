@@ -98,6 +98,30 @@ describe('ExecutionDestinationsSection', () => {
     let requestBody: Record<string, unknown> | null = null;
     const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
+      if (url === '/api/external-agents/paperclip/discover' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { companyId?: string };
+        return response({
+          health: { status: 'ok', version: '1.2.3', deploymentMode: 'local' },
+          companies: [{
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'Acme',
+            status: 'active',
+          }],
+          projects: body.companyId ? [{
+            id: '22222222-2222-4222-8222-222222222222',
+            name: 'Mission Control',
+            status: 'active',
+          }] : [],
+          agents: body.companyId ? [{
+            id: '33333333-3333-4333-8333-333333333333',
+            name: 'Engineer',
+            title: 'Software Engineer',
+            role: 'engineer',
+            status: 'idle',
+            adapterType: 'claude-local',
+          }] : [],
+        });
+      }
       if (url === '/api/external-agents' && init?.method === 'POST') {
         requestBody = JSON.parse(String(init.body)) as Record<string, unknown>;
         return response({ agent: { id: 'paperclip-route' } }, 201);
@@ -115,18 +139,13 @@ describe('ExecutionDestinationsSection', () => {
     fireEvent.change(screen.getByLabelText('Paperclip API origin'), {
       target: { value: 'http://localhost:3100' },
     });
-    fireEvent.change(screen.getByLabelText('Company ID'), {
-      target: { value: '11111111-1111-4111-8111-111111111111' },
+    fireEvent.change(screen.getByLabelText('Access token'), {
+      target: { value: 'paperclip-secret' },
     });
-    fireEvent.change(screen.getByLabelText('Project ID'), {
-      target: { value: '22222222-2222-4222-8222-222222222222' },
-    });
-    fireEvent.change(screen.getByLabelText('Assignee agent ID'), {
-      target: { value: '33333333-3333-4333-8333-333333333333' },
-    });
-    fireEvent.change(screen.getByLabelText('Required adapter type'), {
-      target: { value: 'claude-local' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'Check connection' }));
+    expect(await screen.findByText('Connected · Paperclip 1.2.3')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Default project'));
+    fireEvent.click(screen.getByRole('option', { name: 'Mission Control' }));
     fireEvent.change(screen.getByLabelText('Always instructions'), {
       target: { value: 'Post concise progress updates.' },
     });
@@ -136,8 +155,8 @@ describe('ExecutionDestinationsSection', () => {
     expect(requestBody).toMatchObject({
       type: 'paperclip',
       endpoint: 'http://localhost:3100',
-      authType: 'none',
-      authCredentialRef: null,
+      authType: 'bearer',
+      credential: 'paperclip-secret',
       providerConfig: {
         alwaysInstructions: 'Post concise progress updates.',
         paperclip: {

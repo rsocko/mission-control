@@ -405,7 +405,7 @@ export function ProjectSettingsTab({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       icon,
-                      iconColor: resolveProjectIconColor(project.iconColor, project.color),
+                      iconColor: project.iconColor,
                     }),
                   });
                   if (!res.ok) throw new Error('Failed to update icon');
@@ -418,11 +418,15 @@ export function ProjectSettingsTab({
               }}
               size="md"
               color={resolveProjectIconColor(project.iconColor, project.color)}
+              pickerColor={project.iconColor || undefined}
               onColorChange={async (iconColor) => {
                 try {
                   // Sync icon color → project color when the chosen color exists in presets
                   const matchingPreset = COLOR_PRESETS.find((p) => p === iconColor);
-                  const patchBody: Record<string, string> = { iconColor };
+                  const persistedIconColor = iconColor || null;
+                  const patchBody: { iconColor: string | null; color?: string } = {
+                    iconColor: persistedIconColor,
+                  };
                   if (matchingPreset) patchBody.color = matchingPreset;
                   const res = await fetch(`/api/hub-projects/${projectId}`, {
                     method: 'PATCH',
@@ -430,7 +434,11 @@ export function ProjectSettingsTab({
                     body: JSON.stringify(patchBody),
                   });
                   if (!res.ok) throw new Error('Failed to update icon color');
-                  setProject((prev) => prev ? { ...prev, iconColor, ...(matchingPreset ? { color: matchingPreset } : {}) } : prev);
+                  setProject((prev) => prev ? {
+                    ...prev,
+                    iconColor: persistedIconColor,
+                    ...(matchingPreset ? { color: matchingPreset } : {}),
+                  } : prev);
                   if (matchingPreset) window.dispatchEvent(new Event('projects-updated'));
                 } catch {
                   toast.error('Failed to update icon color');

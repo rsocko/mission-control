@@ -23,6 +23,8 @@ export interface IconPickerButtonProps {
   disabled?: boolean;
   /** Optional icon color (for SVG icons) */
   color?: string;
+  /** Optional picker color when the trigger uses a resolved theme color */
+  pickerColor?: string;
   /** Called when color changes in the picker */
   onColorChange?: (color: string) => void;
 }
@@ -55,6 +57,7 @@ export function IconPickerButton({
   className,
   disabled = false,
   color,
+  pickerColor = color,
   onColorChange,
 }: IconPickerButtonProps) {
   const [open, setOpen] = useState(false);
@@ -146,7 +149,7 @@ export function IconPickerButton({
                 setOpenAndNotify(false);
               }}
               onClose={() => setOpenAndNotify(false)}
-              color={color}
+              color={pickerColor}
               onColorChange={onColorChange}
             />
           </div>,

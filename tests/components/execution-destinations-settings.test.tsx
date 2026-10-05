@@ -69,7 +69,16 @@ describe('ExecutionDestinationsSection', () => {
 
     expect(await screen.findByText('No execution destinations yet')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'GitHub Copilot Cloud' }));
-    fireEvent.change(screen.getByLabelText('Personal access token'), {
+    expect(screen.getByText(/Agent tasks — Read and write/)).toBeInTheDocument();
+    expect(screen.getByText((_, element) =>
+      element?.tagName === 'LI' && element.textContent === 'Account permissions: None.'))
+      .toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Create fine-grained token/ })).toHaveAttribute(
+      'href',
+      'https://github.com/settings/personal-access-tokens/new',
+    );
+    expect(screen.queryByRole('link', { name: /Create classic token/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Fine-grained personal access token'), {
       target: { value: 'github_pat_test-value' },
     });
     fireEvent.change(screen.getByLabelText('Always instructions'), {
@@ -221,7 +230,7 @@ describe('ExecutionDestinationsSection', () => {
     expect(await screen.findByText(/Personal access token stored in Mission Control/))
       .toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Edit GitHub Copilot Cloud' }));
-    expect(screen.getByLabelText('Personal access token')).toHaveAttribute(
+    expect(screen.getByLabelText('Fine-grained personal access token')).toHaveAttribute(
       'placeholder',
       'Current token is hidden',
     );

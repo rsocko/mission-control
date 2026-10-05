@@ -658,7 +658,7 @@ export function ExecutionDestinationsSection() {
               </h4>
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
                 {form.type === 'copilot-cloud'
-                  ? 'Use a GitHub personal access token here, just like a GitHub Issues connector. Mission Control validates it with GitHub and never returns it to the browser.'
+                  ? 'Use a fine-grained GitHub personal access token. Mission Control validates it with GitHub, stores it server-side, and never returns it to the browser.'
                   : 'Check the Paperclip URL and credential first, then choose route defaults from the validated options. Delegation can override these defaults for one dispatch.'}
               </p>
             </div>
@@ -682,11 +682,18 @@ export function ExecutionDestinationsSection() {
             <Field label="Credential source" htmlFor="destination-credential-source">
               <Select
                 value={form.credentialSource}
-                onValueChange={(value) => updatePaperclipConnection({
-                  credentialSource: value as DestinationForm['credentialSource'],
-                  credential: '',
-                  credentialRef: '',
-                })}
+                onValueChange={(value) => {
+                  const update = {
+                    credentialSource: value as DestinationForm['credentialSource'],
+                    credential: '',
+                    credentialRef: '',
+                  };
+                  if (form.type === 'paperclip') {
+                    updatePaperclipConnection(update);
+                  } else {
+                    updateForm(update);
+                  }
+                }}
               >
                 <SelectTrigger id="destination-credential-source" className="w-full">
                   <SelectValue />
@@ -694,7 +701,7 @@ export function ExecutionDestinationsSection() {
                 <SelectContent>
                   <SelectItem value="mission-control">
                     {form.type === 'copilot-cloud'
-                      ? 'Personal access token'
+                      ? 'Fine-grained personal access token'
                       : 'Access token'}
                   </SelectItem>
                   <SelectItem value="deployment-secret">
@@ -707,12 +714,12 @@ export function ExecutionDestinationsSection() {
 
           {form.credentialSource === 'mission-control' && (
             <Field
-              label={form.type === 'copilot-cloud' ? 'Personal access token' : 'Access token'}
+              label={form.type === 'copilot-cloud' ? 'Fine-grained personal access token' : 'Access token'}
               htmlFor="github-cloud-token"
               hint={form.id && !switchingCredentialSource
                 ? 'Leave blank to keep the currently stored token.'
                 : form.type === 'copilot-cloud'
-                  ? 'Required. Use a GitHub user token authorized for Copilot Agent Tasks.'
+                  ? 'Required. Configure the repository access and permissions listed below.'
                   : 'Required for remote Paperclip. Trusted local endpoints may be checked without a token.'}
             >
               <div className="relative">
@@ -742,9 +749,23 @@ export function ExecutionDestinationsSection() {
                   {showCredential ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
-              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                {form.type === 'copilot-cloud' && (
-                  <>
+              {form.type === 'copilot-cloud' && (
+                <>
+                  <ul className="mt-2 space-y-1 text-xs leading-5 text-[var(--text-muted)]">
+                    <li>
+                      <span className="font-medium text-[var(--text-secondary)]">Repository access:</span>{' '}
+                      Select only the repositories you will delegate to.
+                    </li>
+                    <li>
+                      <span className="font-medium text-[var(--text-secondary)]">Repository permissions:</span>{' '}
+                      Agent tasks — Read and write; Contents — Read-only; Pull requests — Read-only.
+                    </li>
+                    <li>
+                      <span className="font-medium text-[var(--text-secondary)]">Account permissions:</span>{' '}
+                      None.
+                    </li>
+                  </ul>
+                  <div className="mt-2 text-xs">
                     <a
                       href="https://github.com/settings/personal-access-tokens/new"
                       target="_blank"
@@ -753,17 +774,9 @@ export function ExecutionDestinationsSection() {
                     >
                       Create fine-grained token <ExternalLink size={11} />
                     </a>
-                    <a
-                      href="https://github.com/settings/tokens/new"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
-                    >
-                      Create classic token <ExternalLink size={11} />
-                    </a>
-                  </>
-                )}
-              </div>
+                  </div>
+                </>
+              )}
             </Field>
           )}
 

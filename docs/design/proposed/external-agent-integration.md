@@ -361,7 +361,7 @@ expanded into child Paperclip issues.
 #### `copilot-cloud` (GitHub-hosted cloud agent)
 
 1. MC previews the exact prompt, repository, base ref, model selection, and whether a PR should be created.
-2. Before transmission, MC validates the user credential, exact repository identity, base ref, Copilot repository eligibility, and Agent tasks read permission. The create request then validates write permission.
+2. Before transmission, MC validates the user credential, exact repository identity, base ref, Copilot repository eligibility, and Agent tasks read permission. Fine-grained PATs are limited to the delegated repositories and use Agent tasks read/write, Contents read-only, and Pull requests read-only repository permissions with no account permissions. The create request then validates Agent tasks write permission.
 3. After confirmation, MC calls `POST /agents/repos/{owner}/{repo}/tasks` with the reviewed context serialized into `prompt`, optional `base_ref`, optional `model`, and `create_pull_request`.
 4. MC stores the returned GitHub agent task ID and polls `GET /agents/repos/{owner}/{repo}/tasks/{task_id}`. `idle` maps to canonical `in_progress`; all other documented provider states map directly.
 5. The persisted provider task ID is the normal restart-reconciliation anchor. If a process stopped after GitHub accepted a create request but before that ID was stored, MC resumes the fenced attempt after its lease expires and scans recent Agent tasks for the dispatch marker in the exact prompt so a response-loss retry does not create duplicate work.

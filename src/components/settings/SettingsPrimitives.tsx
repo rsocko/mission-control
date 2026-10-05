@@ -32,10 +32,12 @@ export function Toggle({
   enabled,
   onChange,
   label,
+  disabled = false,
 }: {
   enabled: boolean;
   onChange: (enabled: boolean) => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -43,9 +45,10 @@ export function Toggle({
       role="switch"
       aria-checked={enabled}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!enabled)}
       className={cn(
-        'relative inline-flex h-[28px] w-[50px] flex-shrink-0 items-center rounded-full transition-colors duration-200',
+        'relative inline-flex h-[28px] w-[50px] flex-shrink-0 items-center rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50',
         enabled ? 'bg-[var(--accent-500)]' : 'bg-[var(--surface-3)]',
       )}
     >

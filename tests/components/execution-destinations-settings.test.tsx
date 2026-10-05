@@ -22,7 +22,8 @@ describe('ExecutionDestinationsSection', () => {
     render(<ExecutionDestinationsSection />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Registry unavailable');
-    expect(screen.queryByText('No execution destinations yet')).not.toBeInTheDocument();
+    expect(screen.getByText('Scout status unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('No direct execution destinations yet')).not.toBeInTheDocument();
     expect(screen.getByRole('button', {
       name: 'Retry loading execution destinations',
     })).toBeInTheDocument();
@@ -67,7 +68,7 @@ describe('ExecutionDestinationsSection', () => {
 
     render(<ExecutionDestinationsSection />);
 
-    expect(await screen.findByText('No execution destinations yet')).toBeInTheDocument();
+    expect(await screen.findByText('No direct execution destinations yet')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'GitHub Copilot Cloud' }));
     expect(screen.getByText(/Agent tasks — Read and write/)).toBeInTheDocument();
     expect(screen.getByText((_, element) =>
@@ -143,7 +144,7 @@ describe('ExecutionDestinationsSection', () => {
     vi.stubGlobal('fetch', fetcher);
 
     render(<ExecutionDestinationsSection />);
-    expect(await screen.findByText('No execution destinations yet')).toBeInTheDocument();
+    expect(await screen.findByText('No direct execution destinations yet')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Paperclip route' }));
     fireEvent.change(screen.getByLabelText('Paperclip API origin'), {
       target: { value: 'http://localhost:3100' },
@@ -176,6 +177,82 @@ describe('ExecutionDestinationsSection', () => {
         },
       },
     });
+  });
+
+  it('shows configured Scout pickup and can disable it from AI settings', async () => {
+    let disabled = false;
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/external-agents') return response({ agents: [] });
+      if (url === '/api/connectors') {
+        return response({
+          connectors: [{ id: 'scout-primary', type: 'scout', name: 'Scout', enabled: true }],
+        });
+      }
+      if (url === '/api/scout/worker?connectorId=scout-primary') {
+        return response({
+          worker: {
+            id: 'scout-pull-worker-scout-primary',
+            name: 'Scout work pickup',
+            enabled: true,
+          },
+        });
+      }
+      if (url === '/api/scout/worker' && init?.method === 'POST') {
+        disabled = true;
+        return response({
+          worker: {
+            id: 'scout-pull-worker-scout-primary',
+            name: 'Scout work pickup',
+            enabled: false,
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<ExecutionDestinationsSection />);
+
+    expect(await screen.findByText('Pickup enabled')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch', { name: 'Disable Scout work pickup' }));
+
+    await waitFor(() => expect(disabled).toBe(true));
+    expect(await screen.findByText('Pickup off')).toBeInTheDocument();
+  });
+
+  it('reveals the required Scout setup prompt when pickup is enabled', async () => {
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/external-agents') return response({ agents: [] });
+      if (url === '/api/connectors') {
+        return response({
+          connectors: [{ id: 'scout-primary', type: 'scout', name: 'Scout', enabled: true }],
+        });
+      }
+      if (url === '/api/scout/worker?connectorId=scout-primary') {
+        return response({ worker: null });
+      }
+      if (url === '/api/scout/worker' && init?.method === 'POST') {
+        return response({
+          worker: {
+            id: 'scout-pull-worker-scout-primary',
+            name: 'Scout work pickup',
+            enabled: true,
+          },
+          setupPrompt: 'Configure Scout to claim Mission Control work.',
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<ExecutionDestinationsSection />);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable Scout work pickup' }));
+
+    expect(await screen.findByText('Finish setup in Scout')).toBeInTheDocument();
+    expect(screen.getByText('Configure Scout to claim Mission Control work.')).toBeInTheDocument();
   });
 
   it('keeps an existing hidden credential reference while editing', async () => {

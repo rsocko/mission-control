@@ -175,7 +175,7 @@ export interface TaskDelegationContext {
 export interface TaskDelegationPreviewInput {
   taskId: string;
   agentId: string;
-  instruction: string;
+  instruction?: string;
   allowedActions?: string[];
   operationId: string;
   repository?: string;
@@ -748,7 +748,8 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
   const idempotencyKey = delegationIdempotencyKey(operationId, input.taskId);
   return createDispatchPreview({
     agentId: target.id,
-    instruction: input.instruction,
+    instruction: input.instruction?.trim()
+      || 'Complete the delegated task using the task details provided.',
     scope: target.type === 'copilot-cloud'
       ? {
         taskIds: [input.taskId],

@@ -294,12 +294,19 @@ function TaskDelegationRunDialog({
   const [error, setError] = useState<string | null>(null);
   const [interactionAnswer, setInteractionAnswer] = useState('');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (refreshProvider = false) => {
     setLoading(true);
     setError(null);
     try {
       const response = await fetch(
         `/api/external-agents/dispatches/${encodeURIComponent(assignment.dispatchId)}`,
+        refreshProvider
+          ? {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'refresh' }),
+          }
+          : undefined,
       );
       if (!response.ok) throw new Error(await responseError(response));
       const body = await response.json() as { dispatch: RunDetail };
@@ -623,7 +630,7 @@ function TaskDelegationRunDialog({
                     <button
                       type="button"
                       disabled={loading || Boolean(busyAction)}
-                      onClick={() => void load()}
+                      onClick={() => void load(true)}
                       className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border)] px-3 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50"
                     >
                       <RefreshCw size={13} className={cn(loading && 'animate-spin')} />

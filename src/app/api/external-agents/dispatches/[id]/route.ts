@@ -18,15 +18,10 @@ import { ExternalAgentError } from '@/lib/external-agents/errors';
 
 type Context = { params: Promise<{ id: string }> };
 
-export async function GET(request: Request, { params }: Context) {
+export async function GET(_request: Request, { params }: Context) {
   try {
-    requireTrustedMutation(request);
     const id = (await params).id;
-    const current = await getDispatch(id);
-    const dispatch = current?.executionLocality === 'github-hosted'
-      && current.providerTaskId
-      ? await reconcileDispatch(id)
-      : current;
+    const dispatch = await getDispatch(id);
     if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
     return NextResponse.json({ dispatch: publicDispatch(dispatch) });
   } catch (error) {
@@ -41,6 +36,7 @@ export async function PATCH(request: Request, { params }: Context) {
     const body = await request.json() as {
       action:
         | 'cancel'
+        | 'refresh'
         | 'stop_tracking'
         | 'retry'
         | 'waiting_for_user'
@@ -55,6 +51,9 @@ export async function PATCH(request: Request, { params }: Context) {
     };
     let manualUrl: string | undefined;
     switch (body.action) {
+      case 'refresh':
+        await reconcileDispatch(id);
+        break;
       case 'cancel':
         await cancelDispatch(id);
         break;

@@ -121,6 +121,10 @@ export function TaskDelegationDialog() {
   const [allowedActions, setAllowedActions] = useState<string[]>([]);
   const [operationId, setOperationId] = useState('');
   const [previewBatch, setPreviewBatch] = useState<PreviewBatch | null>(null);
+  const [confirmationProgress, setConfirmationProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -146,6 +150,7 @@ export function TaskDelegationDialog() {
     setAllowedActions([]);
     setOperationId(crypto.randomUUID());
     setPreviewBatch(null);
+    setConfirmationProgress(null);
     setError(null);
     setPaperclipOptions(null);
     setPaperclipBinding(null);
@@ -286,7 +291,7 @@ export function TaskDelegationDialog() {
         body: JSON.stringify({
           taskIds,
           agentId: selectedTarget.id,
-          instruction: instruction.trim(),
+          instruction: instruction.trim() || undefined,
           operationId,
           allowedActions,
           ...(selectedTarget.type === 'copilot-cloud'
@@ -317,11 +322,16 @@ export function TaskDelegationDialog() {
   const confirm = async () => {
     if (!previewBatch?.previews.length) return;
     setSubmitting(true);
+    setConfirmationProgress({ current: 1, total: previewBatch.previews.length });
     setError(null);
     const failures: string[] = [];
     const confirmedTaskIds: string[] = [];
     let confirmed = 0;
-    for (const preview of previewBatch.previews) {
+    for (const [index, preview] of previewBatch.previews.entries()) {
+      setConfirmationProgress({
+        current: index + 1,
+        total: previewBatch.previews.length,
+      });
       try {
         const response = await fetch('/api/external-agents/dispatch', {
           method: 'POST',
@@ -351,6 +361,7 @@ export function TaskDelegationDialog() {
       }
     }
     setSubmitting(false);
+    setConfirmationProgress(null);
     if (confirmedTaskIds.length) {
       notifyTaskDelegationUpdated(confirmedTaskIds);
     }
@@ -370,7 +381,6 @@ export function TaskDelegationDialog() {
   const canContinueConfiguration = Boolean(
     selectedTarget
     && ready.length
-    && instruction.trim()
     && (!needsRepository || repository)
     && (selectedTarget.type !== 'paperclip' || Boolean(
       paperclipBinding?.companyId && paperclipBinding.assigneeAgentId,
@@ -543,7 +553,7 @@ export function TaskDelegationDialog() {
                   type="button"
                   disabled={!canContinueConfiguration || submitting}
                   onClick={() => void createPreviews()}
-                  className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-4 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-4 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--text-muted)]"
                 >
                   {submitting ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
                   Review {ready.length} delegation{ready.length === 1 ? '' : 's'}
@@ -557,7 +567,9 @@ export function TaskDelegationDialog() {
                   className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-4 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                  Confirm and delegate {previewBatch?.readyCount ?? 0}
+                  {confirmationProgress
+                    ? `Starting ${confirmationProgress.current} of ${confirmationProgress.total}…`
+                    : `Confirm and delegate ${previewBatch?.readyCount ?? 0}`}
                 </button>
               )}
             </div>
@@ -911,19 +923,37 @@ function ConfigureStep({
         </div>
       )}
 
-      <label className="block text-xs font-medium text-[var(--text-secondary)]">
-        Per-dispatch instructions
+      <div>
+        <div className="flex items-center justify-between gap-3">
+          <label
+            htmlFor="delegation-instructions"
+            className="text-xs font-medium text-[var(--text-secondary)]"
+          >
+            Per-dispatch instructions
+          </label>
+          <span aria-hidden="true" className="text-[11px] font-normal text-[var(--text-muted)]">
+            Optional
+          </span>
+        </div>
         <div className="input-glow mt-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-0)]">
           <textarea
+            id="delegation-instructions"
             value={instruction}
             onChange={(event) => onInstructionChange(event.target.value)}
             rows={4}
             maxLength={32_000}
+            aria-describedby="delegation-instructions-help"
             placeholder="Describe the outcome each delegated task should deliver."
             className="w-full resize-y bg-transparent px-3 py-2 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
           />
         </div>
-      </label>
+        <span
+          id="delegation-instructions-help"
+          className="mt-1.5 block text-[11px] font-normal leading-relaxed text-[var(--text-muted)]"
+        >
+          Add guidance only when the task details do not fully describe the desired outcome.
+        </span>
+      </div>
 
       <section className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-3">
         <h3 className="text-xs font-medium text-[var(--text-secondary)]">

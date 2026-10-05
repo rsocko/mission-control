@@ -8,6 +8,7 @@ import type {
   ExternalAgentCapabilities,
   ExternalAgentLocality,
   ExternalAgentType,
+  PaperclipProviderConfig,
 } from './contracts';
 import { ExternalAgentError } from './errors';
 import { getExternalAgentControlPersistence } from './persistence';
@@ -29,6 +30,7 @@ import {
 } from './service';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 import { parseSourceId } from '@/lib/connectors/github-issues/issue-transformer';
+import { validatePaperclipConnection } from './paperclip';
 
 const CAPABILITY_ACTIONS: Array<[keyof ExternalAgentCapabilities, string]> = [
   ['canAnalyzeCode', 'analyze_code'],
@@ -176,6 +178,7 @@ export interface TaskDelegationPreviewInput {
   baseRef?: string;
   model?: string;
   createPullRequest?: boolean;
+  paperclipBinding?: PaperclipProviderConfig;
   maxAttempts?: number;
   timeoutMs?: number;
   callbackBaseUrl?: string;
@@ -688,6 +691,36 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
       }
     }
   }
+  let paperclipBinding: PaperclipProviderConfig | undefined;
+  if (target.type === 'paperclip') {
+    paperclipBinding = input.paperclipBinding ?? (
+      target.paperclipBinding
+        ? {
+          companyId: target.paperclipBinding.companyId,
+          assigneeAgentId: target.paperclipBinding.assigneeAgentId,
+          ...(target.paperclipBinding.projectId
+            ? { projectId: target.paperclipBinding.projectId }
+            : {}),
+          ...(target.paperclipBinding.requiredAdapterType
+            ? { requiredAdapterType: target.paperclipBinding.requiredAdapterType }
+            : {}),
+        }
+        : undefined
+    );
+    const internal = await getExternalAgent(target.id);
+    if (!paperclipBinding || !internal?.endpoint) {
+      throw new ExternalAgentError(
+        'Paperclip company and assignee are required',
+        'VALIDATION_ERROR',
+        422,
+      );
+    }
+    await validatePaperclipConnection({
+      endpoint: internal.endpoint,
+      credential: await resolveExternalAgentCredential(internal),
+      config: paperclipBinding,
+    });
+  }
   const idempotencyKey = delegationIdempotencyKey(operationId, input.taskId);
   return createDispatchPreview({
     agentId: target.id,
@@ -701,7 +734,10 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
         model: input.model,
         createPullRequest,
       }
-      : { taskIds: [input.taskId] },
+      : {
+        taskIds: [input.taskId],
+        ...(paperclipBinding ? { paperclip: paperclipBinding } : {}),
+      },
     allowedActions: requested,
     idempotencyKey,
     callbackBaseUrl: input.callbackBaseUrl,

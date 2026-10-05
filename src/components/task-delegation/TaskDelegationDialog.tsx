@@ -163,7 +163,9 @@ export function TaskDelegationDialog() {
       const next = await response.json() as TaskDelegationContext;
       if (requestId !== contextRequestRef.current || signal.aborted) return;
       setContext(next);
-      const initial = next.targets.length === 1 ? next.targets[0] : null;
+      const eligibleTargets = next.targets.filter((target) =>
+        target.eligibility.some(({ ready }) => ready));
+      const initial = eligibleTargets.length === 1 ? eligibleTargets[0] : null;
       if (initial) {
         setSelectedTargetId(initial.id);
         setAllowedActions(initial.allowedActions);
@@ -516,19 +518,25 @@ function DestinationStep({
       <div className="grid gap-2 sm:grid-cols-2">
         {context.targets.map((target) => {
           const readyCount = target.eligibility.filter(({ ready }) => ready).length;
+          const unavailable = readyCount === 0;
           const selected = target.id === selectedTargetId;
+          const unavailableReason = target.eligibility.find(({ blocker }) => blocker)?.blocker
+            ?? 'No selected tasks are eligible for this destination';
           return (
             <button
               key={target.id}
               type="button"
               role="radio"
               aria-checked={selected}
+              disabled={unavailable}
+              title={unavailable ? unavailableReason : undefined}
               onClick={() => onSelect(target)}
               className={cn(
                 'flex min-h-20 items-center gap-3 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
                 selected
                   ? 'border-[var(--accent-500)] bg-[var(--accent-500)]/10'
                   : 'border-[var(--border)] bg-[var(--surface-0)] hover:bg-[var(--surface-2)]',
+                unavailable && 'cursor-not-allowed opacity-55 hover:bg-[var(--surface-0)]',
               )}
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
@@ -547,6 +555,11 @@ function DestinationStep({
                 )}>
                   {readyCount} of {target.eligibility.length} ready
                 </span>
+                {unavailable && (
+                  <span className="mt-0.5 block text-[11px] leading-4 text-[var(--text-muted)]">
+                    {unavailableReason}
+                  </span>
+                )}
               </span>
             </button>
           );

@@ -308,7 +308,7 @@ describe('TaskDelegationDialog disclosure review', () => {
       }));
   });
 
-  it('shows an accessible worker handoff while confirmation is queued', async () => {
+  it('releases the modal pointer lock when closed during worker handoff', async () => {
     type MockResponse = Awaited<ReturnType<typeof response>>;
     let resolveConfirmation!: (value: MockResponse) => void;
     const pendingConfirmation = new Promise<MockResponse>((resolve) => {
@@ -393,12 +393,16 @@ describe('TaskDelegationDialog disclosure review', () => {
     expect(progress.firstElementChild).toHaveClass('motion-reduce:transition-none');
     expect(screen.getByRole('button', { name: 'Queueing 1 of 1…' })).toBeDisabled();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Close delegation' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(document.body.style.pointerEvents).not.toBe('none');
+    });
+
     await act(async () => {
       resolveConfirmation(await response({ dispatch: { status: 'queued' } }, 202));
       await pendingConfirmation;
     });
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

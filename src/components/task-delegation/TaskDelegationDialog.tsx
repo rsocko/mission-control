@@ -138,6 +138,27 @@ export function TaskDelegationDialog() {
   const [paperclipOptionsError, setPaperclipOptionsError] = useState<string | null>(null);
   const contextRequestRef = useRef(0);
   const paperclipRequestRef = useRef(0);
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (open) {
+      wasOpenRef.current = true;
+      return;
+    }
+    if (!wasOpenRef.current) return;
+
+    wasOpenRef.current = false;
+    // Radix can retain its body pointer lock when a global refresh races modal teardown.
+    const timeoutId = window.setTimeout(() => {
+      const openModal = document.querySelector(
+        '[data-state="open"]:is([role="dialog"], [role="alertdialog"], [role="menu"])',
+      );
+      if (!openModal && document.body.style.pointerEvents === 'none') {
+        document.body.style.pointerEvents = '';
+      }
+    }, 200);
+    return () => window.clearTimeout(timeoutId);
+  }, [open]);
 
   const reset = useCallback((ids: string[]) => {
     setTaskIds(ids);
@@ -377,20 +398,23 @@ export function TaskDelegationDialog() {
     }
     setSubmitting(false);
     setConfirmationProgress(null);
-    if (confirmedTaskIds.length) {
-      notifyTaskDelegationUpdated(confirmedTaskIds);
-    }
     if (failures.length) {
+      if (confirmedTaskIds.length) {
+        notifyTaskDelegationUpdated(confirmedTaskIds);
+      }
       setError(
         `${confirmed} delegation${confirmed === 1 ? '' : 's'} confirmed. `
         + `${failures.length} failed: ${failures.join('; ')}`,
       );
       return;
     }
-    toast.success(
-      `${confirmed} task${confirmed === 1 ? '' : 's'} queued for ${selectedTarget?.name}`,
-    );
     setOpen(false);
+    requestAnimationFrame(() => {
+      notifyTaskDelegationUpdated(confirmedTaskIds);
+      toast.success(
+        `${confirmed} task${confirmed === 1 ? '' : 's'} queued for ${selectedTarget?.name}`,
+      );
+    });
   };
 
   const canContinueConfiguration = Boolean(

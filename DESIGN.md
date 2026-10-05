@@ -11,6 +11,7 @@ colors:
   border-subtle: "#162032"
   border-strong: "#334155"
   text-primary: "#f8fafc"
+  text-heading: "#c4cede"
   text-secondary: "#94a3b8"
   text-tertiary: "#8b9ab5"
   text-muted: "#8190a6"
@@ -144,7 +145,7 @@ The palette is a cool slate stack with one blue action voice and a small set of 
 - **Raised** (`surface-2`): hover, active navigation, dropdown, and nested content surfaces.
 - **Pressed** (`surface-3`): strongest neutral state and progress tracks.
 - **Quiet Stroke** (`border-subtle`, `border`, `border-strong`): separators, standard container outlines, and elevated/focus-adjacent outlines.
-- **Primary, Secondary, Tertiary, and Muted Text** (`text-primary`, `text-secondary`, `text-tertiary`, `text-muted`): descending emphasis; tertiary and muted values are intentionally lifted enough to remain legible on shipped surfaces.
+- **Primary, Heading, Secondary, Tertiary, and Muted Text** (`text-primary`, `text-heading`, `text-secondary`, `text-tertiary`, `text-muted`): descending emphasis; heading text separates structural labels from body copy without competing with page titles, while tertiary and muted values remain lifted enough to stay legible on shipped surfaces.
 
 ### Named Rules
 

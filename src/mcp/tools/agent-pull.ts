@@ -2,8 +2,13 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   claimNextDispatch,
+  requestDispatchInteraction,
   submitDispatchResult,
 } from '@/lib/external-agents/service';
+import {
+  getScoutWorkerHealth,
+  getScoutWorkerIdentity,
+} from '@/lib/external-agents/scout-worker';
 
 const claimIdentity = {
   dispatchId: z.string().min(1).max(200),
@@ -24,14 +29,30 @@ function toolResult(data: unknown) {
 
 export function registerAgentPullTools(server: McpServer, agentId: string) {
   server.tool(
+    'mc_agent_identity',
+    'Verify this worker identity, connector binding, negotiated capabilities, and data policy.',
+    {},
+    async () => toolResult(await getScoutWorkerIdentity(agentId)),
+  );
+
+  server.tool(
+    'mc_agent_health',
+    'Check worker readiness, protocol versions, connectivity, and supported activation modes.',
+    {},
+    async () => toolResult(await getScoutWorkerHealth(agentId)),
+  );
+
+  server.tool(
     'mc_agent_claim_work',
     'Claim the next compatible Mission Control delegation for this worker. Returns no work when the queue is empty.',
     {
       leaseSeconds: z.number().int().min(60).max(3600).optional(),
+      dispatchId: z.string().trim().min(1).max(200).optional(),
     },
-    async ({ leaseSeconds }) => {
+    async ({ leaseSeconds, dispatchId }) => {
       const claim = await claimNextDispatch(agentId, {
         leaseMs: (leaseSeconds ?? 300) * 1000,
+        dispatchId,
       });
       return toolResult(claim ?? {
         available: false,
@@ -46,14 +67,13 @@ export function registerAgentPullTools(server: McpServer, agentId: string) {
     {
       ...claimIdentity,
       message: z.string().trim().min(1).max(1000),
-      waitingForUser: z.boolean().optional(),
       leaseSeconds: z.number().int().min(60).max(3600).optional(),
     },
-    async ({ dispatchId, claimToken, message, waitingForUser, leaseSeconds }) => {
+    async ({ dispatchId, claimToken, message, leaseSeconds }) => {
       const result = await submitDispatchResult(
         dispatchId,
         {
-          status: waitingForUser ? 'waiting_for_user' : 'in_progress',
+          status: 'in_progress',
           providerDetail: { progress: { message } },
         },
         { claimToken },
@@ -61,6 +81,36 @@ export function registerAgentPullTools(server: McpServer, agentId: string) {
       );
       return toolResult(result);
     },
+  );
+
+  server.tool(
+    'mc_agent_request_input',
+    'Create a durable user question or approval, release the claim, and resume only after Mission Control records a resolution.',
+    {
+      ...claimIdentity,
+      kind: z.enum(['question', 'approval']),
+      prompt: z.string().trim().min(1).max(2000),
+      choices: z.array(z.string().trim().min(1).max(200)).min(2).max(20).optional(),
+      continuationPolicy: z.enum([
+        'resume_same_dispatch',
+        'require_new_dispatch',
+      ]).optional(),
+    },
+    async ({
+      dispatchId,
+      claimToken,
+      kind,
+      prompt,
+      choices,
+      continuationPolicy,
+    }) => toolResult({
+      interaction: await requestDispatchInteraction(
+        dispatchId,
+        claimToken,
+        { kind, prompt, choices, continuationPolicy },
+      ),
+      message: 'Input request recorded. Stop work and discard this claim token.',
+    }),
   );
 
   server.tool(

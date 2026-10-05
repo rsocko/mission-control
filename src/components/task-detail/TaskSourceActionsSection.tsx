@@ -76,7 +76,7 @@ export function TaskSourceActionsSection({
       mode === 'dialog' && 'col-start-2 row-start-4',
       mode === 'workspace' && 'col-start-2 row-start-4',
     )}>
-      <h3 className="flex min-h-11 items-center border-b border-[var(--border-subtle)] px-3 text-sm font-semibold text-[var(--text-secondary)]">Source &amp; actions</h3>
+      <h3 className="flex min-h-11 items-center border-b border-[var(--border-subtle)] px-3 text-sm font-semibold text-[var(--text-heading)]">Source &amp; actions</h3>
       <div className="flex flex-wrap items-center gap-2 p-3">
         {sourceSpecificActions}
         {dispositionOptions.length > 0 && (

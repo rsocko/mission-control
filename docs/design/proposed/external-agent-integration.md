@@ -361,7 +361,7 @@ expanded into child Paperclip issues.
 #### `copilot-cloud` (GitHub-hosted cloud agent)
 
 1. MC previews the exact prompt, repository, base ref, model selection, and whether a PR should be created.
-2. Before transmission, MC validates the user credential, exact repository identity, base ref, Copilot repository eligibility, and Agent tasks read permission. The create request then validates write permission.
+2. Before transmission, MC validates the user credential, exact repository identity, base ref, Copilot repository eligibility, and Agent tasks read permission. Fine-grained PATs are limited to the delegated repositories and use Agent tasks read/write, Contents read-only, and Pull requests read-only repository permissions with no account permissions. The create request then validates Agent tasks write permission.
 3. After confirmation, MC calls `POST /agents/repos/{owner}/{repo}/tasks` with the reviewed context serialized into `prompt`, optional `base_ref`, optional `model`, and `create_pull_request`.
 4. MC stores the returned GitHub agent task ID and polls `GET /agents/repos/{owner}/{repo}/tasks/{task_id}`. `idle` maps to canonical `in_progress`; all other documented provider states map directly.
 5. The persisted provider task ID is the normal restart-reconciliation anchor. If a process stopped after GitHub accepted a create request but before that ID was stored, MC resumes the fenced attempt after its lease expires and scans recent Agent tasks for the dispatch marker in the exact prompt so a response-loss retry does not create duplicate work.
@@ -441,13 +441,32 @@ business M365 payloads should not be copied into a code-hosting work item.
 Scout setup provisions this as a second role linked to the existing Scout
 connector. The connector remains the inbound task source; the worker is an
 independently enabled execution destination with its own managed credential,
-disclosure policy, and audit history. Its dedicated MCP endpoint exposes only
-claim, progress, complete, and fail tools. Mission Control generates a setup
-prompt that instructs Scout to create the scheduled pickup automation and
-connect that endpoint without granting access to the general MC MCP tool
-surface. The user can explicitly reveal the prompt again from Scout settings;
-ordinary status reads never return its credential. Credential rotation remains
-a separate action because it invalidates an existing automation.
+disclosure policy, and audit history.
+
+The copied bootstrap prompt contains only a short-lived registration token and
+the onboarding endpoint. Scout downloads a versioned durable worker skill,
+declares tenant-available M365 source/action/trigger capabilities, and confirms
+protected MCP credential storage. Mission Control records the outbound
+connectivity test and requires an operator to approve the declared capabilities.
+Scout then exchanges a one-time claim token for the durable bearer credential
+exactly once. The credential response marks the token sensitive and requires a
+protected MCP connection field; the settings UI never reveals it. Restarting
+onboarding invalidates the prior credential and temporary secrets.
+
+The dedicated endpoint exposes only identity, health, exact-or-next claim,
+progress, durable question/approval, complete, and fail tools. Identity binds
+the runtime to the expected connector, protocol/skill versions, capabilities,
+and disclosure policy. A human-input request releases the active lease and
+claim token. Operator resolution durably requeues the dispatch, and the next
+claim carries scoped resume context.
+
+MCP is the authenticated control/work channel, not a wake mechanism. Scheduled
+polling is the guaranteed Scout activation path. A Scout-native condition
+trigger can invoke the same automation sooner and supply a trusted `dispatchId`
+for an exact claim, but Mission Control does not send a webhook or event into
+Scout because no generic inbound wake protocol is documented. Health therefore
+reports Scout-to-Mission-Control connectivity independently from the currently
+unsupported Mission-Control-to-Scout direction.
 
 ##### GitHub Copilot app pull-worker profile
 

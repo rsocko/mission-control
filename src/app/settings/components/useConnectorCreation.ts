@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { useConnectorClassificationSelection } from './ConnectorDataClassification';
 
 export type ConnectorCreationStatus = 'idle' | 'creating' | 'success' | 'error';
 
@@ -14,6 +15,7 @@ async function readCreationResponse(response: Response) {
 }
 
 export function useConnectorCreation() {
+  const { override } = useConnectorClassificationSelection();
   const [status, setStatus] = useState<ConnectorCreationStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [connector, setConnector] = useState<Record<string, unknown> | null>(null);
@@ -45,10 +47,23 @@ export function useConnectorCreation() {
   const create = useCallback(async (payload: Record<string, unknown>) => {
     markCreating();
     try {
+      const currentSettings = payload.settings
+        && typeof payload.settings === 'object'
+        && !Array.isArray(payload.settings)
+        ? payload.settings as Record<string, unknown>
+        : {};
       const response = await fetch('/api/connectors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          ...(payload.settings || override ? {
+            settings: {
+              ...currentSettings,
+              ...(override ? { dataClassificationOverride: override } : {}),
+            },
+          } : {}),
+        }),
       });
       const data = await readCreationResponse(response);
       if (!response.ok) {
@@ -59,7 +74,7 @@ export function useConnectorCreation() {
     } catch (creationError) {
       throw markError(creationError);
     }
-  }, [markCreating, markError, markSuccess]);
+  }, [markCreating, markError, markSuccess, override]);
 
   return {
     status,

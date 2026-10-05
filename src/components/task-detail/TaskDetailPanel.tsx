@@ -1013,7 +1013,7 @@ export function TaskDetailPanel({
                 ? `Subtasks (${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length})`
                 : 'Subtasks'}
               className={cn(
-                'text-sm font-semibold text-[var(--text-secondary)]',
+                'text-sm font-semibold text-[var(--text-heading)]',
                 mode === 'panel' && 'rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]',
               )}
             >

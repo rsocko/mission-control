@@ -906,10 +906,13 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
           repository,
           source,
           embeddings: getSemanticEmbeddingProvider(),
-          resolveSensitivity: ({ connectorType }) => resolveSensitivity(
+          resolveSensitivity: ({ connectorType, dataClassificationOverride }) => resolveSensitivity(
             'semantic-embedding',
             routingPolicy,
-            { sources: connectorType ? [connectorType.trim().toLowerCase()] : [] },
+            {
+              sources: connectorType ? [connectorType.trim().toLowerCase()] : [],
+              override: dataClassificationOverride ?? undefined,
+            },
           ),
           embeddingTimeoutMs: config.embeddingTimeoutMs,
         });

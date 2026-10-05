@@ -17,6 +17,72 @@ afterEach(() => {
 });
 
 describe('TaskDelegationDialog disclosure review', () => {
+  it('only allows destinations with at least one eligible selected task', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response({
+      taskIds: ['task-1'],
+      tasks: [{ id: 'task-1', title: 'Restricted task', connectorType: 'scout' }],
+      targets: [
+        {
+          id: 'public-cloud',
+          name: 'Public Cloud',
+          type: 'copilot-cloud',
+          description: null,
+          alwaysInstructions: '',
+          executionLocality: 'github-hosted',
+          allowedActions: ['write_code'],
+          hasCredential: true,
+          paperclipBinding: null,
+          repositories: [],
+          eligibility: [{
+            taskId: 'task-1',
+            title: 'Restricted task',
+            connectorType: 'scout',
+            ready: false,
+            blocker: 'Agent policy does not allow restricted data',
+            repository: null,
+            repositoryLocked: false,
+          }],
+        },
+        {
+          id: 'private-runner',
+          name: 'Private Runner',
+          type: 'pull-queue',
+          description: null,
+          alwaysInstructions: '',
+          executionLocality: 'mission-control-host',
+          allowedActions: ['write_code'],
+          hasCredential: true,
+          paperclipBinding: null,
+          repositories: [],
+          eligibility: [{
+            taskId: 'task-1',
+            title: 'Restricted task',
+            connectorType: 'scout',
+            ready: true,
+            blocker: null,
+            repository: null,
+            repositoryLocked: false,
+          }],
+        },
+      ],
+      assignments: [],
+      syncErrors: [],
+    })));
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+
+    const blockedTarget = await screen.findByRole('radio', { name: /Public Cloud/ });
+    expect(blockedTarget).toBeDisabled();
+    expect(blockedTarget).toHaveAttribute(
+      'title',
+      'Agent policy does not allow restricted data',
+    );
+    expect(screen.getByText('Agent policy does not allow restricted data')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Private Runner/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Configure' })).toBeEnabled();
+  });
+
   it('shows configured and per-dispatch instructions with the exact rich payload', async () => {
     const payloadPreview = {
       instruction: 'Fix the parser and add coverage.',
@@ -76,6 +142,15 @@ describe('TaskDelegationDialog disclosure review', () => {
             previewHash: 'preview-hash',
             processingLocation: 'github-hosted',
             dataClassification: 'standard',
+            classificationExplanation: 'Standard because GitHub Issues uses the active policy default',
+            classificationSources: [{
+              connectorType: 'github-issues',
+              connectorInstanceId: 'github-primary',
+              connectorName: 'GitHub Issues',
+              baseline: 'standard',
+              effective: 'standard',
+              override: null,
+            }],
             disclosedFields: [
               'instruction',
               'alwaysInstructions',
@@ -106,6 +181,9 @@ describe('TaskDelegationDialog disclosure review', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
 
     expect(await screen.findByText('Effective reviewed context')).toBeInTheDocument();
+    expect(screen.getByText(/Standard because GitHub Issues uses the active policy default/))
+      .toBeInTheDocument();
+    expect(screen.getByText(/GitHub Issues: standard/)).toBeInTheDocument();
     fireEvent.click(screen.getByText('Canonical parser task'));
     await waitFor(() => {
       expect(screen.getByText((_, element) =>
@@ -115,5 +193,110 @@ describe('TaskDelegationDialog disclosure review', () => {
         && element.textContent?.includes('"title": "Add regression coverage"') === true,
       )).toBeInTheDocument();
     });
+  });
+
+  it('uses destination Paperclip bindings as overridable dispatch defaults', async () => {
+      let previewRequest: Record<string, unknown> | null = null;
+      const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+          return response({
+            taskIds: ['task-1'],
+            tasks: [{ id: 'task-1', title: 'Paperclip task', connectorType: 'local' }],
+            targets: [{
+              id: 'paperclip-route',
+              name: 'Paperclip',
+              type: 'paperclip',
+              description: null,
+              alwaysInstructions: '',
+              executionLocality: 'external',
+              allowedActions: ['write_code'],
+              hasCredential: true,
+              paperclipBinding: {
+                companyId: '11111111-1111-4111-8111-111111111111',
+                projectId: null,
+                assigneeAgentId: '33333333-3333-4333-8333-333333333333',
+                requiredAdapterType: 'claude-local',
+              },
+              repositories: [],
+              eligibility: [{
+                taskId: 'task-1',
+                title: 'Paperclip task',
+                connectorType: 'local',
+                ready: true,
+                blocker: null,
+                repository: null,
+                repositoryLocked: false,
+              }],
+            }],
+            assignments: [],
+            syncErrors: [],
+          });
+        }
+        if (url === '/api/external-agents/paperclip/discover' && init?.method === 'POST') {
+          return response({
+            companies: [{
+              id: '11111111-1111-4111-8111-111111111111',
+              name: 'Acme',
+              status: 'active',
+            }],
+            projects: [{
+              id: '22222222-2222-4222-8222-222222222222',
+              name: 'Project Alpha',
+              status: 'active',
+            }],
+            agents: [{
+              id: '33333333-3333-4333-8333-333333333333',
+              name: 'Engineer',
+              title: 'Software Engineer',
+              role: 'engineer',
+              status: 'idle',
+              adapterType: 'claude-local',
+            }],
+          });
+        }
+        if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+          previewRequest = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return response({
+            previews: [{
+              taskId: 'task-1',
+              dispatchId: 'dispatch-1',
+              previewHash: 'preview-hash',
+              processingLocation: 'external',
+              dataClassification: 'standard',
+              disclosedFields: ['instruction'],
+              allowedActions: ['write_code'],
+              payloadPreview: { instruction: 'Implement the change.' },
+            }],
+            blocked: [],
+            readyCount: 1,
+            blockedCount: 0,
+          }, 201);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      });
+      vi.stubGlobal('fetch', fetcher);
+
+      render(<TaskDelegationDialog />);
+      openTaskDelegation(['task-1']);
+      expect(await screen.findByText('Paperclip')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+      expect(await screen.findByRole('combobox', { name: 'Paperclip project' }))
+        .toBeInTheDocument();
+      fireEvent.click(screen.getByRole('combobox', { name: 'Paperclip project' }));
+      fireEvent.click(screen.getByRole('option', { name: 'Project Alpha' }));
+      fireEvent.change(screen.getByLabelText('Per-dispatch instructions'), {
+        target: { value: 'Implement the change.' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
+
+      await waitFor(() => expect(previewRequest).toMatchObject({
+        paperclipBinding: {
+          companyId: '11111111-1111-4111-8111-111111111111',
+          projectId: '22222222-2222-4222-8222-222222222222',
+          assigneeAgentId: '33333333-3333-4333-8333-333333333333',
+          requiredAdapterType: 'claude-local',
+        },
+      }));
   });
 });

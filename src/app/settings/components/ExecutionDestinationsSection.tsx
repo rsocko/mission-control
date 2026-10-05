@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle,
   Bot,
   CheckCircle2,
   CloudCog,
+  Copy,
   Eye,
   EyeOff,
   ExternalLink,
@@ -56,6 +58,19 @@ interface ExecutionDestination {
   updatedAt: string;
 }
 
+interface ScoutConnector {
+  id: string;
+  type: string;
+  name: string;
+  enabled: boolean;
+}
+
+interface ScoutWorker {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
 interface DestinationForm {
   id: string | null;
   type: DestinationType;
@@ -73,6 +88,20 @@ interface DestinationForm {
   capabilities: ExternalAgentCapabilities;
   allowedClassifications: AgentDataClassification[];
   enabled: boolean;
+}
+
+interface PaperclipDiscovery {
+  health: { status: unknown; version: unknown; deploymentMode: unknown };
+  companies: Array<{ id: string; name: string; status: string | null }>;
+  projects: Array<{ id: string; name: string; status: string | null }>;
+  agents: Array<{
+    id: string;
+    name: string;
+    title: string | null;
+    role: string | null;
+    status: string | null;
+    adapterType: string | null;
+  }>;
 }
 
 const CAPABILITY_OPTIONS: Array<{
@@ -198,6 +227,244 @@ function DestinationIcon({ type, size = 18 }: { type: DestinationType; size?: nu
   return type === 'copilot-cloud' ? <CloudCog size={size} /> : <Bot size={size} />;
 }
 
+function ScoutDestinationCard() {
+  const [connector, setConnector] = useState<ScoutConnector | null>(null);
+  const [worker, setWorker] = useState<ScoutWorker | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [setupPrompt, setSetupPrompt] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const loadScout = useCallback(async () => {
+    setError(null);
+    try {
+      const connectorsResponse = await fetch('/api/connectors');
+      const connectorsBody = await connectorsResponse.json().catch(() => null) as {
+        connectors?: ScoutConnector[];
+        error?: string;
+      } | null;
+      if (!connectorsResponse.ok) {
+        throw new Error(responseError(connectorsBody, connectorsResponse.status));
+      }
+      const nextConnector = (connectorsBody?.connectors ?? [])
+        .find((candidate) => candidate.type === 'scout') ?? null;
+      setConnector(nextConnector);
+      if (!nextConnector) {
+        setWorker(null);
+        return;
+      }
+
+      const workerResponse = await fetch(
+        `/api/scout/worker?connectorId=${encodeURIComponent(nextConnector.id)}`,
+      );
+      const workerBody = await workerResponse.json().catch(() => null) as {
+        worker?: ScoutWorker | null;
+        error?: string;
+      } | null;
+      if (!workerResponse.ok) {
+        throw new Error(responseError(workerBody, workerResponse.status));
+      }
+      setWorker(workerBody?.worker ?? null);
+    } catch (loadError) {
+      const message = loadError instanceof Error
+        ? loadError.message
+        : 'Failed to load Scout status';
+      setError(message);
+      settingsLogger.error('Failed to load Scout execution status', { error: message });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void loadScout();
+    });
+  }, [loadScout]);
+
+  async function updateWorker(action: 'generate-setup' | 'disable') {
+    if (!connector) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/scout/worker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectorId: connector.id, action }),
+      });
+      const body = await response.json().catch(() => null) as {
+        worker?: ScoutWorker | null;
+        setupPrompt?: string;
+        error?: string;
+      } | null;
+      if (!response.ok) throw new Error(responseError(body, response.status));
+      setWorker(body?.worker ?? null);
+      setSetupPrompt(action === 'generate-setup' ? body?.setupPrompt ?? '' : '');
+    } catch (updateError) {
+      const message = updateError instanceof Error
+        ? updateError.message
+        : 'Failed to update Scout work pickup';
+      setError(message);
+      settingsLogger.error('Failed to update Scout work pickup', { error: message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copySetupPrompt() {
+    try {
+      await navigator.clipboard.writeText(setupPrompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('The setup prompt could not be copied. Select it and copy it manually.');
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-20 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] text-sm text-[var(--text-muted)]">
+        <Loader2 size={15} className="animate-spin" />
+        Checking Scout
+      </div>
+    );
+  }
+
+  if (error && !connector) {
+    return (
+      <div className="flex flex-col gap-4 rounded-xl border border-red-800/40 bg-red-950/20 p-4 sm:flex-row sm:items-center">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-red-950/40 text-red-300">
+          <AlertTriangle size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-red-200">Scout status unavailable</p>
+          <p className="mt-1 text-xs leading-5 text-red-300">{error}</p>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={() => void loadScout()}>
+          <RefreshCw size={14} />
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (!connector) {
+    return (
+      <div className="flex flex-col gap-4 rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] p-4 sm:flex-row sm:items-center">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
+          <Bot size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium text-[var(--text-primary)]">Scout</p>
+            <Badge variant="secondary">Not connected</Badge>
+            <Badge variant="outline">Scheduled pickup</Badge>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+            Add the Scout connector to receive curated M365 work and optionally claim delegated tasks.
+          </p>
+        </div>
+        <Button asChild type="button" variant="outline" size="sm">
+          <Link href="/settings/connectors?setting=Scout">
+            <Plus size={14} />
+            Add Scout
+          </Link>
+        </Button>
+      </div>
+    );
+  }
+
+  const pickupEnabled = worker?.enabled === true;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
+      <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
+          <Bot size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+              {connector.name}
+            </p>
+            <Badge variant={pickupEnabled ? 'success' : 'secondary'}>
+              {pickupEnabled ? 'Pickup enabled' : 'Pickup off'}
+            </Badge>
+            <Badge variant="outline">Scheduled pickup</Badge>
+            {!connector.enabled && <Badge variant="warning">Connector paused</Badge>}
+          </div>
+          <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+            Claims confirmed Mission Control delegations on Scout&apos;s automation schedule.
+            Inbound M365 sources remain managed by the connector.
+          </p>
+          <Link
+            href="/settings/connectors?setting=Scout"
+            className="mt-1 inline-flex text-[11px] font-medium text-[var(--accent)] underline-offset-4 hover:underline"
+          >
+            Manage Scout connector
+          </Link>
+        </div>
+        <div className="flex items-center gap-2 sm:justify-end">
+          <Toggle
+            enabled={pickupEnabled}
+            disabled={busy}
+            onChange={() => void updateWorker(pickupEnabled ? 'disable' : 'generate-setup')}
+            label={`${pickupEnabled ? 'Disable' : 'Enable'} Scout work pickup`}
+          />
+          {pickupEnabled && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => void updateWorker('generate-setup')}
+            >
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              Rotate setup
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {error && (
+        <div role="status" className="border-t border-red-800/30 bg-red-950/20 px-4 py-3 text-xs text-red-300">
+          {error}
+        </div>
+      )}
+
+      {setupPrompt && (
+        <div className="border-t border-[var(--border)] bg-[var(--surface-0)] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-[var(--text-secondary)]">
+                Finish setup in Scout
+              </p>
+              <p className="mt-1 text-[11px] leading-4 text-amber-300">
+                Pickup is registered in Mission Control, but Scout will not claim work until this
+                private setup prompt is applied.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setSetupPrompt('')}>
+                <EyeOff size={13} />
+                Hide
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => void copySetupPrompt()}>
+                {copied ? <CheckCircle2 size={13} /> : <Copy size={13} />}
+                {copied ? 'Copied' : 'Copy prompt'}
+              </Button>
+            </div>
+          </div>
+          <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-xs leading-5 text-[var(--text-secondary)]">
+            {setupPrompt}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ExecutionDestinationsSection() {
   const [destinations, setDestinations] = useState<ExecutionDestination[]>([]);
   const [loading, setLoading] = useState(true);
@@ -208,6 +475,10 @@ export function ExecutionDestinationsSection() {
   const [deleteTarget, setDeleteTarget] = useState<ExecutionDestination | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showCredential, setShowCredential] = useState(false);
+  const [paperclipDiscovery, setPaperclipDiscovery] = useState<PaperclipDiscovery | null>(null);
+  const [checkingPaperclip, setCheckingPaperclip] = useState(false);
+  const [paperclipCheckError, setPaperclipCheckError] = useState<string | null>(null);
+  const paperclipCheckRef = useRef(0);
 
   const loadDestinations = useCallback(async () => {
     setLoadError(null);
@@ -241,14 +512,97 @@ export function ExecutionDestinationsSection() {
   const formDestination = form?.id
     ? destinations.find((destination) => destination.id === form.id)
     : undefined;
-  const switchingGitHubCredentialSource = Boolean(
-    form?.type === 'copilot-cloud'
-    && form.id
+  const switchingCredentialSource = Boolean(
+    form?.id
     && formDestination?.credentialSource !== form.credentialSource,
   );
 
   function updateForm(patch: Partial<DestinationForm>) {
     setForm((current) => current ? { ...current, ...patch } : current);
+  }
+
+  function openForm(next: DestinationForm | null) {
+    paperclipCheckRef.current += 1;
+    setForm(next);
+    setSaveError(null);
+    setPaperclipDiscovery(null);
+    setPaperclipCheckError(null);
+    setCheckingPaperclip(false);
+    setShowCredential(false);
+  }
+
+  function updatePaperclipConnection(patch: Partial<DestinationForm>) {
+    paperclipCheckRef.current += 1;
+    updateForm(patch);
+    setPaperclipDiscovery(null);
+    setPaperclipCheckError(null);
+    setCheckingPaperclip(false);
+  }
+
+  async function requestPaperclipDiscovery(companyId?: string) {
+    if (!form || form.type !== 'paperclip') return null;
+    const response = await fetch('/api/external-agents/paperclip/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: form.endpoint.trim(),
+        destinationId: form.id,
+        companyId,
+        ...(form.credentialSource === 'mission-control' && form.credential.trim()
+          ? { credential: form.credential.trim() }
+          : {}),
+        ...(form.credentialSource === 'deployment-secret' && form.credentialRef.trim()
+          ? { authCredentialRef: form.credentialRef.trim() }
+          : {}),
+      }),
+    });
+    const body = await response.json().catch(() => null) as PaperclipDiscovery | null;
+    if (!response.ok) throw new Error(responseError(body, response.status));
+    return body;
+  }
+
+  async function checkPaperclipConnection(companyId?: string) {
+    if (!form || form.type !== 'paperclip') return;
+    const requestId = ++paperclipCheckRef.current;
+    setCheckingPaperclip(true);
+    setPaperclipCheckError(null);
+    try {
+      const initial = await requestPaperclipDiscovery(companyId);
+      if (!initial || requestId !== paperclipCheckRef.current) return;
+      const selectedCompany = companyId
+        ?? (
+          initial.companies.some(({ id }) => id === form.companyId)
+            ? form.companyId
+            : initial.companies[0]?.id
+        );
+      const discovery = selectedCompany && !companyId
+        ? await requestPaperclipDiscovery(selectedCompany)
+        : initial;
+      if (!discovery || requestId !== paperclipCheckRef.current) return;
+      const selectedAgent = discovery.agents.some(({ id }) => id === form.assigneeAgentId)
+        ? form.assigneeAgentId
+        : discovery.agents[0]?.id ?? '';
+      const selectedProject = discovery.projects.some(({ id }) => id === form.projectId)
+        ? form.projectId
+        : '';
+      const selectedAgentRecord = discovery.agents.find(({ id }) => id === selectedAgent);
+      setPaperclipDiscovery(discovery);
+      updateForm({
+        companyId: selectedCompany ?? '',
+        projectId: selectedProject,
+        assigneeAgentId: selectedAgent,
+        requiredAdapterType: selectedAgentRecord?.adapterType ?? '',
+      });
+    } catch (error) {
+      if (requestId !== paperclipCheckRef.current) return;
+      setPaperclipCheckError(
+        error instanceof Error ? error.message : 'Paperclip connection check failed',
+      );
+    } finally {
+      if (requestId === paperclipCheckRef.current) {
+        setCheckingPaperclip(false);
+      }
+    }
   }
 
   function toggleCapability(capability: Capability) {
@@ -288,10 +642,13 @@ export function ExecutionDestinationsSection() {
       : undefined;
     const credentialRef = form.credentialRef.trim();
     const credential = form.credential.trim();
-    const usesManagedGitHubCredential = form.type === 'copilot-cloud'
-      && form.credentialSource === 'mission-control';
+    const usesManagedCredential = form.credentialSource === 'mission-control';
     const paperclipUsesCredential = form.type === 'paperclip'
-      && Boolean(credentialRef || existing?.hasCredentialReference);
+      && Boolean(
+        credential
+        || credentialRef
+        || existing?.hasCredentialReference,
+      );
     const body = {
       name: form.name.trim(),
       type: form.type,
@@ -302,8 +659,8 @@ export function ExecutionDestinationsSection() {
       authType: form.type === 'copilot-cloud'
         ? 'github-user'
         : paperclipUsesCredential ? 'bearer' : 'none',
-      ...(usesManagedGitHubCredential && credential ? { credential } : {}),
-      ...(!usesManagedGitHubCredential && credentialRef
+      ...(usesManagedCredential && credential ? { credential } : {}),
+      ...(!usesManagedCredential && credentialRef
         ? { authCredentialRef: credentialRef }
         : {}),
       ...(form.type === 'paperclip' && !paperclipUsesCredential
@@ -346,7 +703,7 @@ export function ExecutionDestinationsSection() {
       );
       const responseBody = await response.json().catch(() => null);
       if (!response.ok) throw new Error(responseError(responseBody, response.status));
-      setForm(null);
+      openForm(null);
       await loadDestinations();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save destination';
@@ -390,7 +747,7 @@ export function ExecutionDestinationsSection() {
         throw new Error(responseError(body, response.status));
       }
       setDeleteTarget(null);
-      if (form?.id === deleteTarget.id) setForm(null);
+      if (form?.id === deleteTarget.id) openForm(null);
       await loadDestinations();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to delete destination';
@@ -422,7 +779,7 @@ export function ExecutionDestinationsSection() {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setForm(emptyForm('paperclip'))}
+              onClick={() => openForm(emptyForm('paperclip'))}
             >
               <Plus size={14} />
               Paperclip route
@@ -430,7 +787,7 @@ export function ExecutionDestinationsSection() {
             <Button
               type="button"
               size="sm"
-              onClick={() => setForm(emptyForm('copilot-cloud'))}
+              onClick={() => openForm(emptyForm('copilot-cloud'))}
             >
               <Plus size={14} />
               GitHub Copilot Cloud
@@ -438,6 +795,8 @@ export function ExecutionDestinationsSection() {
           </div>
         )}
       </div>
+
+      <ScoutDestinationCard />
 
       {loadError && (
         <div
@@ -465,11 +824,12 @@ export function ExecutionDestinationsSection() {
         <div className="rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-5 py-8 text-center">
           <Bot size={24} className="mx-auto text-[var(--text-muted)]" />
           <p className="mt-3 text-sm font-medium text-[var(--text-primary)]">
-            No execution destinations yet
+            No direct execution destinations yet
           </p>
           <p className="mx-auto mt-1 max-w-lg text-xs leading-5 text-[var(--text-muted)]">
             Add GitHub Copilot Cloud for GitHub-hosted Agent Tasks or bind a validated Paperclip
-            route. Nothing is transmitted until a delegation preview is reviewed and confirmed.
+            route. Scout scheduled pickup is shown separately above. Nothing is transmitted until
+            a delegation preview is reviewed and confirmed.
           </p>
         </div>
       ) : destinations.length > 0 ? (
@@ -519,8 +879,7 @@ export function ExecutionDestinationsSection() {
                     variant="ghost"
                     size="icon"
                     onClick={() => {
-                      setSaveError(null);
-                      setForm(editForm(destination));
+                      openForm(editForm(destination));
                     }}
                     aria-label={`Edit ${destination.name}`}
                   >
@@ -555,8 +914,8 @@ export function ExecutionDestinationsSection() {
               </h4>
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
                 {form.type === 'copilot-cloud'
-                  ? 'Use a GitHub personal access token here, just like a GitHub Issues connector. Mission Control validates it with GitHub and never returns it to the browser.'
-                  : 'The company, project, assignee, and adapter binding is validated now and cannot be changed during delegation.'}
+                  ? 'Use a fine-grained GitHub personal access token. Mission Control validates it with GitHub, stores it server-side, and never returns it to the browser.'
+                  : 'Check the Paperclip URL and credential first, then choose route defaults from the validated options. Delegation can override these defaults for one dispatch.'}
               </p>
             </div>
             <Badge variant="outline">
@@ -576,67 +935,63 @@ export function ExecutionDestinationsSection() {
                 className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
               />
             </Field>
-            {form.type === 'copilot-cloud' ? (
-              <Field label="Credential source" htmlFor="destination-credential-source">
-                <Select
-                  value={form.credentialSource}
-                  onValueChange={(value) => updateForm({
+            <Field label="Credential source" htmlFor="destination-credential-source">
+              <Select
+                value={form.credentialSource}
+                onValueChange={(value) => {
+                  const update = {
                     credentialSource: value as DestinationForm['credentialSource'],
                     credential: '',
                     credentialRef: '',
-                  })}
-                >
-                  <SelectTrigger id="destination-credential-source" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="mission-control">
-                      Personal access token
-                    </SelectItem>
-                    <SelectItem value="deployment-secret">
-                      Deployment secret reference
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            ) : (
-              <Field
-                label="Credential reference"
-                htmlFor="destination-credential"
-                hint={form.id
-                  ? 'Leave blank to keep the current server-side reference.'
-                  : 'Optional only for a trusted local Paperclip endpoint.'}
+                  };
+                  if (form.type === 'paperclip') {
+                    updatePaperclipConnection(update);
+                  } else {
+                    updateForm(update);
+                  }
+                }}
               >
-                <input
-                  id="destination-credential"
-                  maxLength={200}
-                  autoComplete="off"
-                  value={form.credentialRef}
-                  onChange={(event) => updateForm({ credentialRef: event.target.value })}
-                  placeholder={form.id ? 'Current reference is hidden' : 'paperclip-token'}
-                  className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                />
-              </Field>
-            )}
+                <SelectTrigger id="destination-credential-source" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mission-control">
+                    {form.type === 'copilot-cloud'
+                      ? 'Fine-grained personal access token'
+                      : 'Access token'}
+                  </SelectItem>
+                  <SelectItem value="deployment-secret">
+                    Deployment secret reference
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
           </div>
 
-          {form.type === 'copilot-cloud' && form.credentialSource === 'mission-control' && (
+          {form.credentialSource === 'mission-control' && (
             <Field
-              label="Personal access token"
+              label={form.type === 'copilot-cloud' ? 'Fine-grained personal access token' : 'Access token'}
               htmlFor="github-cloud-token"
-              hint={form.id && !switchingGitHubCredentialSource
+              hint={form.id && !switchingCredentialSource
                 ? 'Leave blank to keep the currently stored token.'
-                : 'Required. Use a GitHub user token authorized for Copilot Agent Tasks.'}
+                : form.type === 'copilot-cloud'
+                  ? 'Required. Configure the repository access and permissions listed below.'
+                  : 'Required for remote Paperclip. Trusted local endpoints may be checked without a token.'}
             >
               <div className="relative">
                 <input
                   id="github-cloud-token"
                   type={showCredential ? 'text' : 'password'}
-                  required={!form.id || switchingGitHubCredentialSource}
+                  required={
+                    (form.type === 'copilot-cloud' && !form.id)
+                    || switchingCredentialSource
+                  }
                   autoComplete="new-password"
                   value={form.credential}
-                  onChange={(event) => updateForm({ credential: event.target.value })}
-                  placeholder={form.id && !switchingGitHubCredentialSource
+                  onChange={(event) => form.type === 'paperclip'
+                    ? updatePaperclipConnection({ credential: event.target.value })
+                    : updateForm({ credential: event.target.value })}
+                  placeholder={form.id && !switchingCredentialSource
                     ? 'Current token is hidden'
                     : 'github_pat_...'}
                   className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 pr-10 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
@@ -650,45 +1005,57 @@ export function ExecutionDestinationsSection() {
                   {showCredential ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
-              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                <a
-                  href="https://github.com/settings/personal-access-tokens/new"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
-                >
-                  Create fine-grained token <ExternalLink size={11} />
-                </a>
-                <a
-                  href="https://github.com/settings/tokens/new"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
-                >
-                  Create classic token <ExternalLink size={11} />
-                </a>
-              </div>
+              {form.type === 'copilot-cloud' && (
+                <>
+                  <ul className="mt-2 space-y-1 text-xs leading-5 text-[var(--text-muted)]">
+                    <li>
+                      <span className="font-medium text-[var(--text-secondary)]">Repository access:</span>{' '}
+                      Select only the repositories you will delegate to.
+                    </li>
+                    <li>
+                      <span className="font-medium text-[var(--text-secondary)]">Repository permissions:</span>{' '}
+                      Agent tasks — Read and write; Contents — Read-only; Pull requests — Read-only.
+                    </li>
+                    <li>
+                      <span className="font-medium text-[var(--text-secondary)]">Account permissions:</span>{' '}
+                      None.
+                    </li>
+                  </ul>
+                  <div className="mt-2 text-xs">
+                    <a
+                      href="https://github.com/settings/personal-access-tokens/new"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
+                    >
+                      Create fine-grained token <ExternalLink size={11} />
+                    </a>
+                  </div>
+                </>
+              )}
             </Field>
           )}
 
-          {form.type === 'copilot-cloud' && form.credentialSource === 'deployment-secret' && (
+          {form.credentialSource === 'deployment-secret' && (
             <Field
               label="Deployment secret reference"
               htmlFor="destination-credential"
-              hint={form.id && !switchingGitHubCredentialSource
+              hint={form.id && !switchingCredentialSource
                 ? 'Leave blank to keep the current reference.'
                 : 'Required. Key in MC_EXTERNAL_AGENT_CREDENTIALS_JSON.'}
             >
               <input
                 id="destination-credential"
-                required={!form.id || switchingGitHubCredentialSource}
+                required={!form.id || switchingCredentialSource}
                 maxLength={200}
                 autoComplete="off"
                 value={form.credentialRef}
-                onChange={(event) => updateForm({ credentialRef: event.target.value })}
-                placeholder={form.id && !switchingGitHubCredentialSource
+                onChange={(event) => form.type === 'paperclip'
+                  ? updatePaperclipConnection({ credentialRef: event.target.value })
+                  : updateForm({ credentialRef: event.target.value })}
+                placeholder={form.id && !switchingCredentialSource
                   ? 'Current reference is hidden'
-                  : 'github-agent-user'}
+                  : form.type === 'copilot-cloud' ? 'github-agent-user' : 'paperclip-token'}
                 className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
               />
             </Field>
@@ -724,65 +1091,150 @@ export function ExecutionDestinationsSection() {
 
           {form.type === 'paperclip' && (
             <div className="space-y-4">
-              <Field
-                label="Paperclip API origin"
-                htmlFor="paperclip-endpoint"
-                hint="Use an origin only, without an API path, query, or fragment."
-              >
-                <input
-                  id="paperclip-endpoint"
-                  type="url"
-                  required
-                  value={form.endpoint}
-                  onChange={(event) => updateForm({ endpoint: event.target.value })}
-                  placeholder="https://paperclip.example.com"
-                  className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                />
-              </Field>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Company ID" htmlFor="paperclip-company">
-                  <input
-                    id="paperclip-company"
-                    required
-                    value={form.companyId}
-                    onChange={(event) => updateForm({ companyId: event.target.value })}
-                    placeholder="UUID"
-                    className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                  />
-                </Field>
-                <Field label="Project ID" htmlFor="paperclip-project" hint="Optional route scope.">
-                  <input
-                    id="paperclip-project"
-                    value={form.projectId}
-                    onChange={(event) => updateForm({ projectId: event.target.value })}
-                    placeholder="UUID"
-                    className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                  />
-                </Field>
-                <Field label="Assignee agent ID" htmlFor="paperclip-agent">
-                  <input
-                    id="paperclip-agent"
-                    required
-                    value={form.assigneeAgentId}
-                    onChange={(event) => updateForm({ assigneeAgentId: event.target.value })}
-                    placeholder="UUID"
-                    className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                  />
-                </Field>
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
                 <Field
-                  label="Required adapter type"
-                  htmlFor="paperclip-adapter"
-                  hint="Optional runtime compatibility lock."
+                  label="Paperclip API origin"
+                  htmlFor="paperclip-endpoint"
+                  hint="Use an origin only, without an API path, query, or fragment."
                 >
                   <input
-                    id="paperclip-adapter"
-                    value={form.requiredAdapterType}
-                    onChange={(event) => updateForm({ requiredAdapterType: event.target.value })}
-                    placeholder="claude-local"
+                    id="paperclip-endpoint"
+                    type="url"
+                    required
+                    value={form.endpoint}
+                    onChange={(event) => updatePaperclipConnection({
+                      endpoint: event.target.value,
+                    })}
+                    placeholder="https://paperclip.example.com"
                     className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
                   />
                 </Field>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void checkPaperclipConnection()}
+                  disabled={checkingPaperclip || !form.endpoint.trim()}
+                  className="w-full sm:w-auto"
+                >
+                  {checkingPaperclip
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <RefreshCw size={14} />}
+                  {checkingPaperclip ? 'Checking...' : 'Check connection'}
+                </Button>
               </div>
+              {paperclipCheckError && (
+                <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-800/40 bg-red-950/20 p-3 text-sm text-red-300">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                  <span>{paperclipCheckError}</span>
+                </div>
+              )}
+              {paperclipDiscovery ? (
+                <>
+                  <div className="flex items-center gap-2 rounded-lg border border-emerald-800/40 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300">
+                    <CheckCircle2 size={15} />
+                    Connected
+                    {paperclipDiscovery.health.version
+                      ? ` · Paperclip ${String(paperclipDiscovery.health.version)}`
+                      : ''}
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Default company" htmlFor="paperclip-company">
+                      <Select
+                        value={form.companyId}
+                        onValueChange={(value) => void checkPaperclipConnection(value)}
+                      >
+                        <SelectTrigger id="paperclip-company" className="w-full">
+                          <SelectValue placeholder="Choose a company" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {paperclipDiscovery.companies.map((company) => (
+                            <SelectItem key={company.id} value={company.id}>
+                              {company.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field
+                      label="Default project"
+                      htmlFor="paperclip-project"
+                      hint="Optional. Can be changed for one delegation."
+                    >
+                      <Select
+                        value={form.projectId || '__none__'}
+                        onValueChange={(value) => updateForm({
+                          projectId: value === '__none__' ? '' : value,
+                        })}
+                      >
+                        <SelectTrigger id="paperclip-project" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">No default project</SelectItem>
+                          {paperclipDiscovery.projects.map((project) => (
+                            <SelectItem key={project.id} value={project.id}>
+                              {project.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Default agent" htmlFor="paperclip-agent">
+                      <Select
+                        value={form.assigneeAgentId}
+                        onValueChange={(value) => {
+                          const agent = paperclipDiscovery.agents.find(({ id }) => id === value);
+                          updateForm({
+                            assigneeAgentId: value,
+                            requiredAdapterType: agent?.adapterType ?? '',
+                          });
+                        }}
+                      >
+                        <SelectTrigger id="paperclip-agent" className="w-full">
+                          <SelectValue placeholder="Choose an agent" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {paperclipDiscovery.agents.map((agent) => (
+                            <SelectItem key={agent.id} value={agent.id}>
+                              {agent.name}{agent.title ? ` · ${agent.title}` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field
+                      label="Adapter guard"
+                      htmlFor="paperclip-adapter"
+                      hint="Fail if the selected agent changes runtime."
+                    >
+                      <Select
+                        value={form.requiredAdapterType || '__any__'}
+                        onValueChange={(value) => updateForm({
+                          requiredAdapterType: value === '__any__' ? '' : value,
+                        })}
+                      >
+                        <SelectTrigger id="paperclip-adapter" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__any__">Any adapter</SelectItem>
+                          {[...new Set(paperclipDiscovery.agents
+                            .map(({ adapterType }) => adapterType)
+                            .filter((value): value is string => Boolean(value)))].map((adapter) => (
+                              <SelectItem key={adapter} value={adapter}>
+                                {adapter}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
+                </>
+              ) : (
+                <p className="rounded-lg border border-dashed border-[var(--border-strong)] px-3 py-3 text-xs leading-5 text-[var(--text-muted)]">
+                  Check the connection to load accessible companies, projects, agents, and adapters.
+                </p>
+              )}
             </div>
           )}
 
@@ -884,15 +1336,19 @@ export function ExecutionDestinationsSection() {
             <Button
               type="button"
               variant="ghost"
-              onClick={() => {
-                setForm(null);
-                setSaveError(null);
-              }}
+              onClick={() => openForm(null)}
               disabled={saving}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={saving}>
+            <Button
+              type="submit"
+              disabled={
+                saving
+                || checkingPaperclip
+                || (form.type === 'paperclip' && !form.id && !paperclipDiscovery)
+              }
+            >
               {saving ? <Loader2 size={14} className="animate-spin" /> : null}
               {saving
                 ? 'Validating...'

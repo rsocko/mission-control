@@ -31,6 +31,7 @@ import type {
   TaskDelegationContext,
   TaskDelegationTarget,
 } from '@/lib/external-agents/task-delegation';
+import type { PaperclipProviderConfig } from '@/lib/external-agents/contracts';
 import {
   notifyTaskDelegationUpdated,
   TASK_DELEGATION_OPEN_EVENT,
@@ -44,9 +45,26 @@ interface DelegationPreview {
   previewHash: string;
   processingLocation: string;
   dataClassification: string;
+  classificationExplanation?: string;
+  classificationSources?: NonNullable<
+    TaskDelegationTarget['eligibility'][number]['classificationSources']
+  >;
   disclosedFields: string[];
   allowedActions: string[];
   payloadPreview: Record<string, unknown>;
+}
+
+interface PaperclipOptions {
+  companies: Array<{ id: string; name: string; status: string | null }>;
+  projects: Array<{ id: string; name: string; status: string | null }>;
+  agents: Array<{
+    id: string;
+    name: string;
+    title: string | null;
+    role: string | null;
+    status: string | null;
+    adapterType: string | null;
+  }>;
 }
 
 interface PreviewBatch {
@@ -106,7 +124,12 @@ export function TaskDelegationDialog() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [paperclipOptions, setPaperclipOptions] = useState<PaperclipOptions | null>(null);
+  const [paperclipBinding, setPaperclipBinding] = useState<PaperclipProviderConfig | null>(null);
+  const [loadingPaperclipOptions, setLoadingPaperclipOptions] = useState(false);
+  const [paperclipOptionsError, setPaperclipOptionsError] = useState<string | null>(null);
   const contextRequestRef = useRef(0);
+  const paperclipRequestRef = useRef(0);
 
   const reset = useCallback((ids: string[]) => {
     setTaskIds(ids);
@@ -124,6 +147,10 @@ export function TaskDelegationDialog() {
     setOperationId(crypto.randomUUID());
     setPreviewBatch(null);
     setError(null);
+    setPaperclipOptions(null);
+    setPaperclipBinding(null);
+    setPaperclipOptionsError(null);
+    paperclipRequestRef.current += 1;
   }, []);
 
   useEffect(() => {
@@ -159,7 +186,9 @@ export function TaskDelegationDialog() {
       const next = await response.json() as TaskDelegationContext;
       if (requestId !== contextRequestRef.current || signal.aborted) return;
       setContext(next);
-      const initial = next.targets.length === 1 ? next.targets[0] : null;
+      const eligibleTargets = next.targets.filter((target) =>
+        target.eligibility.some(({ ready }) => ready));
+      const initial = eligibleTargets.length === 1 ? eligibleTargets[0] : null;
       if (initial) {
         setSelectedTargetId(initial.id);
         setAllowedActions(initial.allowedActions);
@@ -202,7 +231,49 @@ export function TaskDelegationDialog() {
     ) {
       setRepository(selectedTarget.repositories[0].repository);
     }
+    if (selectedTarget.type === 'paperclip' && selectedTarget.paperclipBinding) {
+      const binding = {
+        companyId: selectedTarget.paperclipBinding.companyId,
+        assigneeAgentId: selectedTarget.paperclipBinding.assigneeAgentId,
+        ...(selectedTarget.paperclipBinding.projectId
+          ? { projectId: selectedTarget.paperclipBinding.projectId }
+          : {}),
+        ...(selectedTarget.paperclipBinding.requiredAdapterType
+          ? { requiredAdapterType: selectedTarget.paperclipBinding.requiredAdapterType }
+          : {}),
+      };
+      setPaperclipBinding(binding);
+      void loadPaperclipOptions(selectedTarget.id, binding.companyId);
+    } else {
+      paperclipRequestRef.current += 1;
+      setPaperclipBinding(null);
+      setPaperclipOptions(null);
+    }
   }, [selectedTarget]);
+
+  async function loadPaperclipOptions(targetId: string, companyId: string) {
+    const requestId = ++paperclipRequestRef.current;
+    setLoadingPaperclipOptions(true);
+    setPaperclipOptionsError(null);
+    try {
+      const response = await fetch('/api/external-agents/paperclip/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ destinationId: targetId, companyId }),
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const options = await response.json() as PaperclipOptions;
+      if (requestId !== paperclipRequestRef.current) return;
+      setPaperclipOptions(options);
+    } catch (optionsError) {
+      if (requestId !== paperclipRequestRef.current) return;
+      setPaperclipOptionsError(errorMessage(optionsError));
+    } finally {
+      if (requestId === paperclipRequestRef.current) {
+        setLoadingPaperclipOptions(false);
+      }
+    }
+  }
 
   const createPreviews = async () => {
     if (!selectedTarget) return;
@@ -225,6 +296,9 @@ export function TaskDelegationDialog() {
               model: model || undefined,
               createPullRequest,
             }
+            : {}),
+          ...(selectedTarget.type === 'paperclip' && paperclipBinding
+            ? { paperclipBinding }
             : {}),
           maxAttempts,
           timeoutMs: timeoutHours * 60 * 60_000,
@@ -298,6 +372,9 @@ export function TaskDelegationDialog() {
     && ready.length
     && instruction.trim()
     && (!needsRepository || repository)
+    && (selectedTarget.type !== 'paperclip' || Boolean(
+      paperclipBinding?.companyId && paperclipBinding.assigneeAgentId,
+    ))
     && (selectedTarget.type !== 'copilot-cloud' || baseRef.trim()),
   );
 
@@ -385,6 +462,19 @@ export function TaskDelegationDialog() {
                 onMaxAttemptsChange={setMaxAttempts}
                 timeoutHours={timeoutHours}
                 onTimeoutHoursChange={setTimeoutHours}
+                paperclipOptions={paperclipOptions}
+                paperclipBinding={paperclipBinding}
+                onPaperclipBindingChange={setPaperclipBinding}
+                loadingPaperclipOptions={loadingPaperclipOptions}
+                paperclipOptionsError={paperclipOptionsError}
+                onPaperclipCompanyChange={(companyId) => {
+                  if (!selectedTarget.paperclipBinding) return;
+                  setPaperclipBinding({
+                    companyId,
+                    assigneeAgentId: '',
+                  });
+                  void loadPaperclipOptions(selectedTarget.id, companyId);
+                }}
               />
             ) : step === 'review' && selectedTarget && previewBatch ? (
               <ReviewStep
@@ -393,6 +483,8 @@ export function TaskDelegationDialog() {
                 baseRef={baseRef}
                 model={model}
                 createPullRequest={createPullRequest}
+                paperclipBinding={paperclipBinding}
+                paperclipOptions={paperclipOptions}
               />
             ) : null}
 
@@ -512,19 +604,25 @@ function DestinationStep({
       <div className="grid gap-2 sm:grid-cols-2">
         {context.targets.map((target) => {
           const readyCount = target.eligibility.filter(({ ready }) => ready).length;
+          const unavailable = readyCount === 0;
           const selected = target.id === selectedTargetId;
+          const unavailableReason = target.eligibility.find(({ blocker }) => blocker)?.blocker
+            ?? 'No selected tasks are eligible for this destination';
           return (
             <button
               key={target.id}
               type="button"
               role="radio"
               aria-checked={selected}
+              disabled={unavailable}
+              title={unavailable ? unavailableReason : undefined}
               onClick={() => onSelect(target)}
               className={cn(
                 'flex min-h-20 items-center gap-3 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
                 selected
                   ? 'border-[var(--accent-500)] bg-[var(--accent-500)]/10'
                   : 'border-[var(--border)] bg-[var(--surface-0)] hover:bg-[var(--surface-2)]',
+                unavailable && 'cursor-not-allowed opacity-55 hover:bg-[var(--surface-0)]',
               )}
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
@@ -543,6 +641,11 @@ function DestinationStep({
                 )}>
                   {readyCount} of {target.eligibility.length} ready
                 </span>
+                {unavailable && (
+                  <span className="mt-0.5 block text-[11px] leading-4 text-[var(--text-muted)]">
+                    {unavailableReason}
+                  </span>
+                )}
               </span>
             </button>
           );
@@ -571,6 +674,12 @@ function ConfigureStep({
   onMaxAttemptsChange,
   timeoutHours,
   onTimeoutHoursChange,
+  paperclipOptions,
+  paperclipBinding,
+  onPaperclipBindingChange,
+  loadingPaperclipOptions,
+  paperclipOptionsError,
+  onPaperclipCompanyChange,
 }: {
   target: TaskDelegationTarget;
   instruction: string;
@@ -590,31 +699,133 @@ function ConfigureStep({
   onMaxAttemptsChange: (value: number) => void;
   timeoutHours: number;
   onTimeoutHoursChange: (value: number) => void;
+  paperclipOptions: PaperclipOptions | null;
+  paperclipBinding: PaperclipProviderConfig | null;
+  onPaperclipBindingChange: (value: PaperclipProviderConfig) => void;
+  loadingPaperclipOptions: boolean;
+  paperclipOptionsError: string | null;
+  onPaperclipCompanyChange: (companyId: string) => void;
 }) {
   const ready = target.eligibility.filter(({ ready }) => ready);
   const blocked = target.eligibility.filter(({ ready }) => !ready);
   return (
     <div className="space-y-5">
       {target.type === 'paperclip' && target.paperclipBinding && (
-        <section>
-          <h3 className="text-xs font-semibold text-[var(--text-primary)]">Configured route</h3>
-          <dl className="mt-2 grid grid-cols-1 overflow-hidden rounded-lg border border-[var(--border-subtle)] sm:grid-cols-2">
-            {[
-              ['Company', target.paperclipBinding.companyId],
-              ['Project', target.paperclipBinding.projectId ?? 'No project binding'],
-              ['Assignee', target.paperclipBinding.assigneeAgentId],
-              ['Required adapter', target.paperclipBinding.requiredAdapterType ?? 'Any validated adapter'],
-            ].map(([label, value]) => (
-              <div key={label} className="border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-2 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 sm:[&:nth-child(odd)]:border-r">
-                <dt className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{label}</dt>
-                <dd className="mt-1 break-all font-mono text-[11px] text-[var(--text-secondary)]">{value}</dd>
+        <section className="space-y-3">
+          <div>
+            <h3 className="text-xs font-semibold text-[var(--text-primary)]">Paperclip route</h3>
+            <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+              Settings provides the defaults. Changes here apply only to this delegation.
+            </p>
+          </div>
+          {paperclipOptionsError && (
+            <div role="alert" className="flex gap-2 rounded-lg border border-red-800/40 bg-red-950/20 p-3 text-xs text-red-300">
+              <AlertTriangle size={14} className="shrink-0" />
+              {paperclipOptionsError}
+            </div>
+          )}
+          {loadingPaperclipOptions && !paperclipOptions ? (
+            <div className="flex min-h-20 items-center justify-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] text-xs text-[var(--text-muted)]">
+              <Loader2 size={14} className="animate-spin" />
+              Loading Paperclip choices...
+            </div>
+          ) : paperclipOptions && paperclipBinding ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="text-xs font-medium text-[var(--text-secondary)]">
+                Company
+                <Select
+                  value={paperclipBinding.companyId}
+                  onValueChange={onPaperclipCompanyChange}
+                >
+                  <SelectTrigger aria-label="Paperclip company" className="mt-1.5 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paperclipOptions.companies.map((company) => (
+                      <SelectItem key={company.id} value={company.id}>
+                        {company.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            ))}
-          </dl>
-          <p className="mt-2 flex gap-1.5 text-[11px] leading-relaxed text-[var(--text-muted)]">
-            <Lock size={12} className="mt-0.5 shrink-0" />
-            Route IDs are setup-bound and cannot be changed for this dispatch.
-          </p>
+              <div className="text-xs font-medium text-[var(--text-secondary)]">
+                Project
+                <Select
+                  value={paperclipBinding.projectId ?? '__none__'}
+                  onValueChange={(value) => onPaperclipBindingChange({
+                    ...paperclipBinding,
+                    ...(value === '__none__' ? { projectId: undefined } : { projectId: value }),
+                  })}
+                >
+                  <SelectTrigger aria-label="Paperclip project" className="mt-1.5 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No project</SelectItem>
+                    {paperclipOptions.projects.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="text-xs font-medium text-[var(--text-secondary)]">
+                Agent
+                <Select
+                  value={paperclipBinding.assigneeAgentId}
+                  onValueChange={(value) => {
+                    const agent = paperclipOptions.agents.find(({ id }) => id === value);
+                    onPaperclipBindingChange({
+                      ...paperclipBinding,
+                      assigneeAgentId: value,
+                      ...(agent?.adapterType
+                        ? { requiredAdapterType: agent.adapterType }
+                        : { requiredAdapterType: undefined }),
+                    });
+                  }}
+                >
+                  <SelectTrigger aria-label="Paperclip agent" className="mt-1.5 w-full">
+                    <SelectValue placeholder="Choose an agent" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paperclipOptions.agents.map((agent) => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        {agent.name}{agent.title ? ` · ${agent.title}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="text-xs font-medium text-[var(--text-secondary)]">
+                Adapter guard
+                <Select
+                  value={paperclipBinding.requiredAdapterType ?? '__any__'}
+                  onValueChange={(value) => onPaperclipBindingChange({
+                    ...paperclipBinding,
+                    ...(value === '__any__'
+                      ? { requiredAdapterType: undefined }
+                      : { requiredAdapterType: value }),
+                  })}
+                >
+                  <SelectTrigger aria-label="Paperclip adapter guard" className="mt-1.5 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__any__">Any adapter</SelectItem>
+                    {[...new Set(paperclipOptions.agents
+                      .map(({ adapterType }) => adapterType)
+                      .filter((value): value is string => Boolean(value)))].map((adapter) => (
+                        <SelectItem key={adapter} value={adapter}>
+                          {adapter}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          ) : null}
         </section>
       )}
 
@@ -843,15 +1054,22 @@ function ReviewStep({
   baseRef,
   model,
   createPullRequest,
+  paperclipBinding,
+  paperclipOptions,
 }: {
   target: TaskDelegationTarget;
   batch: PreviewBatch;
   baseRef: string;
   model: string;
   createPullRequest: boolean;
+  paperclipBinding: PaperclipProviderConfig | null;
+  paperclipOptions: PaperclipOptions | null;
 }) {
   const fields = [...new Set(batch.previews.flatMap(({ disclosedFields }) => disclosedFields))];
   const actions = [...new Set(batch.previews.flatMap(({ allowedActions }) => allowedActions))];
+  const classifications = [...new Set(
+    batch.previews.map(({ dataClassification }) => dataClassification),
+  )];
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
@@ -873,11 +1091,53 @@ function ReviewStep({
             <div><dt className="text-[var(--text-muted)]">Pull request</dt><dd className="mt-0.5 text-[var(--text-secondary)]">{createPullRequest ? 'Create' : 'Do not create'}</dd></div>
           </dl>
         )}
+        {target.type === 'paperclip' && paperclipBinding && (
+          <dl className="mt-3 grid gap-2 border-t border-[var(--border-subtle)] pt-3 text-xs sm:grid-cols-3">
+            <div>
+              <dt className="text-[var(--text-muted)]">Company</dt>
+              <dd className="mt-0.5 text-[var(--text-secondary)]">
+                {paperclipOptions?.companies.find(({ id }) =>
+                  id === paperclipBinding.companyId)?.name ?? paperclipBinding.companyId}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[var(--text-muted)]">Project</dt>
+              <dd className="mt-0.5 text-[var(--text-secondary)]">
+                {paperclipBinding.projectId
+                  ? paperclipOptions?.projects.find(({ id }) =>
+                    id === paperclipBinding.projectId)?.name ?? paperclipBinding.projectId
+                  : 'No project'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[var(--text-muted)]">Agent</dt>
+              <dd className="mt-0.5 text-[var(--text-secondary)]">
+                {paperclipOptions?.agents.find(({ id }) =>
+                  id === paperclipBinding.assigneeAgentId)?.name
+                  ?? paperclipBinding.assigneeAgentId}
+              </dd>
+            </div>
+          </dl>
+        )}
       </section>
 
       <section>
         <h3 className="text-xs font-semibold text-[var(--text-primary)]">Disclosure and authorization</h3>
-        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <div className="mt-2 grid gap-3 sm:grid-cols-3">
+          <div>
+            <p className="text-[11px] text-[var(--text-muted)]">Data handling</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {classifications.map((classification) => (
+                <span
+                  key={classification}
+                  className="inline-flex items-center gap-1 rounded-full border border-amber-700/40 bg-amber-950/30 px-2 py-0.5 text-xs font-medium capitalize text-amber-300"
+                >
+                  <Lock size={9} />
+                  {classification.replace('-', ' ')}
+                </span>
+              ))}
+            </div>
+          </div>
           <div>
             <p className="text-[11px] text-[var(--text-muted)]">Disclosed fields</p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -899,6 +1159,22 @@ function ReviewStep({
               ))}
             </div>
           </div>
+        </div>
+        <div className="mt-3 space-y-1.5">
+          {batch.previews.map((preview) => (
+            <p
+              key={preview.dispatchId}
+              className="text-[11px] leading-relaxed text-[var(--text-muted)]"
+            >
+              <span className="font-medium text-[var(--text-secondary)]">
+                {preview.classificationExplanation
+                  ?? `${preview.dataClassification.replace('-', ' ')} source policy`}.
+              </span>{' '}
+              {(preview.classificationSources ?? []).map((source) => (
+                `${source.connectorName}: ${source.effective.replace('-', ' ')}`
+              )).join(' · ')}
+            </p>
+          ))}
         </div>
       </section>
 

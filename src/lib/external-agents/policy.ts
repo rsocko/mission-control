@@ -8,6 +8,12 @@ import type {
   ExternalAgentType,
 } from './contracts';
 import { DEFAULT_AI_ROUTING_POLICY } from '@/lib/ai/sensitivity-policy';
+import { loadAIProviderConfiguration } from '@/lib/ai/provider-configuration-service';
+import {
+  connectorClassificationSummary,
+  DATA_CLASSIFICATION_LABELS,
+} from '@/lib/connectors/data-classification';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 import { redactPushText } from '@/lib/notifications/push-text';
 import { ExternalAgentError } from './errors';
 
@@ -199,6 +205,79 @@ export function resolveDispatchClassification(
     );
   }
   return requested;
+}
+
+export interface DispatchClassificationSource {
+  connectorType: string;
+  connectorInstanceId: string;
+}
+
+export interface DispatchClassificationSourceSummary {
+  connectorType: string;
+  connectorInstanceId: string;
+  connectorName: string;
+  baseline: AgentDataClassification;
+  effective: AgentDataClassification;
+  override: AgentDataClassification | null;
+}
+
+export interface DispatchClassificationResolution {
+  classification: AgentDataClassification;
+  sources: DispatchClassificationSourceSummary[];
+  explanation: string;
+}
+
+export async function resolveDispatchClassificationForSources(
+  inputSources: DispatchClassificationSource[],
+  requested?: AgentDataClassification,
+): Promise<DispatchClassificationResolution> {
+  const [{ routingPolicy }, overview] = await Promise.all([
+    loadAIProviderConfiguration(),
+    getConnectorManagementPersistence().then((persistence) => persistence.getOverview(false)),
+  ]);
+  const connectorsById = new Map(
+    overview.connectors.map((connector) => [connector.id, connector]),
+  );
+  const uniqueSources = [...new Map(inputSources.map((source) => [
+    `${source.connectorInstanceId}:${source.connectorType}`,
+    source,
+  ])).values()];
+  const sources = uniqueSources.map((source) => {
+    const connector = source.connectorInstanceId
+      ? connectorsById.get(source.connectorInstanceId)
+      : null;
+    const summary = connectorClassificationSummary(
+      source.connectorType,
+      connector?.settings,
+      routingPolicy,
+    );
+    return {
+      ...source,
+      connectorName: connector?.name || source.connectorType,
+      ...summary,
+    };
+  });
+  const detected = sources.reduce<AgentDataClassification>((current, source) =>
+    CLASSIFICATION_RANK[source.effective] > CLASSIFICATION_RANK[current]
+      ? source.effective
+      : current
+  , 'standard');
+  if (requested && CLASSIFICATION_RANK[requested] < CLASSIFICATION_RANK[detected]) {
+    throw new ExternalAgentError(
+      `Data classification cannot be relaxed from ${detected} to ${requested}`,
+      'CLASSIFICATION_DOWNGRADE',
+      403,
+    );
+  }
+  const classification = requested ?? detected;
+  const determiningSources = sources.filter(
+    (source) => source.effective === detected,
+  );
+  const sourceNames = [...new Set(determiningSources.map(({ connectorName }) => connectorName))];
+  const explanation = requested && requested !== detected
+    ? `Raised to ${DATA_CLASSIFICATION_LABELS[requested]} for this delegation`
+    : `${DATA_CLASSIFICATION_LABELS[classification]} because of ${sourceNames.join(', ') || 'the active source policy'}`;
+  return { classification, sources, explanation };
 }
 
 export function assertClassificationAllowed(

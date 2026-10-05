@@ -507,7 +507,7 @@ export async function getTaskDelegationContext(
   });
   const syncErrors: TaskDelegationContext['syncErrors'] = [];
   for (const dispatch of dispatches) {
-    if (!ACTIVE_STATUSES.includes(dispatch.status) || !dispatch.providerTaskId) continue;
+    if (!dispatch.providerTaskId) continue;
     try {
       await reconcileDispatch(dispatch.id);
     } catch (error) {

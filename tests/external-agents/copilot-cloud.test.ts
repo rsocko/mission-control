@@ -342,4 +342,85 @@ describe('GitHub Copilot cloud agent adapter', () => {
       },
     });
   });
+
+  it('resolves a pull request by its reported branch when GitHub omits the global ID', async () => {
+    process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+      [credentialReference]: 'user-token',
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-empty-global-id')) {
+        return response({
+          id: 'task-empty-global-id',
+          state: 'completed',
+          sessions: [{ model: 'gpt-5.4', base_ref: 'main' }],
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 4748906850, global_id: '' },
+            },
+            {
+              provider: 'github',
+              type: 'branch',
+              data: { head_ref: 'copilot/dispatch-123', base_ref: 'main' },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        const body = JSON.parse(String(init?.body)) as {
+          variables?: Record<string, unknown>;
+        };
+        expect(body.variables).toMatchObject({
+          owner: 'octo',
+          name: 'example',
+          headRef: 'copilot/dispatch-123',
+          baseRef: 'main',
+        });
+        return response({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [{
+                  __typename: 'PullRequest',
+                  url: 'https://github.com/octo/example/pull/42',
+                  headRefName: 'copilot/dispatch-123',
+                  headRefOid: '0123456789abcdef',
+                  headRepository: { nameWithOwner: 'octo/example' },
+                  baseRefName: 'main',
+                  baseRepository: { nameWithOwner: 'octo/example' },
+                }],
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    const result = await getCopilotCloudTask(
+      agent(),
+      'octo/example',
+      'main',
+      'task-empty-global-id',
+      fetcher,
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      providerDetail: {
+        outputWarning: undefined,
+      },
+      result: {
+        codeChange: {
+          repository: 'octo/example',
+          baseRef: 'main',
+          branchRef: 'copilot/dispatch-123',
+          commitSha: '0123456789abcdef',
+          pullRequestUrl: 'https://github.com/octo/example/pull/42',
+        },
+      },
+    });
+  });
 });

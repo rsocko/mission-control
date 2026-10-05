@@ -19,6 +19,11 @@ Changes limited to `docs/**` or the standard root documentation files
 `PRODUCT.md`, `SECURITY.md`, and `SUPPORT.md`) still report every required
 status check but skip dependency installation, lint, tests, and builds. Empty,
 mixed, or unclassifiable change sets fail closed and run the complete suite.
+Single-runner validations report directly through their required check names,
+avoiding a second runner allocation after the work completes. Lightweight
+aggregate jobs remain only where one required context summarizes shared work:
+sharded test suites, workflow policy within lint, and the worker-runtime smoke
+test within the production build.
 
 CI restores npm's content-addressed download cache on every run. Only the
 successful workflow-policy job on `main` may save a cache, so parallel jobs do

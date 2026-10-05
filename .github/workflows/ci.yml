@@ -96,12 +96,9 @@ jobs:
           echo "vendor_changed=${vendor_changed}" >> "$GITHUB_OUTPUT"
           echo "workflow_policy_changed=${workflow_policy_changed}" >> "$GITHUB_OUTPUT"
 
-  impeccable-worker:
-    name: Impeccable integration worker
-    if: >-
-      always() &&
-      (needs.changes.result != 'success' ||
-      needs.changes.outputs.impeccable_changed != 'false')
+  impeccable:
+    name: Impeccable integration
+    if: always()
     needs:
       - changes
     runs-on: ubuntu-24.04
@@ -110,34 +107,32 @@ jobs:
       contents: read
     steps:
       - name: Check out source
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.impeccable_changed != 'false'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
       - name: Set up Node.js
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.impeccable_changed != 'false'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
       - name: Validate Impeccable integration
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.impeccable_changed != 'false'
         run: node scripts/validate-impeccable.mjs
 
-  impeccable:
-    name: Impeccable integration
-    if: always()
-    needs:
-      - changes
-      - impeccable-worker
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Confirm Impeccable integration result
+      - name: Confirm Impeccable classification
+        if: always()
         env:
           CHANGE_REQUIRED: ${{ needs.changes.outputs.impeccable_changed }}
           CLASSIFICATION_RESULT: ${{ needs.changes.result }}
-          WORKER_RESULT: ${{ needs.impeccable-worker.result }}
         shell: bash
         run: |
           if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
@@ -145,17 +140,13 @@ jobs:
             exit 1
           fi
           case "${CHANGE_REQUIRED}" in
-            true) test "${WORKER_RESULT}" = "success" ;;
-            false) test "${WORKER_RESULT}" = "skipped" ;;
+            true|false) ;;
             *) echo "Invalid Impeccable classification." >&2; exit 1 ;;
           esac
 
-  lint-worker:
-    name: Lint worker
-    if: >-
-      always() &&
-      (needs.changes.result != 'success' ||
-      needs.changes.outputs.docs_only != 'true')
+  lint:
+    name: Lint
+    if: always()
     needs:
       - changes
     runs-on: ubuntu-24.04
@@ -164,16 +155,25 @@ jobs:
       contents: read
     steps:
       - name: Check out source
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
            persist-credentials: false
 
       - name: Set up Node.js
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
       - name: Restore npm download cache
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
         id: npm-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -183,27 +183,36 @@ jobs:
             npm-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install dependencies
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
         run: npm ci --no-audit --no-fund
 
       - name: Verify Generic Graph vendor snapshot
         if: >-
+          needs.changes.outputs.docs_only != 'true' &&
           (needs.changes.result != 'success' ||
           needs.changes.outputs.vendor_changed != 'false')
         run: npm run vendor:verify
 
       - name: Test Generic Graph vendor tooling
         if: >-
+          needs.changes.outputs.docs_only != 'true' &&
           (needs.changes.result != 'success' ||
           needs.changes.outputs.vendor_changed != 'false')
         run: npm run test:vendor
 
       - name: Validate workflow policy
         if: >-
+          needs.changes.outputs.docs_only != 'true' &&
           (needs.changes.result != 'success' ||
           needs.changes.outputs.workflow_policy_changed != 'false')
         run: npm run ci:workflows
 
       - name: Run lint
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
         run: npm run lint
 
       - name: Save npm download cache
@@ -216,64 +225,11 @@ jobs:
           path: ~/.npm
           key: ${{ steps.npm-cache.outputs.cache-primary-key }}
 
-  production-build-worker:
-    name: Production build worker
-    if: >-
-      always() &&
-      (needs.changes.result != 'success' ||
-      needs.changes.outputs.docs_only != 'true')
-    needs:
-      - changes
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    permissions:
-      contents: read
-    steps:
-      - name: Check out source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-
-      - name: Restore npm download cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.npm
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            npm-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Run production build
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-        run: npm run build
-
-      - name: Smoke-test production worker runtime
-        run: MC_WORKER_RUNTIME_SOURCE=.next/standalone node scripts/smoke-sync-worker-runtime.mjs
-
-  lint:
-    name: Lint
-    if: always()
-    needs:
-      - changes
-      - lint-worker
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Confirm lint result
+      - name: Confirm lint classification
+        if: always()
         env:
           CLASSIFICATION_RESULT: ${{ needs.changes.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
-          WORKER_RESULT: ${{ needs.lint-worker.result }}
         shell: bash
         run: |
           if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
@@ -281,8 +237,7 @@ jobs:
             exit 1
           fi
           case "${DOCS_ONLY}" in
-            true) test "${WORKER_RESULT}" = "skipped" ;;
-            false) test "${WORKER_RESULT}" = "success" ;;
+            true|false) ;;
             *) echo "Invalid documentation classification." >&2; exit 1 ;;
           esac
 
@@ -291,17 +246,63 @@ jobs:
     if: always()
     needs:
       - changes
-      - production-build-worker
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
-      - name: Confirm production build result
+      - name: Check out source
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Restore npm download cache
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install dependencies
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Run production build
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npm run build
+
+      - name: Smoke-test production worker runtime
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.changes.outputs.docs_only != 'true'
+        run: MC_WORKER_RUNTIME_SOURCE=.next/standalone node scripts/smoke-sync-worker-runtime.mjs
+
+      - name: Confirm production build classification
+        if: always()
         env:
           CLASSIFICATION_RESULT: ${{ needs.changes.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
-          WORKER_RESULT: ${{ needs.production-build-worker.result }}
         shell: bash
         run: |
           if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
@@ -309,8 +310,7 @@ jobs:
             exit 1
           fi
           case "${DOCS_ONLY}" in
-            true) test "${WORKER_RESULT}" = "skipped" ;;
-            false) test "${WORKER_RESULT}" = "success" ;;
+            true|false) ;;
             *) echo "Invalid documentation classification." >&2; exit 1 ;;
           esac
 
@@ -319,7 +319,7 @@ jobs:
     if: always()
     needs:
       - changes
-      - lint-worker
+      - lint
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -329,7 +329,7 @@ jobs:
         env:
           CLASSIFICATION_RESULT: ${{ needs.changes.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
-          WORKER_RESULT: ${{ needs.lint-worker.result }}
+          VALIDATION_RESULT: ${{ needs.lint.result }}
         shell: bash
         run: |
           if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
@@ -337,8 +337,7 @@ jobs:
             exit 1
           fi
           case "${DOCS_ONLY}" in
-            true) test "${WORKER_RESULT}" = "skipped" ;;
-            false) test "${WORKER_RESULT}" = "success" ;;
+            true|false) test "${VALIDATION_RESULT}" = "success" ;;
             *) echo "Invalid documentation classification." >&2; exit 1 ;;
           esac
 
@@ -347,7 +346,7 @@ jobs:
     if: always()
     needs:
       - changes
-      - production-build-worker
+      - production-build
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -357,7 +356,7 @@ jobs:
         env:
           CLASSIFICATION_RESULT: ${{ needs.changes.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
-          WORKER_RESULT: ${{ needs.production-build-worker.result }}
+          VALIDATION_RESULT: ${{ needs.production-build.result }}
         shell: bash
         run: |
           if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
@@ -365,8 +364,7 @@ jobs:
             exit 1
           fi
           case "${DOCS_ONLY}" in
-            true) test "${WORKER_RESULT}" = "skipped" ;;
-            false) test "${WORKER_RESULT}" = "success" ;;
+            true|false) test "${VALIDATION_RESULT}" = "success" ;;
             *) echo "Invalid documentation classification." >&2; exit 1 ;;
           esac
 
@@ -440,8 +438,8 @@ jobs:
             *) echo "Invalid documentation classification." >&2; exit 1 ;;
           esac
 
-  postgres-route-sentinel-worker:
-    name: PostgreSQL route sentinel worker
+  postgres-route-sentinel:
+    name: PostgreSQL route sentinel
     if: >-
       always() &&
       (needs.changes.result != 'success' ||
@@ -467,34 +465,6 @@ jobs:
         env:
           MC_DATABASE_BACKEND: postgres
         run: npm run test:postgres-route-sentinel
-
-  postgres-route-sentinel:
-    name: PostgreSQL route sentinel
-    if: always()
-    needs:
-      - changes
-      - postgres-route-sentinel-worker
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Confirm PostgreSQL route sentinel passed
-        env:
-          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
-          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
-          WORKER_RESULT: ${{ needs.postgres-route-sentinel-worker.result }}
-        shell: bash
-        run: |
-          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
-             echo "Change classification did not succeed." >&2
-             exit 1
-          fi
-          case "${DOCS_ONLY}" in
-             true) test "${WORKER_RESULT}" = "skipped" ;;
-             false) test "${WORKER_RESULT}" = "success" ;;
-             *) echo "Invalid documentation classification." >&2; exit 1 ;;
-          esac
 
   persisted-state-compatibility:
     name: Persisted-state compatibility

@@ -251,6 +251,8 @@ export interface IconPickerProps {
   color?: string;
   /** Called when color changes */
   onColorChange?: (color: string) => void;
+  /** Extra className on the picker container */
+  className?: string;
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────────────────────
@@ -261,6 +263,7 @@ export const IconPicker = memo(function IconPicker({
   onClose,
   color,
   onColorChange,
+  className,
 }: IconPickerProps) {
   const [query, setQuery] = useState('');
   const [sourceGroups, setSourceGroups] = useState<SourceGroup[]>([]);
@@ -432,7 +435,12 @@ export const IconPicker = memo(function IconPicker({
   }, [displayGroups]);
 
   return (
-    <div className="flex flex-col w-[420px] max-h-[520px] bg-[var(--surface-1)] rounded-xl border border-[var(--border)] shadow-2xl overflow-hidden">
+    <div
+      className={cn(
+        'flex w-[420px] max-h-[520px] flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)] shadow-2xl',
+        className,
+      )}
+    >
       {/* ── Search Bar (always visible, top of picker) ────── */}
       <div className="input-glow flex items-center gap-1.5 px-3 py-2.5 border-b border-[var(--border)] bg-[var(--surface-0)]">
         <Search size={15} className="shrink-0 text-[var(--text-muted)]" />
@@ -523,7 +531,7 @@ export const IconPicker = memo(function IconPicker({
       )}
 
       {/* ── Results / Browse Area ────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {/* Browse emoji (full picker widget) — shown when user clicks "Browse all emoji" */}
         {showBrowseEmoji && !isSearching ? (
           <div>

@@ -76,6 +76,15 @@ describe('TaskDelegationDialog disclosure review', () => {
             previewHash: 'preview-hash',
             processingLocation: 'github-hosted',
             dataClassification: 'standard',
+            classificationExplanation: 'Standard because GitHub Issues uses the active policy default',
+            classificationSources: [{
+              connectorType: 'github-issues',
+              connectorInstanceId: 'github-primary',
+              connectorName: 'GitHub Issues',
+              baseline: 'standard',
+              effective: 'standard',
+              override: null,
+            }],
             disclosedFields: [
               'instruction',
               'alwaysInstructions',
@@ -106,6 +115,9 @@ describe('TaskDelegationDialog disclosure review', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
 
     expect(await screen.findByText('Effective reviewed context')).toBeInTheDocument();
+    expect(screen.getByText(/Standard because GitHub Issues uses the active policy default/))
+      .toBeInTheDocument();
+    expect(screen.getByText(/GitHub Issues: standard/)).toBeInTheDocument();
     fireEvent.click(screen.getByText('Canonical parser task'));
     await waitFor(() => {
       expect(screen.getByText((_, element) =>

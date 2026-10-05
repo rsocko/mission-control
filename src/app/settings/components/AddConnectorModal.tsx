@@ -32,6 +32,15 @@ import {
   currencySchema,
   supportedCurrencyCodes,
 } from '@/lib/finance/currency';
+import {
+  connectorBaselineClassification,
+  type ConnectorDataClassification,
+} from '@/lib/connectors/data-classification';
+import {
+  ConnectorClassificationBadge,
+  ConnectorClassificationProvider,
+  ConnectorClassificationSetup,
+} from './ConnectorDataClassification';
 
 const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
   process.env.NODE_ENV,
@@ -41,13 +50,24 @@ const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
 
 type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-home-assistant' | 'configure-rymessage' | 'configure-other';
 
-function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+function AddConnectorModal({
+  onClose,
+  onAdded,
+  classificationDefaults,
+}: {
+  onClose: () => void;
+  onAdded: () => void;
+  classificationDefaults?: Record<string, ConnectorDataClassification>;
+}) {
   const [step, setStep] = useState<ConnectorSetupStep>('select');
   const [selectedType, setSelectedType] = useState<string | null>(null);
+  const [classificationOverride, setClassificationOverride] =
+    useState<ConnectorDataClassification | null>(null);
   useCloseOnEscape(onClose);
 
   function handleSelectType(type: string) {
     setSelectedType(type);
+    setClassificationOverride(null);
     if (type === 'microsoft-todo') {
       setStep('configure-mstodo');
     } else if (type === 'microsoft-todo-work') {
@@ -95,10 +115,23 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
         }`}
         onClick={e => e.stopPropagation()}
       >
-        <AnimatePresence mode="wait">
+        <ConnectorClassificationProvider override={classificationOverride}>
+          {selectedType && step !== 'select' && step !== 'configure-other' && (
+            <ConnectorClassificationSetup
+              connectorType={selectedType}
+              baseline={classificationDefaults?.[selectedType]}
+              override={classificationOverride}
+              onChange={setClassificationOverride}
+            />
+          )}
+          <AnimatePresence mode="wait">
           {step === 'select' && (
             <motion.div key="select" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.15 }}>
-              <ConnectorTypeSelector onSelect={handleSelectType} onClose={onClose} />
+              <ConnectorTypeSelector
+                onSelect={handleSelectType}
+                onClose={onClose}
+                classificationDefaults={classificationDefaults}
+              />
             </motion.div>
           )}
           {step === 'configure-mstodo' && (
@@ -167,7 +200,8 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
               </div>
             </motion.div>
           )}
-        </AnimatePresence>
+          </AnimatePresence>
+        </ConnectorClassificationProvider>
       </motion.div>
     </motion.div>
   );
@@ -754,7 +788,15 @@ function TierOption({
   );
 }
 
-function ConnectorTypeSelector({ onSelect, onClose }: { onSelect: (type: string) => void; onClose: () => void }) {
+function ConnectorTypeSelector({
+  onSelect,
+  onClose,
+  classificationDefaults,
+}: {
+  onSelect: (type: string) => void;
+  onClose: () => void;
+  classificationDefaults?: Record<string, ConnectorDataClassification>;
+}) {
   return (
     <>
       <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">Add Connector</h3>
@@ -775,6 +817,14 @@ function ConnectorTypeSelector({ onSelect, onClose }: { onSelect: (type: string)
                 <span className="text-sm font-medium text-[var(--text-primary)]">{ct.name}</span>
               </div>
               <p className="text-xs text-[var(--text-tertiary)] ml-10">{ct.description}</p>
+              <div className="ml-10 mt-2">
+                <ConnectorClassificationBadge
+                  classification={
+                    classificationDefaults?.[ct.type]
+                    ?? connectorBaselineClassification(ct.type)
+                  }
+                />
+              </div>
             </motion.button>
         ))}
       </motion.div>

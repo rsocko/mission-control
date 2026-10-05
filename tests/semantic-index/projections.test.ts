@@ -53,6 +53,7 @@ function makeTask(overrides: Partial<SemanticTaskSource> = {}): SemanticTaskSour
     effort: 3,
     dueDate: '2026-09-01T00:00:00.000Z',
     connectorType: 'github-issues',
+    connectorInstanceId: 'github-primary',
     sourceListName: 'Platform',
     parentId: null,
     isChecklistItem: false,
@@ -343,6 +344,22 @@ describe('task projection', () => {
     });
     expect(restricted.sensitivity).toBe('restricted');
     expect(restricted.contentFingerprint).not.toBe(standardDocument.contentFingerprint);
+  });
+
+  it('passes a connector override into sensitivity resolution', () => {
+    const seen: Array<string | null | undefined> = [];
+    const document = projectTask(makeTask({
+      dataClassificationOverride: 'restricted',
+    }), {
+      resolveSensitivity: ({ connectorType, dataClassificationOverride }) => {
+        seen.push(dataClassificationOverride);
+        return connectorType === 'mission-control'
+          ? 'standard'
+          : dataClassificationOverride ?? 'standard';
+      },
+    });
+    expect(seen).toEqual(['restricted', null]);
+    expect(document.sensitivity).toBe('restricted');
   });
 
   it('widens sourceUpdatedAt to the completion timestamp', () => {

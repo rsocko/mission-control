@@ -555,7 +555,7 @@ export function ExecutionDestinationsSection() {
               </h4>
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
                 {form.type === 'copilot-cloud'
-                  ? 'Use a GitHub personal access token here, just like a GitHub Issues connector. Mission Control validates it with GitHub and never returns it to the browser.'
+                  ? 'Use a fine-grained GitHub personal access token. Mission Control validates it with GitHub, stores it server-side, and never returns it to the browser.'
                   : 'The company, project, assignee, and adapter binding is validated now and cannot be changed during delegation.'}
               </p>
             </div>
@@ -591,7 +591,7 @@ export function ExecutionDestinationsSection() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="mission-control">
-                      Personal access token
+                      Fine-grained personal access token
                     </SelectItem>
                     <SelectItem value="deployment-secret">
                       Deployment secret reference
@@ -622,11 +622,11 @@ export function ExecutionDestinationsSection() {
 
           {form.type === 'copilot-cloud' && form.credentialSource === 'mission-control' && (
             <Field
-              label="Personal access token"
+              label="Fine-grained personal access token"
               htmlFor="github-cloud-token"
               hint={form.id && !switchingGitHubCredentialSource
                 ? 'Leave blank to keep the currently stored token.'
-                : 'Required. Use a GitHub user token authorized for Copilot Agent Tasks.'}
+                : 'Required. Configure the repository access and permissions listed below.'}
             >
               <div className="relative">
                 <input
@@ -650,7 +650,21 @@ export function ExecutionDestinationsSection() {
                   {showCredential ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
-              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              <ul className="mt-2 space-y-1 text-xs leading-5 text-[var(--text-muted)]">
+                <li>
+                  <span className="font-medium text-[var(--text-secondary)]">Repository access:</span>{' '}
+                  Select only the repositories you will delegate to.
+                </li>
+                <li>
+                  <span className="font-medium text-[var(--text-secondary)]">Repository permissions:</span>{' '}
+                  Agent tasks — Read and write; Contents — Read-only; Pull requests — Read-only.
+                </li>
+                <li>
+                  <span className="font-medium text-[var(--text-secondary)]">Account permissions:</span>{' '}
+                  None.
+                </li>
+              </ul>
+              <div className="mt-2 text-xs">
                 <a
                   href="https://github.com/settings/personal-access-tokens/new"
                   target="_blank"
@@ -658,14 +672,6 @@ export function ExecutionDestinationsSection() {
                   className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
                 >
                   Create fine-grained token <ExternalLink size={11} />
-                </a>
-                <a
-                  href="https://github.com/settings/tokens/new"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
-                >
-                  Create classic token <ExternalLink size={11} />
                 </a>
               </div>
             </Field>

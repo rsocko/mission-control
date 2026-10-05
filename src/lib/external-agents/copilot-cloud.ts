@@ -79,6 +79,29 @@ interface PullRequestReference {
   base?: { ref?: string; repo?: { full_name?: string } };
 }
 
+function parsePullRequestReference(value: unknown): PullRequestReference | undefined {
+  const node = record(value);
+  if (node?.__typename !== 'PullRequest') return undefined;
+  const headRepository = record(node.headRepository);
+  const baseRepository = record(node.baseRepository);
+  return {
+    url: text(node.url),
+    head: {
+      ref: text(node.headRefName),
+      sha: text(node.headRefOid),
+      ...(headRepository
+        ? { repo: { full_name: text(headRepository.nameWithOwner) } }
+        : {}),
+    },
+    base: {
+      ref: text(node.baseRefName),
+      ...(baseRepository
+        ? { repo: { full_name: text(baseRepository.nameWithOwner) } }
+        : {}),
+    },
+  };
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -493,6 +516,9 @@ async function pullRequestReference(
 }> {
   const branch = task.artifacts?.find((artifact) => artifact.type === 'branch')?.data;
   const pull = task.artifacts?.find((artifact) => artifact.type === 'pull')?.data;
+  const session = task.sessions?.at(-1);
+  const reportedHeadRef = branch?.head_ref ?? session?.head_ref;
+  const reportedBaseRef = branch?.base_ref ?? session?.base_ref ?? target.baseRef;
   let pullRequest: PullRequestReference | undefined;
   let warning: string | undefined;
   if (pull?.global_id) {
@@ -513,33 +539,70 @@ async function pullRequestReference(
         }`,
         { id: pull.global_id },
       );
-      const node = record(response.data?.node);
-      if (response.errors?.length || node?.__typename !== 'PullRequest') {
+      const resolvedPullRequest = parsePullRequestReference(response.data?.node);
+      if (response.errors?.length || !resolvedPullRequest) {
         warning = 'GitHub reported a pull request output, but its details are unavailable.';
       } else {
-        const headRepository = record(node.headRepository);
-        const baseRepository = record(node.baseRepository);
-        pullRequest = {
-          url: text(node.url),
-          head: {
-            ref: text(node.headRefName),
-            sha: text(node.headRefOid),
-            ...(headRepository
-              ? { repo: { full_name: text(headRepository.nameWithOwner) } }
-              : {}),
-          },
-          base: {
-            ref: text(node.baseRefName),
-            ...(baseRepository
-              ? { repo: { full_name: text(baseRepository.nameWithOwner) } }
-              : {}),
-          },
-        };
+        pullRequest = resolvedPullRequest;
       }
     } catch {
       warning = 'GitHub reported a pull request output, but its details could not be loaded.';
     }
-  } else if (pull && task.state === 'completed') {
+  }
+  if (pull && !pullRequest && task.state === 'completed' && reportedHeadRef) {
+    try {
+      const [owner, name] = target.fullName.split('/');
+      const response = await client.graphqlFetchAny(
+        `query AgentTaskPullRequestByBranch(
+          $owner: String!,
+          $name: String!,
+          $headRef: String!,
+          $baseRef: String!
+        ) {
+          repository(owner: $owner, name: $name) {
+            pullRequests(
+              first: 2,
+              headRefName: $headRef,
+              baseRefName: $baseRef,
+              states: [OPEN, CLOSED, MERGED]
+            ) {
+              nodes {
+                __typename
+                url
+                headRefName
+                headRefOid
+                baseRefName
+                headRepository { nameWithOwner }
+                baseRepository { nameWithOwner }
+              }
+            }
+          }
+        }`,
+        {
+          owner,
+          name,
+          headRef: reportedHeadRef,
+          baseRef: reportedBaseRef,
+        },
+      );
+      const repository = record(response.data?.repository);
+      const pullRequests = record(repository?.pullRequests);
+      const nodes = Array.isArray(pullRequests?.nodes) ? pullRequests.nodes : [];
+      const matches = nodes
+        .map(parsePullRequestReference)
+        .filter((entry): entry is PullRequestReference => Boolean(entry));
+      if (!response.errors?.length && matches.length === 1) {
+        pullRequest = matches[0];
+        warning = undefined;
+      } else if (!warning) {
+        warning = 'GitHub reported a pull request output, but its details are unavailable.';
+      }
+    } catch {
+      if (!warning) {
+        warning = 'GitHub reported a pull request output, but its details could not be loaded.';
+      }
+    }
+  } else if (pull && !pullRequest && task.state === 'completed') {
     warning = 'GitHub reported a pull request output without a resolvable global ID.';
   }
   if (pullRequest) {
@@ -554,9 +617,8 @@ async function pullRequestReference(
       );
     }
   }
-  const session = task.sessions?.at(-1);
-  const branchRef = pullRequest?.head?.ref ?? branch?.head_ref ?? session?.head_ref;
-  const baseRef = pullRequest?.base?.ref ?? branch?.base_ref ?? session?.base_ref ?? target.baseRef;
+  const branchRef = pullRequest?.head?.ref ?? reportedHeadRef;
+  const baseRef = pullRequest?.base?.ref ?? reportedBaseRef;
   return {
     ...((branchRef || pullRequest?.url)
       ? {

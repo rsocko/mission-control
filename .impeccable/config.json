@@ -111,6 +111,18 @@
         "value": "11px",
         "createdAt": "2026-09-27T22:30:20.144Z",
         "reason": "Established compact mobile navigation label size documented by the incumbent component"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "10px",
+        "createdAt": "2026-10-05T04:03:24.588Z",
+        "reason": "DESIGN.md explicitly defines 9-11px caption text for timestamps, counts, and tertiary operational metadata"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "16px",
+        "createdAt": "2026-10-05T04:03:24.644Z",
+        "reason": "DESIGN.md explicitly defines 16px card titles and section hierarchy"
       }
     ]
   },

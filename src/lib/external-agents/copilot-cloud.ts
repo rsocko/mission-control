@@ -549,7 +549,7 @@ async function pullRequestReference(
       warning = 'GitHub reported a pull request output, but its details could not be loaded.';
     }
   }
-  if (pull && !pullRequest && reportedHeadRef) {
+  if (pull && !pullRequest && task.state === 'completed' && reportedHeadRef) {
     try {
       const [owner, name] = target.fullName.split('/');
       const response = await client.graphqlFetchAny(
@@ -602,7 +602,7 @@ async function pullRequestReference(
         warning = 'GitHub reported a pull request output, but its details could not be loaded.';
       }
     }
-  } else if (pull && !pullRequest) {
+  } else if (pull && !pullRequest && task.state === 'completed') {
     warning = 'GitHub reported a pull request output without a resolvable global ID.';
   }
   if (pullRequest) {
@@ -649,7 +649,7 @@ function providerDetail(
     createdAt: task.created_at,
     updatedAt: task.updated_at,
     artifacts: task.artifacts,
-    outputWarning,
+    ...(outputWarning ? { outputWarning } : {}),
   }, { maxBytes: 128 * 1024 }) as Record<string, unknown>;
 }
 

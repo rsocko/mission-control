@@ -75,8 +75,20 @@ interface IconifySearchResult {
   total: number;
 }
 
+interface IconifyIconSet {
+  width?: number;
+  height?: number;
+  icons: Record<string, {
+    body: string;
+    width?: number;
+    height?: number;
+  }>;
+}
+
 const searchCache = new Map<string, string[]>();
+const iconMaskCache = new Map<string, string>();
 const MAX_CACHE_SIZE = 200;
+const MAX_ICON_MASK_CACHE_SIZE = 1_000;
 
 async function searchIconify(
   query: string,
@@ -91,7 +103,9 @@ async function searchIconify(
     const res = await fetch(url);
     if (!res.ok) return [];
     const data: IconifySearchResult = await res.json();
-    const names = data.icons.map((icon) => icon.replace(`${prefix}:`, ''));
+    const names = data.icons
+      .map((icon) => icon.replace(`${prefix}:`, ''))
+      .slice(0, limit);
     // Evict oldest entries if cache is full
     if (searchCache.size >= MAX_CACHE_SIZE) {
       const firstKey = searchCache.keys().next().value;
@@ -102,6 +116,54 @@ async function searchIconify(
   } catch {
     return [];
   }
+}
+
+function iconMaskCacheKey(source: IconSource, name: string) {
+  return `${source}:${name}`;
+}
+
+function createIconMaskUrl(body: string, width: number, height: number) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">${body}</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+async function loadIconifyMasks(
+  source: IconSource,
+  names: string[],
+): Promise<Record<string, string>> {
+  if (!['lucide', 'mdi', 'ph'].includes(source) || names.length === 0) return {};
+
+  const missingNames = names.filter((name) => !iconMaskCache.has(iconMaskCacheKey(source, name)));
+  if (missingNames.length > 0) {
+    try {
+      const params = new URLSearchParams({ icons: missingNames.join(',') });
+      const res = await fetch(`https://api.iconify.design/${source}.json?${params}`);
+      if (res.ok) {
+        const data: IconifyIconSet = await res.json();
+        for (const [name, icon] of Object.entries(data.icons)) {
+          const width = icon.width || data.width || 24;
+          const height = icon.height || data.height || 24;
+          if (iconMaskCache.size >= MAX_ICON_MASK_CACHE_SIZE) {
+            const firstKey = iconMaskCache.keys().next().value;
+            if (firstKey) iconMaskCache.delete(firstKey);
+          }
+          iconMaskCache.set(
+            iconMaskCacheKey(source, name),
+            createIconMaskUrl(icon.body, width, height),
+          );
+        }
+      }
+    } catch {
+      // The picker remains usable for emoji, app, and brand icons if Iconify is unavailable.
+    }
+  }
+
+  return Object.fromEntries(
+    names.flatMap((name) => {
+      const mask = iconMaskCache.get(iconMaskCacheKey(source, name));
+      return mask ? [[iconMaskCacheKey(source, name), mask]] : [];
+    }),
+  );
 }
 
 // ─── DASHBOARD ICONS TREE ───────────────────────────────────────────────────
@@ -201,6 +263,7 @@ export const IconPicker = memo(function IconPicker({
   const [dashIcons, setDashIcons] = useState<string[]>([]);
   const [siIcons, setSiIcons] = useState<string[]>([]);
   const [showBrowseEmoji, setShowBrowseEmoji] = useState(false);
+  const [iconMasks, setIconMasks] = useState<Record<string, string>>({});
 
   // Load service icon lists lazily
   useEffect(() => {
@@ -340,6 +403,25 @@ export const IconPicker = memo(function IconPicker({
 
   const isSearching = query.trim().length > 0;
   const displayGroups = isSearching ? sourceGroups : defaultDisplay;
+
+  useEffect(() => {
+    let active = true;
+    const iconifyGroups = displayGroups.filter((group) =>
+      ['lucide', 'mdi', 'ph'].includes(group.source),
+    );
+    if (iconifyGroups.length === 0) return;
+
+    void Promise.all(
+      iconifyGroups.map((group) => loadIconifyMasks(group.source, group.icons)),
+    ).then((groups) => {
+      if (!active) return;
+      setIconMasks((current) => Object.assign({}, current, ...groups));
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [displayGroups]);
 
   return (
     <div className="flex flex-col w-[420px] max-h-[520px] bg-[var(--surface-1)] rounded-xl border border-[var(--border)] shadow-2xl overflow-hidden">
@@ -509,6 +591,7 @@ export const IconPicker = memo(function IconPicker({
                       name={name}
                       source={group.source}
                       color={group.source !== 'dash' && group.source !== 'si' ? color : undefined}
+                      maskUrl={iconMasks[iconMaskCacheKey(group.source, name)]}
                       onClick={() => handleIconSelect(group.source, name)}
                     />
                   )
@@ -528,15 +611,18 @@ const IconGridItem = memo(function IconGridItem({
   name,
   source,
   color,
+  maskUrl,
   onClick,
 }: {
   name: string;
   source: IconSource;
   color?: string;
+  maskUrl?: string;
   onClick: () => void;
 }) {
   const parsed: ParsedIcon = { source, name };
   const url = getIconUrl(parsed, color);
+  const isIconifyIcon = ['lucide', 'mdi', 'ph'].includes(source);
 
   return (
     <button
@@ -545,7 +631,29 @@ const IconGridItem = memo(function IconGridItem({
       className="flex flex-col items-center justify-center p-1.5 rounded-lg hover:bg-[var(--surface-2)] transition-colors duration-75 group"
       title={`${source}:${name}`}
     >
-      {url ? (
+      {isIconifyIcon && maskUrl ? (
+        <span
+          role="img"
+          aria-label={`${source}:${name}`}
+          className="inline-block h-[22px] w-[22px] flex-shrink-0"
+          style={{
+            backgroundColor: color || 'currentColor',
+            maskImage: `url("${maskUrl}")`,
+            WebkitMaskImage: `url("${maskUrl}")`,
+            maskPosition: 'center',
+            WebkitMaskPosition: 'center',
+            maskRepeat: 'no-repeat',
+            WebkitMaskRepeat: 'no-repeat',
+            maskSize: 'contain',
+            WebkitMaskSize: 'contain',
+          }}
+        />
+      ) : isIconifyIcon ? (
+        <span
+          aria-hidden="true"
+          className="h-[22px] w-[22px] animate-pulse rounded bg-[var(--surface-3)]"
+        />
+      ) : url ? (
         <img
           src={url}
           alt={name}

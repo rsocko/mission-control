@@ -136,6 +136,9 @@ export interface TaskDelegationSummary {
   locality: ExternalAgentLocality;
   canonicalState: AgentDispatchStatus;
   displayState: TaskDelegationDisplayState;
+  providerState: string | null;
+  providerUpdatedAt: string | null;
+  outputWarning: string | null;
   latestProgress: string | null;
   blocker: string | null;
   pendingApproval: boolean;
@@ -293,6 +296,9 @@ function assignmentSummary(
     locality: dispatch.executionLocality,
     canonicalState: dispatch.status,
     displayState: taskDelegationDisplayState(dispatch, detail),
+    providerState: text(detail?.state) ?? text(detail?.providerState),
+    providerUpdatedAt: text(detail?.updatedAt),
+    outputWarning: text(detail?.outputWarning),
     latestProgress: text(progress?.message)
       ?? (dispatch.status === 'waiting_for_user' ? 'Waiting for your input or approval.' : null),
     blocker: firstBlocker(detail),

@@ -5,6 +5,7 @@ import {
   mapGitHubAgentTaskState,
 } from '@/lib/external-agents/copilot-cloud';
 import type { ExternalAgent } from '@/lib/external-agents/registry';
+import type { TransportDispatch } from '@/lib/external-agents/transports';
 
 const credentialReference = 'copilot-cloud-test';
 
@@ -48,10 +49,18 @@ function response(body: unknown, status = 200, headers: HeadersInit = {}) {
   return Response.json(body, { status, headers });
 }
 
-function dispatch() {
+function dispatch(): TransportDispatch {
   return {
     dispatchId: 'dispatch-123',
     attempt: 1,
+    scope: {
+      taskIds: ['task-1'],
+      repository: 'octo/example',
+      defaultBranch: 'main',
+      baseRef: 'main',
+      model: 'gpt-5.4',
+      createPullRequest: true,
+    },
     payload: {
       instruction: 'Fix the failing parser',
       alwaysInstructions: 'Run focused tests before handoff.',
@@ -218,7 +227,11 @@ describe('GitHub Copilot cloud agent adapter', () => {
           state: 'completed',
           sessions: [{ model: 'gpt-5.4', base_ref: 'main', head_ref: 'copilot/fix-parser' }],
           artifacts: [
-            { provider: 'github', type: 'pull', data: { id: 42 } },
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 987654321, global_id: 'PR_kwDOExample' },
+            },
             {
               provider: 'github',
               type: 'branch',
@@ -227,15 +240,19 @@ describe('GitHub Copilot cloud agent adapter', () => {
           ],
         });
       }
-      if (url.endsWith('/pulls/42')) {
+      if (url.endsWith('/graphql')) {
         return response({
-          html_url: 'https://github.com/octo/example/pull/42',
-          head: {
-            ref: 'copilot/fix-parser',
-            sha: '0123456789abcdef',
-            repo: { full_name: 'octo/example' },
+          data: {
+            node: {
+              __typename: 'PullRequest',
+              url: 'https://github.com/octo/example/pull/42',
+              headRefName: 'copilot/fix-parser',
+              headRefOid: '0123456789abcdef',
+              headRepository: { nameWithOwner: 'octo/example' },
+              baseRefName: 'main',
+              baseRepository: { nameWithOwner: 'octo/example' },
+            },
           },
-          base: { ref: 'main', repo: { full_name: 'octo/example' } },
         });
       }
       throw new Error(`Unexpected GitHub request: ${url}`);
@@ -259,6 +276,68 @@ describe('GitHub Copilot cloud agent adapter', () => {
           branchRef: 'copilot/fix-parser',
           commitSha: '0123456789abcdef',
           pullRequestUrl: 'https://github.com/octo/example/pull/42',
+        },
+      },
+    });
+    expect(fetcher).not.toHaveBeenCalledWith(
+      expect.stringContaining('/pulls/987654321'),
+      expect.anything(),
+    );
+  });
+
+  it('keeps provider state updates when pull request enrichment is unavailable', async () => {
+    process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+      [credentialReference]: 'user-token',
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-closed')) {
+        return response({
+          id: 'task-closed',
+          state: 'completed',
+          updated_at: '2026-10-05T13:00:00Z',
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 987654321, global_id: 'PR_missing' },
+            },
+            {
+              provider: 'github',
+              type: 'branch',
+              data: { head_ref: 'copilot/closed-session', base_ref: 'main' },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        return response({
+          data: { node: null },
+          errors: [{ message: 'Could not resolve to a node' }],
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    const result = await getCopilotCloudTask(
+      agent(),
+      'octo/example',
+      'main',
+      'task-closed',
+      fetcher,
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      providerState: 'completed',
+      providerDetail: {
+        outputWarning: 'GitHub reported a pull request output, but its details are unavailable.',
+      },
+      result: {
+        codeChange: {
+          repository: 'octo/example',
+          baseRef: 'main',
+          branchRef: 'copilot/closed-session',
         },
       },
     });

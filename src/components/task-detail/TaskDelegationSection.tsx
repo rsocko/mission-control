@@ -15,7 +15,7 @@ import {
   Send,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import {
@@ -102,16 +102,53 @@ async function responseError(response: Response) {
   return body?.error ?? `Request failed (${response.status})`;
 }
 
-function StateLine({ assignment }: { assignment: TaskDelegationSummary }) {
+function StateLine({
+  assignment,
+  stale = false,
+}: {
+  assignment: TaskDelegationSummary;
+  stale?: boolean;
+}) {
   const presentation = STATE_PRESENTATION[assignment.displayState];
   const Icon = presentation.icon;
   return (
     <div className="flex min-w-0 items-center gap-2">
       <Icon size={14} className={cn('shrink-0', presentation.className)} aria-hidden="true" />
-      <span className={cn('font-medium', presentation.className)}>{presentation.label}</span>
+      <span className={cn('font-medium', presentation.className)}>
+        {stale ? `Last known: ${presentation.label}` : presentation.label}
+      </span>
       <span className="truncate text-[var(--text-muted)]">· {assignment.targetName}</span>
     </div>
   );
+}
+
+function stateDescription(assignment: TaskDelegationSummary) {
+  if (assignment.blocker) return assignment.blocker;
+  if (assignment.errorMessage) return assignment.errorMessage;
+  if (assignment.latestProgress) return assignment.latestProgress;
+  if (assignment.pendingApproval) return 'Approval is waiting for your review.';
+  switch (assignment.displayState) {
+    case 'preview':
+      return 'Review the assignment before sending it to the provider.';
+    case 'queued':
+      return 'GitHub accepted the task and is waiting to start it.';
+    case 'running':
+      return 'The provider reports that work is in progress.';
+    case 'idle':
+      return 'The provider has not reported active work.';
+    case 'waiting_for_user':
+      return 'The provider is waiting for your input.';
+    case 'blocked':
+      return 'The provider reports that work cannot continue.';
+    case 'failed':
+      return 'The provider reported that the run failed.';
+    case 'timed_out':
+      return 'The provider reported that the run exceeded its time limit.';
+    case 'cancelled':
+      return 'The run is no longer active.';
+    case 'completed':
+      return 'The provider reported that the run completed.';
+  }
 }
 
 function outputLink(assignment: TaskDelegationSummary) {
@@ -169,6 +206,9 @@ export function TaskDelegationSection({
   }, [load, taskId]);
 
   const current = context?.assignments?.[0] ?? null;
+  const syncError = current
+    ? context?.syncErrors.find((item) => item.dispatchId === current.dispatchId) ?? null
+    : null;
   const relevantOutput = current ? outputLink(current) : null;
   const OutputIcon = relevantOutput?.icon;
 
@@ -222,15 +262,20 @@ export function TaskDelegationSection({
             </div>
           ) : current ? (
             <div className="space-y-2 text-xs">
-              <StateLine assignment={current} />
+              <StateLine assignment={current} stale={Boolean(syncError)} />
               <p className="leading-relaxed text-[var(--text-secondary)]">
-                {current.blocker
-                  ?? current.errorMessage
-                  ?? current.latestProgress
-                  ?? (current.pendingApproval
-                    ? 'Approval is waiting for your review.'
-                    : 'Provider state is current.')}
+                {stateDescription(current)}
               </p>
+              {syncError && (
+                <p className="text-amber-200" role="status">
+                  State refresh failed: {syncError.message}
+                </p>
+              )}
+              {current.outputWarning && (
+                <p className="text-amber-200" role="status">
+                  {current.outputWarning}
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--text-muted)]">
                 <span>{current.locality.replaceAll('-', ' ')}</span>
                 {current.baseRef && <span>Base {current.baseRef}</span>}
@@ -268,6 +313,7 @@ export function TaskDelegationSection({
       {current && (
         <TaskDelegationRunDialog
           assignment={current}
+          syncError={syncError?.message ?? null}
           open={detailsOpen}
           onOpenChange={setDetailsOpen}
           onUpdated={load}
@@ -279,11 +325,13 @@ export function TaskDelegationSection({
 
 function TaskDelegationRunDialog({
   assignment,
+  syncError,
   open,
   onOpenChange,
   onUpdated,
 }: {
   assignment: TaskDelegationSummary;
+  syncError: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onUpdated: () => Promise<void>;
@@ -293,8 +341,11 @@ function TaskDelegationRunDialog({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [interactionAnswer, setInteractionAnswer] = useState('');
+  const refreshInFlight = useRef(false);
 
   const load = useCallback(async (refreshProvider = false) => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     setLoading(true);
     setError(null);
     try {
@@ -312,16 +363,32 @@ function TaskDelegationRunDialog({
       const body = await response.json() as { dispatch: RunDetail };
       setDetail(body.dispatch);
       setInteractionAnswer('');
+      if (refreshProvider) await onUpdated();
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Run details could not be loaded');
     } finally {
+      refreshInFlight.current = false;
       setLoading(false);
     }
-  }, [assignment.dispatchId]);
+  }, [assignment.dispatchId, onUpdated]);
 
   useEffect(() => {
-    if (open) void load();
-  }, [load, open]);
+    if (!open) return;
+    const initialRefresh = window.setTimeout(() => void load(true), 0);
+    const active = [
+      'queued',
+      'running',
+      'idle',
+      'waiting_for_user',
+      'blocked',
+    ].includes(assignment.displayState);
+    if (!active) return () => window.clearTimeout(initialRefresh);
+    const interval = window.setInterval(() => void load(true), 30_000);
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+    };
+  }, [assignment.displayState, load, open]);
 
   const act = async (action: 'cancel' | 'stop_tracking' | 'retry') => {
     setBusyAction(action);
@@ -426,13 +493,37 @@ function TaskDelegationRunDialog({
               <div className="grid gap-5 md:grid-cols-[minmax(0,1.2fr)_minmax(260px,.8fr)]">
                 <div className="min-w-0 space-y-5">
                   <section>
-                    <StateLine assignment={assignment} />
+                    <StateLine assignment={assignment} stale={Boolean(syncError || error)} />
                     <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-                      {assignment.blocker
-                        ?? assignment.errorMessage
-                        ?? assignment.latestProgress
-                        ?? 'No additional provider progress is available.'}
+                      {stateDescription(assignment)}
                     </p>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                      {assignment.providerState && (
+                        <>Provider state: <span className="font-mono">{assignment.providerState}</span> · </>
+                      )}
+                      Last synced{' '}
+                      <time dateTime={assignment.updatedAt}>
+                        {new Date(assignment.updatedAt).toLocaleString()}
+                      </time>
+                      {assignment.providerUpdatedAt && (
+                        <>
+                          {' '}· Provider updated{' '}
+                          <time dateTime={assignment.providerUpdatedAt}>
+                            {new Date(assignment.providerUpdatedAt).toLocaleString()}
+                          </time>
+                        </>
+                      )}
+                    </p>
+                    {syncError && (
+                      <p className="mt-2 text-xs text-amber-200" role="status">
+                        Automatic refresh failed: {syncError}
+                      </p>
+                    )}
+                    {assignment.outputWarning && (
+                      <p className="mt-2 text-xs text-amber-200" role="status">
+                        {assignment.outputWarning}
+                      </p>
+                    )}
                   </section>
 
                   {interaction && (
@@ -595,6 +686,7 @@ function TaskDelegationRunDialog({
                         ['Base ref', assignment.baseRef],
                         ['Model', assignment.model ?? 'Auto'],
                         ['Attempt', `${Math.max(assignment.attemptCount, 1)} of ${assignment.maxAttempts}`],
+                        ['Provider state', assignment.providerState],
                         ['Provider task', assignment.providerTaskId],
                         ['Run ID', assignment.runId],
                         ['Dispatch ID', assignment.dispatchId],

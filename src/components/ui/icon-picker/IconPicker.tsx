@@ -16,7 +16,9 @@ import {
   POPULAR_SIMPLE_ICONS,
   serializeIconValue,
   getIconUrl,
+  getSimpleIconNames,
 } from './types';
+import { IconRenderer } from './IconRenderer';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
@@ -83,6 +85,11 @@ interface IconifyIconSet {
     width?: number;
     height?: number;
   }>;
+  aliases?: Record<string, {
+    parent: string;
+    width?: number;
+    height?: number;
+  }>;
 }
 
 const searchCache = new Map<string, string[]>();
@@ -130,7 +137,7 @@ function createIconMaskUrl(body: string, width: number, height: number) {
 async function loadIconifyMasks(
   source: IconSource,
   names: string[],
-): Promise<Record<string, string>> {
+): Promise<Record<string, string | null>> {
   if (!['lucide', 'mdi', 'ph'].includes(source) || names.length === 0) return {};
 
   const missingNames = names.filter((name) => !iconMaskCache.has(iconMaskCacheKey(source, name)));
@@ -140,9 +147,13 @@ async function loadIconifyMasks(
       const res = await fetch(`https://api.iconify.design/${source}.json?${params}`);
       if (res.ok) {
         const data: IconifyIconSet = await res.json();
-        for (const [name, icon] of Object.entries(data.icons)) {
-          const width = icon.width || data.width || 24;
-          const height = icon.height || data.height || 24;
+        for (const name of missingNames) {
+          const alias = data.aliases?.[name];
+          const icon = data.icons[name] ?? (alias ? data.icons[alias.parent] : undefined);
+          if (!icon) continue;
+
+          const width = alias?.width || icon.width || data.width || 24;
+          const height = alias?.height || icon.height || data.height || 24;
           if (iconMaskCache.size >= MAX_ICON_MASK_CACHE_SIZE) {
             const firstKey = iconMaskCache.keys().next().value;
             if (firstKey) iconMaskCache.delete(firstKey);
@@ -159,10 +170,10 @@ async function loadIconifyMasks(
   }
 
   return Object.fromEntries(
-    names.flatMap((name) => {
-      const mask = iconMaskCache.get(iconMaskCacheKey(source, name));
-      return mask ? [[iconMaskCacheKey(source, name), mask]] : [];
-    }),
+    names.map((name) => [
+      iconMaskCacheKey(source, name),
+      iconMaskCache.get(iconMaskCacheKey(source, name)) ?? null,
+    ]),
   );
 }
 
@@ -198,17 +209,14 @@ async function getSimpleIcons(): Promise<string[]> {
   if (simpleIconsCache) return simpleIconsCache;
 
   try {
-    // Use the official simple-icons npm CDN which always has the latest data
     const res = await fetch(
-      'https://cdn.jsdelivr.net/npm/simple-icons/_data/simple-icons.json',
+      'https://api.iconify.design/collection?prefix=simple-icons',
     );
     if (!res.ok) return POPULAR_SIMPLE_ICONS;
     const data = await res.json();
-    const names = (data.icons || []).map((icon: { slug?: string; title: string }) =>
-      icon.slug || icon.title.toLowerCase().replace(/[^a-z0-9]/g, ''),
-    );
-    simpleIconsCache = names;
-    return names;
+    const names = getSimpleIconNames(data);
+    simpleIconsCache = names.length > 0 ? names : POPULAR_SIMPLE_ICONS;
+    return simpleIconsCache;
   } catch {
     return POPULAR_SIMPLE_ICONS;
   }
@@ -263,7 +271,7 @@ export const IconPicker = memo(function IconPicker({
   const [dashIcons, setDashIcons] = useState<string[]>([]);
   const [siIcons, setSiIcons] = useState<string[]>([]);
   const [showBrowseEmoji, setShowBrowseEmoji] = useState(false);
-  const [iconMasks, setIconMasks] = useState<Record<string, string>>({});
+  const [iconMasks, setIconMasks] = useState<Record<string, string | null>>({});
 
   // Load service icon lists lazily
   useEffect(() => {
@@ -617,7 +625,7 @@ const IconGridItem = memo(function IconGridItem({
   name: string;
   source: IconSource;
   color?: string;
-  maskUrl?: string;
+  maskUrl?: string | null;
   onClick: () => void;
 }) {
   const parsed: ParsedIcon = { source, name };
@@ -648,10 +656,22 @@ const IconGridItem = memo(function IconGridItem({
             WebkitMaskSize: 'contain',
           }}
         />
-      ) : isIconifyIcon ? (
+      ) : isIconifyIcon && maskUrl === undefined ? (
         <span
           aria-hidden="true"
           className="h-[22px] w-[22px] animate-pulse rounded bg-[var(--surface-3)]"
+        />
+      ) : isIconifyIcon ? (
+        <IconRenderer
+          value={`${source}:${name}`}
+          size={22}
+          color={color}
+          fallback={(
+            <span
+              aria-hidden="true"
+              className="h-[22px] w-[22px] rounded bg-[var(--surface-3)]"
+            />
+          )}
         />
       ) : url ? (
         <img

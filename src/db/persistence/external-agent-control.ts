@@ -4,6 +4,8 @@ import type {
   AgentDispatchResult,
   AgentDispatchScope,
   AgentDispatchStatus,
+  AgentDispatchActionRecord,
+  AgentDispatchActionType,
   AgentPayloadSnapshot,
   AgentResultReference,
   AgentResultStatus,
@@ -192,5 +194,30 @@ export interface ExternalAgentControlPersistence {
       now: string,
     ): Promise<void>;
     cleanup(now: string): Promise<number>;
+  };
+  actions: {
+    enqueue(input: {
+      dispatchId: string;
+      action: AgentDispatchActionType;
+      priority: number;
+      now: string;
+    }): Promise<boolean>;
+    claimNext(input: {
+      owner: string;
+      now: string;
+      leaseExpiresAt: string;
+    }): Promise<AgentDispatchActionRecord | null>;
+    complete(input: {
+      id: string;
+      owner: string;
+      now: string;
+    }): Promise<boolean>;
+    fail(input: {
+      id: string;
+      owner: string;
+      error: string;
+      availableAt: string;
+      now: string;
+    }): Promise<boolean>;
   };
 }

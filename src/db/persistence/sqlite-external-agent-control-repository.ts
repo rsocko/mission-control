@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type {
   AgentDispatchDetail,
   AgentDispatchRecord,
@@ -127,6 +127,22 @@ function insertEvent(
     JSON.stringify(input.detail),
     input.createdAt,
   );
+}
+
+function enqueueAction(
+  sqlite: Database.Database,
+  dispatchId: string,
+  action: 'submit' | 'reconcile' | 'cancel',
+  priority: number,
+  now: string,
+): void {
+  sqlite.prepare(`
+    INSERT INTO agent_dispatch_actions (
+      id, dispatch_id, action, status, priority, available_at,
+      attempt_count, created_at, updated_at
+    ) VALUES (?, ?, ?, 'pending', ?, ?, 0, ?, ?)
+    ON CONFLICT(dispatch_id, action) DO NOTHING
+  `).run(randomUUID(), dispatchId, action, priority, now, now, now);
 }
 
 function state(sqlite: Database.Database, id: string): AgentDispatchRecord | null {
@@ -711,6 +727,7 @@ export function createSqliteExternalAgentControlRepository(
           },
           createdAt: input.now,
         });
+        enqueueAction(sqlite, input.id, 'submit', 50, input.now);
         return true;
       }).immediate();
     },
@@ -1142,6 +1159,7 @@ export function createSqliteExternalAgentControlRepository(
           },
           createdAt: input.now,
         });
+        enqueueAction(sqlite, input.id, 'submit', 50, input.now);
       }).immediate();
     },
     async markWaiting(id, detail, now) {
@@ -1252,6 +1270,9 @@ export function createSqliteExternalAgentControlRepository(
           },
           createdAt: input.now,
         });
+        if (resumesSameDispatch) {
+          enqueueAction(sqlite, input.id, 'submit', 50, input.now);
+        }
       }).immediate();
     },
     async expire(now) {
@@ -1321,5 +1342,65 @@ export function createSqliteExternalAgentControlRepository(
     },
   };
 
-  return { registry, payloads, dispatches };
+  const actions: ExternalAgentControlPersistence['actions'] = {
+    async enqueue(input) {
+      const before = sqlite.prepare(
+        'SELECT 1 FROM agent_dispatch_actions WHERE dispatch_id = ? AND action = ?',
+      ).get(input.dispatchId, input.action);
+      enqueueAction(sqlite, input.dispatchId, input.action, input.priority, input.now);
+      return !before;
+    },
+    async claimNext(input) {
+      return sqlite.transaction(() => {
+        const row = sqlite.prepare(`
+          SELECT id, dispatch_id AS dispatchId, action,
+                 attempt_count AS attemptCount
+          FROM agent_dispatch_actions
+          WHERE (status = 'pending' AND available_at <= ?)
+             OR (status = 'processing' AND lease_expires_at <= ?)
+          ORDER BY priority DESC, created_at ASC
+          LIMIT 1
+        `).get(input.now, input.now) as Row | undefined;
+        if (!row) return null;
+        const updated = sqlite.prepare(`
+          UPDATE agent_dispatch_actions
+          SET status = 'processing', attempt_count = attempt_count + 1,
+              lease_owner = ?, lease_expires_at = ?, updated_at = ?
+          WHERE id = ? AND (
+            status = 'pending'
+            OR (status = 'processing' AND lease_expires_at <= ?)
+          )
+        `).run(
+          input.owner, input.leaseExpiresAt, input.now, row.id, input.now,
+        );
+        if (updated.changes !== 1) return null;
+        return {
+          id: String(row.id),
+          dispatchId: String(row.dispatchId),
+          action: row.action as 'submit' | 'reconcile' | 'cancel',
+          attemptCount: Number(row.attemptCount) + 1,
+          leaseOwner: input.owner,
+          leaseExpiresAt: input.leaseExpiresAt,
+        };
+      }).immediate();
+    },
+    async complete(input) {
+      return sqlite.prepare(`
+        DELETE FROM agent_dispatch_actions
+        WHERE id = ? AND status = 'processing' AND lease_owner = ?
+      `).run(input.id, input.owner).changes === 1;
+    },
+    async fail(input) {
+      return sqlite.prepare(`
+        UPDATE agent_dispatch_actions
+        SET status = 'pending', available_at = ?, lease_owner = NULL,
+            lease_expires_at = NULL, last_error = ?, updated_at = ?
+        WHERE id = ? AND status = 'processing' AND lease_owner = ?
+      `).run(
+        input.availableAt, input.error, input.now, input.id, input.owner,
+      ).changes === 1;
+    },
+  };
+
+  return { registry, payloads, dispatches, actions };
 }

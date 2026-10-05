@@ -209,7 +209,7 @@ describe('TaskDelegationSection', () => {
     );
   });
 
-  it('refreshes an active provider run when details open and updates the displayed state', async () => {
+  it('queues a provider refresh and polls persisted state', async () => {
     let refreshed = false;
     const queued = assignment({
       canonicalState: 'queued',
@@ -237,10 +237,22 @@ describe('TaskDelegationSection', () => {
       if (url.endsWith('/api/external-agents/dispatches/dispatch-1') && init?.method === 'PATCH') {
         refreshed = true;
         return response({
+          accepted: true,
           dispatch: {
             id: 'dispatch-1',
             providerTaskId: 'agent-task-1',
             providerDetail: { state: 'completed' },
+            attempts: [],
+            events: [],
+          },
+        });
+      }
+      if (url.endsWith('/api/external-agents/dispatches/dispatch-1') && !init?.method) {
+        return response({
+          dispatch: {
+            id: 'dispatch-1',
+            providerTaskId: 'agent-task-1',
+            providerDetail: refreshed ? { state: 'completed' } : { state: 'queued' },
             attempts: [],
             events: [],
           },
@@ -254,7 +266,9 @@ describe('TaskDelegationSection', () => {
     expect(await screen.findByText('Queued')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'More details' }));
     const dialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Request refresh' }));
     expect(await within(dialog).findByText('Completed')).toBeInTheDocument();
+    expect(toast.success).toHaveBeenCalledWith('Provider refresh queued');
     expect(within(dialog).getByText(
       'The provider completed the run and its pull request was merged.',
     )).toBeInTheDocument();

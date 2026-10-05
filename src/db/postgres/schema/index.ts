@@ -228,6 +228,7 @@ export {
   agentDispatches,
   agentDispatchAttempts,
   agentDispatchEvents,
+  agentDispatchActions,
   EXTERNAL_AGENT_TYPES,
   EXTERNAL_AGENT_TRANSPORTS,
   EXTERNAL_AGENT_LOCALITIES,

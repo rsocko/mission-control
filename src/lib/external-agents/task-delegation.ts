@@ -26,13 +26,9 @@ import {
 } from './registry';
 import {
   createDispatchPreview,
-  expireDispatches,
-  reconcileDispatch,
-  shouldReconcileDispatch,
 } from './service';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 import { parseSourceId } from '@/lib/connectors/github-issues/issue-transformer';
-import { validatePaperclipConnection } from './paperclip';
 
 const CAPABILITY_ACTIONS: Array<[keyof ExternalAgentCapabilities, string]> = [
   ['canAnalyzeCode', 'analyze_code'],
@@ -486,7 +482,6 @@ function eligibilityFor(
 
 export async function getTaskDelegationContext(
   taskIdsInput: string | string[],
-  options: { reconcile?: boolean } = {},
 ): Promise<TaskDelegationContext> {
   const taskIds = typeof taskIdsInput === 'string' ? [taskIdsInput] : taskIdsInput;
   const persistence = await getExternalAgentControlPersistence();
@@ -515,31 +510,11 @@ export async function getTaskDelegationContext(
       ),
     ] as const),
   ));
-  await expireDispatches();
-  let dispatches = await persistence.dispatches.list({
+  const dispatches = await persistence.dispatches.list({
     taskIds,
     limit: Math.min(taskIds.length * 10, 500),
   });
   const syncErrors: TaskDelegationContext['syncErrors'] = [];
-  if (options.reconcile !== false) {
-    for (const dispatch of dispatches) {
-      if (!shouldReconcileDispatch(dispatch) || !dispatch.providerTaskId) continue;
-      try {
-        await reconcileDispatch(dispatch.id);
-      } catch (error) {
-        syncErrors.push({
-          dispatchId: dispatch.id,
-          message: error instanceof Error
-            ? error.message
-            : 'Delegation status could not be refreshed',
-        });
-      }
-    }
-    dispatches = await persistence.dispatches.list({
-      taskIds,
-      limit: Math.min(taskIds.length * 10, 500),
-    });
-  }
   const [targets, repositories] = await Promise.all([
     listExternalAgents({ includeDeleted: true }),
     configuredRepositories(),
@@ -762,11 +737,6 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
         422,
       );
     }
-    await validatePaperclipConnection({
-      endpoint: internal.endpoint,
-      credential: await resolveExternalAgentCredential(internal),
-      config: paperclipBinding,
-    });
   }
   const idempotencyKey = delegationIdempotencyKey(operationId, input.taskId);
   return createDispatchPreview({

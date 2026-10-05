@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import type {
   AgentDispatchDetail,
@@ -177,6 +177,23 @@ async function insertEvent(
     JSON.stringify(event.detail),
     event.createdAt,
   ]);
+}
+
+async function enqueueAction(
+  client: Pool | PoolClient,
+  dispatchId: string,
+  action: 'submit' | 'reconcile' | 'cancel',
+  priority: number,
+  now: string,
+): Promise<boolean> {
+  const result = await client.query(`
+    INSERT INTO agent_dispatch_actions (
+      id, dispatch_id, action, status, priority, available_at,
+      attempt_count, created_at, updated_at
+    ) VALUES ($1, $2, $3, 'pending', $4, $5, 0, $5, $5)
+    ON CONFLICT(dispatch_id, action) DO NOTHING
+  `, [randomUUID(), dispatchId, action, priority, now]);
+  return result.rowCount === 1;
 }
 
 async function lockedState(
@@ -738,6 +755,7 @@ export function createPostgresExternalAgentControlRepository(
           },
           createdAt: input.now,
         });
+        await enqueueAction(client, input.id, 'submit', 50, input.now);
         return true;
       });
     },
@@ -1167,6 +1185,7 @@ export function createPostgresExternalAgentControlRepository(
           },
           createdAt: input.now,
         });
+        await enqueueAction(client, input.id, 'submit', 50, input.now);
       });
     },
     async markWaiting(id, detail, now) {
@@ -1276,6 +1295,9 @@ export function createPostgresExternalAgentControlRepository(
           },
           createdAt: input.now,
         });
+        if (resumesSameDispatch) {
+          await enqueueAction(client, input.id, 'submit', 50, input.now);
+        }
       });
     },
     async expire(now) {
@@ -1348,5 +1370,67 @@ export function createPostgresExternalAgentControlRepository(
     },
   };
 
-  return { registry, payloads, dispatches };
+  const actions: ExternalAgentControlPersistence['actions'] = {
+    async enqueue(input) {
+      return enqueueAction(
+        pool,
+        input.dispatchId,
+        input.action,
+        input.priority,
+        input.now,
+      );
+    },
+    async claimNext(input) {
+      return transaction(pool, async (client) => {
+        const [row] = await query<{
+          id: string;
+          dispatchId: string;
+          action: 'submit' | 'reconcile' | 'cancel';
+          attemptCount: number;
+        } & QueryResultRow>(client, `
+          SELECT id, dispatch_id AS "dispatchId", action,
+                 attempt_count AS "attemptCount"
+          FROM agent_dispatch_actions
+          WHERE (status = 'pending' AND available_at <= $1)
+             OR (status = 'processing' AND lease_expires_at <= $1)
+          ORDER BY priority DESC, created_at ASC
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+        `, [input.now]);
+        if (!row) return null;
+        await client.query(`
+          UPDATE agent_dispatch_actions
+          SET status = 'processing', attempt_count = attempt_count + 1,
+              lease_owner = $1, lease_expires_at = $2, updated_at = $3
+          WHERE id = $4
+        `, [input.owner, input.leaseExpiresAt, input.now, row.id]);
+        return {
+          ...row,
+          attemptCount: Number(row.attemptCount) + 1,
+          leaseOwner: input.owner,
+          leaseExpiresAt: input.leaseExpiresAt,
+        };
+      });
+    },
+    async complete(input) {
+      const result = await pool.query(`
+        DELETE FROM agent_dispatch_actions
+        WHERE id = $1 AND status = 'processing' AND lease_owner = $2
+      `, [input.id, input.owner]);
+      return result.rowCount === 1;
+    },
+    async fail(input) {
+      const result = await pool.query(`
+        UPDATE agent_dispatch_actions
+        SET status = 'pending', available_at = $1, lease_owner = NULL,
+            lease_expires_at = NULL, last_error = $2, updated_at = $3
+        WHERE id = $4 AND status = 'processing' AND lease_owner = $5
+      `, [
+        input.availableAt, input.error, input.now, input.id, input.owner,
+      ]);
+      return result.rowCount === 1;
+    },
+  };
+
+  return { registry, payloads, dispatches, actions };
 }

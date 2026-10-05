@@ -64,6 +64,7 @@ export async function runPackagedSyncWorker(
       { EventOutboxDispatcher },
       { NotificationEnrichmentWorker },
       { createPackagedNotificationEnrichmentExecutor },
+      { ExternalAgentDispatchWorker },
       { getDurableAiRunRepository, DurableAiRunWorker },
       { createPackagedDurableAiRuntime },
       semanticRuntime,
@@ -95,6 +96,7 @@ export async function runPackagedSyncWorker(
       import('@/lib/events/dispatcher'),
       import('@/lib/notifications/enrichment/worker'),
       import('@/lib/notifications/enrichment/packaged-executor'),
+      import('@/lib/external-agents/worker'),
       import('@/lib/ai/durable-runs'),
       import('@/lib/ai/durable-runs/packaged-worker'),
       process.env.MC_DATABASE_BACKEND === 'postgres'
@@ -157,6 +159,7 @@ export async function runPackagedSyncWorker(
         ? await createPackagedNotificationEnrichmentExecutor()
         : undefined,
     });
+    const externalAgentDispatchWorker = new ExternalAgentDispatchWorker();
 
     let aiRunWorker: { start(): void; stop(): Promise<void>; wake(): void };
     let stopAiRunRuntime: () => Promise<void>;
@@ -299,6 +302,11 @@ export async function runPackagedSyncWorker(
           );
         },
         stop: () => notificationEnrichmentWorker.stop(),
+      },
+      {
+        name: 'external-agent-dispatch',
+        start: () => externalAgentDispatchWorker.start(),
+        stop: () => externalAgentDispatchWorker.stop(),
       },
       {
         name: 'sync-schedulers',

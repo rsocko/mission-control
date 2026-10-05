@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IconPicker, IconRenderer } from '@/components/ui/icon-picker';
-import { POPULAR_DASHBOARD_ICONS } from '@/components/ui/icon-picker/types';
+import {
+  getIconUrl,
+  getSimpleIconNames,
+  POPULAR_DASHBOARD_ICONS,
+} from '@/components/ui/icon-picker/types';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -10,6 +14,25 @@ afterEach(() => {
 describe('IconRenderer', () => {
   it('includes the Home Assistant logo in the source icon picker', () => {
     expect(POPULAR_DASHBOARD_ICONS).toContain('home-assistant');
+  });
+
+  it('normalizes current and legacy Simple Icons catalog responses', () => {
+    expect(getSimpleIconNames({ uncategorized: ['github', 'visualstudiocode'] })).toEqual([
+      'github',
+      'visualstudiocode',
+    ]);
+    expect(getSimpleIconNames([{ title: 'GitHub' }, { title: 'Visual Studio Code' }])).toEqual([
+      'github',
+      'visualstudiocode',
+    ]);
+    expect(getSimpleIconNames({ icons: [{ slug: 'custom-slug', title: 'Custom' }] })).toEqual([
+      'custom-slug',
+    ]);
+  });
+
+  it('preserves renamed Dashboard Icons values', () => {
+    expect(getIconUrl({ source: 'dash', name: 'pihole' })).toContain('/pi-hole.svg');
+    expect(getIconUrl({ source: 'si', name: 'twitter' })).toContain('/x');
   });
 
   it('inherits the theme color for uncolored monochrome icons', () => {
@@ -63,11 +86,41 @@ describe('IconRenderer', () => {
     expect(onColorChange).toHaveBeenCalledWith('');
   });
 
+  it('renders aliases in the default Iconify icon groups', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/lucide.json?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            prefix: 'lucide',
+            width: 24,
+            height: 24,
+            icons: {
+              house: { body: '<path d="M3 11 12 2l9 9v11H3z"/>' },
+            },
+            aliases: { home: { parent: 'house' } },
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<IconPicker value={null} onChange={vi.fn()} />);
+
+    const aliasResult = await screen.findByRole('img', { name: 'lucide:home' });
+    expect(aliasResult.style.maskImage).toContain(encodeURIComponent('M3 11 12 2l9 9v11H3z'));
+  });
+
   it('renders searched Iconify results from batched icon-set requests', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes('/search?') && url.includes('prefix=mdi')) {
-        return { ok: true, json: async () => ({ icons: ['mdi:city'], total: 1 }) };
+        return {
+          ok: true,
+          json: async () => ({ icons: ['mdi:city', 'mdi:room'], total: 2 }),
+        };
       }
       if (url.includes('/mdi.json?')) {
         return {
@@ -78,7 +131,9 @@ describe('IconRenderer', () => {
             height: 24,
             icons: {
               city: { body: '<path fill="currentColor" d="M0 0h24v24H0z"/>' },
+              'map-marker': { body: '<path fill="currentColor" d="M12 2v20"/>' },
             },
+            aliases: { room: { parent: 'map-marker' } },
           }),
         };
       }
@@ -95,6 +150,9 @@ describe('IconRenderer', () => {
     expect(result).toHaveStyle({ backgroundColor: 'currentColor' });
     expect(result.style.maskImage).toContain('data:image/svg+xml');
 
+    const aliasResult = await screen.findByRole('img', { name: 'mdi:room' });
+    expect(aliasResult.style.maskImage).toContain(encodeURIComponent('M12 2v20'));
+
     const maskImage = result.style.maskImage;
     rerender(<IconPicker value={null} onChange={vi.fn()} color="#3b82f6" />);
     expect(await screen.findByRole('img', { name: 'mdi:city' })).toHaveStyle({
@@ -106,5 +164,15 @@ describe('IconRenderer', () => {
         expect.stringMatching(/\/mdi\/city\.svg/),
       );
     });
+  });
+
+  it('falls back to direct Iconify rendering when a batch request fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }));
+
+    render(<IconPicker value={null} onChange={vi.fn()} />);
+
+    const result = await screen.findByRole('img', { name: 'lucide:settings' });
+    expect(result.style.maskImage).toContain('/lucide/settings.svg');
+    expect(result).not.toHaveClass('animate-pulse');
   });
 });

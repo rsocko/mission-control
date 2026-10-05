@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IconPicker, IconRenderer } from '@/components/ui/icon-picker';
 import { POPULAR_DASHBOARD_ICONS } from '@/components/ui/icon-picker/types';
@@ -61,5 +61,50 @@ describe('IconRenderer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Use theme color' }));
     expect(onColorChange).toHaveBeenCalledWith('');
+  });
+
+  it('renders searched Iconify results from batched icon-set requests', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/search?') && url.includes('prefix=mdi')) {
+        return { ok: true, json: async () => ({ icons: ['mdi:city'], total: 1 }) };
+      }
+      if (url.includes('/mdi.json?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            prefix: 'mdi',
+            width: 24,
+            height: 24,
+            icons: {
+              city: { body: '<path fill="currentColor" d="M0 0h24v24H0z"/>' },
+            },
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { rerender } = render(<IconPicker value={null} onChange={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText('Search emoji, icons, brands…'), {
+      target: { value: 'city' },
+    });
+
+    const result = await screen.findByRole('img', { name: 'mdi:city' });
+    expect(result).toHaveStyle({ backgroundColor: 'currentColor' });
+    expect(result.style.maskImage).toContain('data:image/svg+xml');
+
+    const maskImage = result.style.maskImage;
+    rerender(<IconPicker value={null} onChange={vi.fn()} color="#3b82f6" />);
+    expect(await screen.findByRole('img', { name: 'mdi:city' })).toHaveStyle({
+      backgroundColor: '#3b82f6',
+    });
+    expect(screen.getByRole('img', { name: 'mdi:city' }).style.maskImage).toBe(maskImage);
+    await waitFor(() => {
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        expect.stringMatching(/\/mdi\/city\.svg/),
+      );
+    });
   });
 });

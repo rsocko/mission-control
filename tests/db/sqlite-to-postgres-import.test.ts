@@ -270,6 +270,8 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
 
     expect(tables.sourceTables).toHaveLength(171);
     expect(tables.targetTables).toHaveLength(173);
+    expect(tables.sourceTables).toContain('agent_dispatch_actions');
+    expect(tables.targetTables).toContain('agent_dispatch_actions');
     expect(tables.sourceTables).toContain('tasks');
     expect(tables.sourceTables).toContain('task_time_activities');
     expect(tables.sourceTables).toContain('notifications');

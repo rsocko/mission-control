@@ -23,7 +23,7 @@ import {
 import { parseSourceId } from '@/lib/connectors/github-issues/issue-transformer';
 import {
   getExternalAgent,
-  resolveAgentCredential,
+  resolveExternalAgentCredential,
   type ExternalAgent,
 } from './registry';
 import {
@@ -122,6 +122,15 @@ function validateRepository(value: string | undefined) {
   return repository;
 }
 
+function validateUuid(value: string, field: string) {
+  const normalized = requiredText(value, field, 255);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    .test(normalized)) {
+    throw new ExternalAgentError(`${field} must be a UUID`, 'VALIDATION_ERROR', 422);
+  }
+  return normalized;
+}
+
 function normalizeScope(value: AgentDispatchScope | undefined): AgentDispatchScope {
   const scope = value ?? {};
   const taskIds = scope.taskIds
@@ -142,6 +151,27 @@ function normalizeScope(value: AgentDispatchScope | undefined): AgentDispatchSco
     baseRef: scope.baseRef ? requiredText(scope.baseRef, 'scope.baseRef', 255) : undefined,
     model: scope.model ? requiredText(scope.model, 'scope.model', 255) : undefined,
     createPullRequest: scope.createPullRequest === true,
+    paperclip: scope.paperclip
+      ? {
+        companyId: validateUuid(scope.paperclip.companyId, 'scope.paperclip.companyId'),
+        assigneeAgentId: validateUuid(
+          scope.paperclip.assigneeAgentId,
+          'scope.paperclip.assigneeAgentId',
+        ),
+        ...(scope.paperclip.projectId
+          ? { projectId: validateUuid(scope.paperclip.projectId, 'scope.paperclip.projectId') }
+          : {}),
+        ...(scope.paperclip.requiredAdapterType
+          ? {
+            requiredAdapterType: requiredText(
+              scope.paperclip.requiredAdapterType,
+              'scope.paperclip.requiredAdapterType',
+              255,
+            ),
+          }
+          : {}),
+      }
+      : undefined,
   };
 }
 
@@ -605,6 +635,7 @@ async function executeDispatch(
   id: string,
   agent: ExternalAgent,
   resolver: TransportResolver,
+  scope: AgentDispatchScope,
 ) {
   if (agent.transport === 'pull') return undefined;
   const started = await beginOrResumeAttempt(id);
@@ -614,6 +645,7 @@ async function executeDispatch(
       dispatchId: id,
       attempt: started.attempt,
       payload: started.payload,
+      scope,
     });
     await finishAttemptFromTransport(id, started.attempt, started.leaseExpiresAt, result);
     return result.manualUrl;
@@ -656,6 +688,7 @@ export async function confirmDispatch(
       id,
       agent,
       options.transportResolver ?? createTransportResolver(),
+      dispatch.scope,
     );
   }
   return { dispatch: (await getDispatch(id))!, manualUrl };
@@ -857,7 +890,7 @@ export async function cancelDispatch(id: string) {
     if (dispatch.status === 'cancelled') return false;
     assertAgentEnabled(agent);
     const provider = await cancelPaperclipIssue(
-      paperclipConnection(agent),
+      await paperclipConnection(agent, undefined, dispatch.scope.paperclip),
       dispatch.providerTaskId,
     );
     await submitDispatchResult(
@@ -924,7 +957,7 @@ export async function reconcileDispatch(
   if (agent.type === 'paperclip') {
     if (!dispatch.providerTaskId) return dispatch;
     const provider = await getPaperclipState(
-      paperclipConnection(agent, options.fetcher),
+      await paperclipConnection(agent, options.fetcher, dispatch.scope.paperclip),
       dispatch.providerTaskId,
     );
     await submitDispatchResult(
@@ -977,10 +1010,11 @@ export async function reconcileDispatch(
   return (await getDispatch(id))!;
 }
 
-function paperclipConnection(
+async function paperclipConnection(
   agent: ExternalAgent,
   fetcher?: typeof fetch,
-): PaperclipConnection {
+  configOverride?: PaperclipConnection['config'],
+): Promise<PaperclipConnection> {
   const config = agent.providerConfig.paperclip;
   if (!agent.endpoint || !config) {
     throw new ExternalAgentError(
@@ -991,8 +1025,8 @@ function paperclipConnection(
   }
   return {
     endpoint: agent.endpoint,
-    credential: resolveAgentCredential(agent.authCredentialRef),
-    config,
+    credential: await resolveExternalAgentCredential(agent),
+    config: configOverride ?? config,
     fetcher,
   };
 }
@@ -1063,6 +1097,7 @@ export async function retryDispatch(
     id,
     agent,
     options.transportResolver ?? createTransportResolver(),
+    dispatch.scope,
   );
   return { dispatch: (await getDispatch(id))!, manualUrl };
 }

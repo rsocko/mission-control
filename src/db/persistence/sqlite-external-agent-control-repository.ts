@@ -390,7 +390,9 @@ export function createSqliteExternalAgentControlRepository(
             SELECT id, source_id AS sourceId,
                    json_extract(metadata, '$.url') AS sourceUrl,
                    title, description, priority, status,
-                   connector_type AS connectorType, due_date AS dueDate, effort,
+                   connector_type AS connectorType,
+                   connector_instance_id AS connectorInstanceId,
+                   due_date AS dueDate, effort,
                    assignee, micro_status AS microStatus,
                    planning_horizon AS planningHorizon,
                    source_list_name AS sourceListName,
@@ -403,20 +405,23 @@ export function createSqliteExternalAgentControlRepository(
       const subtaskRows = ids.size
         ? sqlite.prepare(`
             WITH RECURSIVE hierarchy (
-              rootId, id, sourceId, sourceUrl, connectorType, title, description,
+              rootId, id, sourceId, sourceUrl, connectorType, connectorInstanceId,
+              title, description,
               priority, status, dueDate, effort, assignee, microStatus,
               planningHorizon, sourceListName, siblingOrder, depth, isChecklistItem,
               treeOrder
             ) AS (
               SELECT id, id, source_id, json_extract(metadata, '$.url'),
-                     connector_type, title, description, priority, status, due_date,
+                     connector_type, connector_instance_id, title, description,
+                     priority, status, due_date,
                      effort, assignee, micro_status, planning_horizon,
                      source_list_name, sibling_order, depth, is_checklist_item, ''
               FROM tasks
               WHERE id IN (${[...ids].map(() => '?').join(', ')})
               UNION ALL
               SELECT h.rootId, t.id, t.source_id, json_extract(t.metadata, '$.url'),
-                     t.connector_type, t.title, t.description, t.priority, t.status,
+                     t.connector_type, t.connector_instance_id, t.title, t.description,
+                     t.priority, t.status,
                      t.due_date, t.effort, t.assignee, t.micro_status,
                      t.planning_horizon, t.source_list_name, t.sibling_order, t.depth,
                      t.is_checklist_item,
@@ -429,7 +434,8 @@ export function createSqliteExternalAgentControlRepository(
               INNER JOIN hierarchy h ON t.parent_id = h.id
               WHERE t.deleted_at IS NULL
             )
-            SELECT rootId, id, sourceId, sourceUrl, connectorType, title, description,
+            SELECT rootId, id, sourceId, sourceUrl, connectorType, connectorInstanceId,
+                   title, description,
                    priority, status, dueDate, effort, assignee, microStatus,
                    planningHorizon, sourceListName, siblingOrder, depth, isChecklistItem
             FROM hierarchy

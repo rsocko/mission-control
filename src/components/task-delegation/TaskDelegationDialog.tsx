@@ -45,6 +45,10 @@ interface DelegationPreview {
   previewHash: string;
   processingLocation: string;
   dataClassification: string;
+  classificationExplanation?: string;
+  classificationSources?: NonNullable<
+    TaskDelegationTarget['eligibility'][number]['classificationSources']
+  >;
   disclosedFields: string[];
   allowedActions: string[];
   payloadPreview: Record<string, unknown>;
@@ -182,7 +186,9 @@ export function TaskDelegationDialog() {
       const next = await response.json() as TaskDelegationContext;
       if (requestId !== contextRequestRef.current || signal.aborted) return;
       setContext(next);
-      const initial = next.targets.length === 1 ? next.targets[0] : null;
+      const eligibleTargets = next.targets.filter((target) =>
+        target.eligibility.some(({ ready }) => ready));
+      const initial = eligibleTargets.length === 1 ? eligibleTargets[0] : null;
       if (initial) {
         setSelectedTargetId(initial.id);
         setAllowedActions(initial.allowedActions);
@@ -598,19 +604,25 @@ function DestinationStep({
       <div className="grid gap-2 sm:grid-cols-2">
         {context.targets.map((target) => {
           const readyCount = target.eligibility.filter(({ ready }) => ready).length;
+          const unavailable = readyCount === 0;
           const selected = target.id === selectedTargetId;
+          const unavailableReason = target.eligibility.find(({ blocker }) => blocker)?.blocker
+            ?? 'No selected tasks are eligible for this destination';
           return (
             <button
               key={target.id}
               type="button"
               role="radio"
               aria-checked={selected}
+              disabled={unavailable}
+              title={unavailable ? unavailableReason : undefined}
               onClick={() => onSelect(target)}
               className={cn(
                 'flex min-h-20 items-center gap-3 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
                 selected
                   ? 'border-[var(--accent-500)] bg-[var(--accent-500)]/10'
                   : 'border-[var(--border)] bg-[var(--surface-0)] hover:bg-[var(--surface-2)]',
+                unavailable && 'cursor-not-allowed opacity-55 hover:bg-[var(--surface-0)]',
               )}
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
@@ -629,6 +641,11 @@ function DestinationStep({
                 )}>
                   {readyCount} of {target.eligibility.length} ready
                 </span>
+                {unavailable && (
+                  <span className="mt-0.5 block text-[11px] leading-4 text-[var(--text-muted)]">
+                    {unavailableReason}
+                  </span>
+                )}
               </span>
             </button>
           );
@@ -1050,6 +1067,9 @@ function ReviewStep({
 }) {
   const fields = [...new Set(batch.previews.flatMap(({ disclosedFields }) => disclosedFields))];
   const actions = [...new Set(batch.previews.flatMap(({ allowedActions }) => allowedActions))];
+  const classifications = [...new Set(
+    batch.previews.map(({ dataClassification }) => dataClassification),
+  )];
   return (
     <div className="space-y-5">
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
@@ -1103,7 +1123,21 @@ function ReviewStep({
 
       <section>
         <h3 className="text-xs font-semibold text-[var(--text-primary)]">Disclosure and authorization</h3>
-        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <div className="mt-2 grid gap-3 sm:grid-cols-3">
+          <div>
+            <p className="text-[11px] text-[var(--text-muted)]">Data handling</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {classifications.map((classification) => (
+                <span
+                  key={classification}
+                  className="inline-flex items-center gap-1 rounded-full border border-amber-700/40 bg-amber-950/30 px-2 py-0.5 text-xs font-medium capitalize text-amber-300"
+                >
+                  <Lock size={9} />
+                  {classification.replace('-', ' ')}
+                </span>
+              ))}
+            </div>
+          </div>
           <div>
             <p className="text-[11px] text-[var(--text-muted)]">Disclosed fields</p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -1125,6 +1159,22 @@ function ReviewStep({
               ))}
             </div>
           </div>
+        </div>
+        <div className="mt-3 space-y-1.5">
+          {batch.previews.map((preview) => (
+            <p
+              key={preview.dispatchId}
+              className="text-[11px] leading-relaxed text-[var(--text-muted)]"
+            >
+              <span className="font-medium text-[var(--text-secondary)]">
+                {preview.classificationExplanation
+                  ?? `${preview.dataClassification.replace('-', ' ')} source policy`}.
+              </span>{' '}
+              {(preview.classificationSources ?? []).map((source) => (
+                `${source.connectorName}: ${source.effective.replace('-', ' ')}`
+              )).join(' · ')}
+            </p>
+          ))}
         </div>
       </section>
 

@@ -51,6 +51,11 @@ import {
   supportedCurrencyCodes,
 } from '@/lib/finance/currency';
 import { ConnectorPushRules } from '@/components/settings/ConnectorPushRules';
+import {
+  ConnectorClassificationBadge,
+  ConnectorDataHandlingEditor,
+} from './ConnectorDataClassification';
+import { connectorBaselineClassification } from '@/lib/connectors/data-classification';
 
 const SYNC_MODE_OPTIONS = [
   { value: 'poll', label: 'Polling' },
@@ -185,6 +190,12 @@ function ConnectorsSection({
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-[var(--text-primary)] truncate">{getConnectorDisplayName(conn)}</span>
                       <ConnectionStatus connector={conn} healthState={healthState} />
+                      <ConnectorClassificationBadge
+                        classification={
+                          conn.dataClassification?.effective
+                          ?? connectorBaselineClassification(conn.type)
+                        }
+                      />
                     </div>
                     <div className="flex items-center gap-3 mt-0.5 text-xs text-[var(--text-muted)]">
                       {conn.enabled ? (
@@ -1554,6 +1565,10 @@ function ConnectorEditPanel(props: ConnectorEditPanelProps) {
   return (
     <>
       {panel}
+      <ConnectorDataHandlingEditor
+        connector={props.connector}
+        onUpdate={props.onUpdate}
+      />
       <div className="border-t border-[var(--border)] px-4 pb-4">
         <ConnectorPushRules connectorInstanceId={props.connector.id} />
       </div>

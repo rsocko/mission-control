@@ -17,7 +17,7 @@ import {
   hashCanonical,
   hashSecret,
   redactForPersistence,
-  resolveDispatchClassification,
+  resolveDispatchClassificationForSources,
   selectAllowedPayloadFields,
 } from './policy';
 import { parseSourceId } from '@/lib/connectors/github-issues/issue-transformer';
@@ -374,9 +374,16 @@ async function loadPayloadSource(
       dataClassification: classification,
       allowedActions,
     },
-    connectorTypes: snapshot.tasks.flatMap(({ connectorType, subtasks }) => [
+    connectorSources: snapshot.tasks.flatMap(({
       connectorType,
-      ...subtasks.map((subtask) => subtask.connectorType),
+      connectorInstanceId,
+      subtasks,
+    }) => [
+      { connectorType, connectorInstanceId: connectorInstanceId ?? '' },
+      ...subtasks.map((subtask) => ({
+        connectorType: subtask.connectorType,
+        connectorInstanceId: subtask.connectorInstanceId ?? '',
+      })),
     ]),
   };
 }
@@ -423,10 +430,11 @@ export async function createDispatchPreview(input: DispatchPreviewInput) {
     allowedActions,
     input.callbackBaseUrl,
   );
-  const classification = resolveDispatchClassification(
-    preliminary.connectorTypes,
+  const classificationResolution = await resolveDispatchClassificationForSources(
+    preliminary.connectorSources,
     input.dataClassification,
   );
+  const classification = classificationResolution.classification;
   assertClassificationAllowed(classification, agent.dataPolicy, agent.executionLocality);
   const loaded = classification === (input.dataClassification ?? 'standard')
     ? preliminary

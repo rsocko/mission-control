@@ -89,6 +89,9 @@ export async function POST(request: Request) {
           previewHash: dispatch.previewHash,
           processingLocation: dispatch.executionLocality,
           dataClassification: dispatch.dataClassification,
+          classificationExplanation: task.classificationExplanation
+            ?? `${dispatch.dataClassification} source policy`,
+          classificationSources: task.classificationSources ?? [],
           disclosedFields: dispatch.disclosedFields,
           allowedActions: dispatch.allowedActions,
           payloadPreview: dispatch.payloadPreview,

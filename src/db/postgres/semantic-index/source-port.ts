@@ -72,6 +72,11 @@ const TASK_COLUMNS = `
   due_date AS "dueDate",
   connector_type AS "connectorType",
   connector_instance_id AS "connectorInstanceId",
+  (
+    SELECT cc.settings->>'dataClassificationOverride'
+    FROM connector_configs cc
+    WHERE cc.id = tasks.connector_instance_id
+  ) AS "dataClassificationOverride",
   source_list_name AS "sourceListName",
   parent_id AS "parentId",
   is_checklist_item AS "isChecklistItem",

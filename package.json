@@ -76,7 +76,7 @@
     "@xyflow/react": "^12.11.2",
     "adm-zip": "^0.6.1",
     "ajv": "^8.20.0",
-    "ai": "^7.0.77",
+    "ai": "^7.0.118",
     "better-sqlite3": "^12.11.1",
     "chrono-node": "^2.10.1",
     "class-variance-authority": "^0.7.1",

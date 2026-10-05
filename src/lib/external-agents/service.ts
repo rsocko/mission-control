@@ -1157,9 +1157,6 @@ export async function reconcileDispatch(
     dispatch.providerTaskId,
     options.fetcher,
   );
-  if (dispatch.status === 'completed' && provider.status === 'completed') {
-    return dispatch;
-  }
   await submitDispatchResult(
     dispatch.id,
     {

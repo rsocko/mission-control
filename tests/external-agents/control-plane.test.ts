@@ -419,6 +419,7 @@ describe('external-agent registry boundaries', () => {
     });
 
     let providerState: 'completed' | 'in_progress' = 'completed';
+    let pullRequestAvailable = false;
     const fetcher = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith('/tasks/provider-task-1')) {
@@ -426,12 +427,42 @@ describe('external-agent registry boundaries', () => {
           id: 'provider-task-1',
           name: 'Fix parser',
           state: providerState,
-          sessions: [{ base_ref: 'main', head_ref: 'copilot/fix-parser' }],
-          artifacts: [{
-            provider: 'github',
-            type: 'branch',
-            data: { base_ref: 'main', head_ref: 'copilot/fix-parser' },
-          }],
+          sessions: pullRequestAvailable
+            ? [{ base_ref: 'main', head_ref: 'copilot/fix-parser' }]
+            : [],
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 42, global_id: '' },
+            },
+            ...(pullRequestAvailable
+              ? [{
+                provider: 'github',
+                type: 'branch',
+                data: { base_ref: 'main', head_ref: 'copilot/fix-parser' },
+              }]
+              : []),
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        return Response.json({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [{
+                  __typename: 'PullRequest',
+                  url: 'https://github.com/octo/example/pull/42',
+                  headRefName: 'copilot/fix-parser',
+                  headRefOid: '0123456789abcdef',
+                  headRepository: { nameWithOwner: 'octo/example' },
+                  baseRefName: 'main',
+                  baseRepository: { nameWithOwner: 'octo/example' },
+                }],
+              },
+            },
+          },
         });
       }
       throw new Error(`Unexpected GitHub request: ${url}`);
@@ -439,13 +470,49 @@ describe('external-agent registry boundaries', () => {
 
     await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
       .resolves.toEqual({ reconciled: 1, failures: [] });
-    expect(await service.getDispatch(preview.id)).toMatchObject({
+    const initiallyCompleted = await service.getDispatch(preview.id);
+    expect(initiallyCompleted?.completedAt).toEqual(expect.any(String));
+    expect(initiallyCompleted).toMatchObject({
+      status: 'completed',
+      resultStatus: 'pending_review',
+      providerTaskId: 'provider-task-1',
+      repository: 'octo/example',
+      baseRef: 'main',
+      providerDetail: {
+        outputWarning: 'GitHub reported a pull request output without a resolvable global ID.',
+      },
+    });
+
+    pullRequestAvailable = true;
+    const refreshedCompleted = await service.reconcileDispatch(preview.id, { fetcher });
+    expect(refreshedCompleted).toMatchObject({
       status: 'completed',
       providerTaskId: 'provider-task-1',
       repository: 'octo/example',
       baseRef: 'main',
       branchRef: 'copilot/fix-parser',
+      commitSha: '0123456789abcdef',
+      githubPullRequestUrl: 'https://github.com/octo/example/pull/42',
+      completedAt: initiallyCompleted?.completedAt,
+      resultStatus: 'pending_review',
+      providerDetail: expect.not.objectContaining({
+        outputWarning: expect.anything(),
+      }),
     });
+
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'completed',
+      branchRef: 'copilot/fix-parser',
+      commitSha: '0123456789abcdef',
+      githubPullRequestUrl: 'https://github.com/octo/example/pull/42',
+      completedAt: initiallyCompleted?.completedAt,
+      resultStatus: 'pending_review',
+    });
+    await expect(service.reconcileDispatch(preview.id, { fetcher }))
+      .resolves.toMatchObject({
+        updatedAt: refreshedCompleted.updatedAt,
+        events: refreshedCompleted.events,
+      });
 
     sqlite.prepare(`
       UPDATE agent_dispatches

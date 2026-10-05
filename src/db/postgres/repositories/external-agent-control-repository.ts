@@ -964,13 +964,19 @@ export function createPostgresExternalAgentControlRepository(
             401,
           );
         }
-        const updatesCompletedProviderTask = current.status === 'completed'
+        const refreshesCompletedProviderTask = current.status === 'completed'
           && input.authorization.agentAuthenticated
           && input.authorization.allowCompletedProviderTaskUpdate
           && current.providerTaskId !== null
-          && input.providerTaskId === current.providerTaskId
+          && input.providerTaskId === current.providerTaskId;
+        const resumesCompletedProviderTask = refreshesCompletedProviderTask
           && input.status !== 'completed';
-        if (TERMINAL.has(current.status) && !updatesCompletedProviderTask) {
+        const preservesCompletedProviderTask = refreshesCompletedProviderTask
+          && input.status === 'completed';
+        if (refreshesCompletedProviderTask && current.resultDigest === input.digest) {
+          return { duplicate: true, status: current.status };
+        }
+        if (TERMINAL.has(current.status) && !refreshesCompletedProviderTask) {
           if (current.resultDigest === input.digest) {
             return { duplicate: true, status: current.status };
           }
@@ -981,14 +987,14 @@ export function createPostgresExternalAgentControlRepository(
           );
         }
         if (
-          !updatesCompletedProviderTask
+          !refreshesCompletedProviderTask
           && current.deadlineAt
           && current.deadlineAt <= input.now
         ) {
           await expireOne(client, current, input.now);
           return { duplicate: false, status: 'timed_out' as const, expired: true };
         }
-        if (!ACTIVE_RESULT.has(current.status) && !updatesCompletedProviderTask) {
+        if (!ACTIVE_RESULT.has(current.status) && !refreshesCompletedProviderTask) {
           throw new ExternalAgentError(
             `Dispatch cannot accept results while ${current.status}`,
             'INVALID_TRANSITION',
@@ -1015,31 +1021,37 @@ export function createPostgresExternalAgentControlRepository(
             provider_detail = COALESCE($3::jsonb, provider_detail),
             result = COALESCE($4::jsonb, result), result_digest = $5,
             result_status = CASE
-              WHEN $1 = 'completed' THEN 'pending_review'
-              WHEN $6 THEN NULL
+              WHEN $1 = 'completed' AND NOT $6 THEN 'pending_review'
+              WHEN $7 THEN NULL
               ELSE result_status
             END,
-            error_message = $7,
-            github_pull_request_url = COALESCE($8, github_pull_request_url),
-            repository = COALESCE($9, repository), base_ref = COALESCE($10, base_ref),
-            branch_ref = COALESCE($11, branch_ref), commit_sha = COALESCE($12, commit_sha),
-            checks = COALESCE($13::jsonb, checks),
-            artifacts = COALESCE($14::jsonb, artifacts),
-            claim_token_hash = CASE WHEN $15 THEN NULL ELSE claim_token_hash END,
-            lease_expires_at = CASE WHEN $15 THEN NULL ELSE $16 END,
-            completed_at = CASE WHEN $17 THEN $18 ELSE NULL END, updated_at = $18
-          WHERE id = $19 AND status = $20
+            error_message = $8,
+            github_pull_request_url = COALESCE($9, github_pull_request_url),
+            repository = COALESCE($10, repository), base_ref = COALESCE($11, base_ref),
+            branch_ref = COALESCE($12, branch_ref), commit_sha = COALESCE($13, commit_sha),
+            checks = COALESCE($14::jsonb, checks),
+            artifacts = COALESCE($15::jsonb, artifacts),
+            claim_token_hash = CASE WHEN $16 THEN NULL ELSE claim_token_hash END,
+            lease_expires_at = CASE WHEN $16 THEN NULL ELSE $17 END,
+            completed_at = CASE
+              WHEN $18 THEN completed_at
+              WHEN $19 THEN $20
+              ELSE NULL
+            END,
+            updated_at = $20
+          WHERE id = $21 AND status = $22
         `, [
           input.status, input.providerTaskId ?? null,
           input.providerDetail ? JSON.stringify(input.providerDetail) : null,
           input.result ? JSON.stringify(input.result) : null, input.digest,
-          updatesCompletedProviderTask,
+          refreshesCompletedProviderTask, resumesCompletedProviderTask,
           input.errorMessage, input.pullRequestUrl, input.repository, input.baseRef,
           input.branchRef, input.commitSha,
           input.checks ? JSON.stringify(input.checks) : null,
           input.artifacts ? JSON.stringify(input.artifacts) : null,
           waiting, input.leaseExpiresAt,
-          terminal, input.now, input.dispatchId, current.status,
+          preservesCompletedProviderTask, terminal, input.now,
+          input.dispatchId, current.status,
         ]);
         if (updated.rowCount !== 1) {
           throw new ExternalAgentError('Dispatch changed concurrently', 'CONFLICT', 409);
@@ -1049,12 +1061,17 @@ export function createPostgresExternalAgentControlRepository(
             status = $1, provider_task_id = COALESCE($2, provider_task_id),
             provider_detail = COALESCE($3::jsonb, provider_detail),
             error_message = $4,
-            completed_at = CASE WHEN $5 THEN $6 ELSE NULL END
-          WHERE dispatch_id = $7 AND attempt_number = $8
+            completed_at = CASE
+              WHEN $5 THEN completed_at
+              WHEN $6 THEN $7
+              ELSE NULL
+            END
+          WHERE dispatch_id = $8 AND attempt_number = $9
         `, [
           input.status, input.providerTaskId ?? null,
           input.providerDetail ? JSON.stringify(input.providerDetail) : null,
-          input.errorMessage, terminal, input.now, input.dispatchId,
+          input.errorMessage, preservesCompletedProviderTask,
+          terminal, input.now, input.dispatchId,
           current.attemptCount,
         ]);
         await insertEvent(client, input.dispatchId, {

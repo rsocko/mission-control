@@ -32,10 +32,9 @@ function previewResponse(
   };
 }
 
-export async function GET(request: Request, { params }: Context) {
+export async function GET(_request: Request, { params }: Context) {
   try {
-    const reconcile = new URL(request.url).searchParams.get('reconcile') !== '0';
-    return NextResponse.json(await getTaskDelegationContext((await params).id, { reconcile }));
+    return NextResponse.json(await getTaskDelegationContext((await params).id));
   } catch (error) {
     return externalAgentErrorResponse(error);
   }

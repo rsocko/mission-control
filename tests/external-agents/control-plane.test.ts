@@ -17,7 +17,21 @@ let registry: typeof import('@/lib/external-agents/registry');
 let policy: typeof import('@/lib/external-agents/policy');
 let service: typeof import('@/lib/external-agents/service');
 let transports: typeof import('@/lib/external-agents/transports');
+let ExternalAgentDispatchWorker: typeof import(
+  '@/lib/external-agents/worker'
+)['ExternalAgentDispatchWorker'];
 let receiveInboundResult: typeof import('@/app/api/inbound-webhooks/[id]/receive/route').POST;
+
+async function asWorker<T>(work: () => Promise<T>): Promise<T> {
+  const previous = process.env.MC_PROCESS_ROLE;
+  process.env.MC_PROCESS_ROLE = 'worker';
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete process.env.MC_PROCESS_ROLE;
+    else process.env.MC_PROCESS_ROLE = previous;
+  }
+}
 
 const requiredFields = [
   'instruction',
@@ -37,6 +51,7 @@ beforeAll(async () => {
     import('@/lib/external-agents/policy'),
     import('@/lib/external-agents/service'),
     import('@/lib/external-agents/transports'),
+    import('@/lib/external-agents/worker'),
     import('@/app/api/inbound-webhooks/[id]/receive/route'),
   ]);
   db = databaseModule.default;
@@ -46,7 +61,8 @@ beforeAll(async () => {
   policy = modules[2];
   service = modules[3];
   transports = modules[4];
-  receiveInboundResult = modules[5].POST;
+  ExternalAgentDispatchWorker = modules[5].ExternalAgentDispatchWorker;
+  receiveInboundResult = modules[6].POST;
   sqlite.prepare('SELECT 1').get();
 }, 30_000);
 
@@ -152,6 +168,54 @@ async function seedTask(connectorType = 'github-issues') {
 }
 
 describe('external-agent registry boundaries', () => {
+  it('submits confirmed push work only after the packaged worker claims its durable intent', async () => {
+    const agent = await registry.createExternalAgent({
+      id: 'worker-owned-push',
+      name: 'Worker-owned push',
+      type: 'webhook-roundtrip',
+      endpoint: 'https://agent.example.test/run',
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+        fieldAllowlist: requiredFields,
+        retentionDays: 30,
+        maxRequestsPerMinute: 30,
+      },
+    });
+    const transport = vi.fn(async () => ({
+      status: 'in_progress' as const,
+      providerTaskId: 'provider-worker-1',
+    }));
+    const preview = await service.createDispatchPreview({
+      agentId: agent.id,
+      instruction: 'Run in the worker',
+      idempotencyKey: 'worker-owned-confirmation',
+    });
+
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({ kind: 'push', dispatch: transport }),
+    });
+    expect(transport).not.toHaveBeenCalled();
+    expect((sqlite.prepare(
+      'SELECT action, status FROM agent_dispatch_actions WHERE dispatch_id = ?',
+    ).get(preview.id) as { action: string; status: string })).toEqual({
+      action: 'submit',
+      status: 'pending',
+    });
+
+    await asWorker(async () => {
+      const worker = new ExternalAgentDispatchWorker({
+        transportResolver: () => ({ kind: 'push', dispatch: transport }),
+      });
+      expect(await worker.drainOne()).toBe(true);
+      expect(await worker.drainOne()).toBe(false);
+    });
+    expect(transport).toHaveBeenCalledOnce();
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'in_progress',
+      providerTaskId: 'provider-worker-1',
+    });
+  });
+
   it('bounds server-owned always instructions', () => {
     expect(() => registry.validateExternalAgentInput({
       name: 'Oversized configuration',
@@ -417,6 +481,22 @@ describe('external-agent registry boundaries', () => {
         },
       }),
     });
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      {
+        transportResolver: () => ({
+          kind: 'push',
+          async dispatch() {
+            return {
+              status: 'queued',
+              providerTaskId: 'provider-task-1',
+              providerState: 'queued',
+            };
+          },
+        }),
+      },
+    ));
 
     const fetcherMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -437,7 +517,7 @@ describe('external-agent registry boundaries', () => {
     });
     const fetcher = fetcherMock as typeof fetch;
 
-    await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
       .resolves.toEqual({ reconciled: 1, failures: [] });
     expect(await service.getDispatch(preview.id)).toMatchObject({
       status: 'completed',
@@ -481,6 +561,22 @@ describe('external-agent registry boundaries', () => {
         },
       }),
     });
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      {
+        transportResolver: () => ({
+          kind: 'push',
+          async dispatch() {
+            return {
+              status: 'queued',
+              providerTaskId: 'provider-task-pr',
+              providerState: 'queued',
+            };
+          },
+        }),
+      },
+    ));
 
     let pullRequestState: 'OPEN' | 'MERGED' = 'OPEN';
     const lifecycleFetcher = vi.fn(async (input: string | URL | Request) => {
@@ -533,7 +629,7 @@ describe('external-agent registry boundaries', () => {
     });
     const fetcher = lifecycleFetcher as typeof fetch;
 
-    await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
       .resolves.toEqual({ reconciled: 1, failures: [] });
     expect(await service.getDispatch(preview.id)).toMatchObject({
       status: 'completed',
@@ -550,7 +646,7 @@ describe('external-agent registry boundaries', () => {
     })).toBe(false);
 
     pullRequestState = 'MERGED';
-    await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
       .resolves.toEqual({ reconciled: 1, failures: [] });
     expect(await service.getDispatch(preview.id)).toMatchObject({
       status: 'completed',
@@ -564,7 +660,7 @@ describe('external-agent registry boundaries', () => {
     });
 
     lifecycleFetcher.mockClear();
-    await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
       .resolves.toEqual({ reconciled: 0, failures: [] });
     expect(lifecycleFetcher).not.toHaveBeenCalled();
   });
@@ -596,6 +692,22 @@ describe('external-agent registry boundaries', () => {
         },
       }),
     });
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      {
+        transportResolver: () => ({
+          kind: 'push',
+          async dispatch() {
+            return {
+              status: 'in_progress',
+              providerTaskId: 'provider-task-2',
+              providerState: 'in_progress',
+            };
+          },
+        }),
+      },
+    ));
 
     await expect(service.cancelDispatch(preview.id)).rejects.toMatchObject({
       code: 'CANCELLATION_UNSUPPORTED',
@@ -678,9 +790,13 @@ describe('disclosure preview and manual result review', () => {
     })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
 
     const confirmed = await service.confirmDispatch(first.id, first.previewHash);
-    expect(confirmed.dispatch.status).toBe('waiting_for_user');
-    expect(confirmed.manualUrl).toBe('https://example.test/agent');
-    expect(confirmed.dispatch.attempts).toHaveLength(1);
+    expect(confirmed.dispatch.status).toBe('queued');
+    expect(confirmed.manualUrl).toBeUndefined();
+    await asWorker(() => service.executeExternalAgentWorkerAction(first.id, 'submit'));
+    expect(await service.getDispatch(first.id)).toMatchObject({
+      status: 'waiting_for_user',
+      attempts: [expect.objectContaining({ attemptNumber: 1 })],
+    });
   });
 
   it('rejects confirmation when the reviewed destination changes', async () => {
@@ -954,6 +1070,7 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
     });
     await service.confirmDispatch(cancelled.id, cancelled.previewHash);
     await expect(service.cancelDispatch(cancelled.id)).resolves.toBe(true);
+    await asWorker(() => service.executeExternalAgentWorkerAction(cancelled.id, 'cancel'));
     await expect(service.cancelDispatch(cancelled.id)).resolves.toBe(false);
     expect((await service.getDispatch(cancelled.id))?.status).toBe('cancelled');
 
@@ -1033,9 +1150,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       idempotencyKey: 'late-synchronous-push',
     });
 
-    await expect(service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: transports.createTransportResolver({ fetcher }),
-    })).rejects.toMatchObject({ code: 'DEADLINE_EXPIRED' });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: transports.createTransportResolver({ fetcher }) },
+    ))).rejects.toMatchObject({ code: 'DEADLINE_EXPIRED' });
 
     const dispatch = await service.getDispatch(preview.id);
     expect(dispatch).toMatchObject({
@@ -1086,9 +1206,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       idempotencyKey: 'push-once',
     });
 
-    await service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ));
     expect(sentHeaders?.get('authorization')).toBe('Bearer push-secret-value');
     expect(sentHeaders?.get('idempotency-key')).toBe(`${preview.id}:1`);
     expect(sentBody).not.toContain('push-secret-value');
@@ -1104,9 +1227,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
     });
     expect(JSON.stringify(dispatch)).not.toContain('provider-response-secret');
     expect(JSON.stringify(dispatch)).not.toContain('push-secret-value');
-    await service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ));
     expect(fetcher).toHaveBeenCalledTimes(1);
 
     const second = await service.createDispatchPreview({
@@ -1119,6 +1245,7 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
     })).rejects.toMatchObject({ code: 'RATE_LIMITED' });
 
     await service.cancelDispatch(preview.id);
+    await asWorker(() => service.executeExternalAgentWorkerAction(preview.id, 'cancel'));
     await expect(service.retryDispatch(preview.id, {
       transportResolver: resolver,
     })).rejects.toMatchObject({ code: 'RATE_LIMITED' });
@@ -1151,9 +1278,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       instruction: 'Recover this delivery',
       idempotencyKey: 'recover-push',
     });
-    await expect(service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    })).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ))).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
 
     sqlite.prepare(`
       UPDATE agent_dispatches
@@ -1161,9 +1291,11 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
           lease_expires_at = '2000-01-01T00:00:00.000Z'
       WHERE id = ?
     `).run(preview.id);
-    await expect(service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    })).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
+    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ))).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
     expect(keys).toEqual([`${preview.id}:1`, `${preview.id}:1`]);
     expect((await service.getDispatch(preview.id))?.events)
       .toEqual(expect.arrayContaining([

@@ -214,12 +214,12 @@ export function TaskDelegationSection({
   const [error, setError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const load = useCallback(async (reconcile = true) => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const response = await fetch(
-        `/api/tasks/${encodeURIComponent(taskId)}/delegation${reconcile ? '' : '?reconcile=0'}`,
+        `/api/tasks/${encodeURIComponent(taskId)}/delegation`,
       );
       if (!response.ok) throw new Error(await responseError(response));
       setContext(await response.json() as TaskDelegationContext);
@@ -357,7 +357,7 @@ export function TaskDelegationSection({
           syncError={syncError?.message ?? null}
           open={detailsOpen}
           onOpenChange={setDetailsOpen}
-          onUpdated={() => load(false)}
+          onUpdated={load}
         />
       )}
     </>
@@ -384,27 +384,35 @@ function TaskDelegationRunDialog({
   const [interactionAnswer, setInteractionAnswer] = useState('');
   const refreshInFlight = useRef(false);
 
-  const load = useCallback(async (refreshProvider = false) => {
+  const load = useCallback(async (requestProviderRefresh = false) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/external-agents/dispatches/${encodeURIComponent(assignment.dispatchId)}`,
-        refreshProvider
-          ? {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'refresh' }),
-          }
-          : undefined,
-      );
+      const url = `/api/external-agents/dispatches/${encodeURIComponent(assignment.dispatchId)}`;
+      const response = await fetch(url, requestProviderRefresh
+        ? {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'refresh' }),
+        }
+        : undefined);
       if (!response.ok) throw new Error(await responseError(response));
-      const body = await response.json() as { dispatch: RunDetail };
+      const body = await response.json() as {
+        dispatch: RunDetail;
+        accepted?: boolean;
+      };
       setDetail(body.dispatch);
       setInteractionAnswer('');
-      if (refreshProvider) await onUpdated();
+      if (requestProviderRefresh) {
+        toast.success(
+          body.accepted === false
+            ? 'Provider state is already current'
+            : 'Provider refresh queued',
+        );
+        await onUpdated();
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Run details could not be loaded');
     } finally {
@@ -415,7 +423,10 @@ function TaskDelegationRunDialog({
 
   useEffect(() => {
     if (!open) return;
-    const initialRefresh = window.setTimeout(() => void load(true), 0);
+    const observePersistedState = () => {
+      void Promise.all([load(false), onUpdated()]);
+    };
+    const initialRefresh = window.setTimeout(observePersistedState, 0);
     const active = [
       'queued',
       'running',
@@ -430,7 +441,7 @@ function TaskDelegationRunDialog({
         && assignment.pullRequestState !== 'closed'
       );
     if (!active) return () => window.clearTimeout(initialRefresh);
-    const interval = window.setInterval(() => void load(true), 30_000);
+    const interval = window.setInterval(observePersistedState, 5_000);
     return () => {
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
@@ -440,6 +451,7 @@ function TaskDelegationRunDialog({
     assignment.displayState,
     assignment.pullRequestState,
     load,
+    onUpdated,
     open,
   ]);
 
@@ -458,10 +470,10 @@ function TaskDelegationRunDialog({
       if (!response.ok) throw new Error(await responseError(response));
       toast.success(
         action === 'retry'
-          ? 'Delegation retried'
+          ? 'Delegation retry queued'
           : action === 'stop_tracking'
             ? 'Mission Control stopped tracking the provider task'
-            : 'Delegation cancelled',
+            : 'Cancellation requested',
       );
       await Promise.all([load(), onUpdated()]);
     } catch (actionError) {
@@ -498,10 +510,10 @@ function TaskDelegationRunDialog({
       if (!response.ok) throw new Error(await responseError(response));
       toast.success(
         outcome === 'answered'
-          ? 'Answer sent to Scout'
+          ? 'Answer saved for worker delivery'
           : outcome === 'approved'
-            ? 'Scout request approved'
-            : 'Scout request rejected',
+            ? 'Approval saved for worker delivery'
+            : 'Rejection saved for worker delivery',
       );
       await Promise.all([load(), onUpdated()]);
     } catch (actionError) {
@@ -786,7 +798,7 @@ function TaskDelegationRunDialog({
                       className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border)] px-3 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50"
                     >
                       <RefreshCw size={13} className={cn(loading && 'animate-spin')} />
-                      Refresh
+                      Request refresh
                     </button>
                     {assignment.canRetry && (
                       <button

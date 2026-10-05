@@ -17,6 +17,10 @@ let ExternalAgentDispatchWorker: typeof import(
 const companyId = '11111111-1111-4111-8111-111111111111';
 const assigneeAgentId = '22222222-2222-4222-8222-222222222222';
 
+function response(body: unknown, status = 200) {
+  return Response.json(body, { status });
+}
+
 async function asWorker<T>(work: () => Promise<T>): Promise<T> {
   const previous = process.env.MC_PROCESS_ROLE;
   process.env.MC_PROCESS_ROLE = 'worker';
@@ -26,10 +30,6 @@ async function asWorker<T>(work: () => Promise<T>): Promise<T> {
     if (previous === undefined) delete process.env.MC_PROCESS_ROLE;
     else process.env.MC_PROCESS_ROLE = previous;
   }
-}
-
-function response(body: unknown, status = 200) {
-  return Response.json(body, { status });
 }
 
 async function drainWorker(fetcher: typeof fetch): Promise<void> {

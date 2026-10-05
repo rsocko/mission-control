@@ -73,8 +73,8 @@ interface CopilotTaskTarget {
   createPullRequest: boolean;
 }
 
-interface PullRequestResponse {
-  html_url?: string;
+interface PullRequestReference {
+  url?: string;
   head?: { ref?: string; sha?: string; repo?: { full_name?: string } };
   base?: { ref?: string; repo?: { full_name?: string } };
 }
@@ -319,37 +319,6 @@ function parseTask(value: Record<string, unknown>): GitHubAgentTask {
   };
 }
 
-function parsePullRequest(value: Record<string, unknown>): PullRequestResponse {
-  const head = record(value.head);
-  const base = record(value.base);
-  const headRepository = record(head?.repo);
-  const baseRepository = record(base?.repo);
-  return {
-    html_url: text(value.html_url),
-    ...(head
-      ? {
-        head: {
-          ref: text(head.ref),
-          sha: text(head.sha),
-          ...(headRepository
-            ? { repo: { full_name: text(headRepository.full_name) } }
-            : {}),
-        },
-      }
-      : {}),
-    ...(base
-      ? {
-        base: {
-          ref: text(base.ref),
-          ...(baseRepository
-            ? { repo: { full_name: text(baseRepository.full_name) } }
-            : {}),
-        },
-      }
-      : {}),
-  };
-}
-
 export function mapGitHubAgentTaskState(
   state: GitHubAgentTaskState,
 ): Extract<
@@ -518,18 +487,62 @@ async function pullRequestReference(
   client: GitHubClient,
   target: CopilotTaskTarget,
   task: GitHubAgentTask,
-): Promise<AgentDispatchResult['codeChange'] | undefined> {
+): Promise<{
+  codeChange?: AgentDispatchResult['codeChange'];
+  warning?: string;
+}> {
   const branch = task.artifacts?.find((artifact) => artifact.type === 'branch')?.data;
   const pull = task.artifacts?.find((artifact) => artifact.type === 'pull')?.data;
-  let pullRequest: PullRequestResponse | undefined;
-  if (pull?.id) {
-    pullRequest = parsePullRequest(await assertGitHubResponse(
-      await client.restFetch(
-        `/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/pulls/${pull.id}`,
-        { headers: apiHeaders() },
-      ),
-      'resolving the Agent task pull request',
-    ));
+  let pullRequest: PullRequestReference | undefined;
+  let warning: string | undefined;
+  if (pull?.global_id) {
+    try {
+      const response = await client.graphqlFetchAny(
+        `query AgentTaskPullRequest($id: ID!) {
+          node(id: $id) {
+            __typename
+            ... on PullRequest {
+              url
+              headRefName
+              headRefOid
+              baseRefName
+              headRepository { nameWithOwner }
+              baseRepository { nameWithOwner }
+            }
+          }
+        }`,
+        { id: pull.global_id },
+      );
+      const node = record(response.data?.node);
+      if (response.errors?.length || node?.__typename !== 'PullRequest') {
+        warning = 'GitHub reported a pull request output, but its details are unavailable.';
+      } else {
+        const headRepository = record(node.headRepository);
+        const baseRepository = record(node.baseRepository);
+        pullRequest = {
+          url: text(node.url),
+          head: {
+            ref: text(node.headRefName),
+            sha: text(node.headRefOid),
+            ...(headRepository
+              ? { repo: { full_name: text(headRepository.nameWithOwner) } }
+              : {}),
+          },
+          base: {
+            ref: text(node.baseRefName),
+            ...(baseRepository
+              ? { repo: { full_name: text(baseRepository.nameWithOwner) } }
+              : {}),
+          },
+        };
+      }
+    } catch {
+      warning = 'GitHub reported a pull request output, but its details could not be loaded.';
+    }
+  } else if (pull) {
+    warning = 'GitHub reported a pull request output without a resolvable global ID.';
+  }
+  if (pullRequest) {
     if (
       pullRequest.base?.repo?.full_name
       && pullRequest.base.repo.full_name.toLowerCase() !== target.fullName.toLowerCase()
@@ -544,17 +557,26 @@ async function pullRequestReference(
   const session = task.sessions?.at(-1);
   const branchRef = pullRequest?.head?.ref ?? branch?.head_ref ?? session?.head_ref;
   const baseRef = pullRequest?.base?.ref ?? branch?.base_ref ?? session?.base_ref ?? target.baseRef;
-  if (!branchRef && !pullRequest?.html_url) return undefined;
   return {
-    repository: target.fullName,
-    baseRef,
-    branchRef,
-    commitSha: pullRequest?.head?.sha,
-    pullRequestUrl: pullRequest?.html_url,
+    ...((branchRef || pullRequest?.url)
+      ? {
+        codeChange: {
+          repository: target.fullName,
+          baseRef,
+          branchRef,
+          commitSha: pullRequest?.head?.sha,
+          pullRequestUrl: pullRequest?.url,
+        },
+      }
+      : {}),
+    ...(warning ? { warning } : {}),
   };
 }
 
-function providerDetail(task: GitHubAgentTask): Record<string, unknown> {
+function providerDetail(
+  task: GitHubAgentTask,
+  outputWarning?: string,
+): Record<string, unknown> {
   const session = task.sessions?.at(-1);
   return redactForPersistence({
     state: task.state,
@@ -565,6 +587,7 @@ function providerDetail(task: GitHubAgentTask): Record<string, unknown> {
     createdAt: task.created_at,
     updatedAt: task.updated_at,
     artifacts: task.artifacts,
+    outputWarning,
   }, { maxBytes: 128 * 1024 }) as Record<string, unknown>;
 }
 
@@ -574,7 +597,7 @@ async function transportResult(
   task: GitHubAgentTask,
 ): Promise<TransportDispatchResult> {
   const status = mapGitHubAgentTaskState(task.state);
-  const codeChange = await pullRequestReference(client, target, task);
+  const output = await pullRequestReference(client, target, task);
   const errorMessage = task.sessions
     ?.map((session) => session.error?.message)
     .find((message): message is string => Boolean(message));
@@ -582,7 +605,7 @@ async function transportResult(
     status,
     providerTaskId: task.id,
     providerState: task.state,
-    providerDetail: providerDetail(task),
+    providerDetail: providerDetail(task, output.warning),
     ...(errorMessage ? { errorMessage } : {}),
     ...(status === 'completed'
       ? {
@@ -590,7 +613,7 @@ async function transportResult(
           summary: task.name
             ? `GitHub Copilot completed "${task.name}"`
             : 'GitHub Copilot completed the Agent task',
-          ...(codeChange ? { codeChange } : {}),
+          ...(output.codeChange ? { codeChange: output.codeChange } : {}),
         },
       }
       : {}),

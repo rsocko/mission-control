@@ -55,6 +55,9 @@ function assignment(
     locality: 'github-hosted',
     canonicalState: 'in_progress',
     displayState: 'running',
+    providerState: 'in_progress',
+    providerUpdatedAt: '2026-10-01T00:00:00.000Z',
+    outputWarning: null,
     latestProgress: 'Running focused reconciliation tests.',
     blocker: null,
     pendingApproval: false,
@@ -150,6 +153,23 @@ describe('TaskDelegationSection', () => {
         });
       }
       if (url.endsWith('/api/external-agents/dispatches/dispatch-1') && init?.method === 'PATCH') {
+        const action = JSON.parse(String(init.body)).action;
+        if (action === 'refresh') {
+          return response({
+            dispatch: {
+              id: 'dispatch-1',
+              providerTaskId: 'agent-task-1',
+              providerDetail: null,
+              attempts: [],
+              events: [{
+                id: 1,
+                eventType: 'provider_started',
+                detail: {},
+                createdAt: '2026-10-01T00:00:00.000Z',
+              }],
+            },
+          });
+        }
         return response({ stoppedTracking: true });
       }
       throw new Error(`Unexpected request: ${url}`);
@@ -166,6 +186,8 @@ describe('TaskDelegationSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More details' }));
     const dialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
     expect(await within(dialog).findByText('provider started')).toBeInTheDocument();
+    expect(within(dialog).getAllByText('in_progress')).not.toHaveLength(0);
+    expect(within(dialog).getByText(/Last synced/)).toBeInTheDocument();
     expect(within(dialog).getByText(/provider work may continue/i)).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
 
@@ -179,9 +201,56 @@ describe('TaskDelegationSection', () => {
         }),
       );
     });
+
     expect(toast.success).toHaveBeenCalledWith(
       'Mission Control stopped tracking the provider task',
     );
+  });
+
+  it('refreshes an active provider run when details open and updates the displayed state', async () => {
+    let refreshed = false;
+    const queued = assignment({
+      canonicalState: 'queued',
+      displayState: 'queued',
+      providerState: 'queued',
+      latestProgress: null,
+    });
+    const completed = assignment({
+      canonicalState: 'completed',
+      displayState: 'completed',
+      providerState: 'completed',
+      latestProgress: null,
+      canStopTracking: false,
+      cancellationLimitation: null,
+    });
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/tasks/task-1/delegation')) {
+        const current = refreshed ? completed : queued;
+        return response(context([{ taskId: 'task-1', ...current }]));
+      }
+      if (url.endsWith('/api/external-agents/dispatches/dispatch-1') && init?.method === 'PATCH') {
+        refreshed = true;
+        return response({
+          dispatch: {
+            id: 'dispatch-1',
+            providerTaskId: 'agent-task-1',
+            providerDetail: { state: 'completed' },
+            attempts: [],
+            events: [],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<TaskDelegationSection taskId="task-1" taskTitle="Fix parser" mode="dialog" />);
+
+    expect(await screen.findByText('Queued')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'More details' }));
+    const dialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
+    expect(await within(dialog).findByText('Completed')).toBeInTheDocument();
+    expect(within(dialog).getByText('The provider reported that the run completed.')).toBeInTheDocument();
   });
 
   it('keeps approvals, outputs, and retry controls available after failure', async () => {

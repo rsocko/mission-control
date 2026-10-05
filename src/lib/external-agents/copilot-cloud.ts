@@ -562,7 +562,7 @@ async function pullRequestReference(
     } catch {
       warning = 'GitHub reported a pull request output, but its details could not be loaded.';
     }
-  } else if (pull) {
+  } else if (pull && task.state === 'completed') {
     warning = 'GitHub reported a pull request output without a resolvable global ID.';
   }
   if (pullRequest) {
@@ -612,8 +612,8 @@ function providerDetail(
     createdAt: task.created_at,
     updatedAt: task.updated_at,
     artifacts: task.artifacts,
-    outputWarning,
-    pullRequest,
+    ...(outputWarning ? { outputWarning } : {}),
+    ...(pullRequest ? { pullRequest } : {}),
   }, { maxBytes: 128 * 1024 }) as Record<string, unknown>;
 }
 

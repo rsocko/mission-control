@@ -112,6 +112,34 @@ describe('project settings tab', () => {
     expect(harness.requestsFor(PROJECT_PATCHES, 'PATCH')).toHaveLength(0);
   });
 
+  it('clears the icon color override when Auto is selected', async () => {
+    harness = settingsScenario({
+      project: {
+        icon: 'lucide:building',
+        iconColor: '#8b5cf6',
+      },
+    });
+    await renderProjectTab('Settings');
+
+    fireEvent.click(await screen.findByTitle('Pick an icon'));
+    fireEvent.click(screen.getByRole('button', { name: 'Use theme color' }));
+
+    await waitFor(() => {
+      expect(patchBodies(harness)).toContainEqual({ iconColor: null });
+    });
+    fireEvent.click(screen.getByTitle('🚀'));
+    await waitFor(() => {
+      expect(patchBodies(harness)).toContainEqual({
+        icon: '🚀',
+        iconColor: null,
+      });
+    });
+    expect(toasts).not.toContainEqual({
+      level: 'error',
+      message: 'Failed to update icon color',
+    });
+  });
+
   it('saves lifecycle status, category, and target date changes', async () => {
     await renderProjectTab('Settings');
     await screen.findByRole('heading', { name: 'Project Status' });

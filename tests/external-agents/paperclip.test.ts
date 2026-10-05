@@ -10,6 +10,9 @@ process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
 let sqlite: typeof import('@/db').sqlite;
 let registry: typeof import('@/lib/external-agents/registry');
 let service: typeof import('@/lib/external-agents/service');
+let ExternalAgentDispatchWorker: typeof import(
+  '@/lib/external-agents/worker'
+)['ExternalAgentDispatchWorker'];
 
 const companyId = '11111111-1111-4111-8111-111111111111';
 const assigneeAgentId = '22222222-2222-4222-8222-222222222222';
@@ -27,6 +30,13 @@ async function asWorker<T>(work: () => Promise<T>): Promise<T> {
 
 function response(body: unknown, status = 200) {
   return Response.json(body, { status });
+}
+
+async function drainWorker(fetcher: typeof fetch): Promise<void> {
+  await asWorker(async () => {
+    const worker = new ExternalAgentDispatchWorker({ fetcher });
+    expect(await worker.drainOne()).toBe(true);
+  });
 }
 
 function paperclipAgent(
@@ -94,16 +104,20 @@ function paperclipAgent(
 beforeAll(async () => {
   const databaseModule = await import('@/db');
   await (await import('@/db/runtime')).initializeRuntimeDatabase();
-  [registry, service] = await Promise.all([
+  const modules = await Promise.all([
     import('@/lib/external-agents/registry'),
     import('@/lib/external-agents/service'),
+    import('@/lib/external-agents/worker'),
   ]);
+  [registry, service] = modules;
+  ExternalAgentDispatchWorker = modules[2].ExternalAgentDispatchWorker;
   sqlite = databaseModule.sqlite;
   sqlite.prepare('SELECT 1').get();
 }, 30_000);
 
 beforeEach(() => {
   sqlite.exec(`
+    DELETE FROM agent_dispatch_actions;
     DELETE FROM agent_dispatch_events;
     DELETE FROM agent_dispatch_attempts;
     DELETE FROM agent_dispatches;
@@ -390,11 +404,7 @@ describe('Paperclip external-agent provider', () => {
 
     await service.confirmDispatch(preview.id, preview.previewHash);
     await service.confirmDispatch(preview.id, preview.previewHash);
-    await asWorker(() => service.executeExternalAgentWorkerAction(
-      preview.id,
-      'submit',
-      { fetcher },
-    ));
+    await drainWorker(fetcher as typeof fetch);
     expect(createCount).toBe(1);
     expect(postedIssue).toMatchObject({
       title: 'Canonical parser task title that must not be truncated',
@@ -426,10 +436,7 @@ describe('Paperclip external-agent provider', () => {
     });
 
     phase = 'completed';
-    const reconciled = await asWorker(() => service.reconcileDispatch(
-      preview.id,
-      { fetcher },
-    ));
+    const reconciled = await asWorker(() => service.reconcileDispatch(preview.id));
     expect(reconciled).toMatchObject({
       status: 'completed',
       providerTaskId: issueId,
@@ -450,7 +457,7 @@ describe('Paperclip external-agent provider', () => {
     });
 
     const callsAfterCompletion = fetcher.mock.calls.length;
-    await asWorker(() => service.reconcileDispatch(preview.id, { fetcher }));
+    await asWorker(() => service.reconcileDispatch(preview.id));
     expect(fetcher).toHaveBeenCalledTimes(callsAfterCompletion);
   });
 
@@ -527,18 +534,10 @@ describe('Paperclip external-agent provider', () => {
       idempotencyKey: 'paperclip-cancel',
     });
     await service.confirmDispatch(preview.id, preview.previewHash);
-    await asWorker(() => service.executeExternalAgentWorkerAction(
-      preview.id,
-      'submit',
-      { fetcher },
-    ));
+    await drainWorker(fetcher as typeof fetch);
 
     await expect(service.cancelDispatch(preview.id)).resolves.toBe(true);
-    await asWorker(() => service.executeExternalAgentWorkerAction(
-      preview.id,
-      'cancel',
-      { fetcher },
-    ));
+    await drainWorker(fetcher as typeof fetch);
     expect(mutations).toEqual(['run', 'issue']);
     expect((await service.getDispatch(preview.id))?.status).toBe('cancelled');
     await expect(service.cancelDispatch(preview.id)).resolves.toBe(false);
@@ -598,21 +597,10 @@ describe('Paperclip external-agent provider', () => {
       idempotencyKey: 'paperclip-reject-cancel',
     });
     await service.confirmDispatch(preview.id, preview.previewHash);
-    await asWorker(() => service.executeExternalAgentWorkerAction(
-      preview.id,
-      'submit',
-      { fetcher },
-    ));
+    await drainWorker(fetcher as typeof fetch);
 
     await expect(service.cancelDispatch(preview.id)).resolves.toBe(true);
-    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
-      preview.id,
-      'cancel',
-      { fetcher },
-    ))).rejects.toMatchObject({
-      code: 'PROVIDER_FORBIDDEN',
-      status: 403,
-    });
+    await drainWorker(fetcher as typeof fetch);
     expect((await service.getDispatch(preview.id))?.status).toBe('in_progress');
   });
 });

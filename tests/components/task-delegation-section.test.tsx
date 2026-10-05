@@ -605,7 +605,7 @@ describe('TaskDelegationDialog', () => {
 
     fireEvent.click(confirmButton);
     expect(await within(dialog).findByRole('button', {
-      name: 'Starting 1 of 1…',
+      name: 'Queueing 1 of 1…',
     })).toBeDisabled();
     await waitFor(() => {
       expect(fetcher).toHaveBeenCalledWith(
@@ -622,7 +622,7 @@ describe('TaskDelegationDialog', () => {
     });
     confirmation.resolve(await response({ dispatch: { status: 'queued' } }));
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('1 task delegated to GitHub Copilot Cloud');
+      expect(toast.success).toHaveBeenCalledWith('1 task queued for GitHub Copilot Cloud');
     });
   });
 });

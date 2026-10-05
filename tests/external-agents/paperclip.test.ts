@@ -14,6 +14,17 @@ let service: typeof import('@/lib/external-agents/service');
 const companyId = '11111111-1111-4111-8111-111111111111';
 const assigneeAgentId = '22222222-2222-4222-8222-222222222222';
 
+async function asWorker<T>(work: () => Promise<T>): Promise<T> {
+  const previous = process.env.MC_PROCESS_ROLE;
+  process.env.MC_PROCESS_ROLE = 'worker';
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete process.env.MC_PROCESS_ROLE;
+    else process.env.MC_PROCESS_ROLE = previous;
+  }
+}
+
 function response(body: unknown, status = 200) {
   return Response.json(body, { status });
 }
@@ -379,6 +390,11 @@ describe('Paperclip external-agent provider', () => {
 
     await service.confirmDispatch(preview.id, preview.previewHash);
     await service.confirmDispatch(preview.id, preview.previewHash);
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { fetcher },
+    ));
     expect(createCount).toBe(1);
     expect(postedIssue).toMatchObject({
       title: 'Canonical parser task title that must not be truncated',
@@ -410,7 +426,10 @@ describe('Paperclip external-agent provider', () => {
     });
 
     phase = 'completed';
-    const reconciled = await service.reconcileDispatch(preview.id);
+    const reconciled = await asWorker(() => service.reconcileDispatch(
+      preview.id,
+      { fetcher },
+    ));
     expect(reconciled).toMatchObject({
       status: 'completed',
       providerTaskId: issueId,
@@ -431,7 +450,7 @@ describe('Paperclip external-agent provider', () => {
     });
 
     const callsAfterCompletion = fetcher.mock.calls.length;
-    await service.reconcileDispatch(preview.id);
+    await asWorker(() => service.reconcileDispatch(preview.id, { fetcher }));
     expect(fetcher).toHaveBeenCalledTimes(callsAfterCompletion);
   });
 
@@ -508,8 +527,18 @@ describe('Paperclip external-agent provider', () => {
       idempotencyKey: 'paperclip-cancel',
     });
     await service.confirmDispatch(preview.id, preview.previewHash);
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { fetcher },
+    ));
 
     await expect(service.cancelDispatch(preview.id)).resolves.toBe(true);
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'cancel',
+      { fetcher },
+    ));
     expect(mutations).toEqual(['run', 'issue']);
     expect((await service.getDispatch(preview.id))?.status).toBe('cancelled');
     await expect(service.cancelDispatch(preview.id)).resolves.toBe(false);
@@ -569,8 +598,18 @@ describe('Paperclip external-agent provider', () => {
       idempotencyKey: 'paperclip-reject-cancel',
     });
     await service.confirmDispatch(preview.id, preview.previewHash);
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { fetcher },
+    ));
 
-    await expect(service.cancelDispatch(preview.id)).rejects.toMatchObject({
+    await expect(service.cancelDispatch(preview.id)).resolves.toBe(true);
+    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'cancel',
+      { fetcher },
+    ))).rejects.toMatchObject({
       code: 'PROVIDER_FORBIDDEN',
       status: 403,
     });

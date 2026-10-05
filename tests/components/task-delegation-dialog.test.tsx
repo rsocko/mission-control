@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TaskDelegationDialog } from '@/components/task-delegation/TaskDelegationDialog';
 import { openTaskDelegation } from '@/components/task-delegation/events';
@@ -306,5 +306,99 @@ describe('TaskDelegationDialog disclosure review', () => {
           requiredAdapterType: 'claude-local',
         },
       }));
+  });
+
+  it('shows an accessible worker handoff while confirmation is queued', async () => {
+    type MockResponse = Awaited<ReturnType<typeof response>>;
+    let resolveConfirmation!: (value: MockResponse) => void;
+    const pendingConfirmation = new Promise<MockResponse>((resolve) => {
+      resolveConfirmation = resolve;
+    });
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response({
+          taskIds: ['task-1'],
+          tasks: [{ id: 'task-1', title: 'Background task', connectorType: 'local' }],
+          targets: [{
+            id: 'worker-queue',
+            name: 'Worker queue',
+            type: 'pull-queue',
+            description: null,
+            alwaysInstructions: '',
+            executionLocality: 'mission-control-host',
+            allowedActions: ['write_code'],
+            hasCredential: true,
+            paperclipBinding: null,
+            repositories: [],
+            eligibility: [{
+              taskId: 'task-1',
+              title: 'Background task',
+              connectorType: 'local',
+              ready: true,
+              blocker: null,
+              repository: null,
+              repositoryLocked: false,
+            }],
+          }],
+          assignments: [],
+          syncErrors: [],
+        });
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        return response({
+          previews: [{
+            taskId: 'task-1',
+            dispatchId: 'dispatch-1',
+            previewHash: 'preview-hash',
+            processingLocation: 'mission-control-host',
+            dataClassification: 'standard',
+            disclosedFields: ['tasks.title'],
+            allowedActions: ['write_code'],
+            payloadPreview: { tasks: [{ id: 'task-1', title: 'Background task' }] },
+          }],
+          blocked: [],
+          readyCount: 1,
+          blockedCount: 0,
+        }, 201);
+      }
+      if (url === '/api/external-agents/dispatch' && init?.method === 'POST') {
+        return pendingConfirmation;
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+    expect(await screen.findByText('Worker queue')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
+    expect(await screen.findByRole('button', { name: 'Confirm and delegate 1' }))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and delegate 1' }));
+
+    expect(await screen.findByText('Queueing work with Worker queue')).toBeInTheDocument();
+    expect(screen.getByText(
+      'Sending delegation 1 of 1 to the Mission Control worker.',
+    )).toBeInTheDocument();
+    expect(screen.getByText(
+      'You can close this window. Queued work continues in the background.',
+    )).toBeInTheDocument();
+    const progress = screen.getByRole('progressbar', {
+      name: 'Delegation handoff progress',
+    });
+    expect(progress).toHaveAttribute('aria-valuenow', '0');
+    expect(progress).toHaveAttribute('aria-valuetext', '0 of 1 queued');
+    expect(progress.firstElementChild).toHaveClass('motion-reduce:transition-none');
+    expect(screen.getByRole('button', { name: 'Queueing 1 of 1…' })).toBeDisabled();
+
+    await act(async () => {
+      resolveConfirmation(await response({ dispatch: { status: 'queued' } }, 202));
+      await pendingConfirmation;
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
   });
 });

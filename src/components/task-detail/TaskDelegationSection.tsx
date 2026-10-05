@@ -147,13 +147,46 @@ function stateDescription(assignment: TaskDelegationSummary) {
     case 'cancelled':
       return 'The run is no longer active.';
     case 'completed':
+      if (assignment.pullRequestState === 'merged') {
+        return 'The provider completed the run and its pull request was merged.';
+      }
+      if (assignment.pullRequestState === 'closed') {
+        return 'The provider completed the run and its pull request was closed without merging.';
+      }
+      if (assignment.pullRequestState === 'draft') {
+        return 'The provider completed the run and its draft pull request is ready for review.';
+      }
+      if (assignment.pullRequestState === 'open') {
+        return 'The provider completed the run and its pull request is ready for review.';
+      }
       return 'The provider reported that the run completed.';
+  }
+}
+
+function pullRequestStatusLabel(assignment: TaskDelegationSummary) {
+  switch (assignment.pullRequestState) {
+    case 'draft':
+      return 'Draft';
+    case 'open':
+      return 'Open';
+    case 'merged':
+      return 'Merged';
+    case 'closed':
+      return 'Closed';
+    default:
+      return null;
   }
 }
 
 function outputLink(assignment: TaskDelegationSummary) {
   if (assignment.pullRequestUrl) {
-    return { href: assignment.pullRequestUrl, label: 'Pull request', icon: GitPullRequest };
+    return {
+      href: assignment.pullRequestUrl,
+      label: assignment.pullRequestState === 'merged' || assignment.pullRequestState === 'closed'
+        ? 'View PR'
+        : 'Review PR',
+      icon: GitPullRequest,
+    };
   }
   if (assignment.runUrl) {
     return { href: assignment.runUrl, label: 'Provider run', icon: ExternalLink };
@@ -185,7 +218,9 @@ export function TaskDelegationSection({
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/delegation`);
+      const response = await fetch(
+        `/api/tasks/${encodeURIComponent(taskId)}/delegation`,
+      );
       if (!response.ok) throw new Error(await responseError(response));
       setContext(await response.json() as TaskDelegationContext);
     } catch (loadError) {
@@ -210,6 +245,7 @@ export function TaskDelegationSection({
     ? context?.syncErrors.find((item) => item.dispatchId === current.dispatchId) ?? null
     : null;
   const relevantOutput = current ? outputLink(current) : null;
+  const pullRequestStatus = current ? pullRequestStatusLabel(current) : null;
   const OutputIcon = relevantOutput?.icon;
 
   return (
@@ -279,6 +315,11 @@ export function TaskDelegationSection({
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--text-muted)]">
                 <span>{current.locality.replaceAll('-', ' ')}</span>
                 {current.baseRef && <span>Base {current.baseRef}</span>}
+                {pullRequestStatus && (
+                  <span>
+                    PR{current.pullRequestNumber ? ` #${current.pullRequestNumber}` : ''}: {pullRequestStatus}
+                  </span>
+                )}
                 <span>Attempt {Math.max(current.attemptCount, 1)} of {current.maxAttempts}</span>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
@@ -343,27 +384,35 @@ function TaskDelegationRunDialog({
   const [interactionAnswer, setInteractionAnswer] = useState('');
   const refreshInFlight = useRef(false);
 
-  const load = useCallback(async (refreshProvider = false) => {
+  const load = useCallback(async (requestProviderRefresh = false) => {
     if (refreshInFlight.current) return;
     refreshInFlight.current = true;
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/external-agents/dispatches/${encodeURIComponent(assignment.dispatchId)}`,
-        refreshProvider
-          ? {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'refresh' }),
-          }
-          : undefined,
-      );
+      const url = `/api/external-agents/dispatches/${encodeURIComponent(assignment.dispatchId)}`;
+      const response = await fetch(url, requestProviderRefresh
+        ? {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'refresh' }),
+        }
+        : undefined);
       if (!response.ok) throw new Error(await responseError(response));
-      const body = await response.json() as { dispatch: RunDetail };
+      const body = await response.json() as {
+        dispatch: RunDetail;
+        accepted?: boolean;
+      };
       setDetail(body.dispatch);
       setInteractionAnswer('');
-      if (refreshProvider) await onUpdated();
+      if (requestProviderRefresh) {
+        toast.success(
+          body.accepted === false
+            ? 'Provider state is already current'
+            : 'Provider refresh queued',
+        );
+        await onUpdated();
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Run details could not be loaded');
     } finally {
@@ -374,21 +423,37 @@ function TaskDelegationRunDialog({
 
   useEffect(() => {
     if (!open) return;
-    const initialRefresh = window.setTimeout(() => void load(true), 0);
+    const observePersistedState = () => {
+      void Promise.all([load(false), onUpdated()]);
+    };
+    const initialRefresh = window.setTimeout(observePersistedState, 0);
     const active = [
       'queued',
       'running',
       'idle',
       'waiting_for_user',
       'blocked',
-    ].includes(assignment.displayState);
+    ].includes(assignment.displayState)
+      || (
+        assignment.displayState === 'completed'
+        && assignment.createPullRequest
+        && assignment.pullRequestState !== 'merged'
+        && assignment.pullRequestState !== 'closed'
+      );
     if (!active) return () => window.clearTimeout(initialRefresh);
-    const interval = window.setInterval(() => void load(true), 30_000);
+    const interval = window.setInterval(observePersistedState, 5_000);
     return () => {
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
     };
-  }, [assignment.displayState, load, open]);
+  }, [
+    assignment.createPullRequest,
+    assignment.displayState,
+    assignment.pullRequestState,
+    load,
+    onUpdated,
+    open,
+  ]);
 
   const act = async (action: 'cancel' | 'stop_tracking' | 'retry') => {
     setBusyAction(action);
@@ -405,10 +470,10 @@ function TaskDelegationRunDialog({
       if (!response.ok) throw new Error(await responseError(response));
       toast.success(
         action === 'retry'
-          ? 'Delegation retried'
+          ? 'Delegation retry queued'
           : action === 'stop_tracking'
             ? 'Mission Control stopped tracking the provider task'
-            : 'Delegation cancelled',
+            : 'Cancellation requested',
       );
       await Promise.all([load(), onUpdated()]);
     } catch (actionError) {
@@ -445,10 +510,10 @@ function TaskDelegationRunDialog({
       if (!response.ok) throw new Error(await responseError(response));
       toast.success(
         outcome === 'answered'
-          ? 'Answer sent to Scout'
+          ? 'Answer saved for worker delivery'
           : outcome === 'approved'
-            ? 'Scout request approved'
-            : 'Scout request rejected',
+            ? 'Approval saved for worker delivery'
+            : 'Rejection saved for worker delivery',
       );
       await Promise.all([load(), onUpdated()]);
     } catch (actionError) {
@@ -638,7 +703,13 @@ function TaskDelegationRunDialog({
                       <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Outputs</h3>
                       <div className="mt-2 space-y-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-2">
                         {assignment.pullRequestUrl && (
-                          <RunReference href={assignment.pullRequestUrl} icon={GitPullRequest}>Pull request</RunReference>
+                          <RunReference href={assignment.pullRequestUrl} icon={GitPullRequest}>
+                            Pull request
+                            {assignment.pullRequestNumber ? ` #${assignment.pullRequestNumber}` : ''}
+                            {pullRequestStatusLabel(assignment)
+                              ? ` · ${pullRequestStatusLabel(assignment)}`
+                              : ''}
+                          </RunReference>
                         )}
                         {assignment.branchRef && (
                           <div className="flex min-h-8 items-center gap-2 px-2 text-xs text-[var(--text-secondary)]">
@@ -687,6 +758,7 @@ function TaskDelegationRunDialog({
                         ['Model', assignment.model ?? 'Auto'],
                         ['Attempt', `${Math.max(assignment.attemptCount, 1)} of ${assignment.maxAttempts}`],
                         ['Provider state', assignment.providerState],
+                        ['Pull request', pullRequestStatusLabel(assignment)],
                         ['Provider task', assignment.providerTaskId],
                         ['Run ID', assignment.runId],
                         ['Dispatch ID', assignment.dispatchId],
@@ -726,7 +798,7 @@ function TaskDelegationRunDialog({
                       className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border)] px-3 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50"
                     >
                       <RefreshCw size={13} className={cn(loading && 'animate-spin')} />
-                      Refresh
+                      Request refresh
                     </button>
                     {assignment.canRetry && (
                       <button

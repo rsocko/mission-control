@@ -17,6 +17,7 @@ export const PACKAGED_SYNC_WORKER_COMPONENT_ORDER = Object.freeze([
   'task-deletion-retention',
   'event-outbox',
   'notification-enrichment',
+  'external-agent-dispatch',
   'sync-schedulers',
   'finance-recovery',
   'triage-scheduler',

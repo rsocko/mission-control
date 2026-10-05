@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 process.env.MC_DB_PATH = ':memory:';
 process.env.MC_API_KEY = 'task-delegation-test-key';
@@ -12,6 +12,8 @@ let registry: typeof import('@/lib/external-agents/registry');
 let delegation: typeof import('@/lib/external-agents/task-delegation');
 let singleRoute: typeof import('@/app/api/tasks/[id]/delegation/route');
 let bulkRoute: typeof import('@/app/api/tasks/delegation/route');
+let dispatchRoute: typeof import('@/app/api/external-agents/dispatch/route');
+let dispatchDetailRoute: typeof import('@/app/api/external-agents/dispatches/[id]/route');
 
 const companyId = '11111111-1111-4111-8111-111111111111';
 const projectId = '22222222-2222-4222-8222-222222222222';
@@ -160,11 +162,20 @@ async function createScoutPullAgent() {
 beforeAll(async () => {
   const databaseModule = await import('@/db');
   await (await import('@/db/runtime')).initializeRuntimeDatabase();
-  [registry, delegation, singleRoute, bulkRoute] = await Promise.all([
+  [
+    registry,
+    delegation,
+    singleRoute,
+    bulkRoute,
+    dispatchRoute,
+    dispatchDetailRoute,
+  ] = await Promise.all([
     import('@/lib/external-agents/registry'),
     import('@/lib/external-agents/task-delegation'),
     import('@/app/api/tasks/[id]/delegation/route'),
     import('@/app/api/tasks/delegation/route'),
+    import('@/app/api/external-agents/dispatch/route'),
+    import('@/app/api/external-agents/dispatches/[id]/route'),
   ]);
   sqlite = databaseModule.sqlite;
 }, 30_000);
@@ -255,6 +266,91 @@ afterAll(async () => {
 });
 
 describe('provider-neutral task delegation API', () => {
+  it('persists confirmation intent without calling a provider from the API process', async () => {
+    await createCloudAgent();
+    const preview = await delegation.previewTaskDelegation({
+      taskId: 'task-github',
+      agentId: 'github-cloud',
+      operationId: 'api-worker-owned-confirmation',
+      instruction: 'Fix the parser',
+      repository: 'octo/source',
+    });
+
+    const providerFetch = vi.fn(() => {
+      throw new Error('provider transport must not run in the web process');
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = providerFetch as typeof fetch;
+    try {
+      const response = await dispatchRoute.POST(mutationRequest(
+        'http://localhost/api/external-agents/dispatch',
+        {
+          dispatchId: preview.id,
+          previewHash: preview.previewHash,
+          confirm: true,
+        },
+      ));
+      expect(response.status).toBe(202);
+      expect(await response.json()).toMatchObject({
+        accepted: true,
+        dispatch: { id: preview.id, status: 'queued' },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(sqlite.prepare(`
+      SELECT action, status FROM agent_dispatch_actions WHERE dispatch_id = ?
+    `).get(preview.id)).toEqual({ action: 'submit', status: 'pending' });
+  });
+
+  it('queues refresh intent and keeps delegation reads side-effect free', async () => {
+    await createCloudAgent();
+    const preview = await delegation.previewTaskDelegation({
+      taskId: 'task-github',
+      agentId: 'github-cloud',
+      operationId: 'api-worker-owned-refresh',
+      instruction: 'Fix the parser',
+      repository: 'octo/source',
+    });
+    await (await import('@/lib/external-agents/service'))
+      .confirmDispatch(preview.id, preview.previewHash);
+    const providerFetch = vi.fn(() => {
+      throw new Error('provider transport must not run in the web process');
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = providerFetch as typeof fetch;
+    try {
+      const getResponse = await singleRoute.GET(
+        new Request('http://localhost/api/tasks/task-github/delegation'),
+        { params: Promise.resolve({ id: 'task-github' }) },
+      );
+      expect(getResponse.status).toBe(200);
+      const refreshResponse = await dispatchDetailRoute.PATCH(
+        new Request(
+          `http://localhost/api/external-agents/dispatches/${preview.id}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-mc-api-key': 'task-delegation-test-key',
+            },
+            body: JSON.stringify({ action: 'refresh' }),
+          },
+        ),
+        { params: Promise.resolve({ id: preview.id }) },
+      );
+      expect(refreshResponse.status).toBe(202);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(sqlite.prepare(`
+      SELECT action, status FROM agent_dispatch_actions
+      WHERE dispatch_id = ? AND action = 'reconcile'
+    `).get(preview.id)).toEqual({ action: 'reconcile', status: 'pending' });
+  });
+
   it('maps every canonical and provider liveness state for task surfaces', () => {
     const base = { status: 'queued' } as import(
       '@/lib/external-agents/contracts'

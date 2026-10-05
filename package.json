@@ -141,7 +141,7 @@
     "qs": "6.16.0"
   },
   "devDependencies": {
-    "@github/copilot-sdk": "1.0.11",
+    "@github/copilot-sdk": "1.0.14",
     "@next/bundle-analyzer": "^16.2.10",
     "@opentelemetry/core": "2.10.0",
     "@opentelemetry/sdk-node": "0.221.0",
@@ -181,7 +181,7 @@
     "eslint-config-next": "16.3.4",
     "eslint-plugin-react-hooks": "^7.1.1",
     "fake-indexeddb": "^6.2.5",
-    "happy-dom": "^20.12.0",
+    "happy-dom": "^20.14.5",
     "tailwindcss": "^4",
     "tsx": "^4.22.4",
     "typescript": "^5",

@@ -17,7 +17,21 @@ let registry: typeof import('@/lib/external-agents/registry');
 let policy: typeof import('@/lib/external-agents/policy');
 let service: typeof import('@/lib/external-agents/service');
 let transports: typeof import('@/lib/external-agents/transports');
+let ExternalAgentDispatchWorker: typeof import(
+  '@/lib/external-agents/worker'
+)['ExternalAgentDispatchWorker'];
 let receiveInboundResult: typeof import('@/app/api/inbound-webhooks/[id]/receive/route').POST;
+
+async function asWorker<T>(work: () => Promise<T>): Promise<T> {
+  const previous = process.env.MC_PROCESS_ROLE;
+  process.env.MC_PROCESS_ROLE = 'worker';
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete process.env.MC_PROCESS_ROLE;
+    else process.env.MC_PROCESS_ROLE = previous;
+  }
+}
 
 const requiredFields = [
   'instruction',
@@ -37,6 +51,7 @@ beforeAll(async () => {
     import('@/lib/external-agents/policy'),
     import('@/lib/external-agents/service'),
     import('@/lib/external-agents/transports'),
+    import('@/lib/external-agents/worker'),
     import('@/app/api/inbound-webhooks/[id]/receive/route'),
   ]);
   db = databaseModule.default;
@@ -46,7 +61,8 @@ beforeAll(async () => {
   policy = modules[2];
   service = modules[3];
   transports = modules[4];
-  receiveInboundResult = modules[5].POST;
+  ExternalAgentDispatchWorker = modules[5].ExternalAgentDispatchWorker;
+  receiveInboundResult = modules[6].POST;
   sqlite.prepare('SELECT 1').get();
 }, 30_000);
 
@@ -152,6 +168,54 @@ async function seedTask(connectorType = 'github-issues') {
 }
 
 describe('external-agent registry boundaries', () => {
+  it('submits confirmed push work only after the packaged worker claims its durable intent', async () => {
+    const agent = await registry.createExternalAgent({
+      id: 'worker-owned-push',
+      name: 'Worker-owned push',
+      type: 'webhook-roundtrip',
+      endpoint: 'https://agent.example.test/run',
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+        fieldAllowlist: requiredFields,
+        retentionDays: 30,
+        maxRequestsPerMinute: 30,
+      },
+    });
+    const transport = vi.fn(async () => ({
+      status: 'in_progress' as const,
+      providerTaskId: 'provider-worker-1',
+    }));
+    const preview = await service.createDispatchPreview({
+      agentId: agent.id,
+      instruction: 'Run in the worker',
+      idempotencyKey: 'worker-owned-confirmation',
+    });
+
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({ kind: 'push', dispatch: transport }),
+    });
+    expect(transport).not.toHaveBeenCalled();
+    expect((sqlite.prepare(
+      'SELECT action, status FROM agent_dispatch_actions WHERE dispatch_id = ?',
+    ).get(preview.id) as { action: string; status: string })).toEqual({
+      action: 'submit',
+      status: 'pending',
+    });
+
+    await asWorker(async () => {
+      const worker = new ExternalAgentDispatchWorker({
+        transportResolver: () => ({ kind: 'push', dispatch: transport }),
+      });
+      expect(await worker.drainOne()).toBe(true);
+      expect(await worker.drainOne()).toBe(false);
+    });
+    expect(transport).toHaveBeenCalledOnce();
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'in_progress',
+      providerTaskId: 'provider-worker-1',
+    });
+  });
+
   it('bounds server-owned always instructions', () => {
     expect(() => registry.validateExternalAgentInput({
       name: 'Oversized configuration',
@@ -417,10 +481,26 @@ describe('external-agent registry boundaries', () => {
         },
       }),
     });
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      {
+        transportResolver: () => ({
+          kind: 'push',
+          async dispatch() {
+            return {
+              status: 'queued',
+              providerTaskId: 'provider-task-1',
+              providerState: 'queued',
+            };
+          },
+        }),
+      },
+    ));
 
     let providerState: 'completed' | 'in_progress' = 'completed';
     let pullRequestAvailable = false;
-    const fetcher = vi.fn(async (input: string | URL | Request) => {
+    const fetcherMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith('/tasks/provider-task-1')) {
         return Response.json({
@@ -466,9 +546,10 @@ describe('external-agent registry boundaries', () => {
         });
       }
       throw new Error(`Unexpected GitHub request: ${url}`);
-    }) as typeof fetch;
+    });
+    const fetcher = fetcherMock as typeof fetch;
 
-    await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
       .resolves.toEqual({ reconciled: 1, failures: [] });
     const initiallyCompleted = await service.getDispatch(preview.id);
     expect(initiallyCompleted?.completedAt).toEqual(expect.any(String));
@@ -484,7 +565,9 @@ describe('external-agent registry boundaries', () => {
     });
 
     pullRequestAvailable = true;
-    const refreshedCompleted = await service.reconcileDispatch(preview.id, { fetcher });
+    const refreshedCompleted = await asWorker(
+      () => service.reconcileDispatch(preview.id, { fetcher }),
+    );
     expect(refreshedCompleted).toMatchObject({
       status: 'completed',
       providerTaskId: 'provider-task-1',
@@ -508,9 +591,8 @@ describe('external-agent registry boundaries', () => {
       completedAt: initiallyCompleted?.completedAt,
       resultStatus: 'pending_review',
     });
-    await expect(service.reconcileDispatch(preview.id, { fetcher }))
+    await expect(asWorker(() => service.reconcileDispatch(preview.id, { fetcher })))
       .resolves.toMatchObject({
-        updatedAt: refreshedCompleted.updatedAt,
         events: refreshedCompleted.events,
       });
 
@@ -520,7 +602,7 @@ describe('external-agent registry boundaries', () => {
       WHERE id = ?
     `).run(preview.id);
     providerState = 'in_progress';
-    await expect(service.reconcileDispatch(preview.id, { fetcher }))
+    await expect(asWorker(() => service.reconcileDispatch(preview.id, { fetcher })))
       .resolves.toMatchObject({
         status: 'in_progress',
         providerTaskId: 'provider-task-1',
@@ -534,6 +616,143 @@ describe('external-agent registry boundaries', () => {
         toStatus: 'in_progress',
       }),
     );
+  });
+
+  it('continues reconciling a completed create-PR dispatch until the PR is merged', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'hosted-pr-lifecycle',
+      name: 'Hosted PR lifecycle',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+      capabilities: { canWriteCode: true, canCreatePullRequest: true },
+    });
+    const preview = await service.createDispatchPreview({
+      agentId: hosted.id,
+      instruction: 'Create a reviewed change',
+      scope: {
+        repository: 'octo/example',
+        baseRef: 'main',
+        createPullRequest: true,
+      },
+      allowedActions: ['write_code', 'create_pull_request'],
+      idempotencyKey: 'completed-pr-reconciliation',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({
+        kind: 'push',
+        async dispatch() {
+          return {
+            status: 'queued',
+            providerTaskId: 'provider-task-pr',
+            providerState: 'queued',
+          };
+        },
+      }),
+    });
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      {
+        transportResolver: () => ({
+          kind: 'push',
+          async dispatch() {
+            return {
+              status: 'queued',
+              providerTaskId: 'provider-task-pr',
+              providerState: 'queued',
+            };
+          },
+        }),
+      },
+    ));
+
+    let pullRequestState: 'OPEN' | 'MERGED' = 'OPEN';
+    const lifecycleFetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/provider-task-pr')) {
+        return Response.json({
+          id: 'provider-task-pr',
+          name: 'Create a reviewed change',
+          state: 'completed',
+          sessions: [{ base_ref: 'main', head_ref: 'copilot/reviewed-change' }],
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 7654321, global_id: 'PR_lifecycle' },
+            },
+            {
+              provider: 'github',
+              type: 'branch',
+              data: { base_ref: 'main', head_ref: 'copilot/reviewed-change' },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        return Response.json({
+          data: {
+            node: {
+              __typename: 'PullRequest',
+              number: 42,
+              url: 'https://github.com/octo/example/pull/42',
+              state: pullRequestState,
+              isDraft: false,
+              mergedAt: pullRequestState === 'MERGED'
+                ? '2026-10-05T17:25:45Z'
+                : null,
+              closedAt: pullRequestState === 'MERGED'
+                ? '2026-10-05T17:25:45Z'
+                : null,
+              headRefName: 'copilot/reviewed-change',
+              headRefOid: '0123456789abcdef',
+              headRepository: { nameWithOwner: 'octo/example' },
+              baseRefName: 'main',
+              baseRepository: { nameWithOwner: 'octo/example' },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+    const fetcher = lifecycleFetcher as typeof fetch;
+
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
+      .resolves.toEqual({ reconciled: 1, failures: [] });
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'completed',
+      githubPullRequestUrl: 'https://github.com/octo/example/pull/42',
+      providerDetail: {
+        pullRequest: { number: 42, state: 'open' },
+      },
+    });
+    const completed = (await service.getDispatch(preview.id))!;
+    expect(service.shouldReconcileDispatch(completed)).toBe(true);
+    expect(service.shouldReconcileDispatch({
+      ...completed,
+      scope: { ...completed.scope, createPullRequest: false },
+    })).toBe(true);
+
+    pullRequestState = 'MERGED';
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
+      .resolves.toEqual({ reconciled: 1, failures: [] });
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'completed',
+      providerDetail: {
+        pullRequest: {
+          number: 42,
+          state: 'merged',
+          mergedAt: '2026-10-05T17:25:45Z',
+        },
+      },
+    });
+
+    lifecycleFetcher.mockClear();
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
+      .resolves.toEqual({ reconciled: 0, failures: [] });
+    expect(lifecycleFetcher).not.toHaveBeenCalled();
   });
 
   it('does not pretend a submitted Copilot task was cancelled locally', async () => {
@@ -563,6 +782,22 @@ describe('external-agent registry boundaries', () => {
         },
       }),
     });
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      {
+        transportResolver: () => ({
+          kind: 'push',
+          async dispatch() {
+            return {
+              status: 'in_progress',
+              providerTaskId: 'provider-task-2',
+              providerState: 'in_progress',
+            };
+          },
+        }),
+      },
+    ));
 
     await expect(service.cancelDispatch(preview.id)).rejects.toMatchObject({
       code: 'CANCELLATION_UNSUPPORTED',
@@ -645,9 +880,13 @@ describe('disclosure preview and manual result review', () => {
     })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
 
     const confirmed = await service.confirmDispatch(first.id, first.previewHash);
-    expect(confirmed.dispatch.status).toBe('waiting_for_user');
-    expect(confirmed.manualUrl).toBe('https://example.test/agent');
-    expect(confirmed.dispatch.attempts).toHaveLength(1);
+    expect(confirmed.dispatch.status).toBe('queued');
+    expect(confirmed.manualUrl).toBeUndefined();
+    await asWorker(() => service.executeExternalAgentWorkerAction(first.id, 'submit'));
+    expect(await service.getDispatch(first.id)).toMatchObject({
+      status: 'waiting_for_user',
+      attempts: [expect.objectContaining({ attemptNumber: 1 })],
+    });
   });
 
   it('rejects confirmation when the reviewed destination changes', async () => {
@@ -921,6 +1160,7 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
     });
     await service.confirmDispatch(cancelled.id, cancelled.previewHash);
     await expect(service.cancelDispatch(cancelled.id)).resolves.toBe(true);
+    await asWorker(() => service.executeExternalAgentWorkerAction(cancelled.id, 'cancel'));
     await expect(service.cancelDispatch(cancelled.id)).resolves.toBe(false);
     expect((await service.getDispatch(cancelled.id))?.status).toBe('cancelled');
 
@@ -1000,9 +1240,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       idempotencyKey: 'late-synchronous-push',
     });
 
-    await expect(service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: transports.createTransportResolver({ fetcher }),
-    })).rejects.toMatchObject({ code: 'DEADLINE_EXPIRED' });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: transports.createTransportResolver({ fetcher }) },
+    ))).rejects.toMatchObject({ code: 'DEADLINE_EXPIRED' });
 
     const dispatch = await service.getDispatch(preview.id);
     expect(dispatch).toMatchObject({
@@ -1053,9 +1296,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       idempotencyKey: 'push-once',
     });
 
-    await service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ));
     expect(sentHeaders?.get('authorization')).toBe('Bearer push-secret-value');
     expect(sentHeaders?.get('idempotency-key')).toBe(`${preview.id}:1`);
     expect(sentBody).not.toContain('push-secret-value');
@@ -1071,9 +1317,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
     });
     expect(JSON.stringify(dispatch)).not.toContain('provider-response-secret');
     expect(JSON.stringify(dispatch)).not.toContain('push-secret-value');
-    await service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ));
     expect(fetcher).toHaveBeenCalledTimes(1);
 
     const second = await service.createDispatchPreview({
@@ -1086,6 +1335,7 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
     })).rejects.toMatchObject({ code: 'RATE_LIMITED' });
 
     await service.cancelDispatch(preview.id);
+    await asWorker(() => service.executeExternalAgentWorkerAction(preview.id, 'cancel'));
     await expect(service.retryDispatch(preview.id, {
       transportResolver: resolver,
     })).rejects.toMatchObject({ code: 'RATE_LIMITED' });
@@ -1118,9 +1368,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       instruction: 'Recover this delivery',
       idempotencyKey: 'recover-push',
     });
-    await expect(service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    })).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ))).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
 
     sqlite.prepare(`
       UPDATE agent_dispatches
@@ -1128,9 +1381,11 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
           lease_expires_at = '2000-01-01T00:00:00.000Z'
       WHERE id = ?
     `).run(preview.id);
-    await expect(service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    })).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
+    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ))).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
     expect(keys).toEqual([`${preview.id}:1`, `${preview.id}:1`]);
     expect((await service.getDispatch(preview.id))?.events)
       .toEqual(expect.arrayContaining([

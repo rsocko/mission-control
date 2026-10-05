@@ -149,6 +149,10 @@ export class SyncScheduler {
   startWatchdog(): void {
     this.cronScheduler.startWatchdog();
   }
+
+  startExternalAgentReconciliation(): void {
+    this.cronScheduler.startExternalAgentReconciliation();
+  }
 }
 
 export const syncScheduler = new SyncScheduler();

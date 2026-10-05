@@ -74,7 +74,11 @@ interface CopilotTaskTarget {
 }
 
 interface PullRequestReference {
+  number?: number;
   url?: string;
+  state?: 'draft' | 'open' | 'merged' | 'closed';
+  mergedAt?: string;
+  closedAt?: string;
   head?: { ref?: string; sha?: string; repo?: { full_name?: string } };
   base?: { ref?: string; repo?: { full_name?: string } };
 }
@@ -84,8 +88,21 @@ function parsePullRequestReference(value: unknown): PullRequestReference | undef
   if (node?.__typename !== 'PullRequest') return undefined;
   const headRepository = record(node.headRepository);
   const baseRepository = record(node.baseRepository);
+  const state = text(node.state)?.toLowerCase();
+  const pullRequestState = node.isDraft === true && state === 'open'
+    ? 'draft'
+    : state;
   return {
+    ...(typeof node.number === 'number' ? { number: node.number } : {}),
     url: text(node.url),
+    ...(pullRequestState === 'draft'
+      || pullRequestState === 'open'
+      || pullRequestState === 'merged'
+      || pullRequestState === 'closed'
+      ? { state: pullRequestState }
+      : {}),
+    mergedAt: text(node.mergedAt),
+    closedAt: text(node.closedAt),
     head: {
       ref: text(node.headRefName),
       sha: text(node.headRefOid),
@@ -512,6 +529,7 @@ async function pullRequestReference(
   task: GitHubAgentTask,
 ): Promise<{
   codeChange?: AgentDispatchResult['codeChange'];
+  pullRequest?: PullRequestReference;
   warning?: string;
 }> {
   const branch = task.artifacts?.find((artifact) => artifact.type === 'branch')?.data;
@@ -529,6 +547,11 @@ async function pullRequestReference(
             __typename
             ... on PullRequest {
               url
+              number
+              state
+              isDraft
+              mergedAt
+              closedAt
               headRefName
               headRefOid
               baseRefName
@@ -569,6 +592,11 @@ async function pullRequestReference(
               nodes {
                 __typename
                 url
+                number
+                state
+                isDraft
+                mergedAt
+                closedAt
                 headRefName
                 headRefOid
                 baseRefName
@@ -631,6 +659,7 @@ async function pullRequestReference(
         },
       }
       : {}),
+    ...(pullRequest ? { pullRequest } : {}),
     ...(warning ? { warning } : {}),
   };
 }
@@ -638,6 +667,7 @@ async function pullRequestReference(
 function providerDetail(
   task: GitHubAgentTask,
   outputWarning?: string,
+  pullRequest?: PullRequestReference,
 ): Record<string, unknown> {
   const session = task.sessions?.at(-1);
   return redactForPersistence({
@@ -650,6 +680,7 @@ function providerDetail(
     updatedAt: task.updated_at,
     artifacts: task.artifacts,
     ...(outputWarning ? { outputWarning } : {}),
+    ...(pullRequest ? { pullRequest } : {}),
   }, { maxBytes: 128 * 1024 }) as Record<string, unknown>;
 }
 
@@ -667,7 +698,7 @@ async function transportResult(
     status,
     providerTaskId: task.id,
     providerState: task.state,
-    providerDetail: providerDetail(task, output.warning),
+    providerDetail: providerDetail(task, output.warning, output.pullRequest),
     ...(errorMessage ? { errorMessage } : {}),
     ...(status === 'completed'
       ? {

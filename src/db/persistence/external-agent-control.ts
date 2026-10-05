@@ -4,6 +4,8 @@ import type {
   AgentDispatchResult,
   AgentDispatchScope,
   AgentDispatchStatus,
+  AgentDispatchActionRecord,
+  AgentDispatchActionType,
   AgentPayloadSnapshot,
   AgentResultReference,
   AgentResultStatus,
@@ -63,6 +65,15 @@ export interface DispatchResultPersistenceInput extends Omit<
     allowCompletedProviderTaskUpdate?: boolean;
   };
   leaseExpiresAt: string;
+}
+
+export interface DispatchOutputRefreshInput {
+  id: string;
+  providerDetail: Record<string, unknown>;
+  pullRequestUrl?: string;
+  branchRef?: string;
+  commitSha?: string;
+  now: string;
 }
 
 export interface ExternalAgentControlPersistence {
@@ -163,6 +174,7 @@ export interface ExternalAgentControlPersistence {
       status: AgentDispatchStatus;
       expired?: boolean;
     }>;
+    refreshOutput(input: DispatchOutputRefreshInput): Promise<boolean>;
     cancel(id: string, now: string): Promise<boolean>;
     retry(input: {
       id: string;
@@ -186,5 +198,30 @@ export interface ExternalAgentControlPersistence {
       now: string,
     ): Promise<void>;
     cleanup(now: string): Promise<number>;
+  };
+  actions: {
+    enqueue(input: {
+      dispatchId: string;
+      action: AgentDispatchActionType;
+      priority: number;
+      now: string;
+    }): Promise<boolean>;
+    claimNext(input: {
+      owner: string;
+      now: string;
+      leaseExpiresAt: string;
+    }): Promise<AgentDispatchActionRecord | null>;
+    complete(input: {
+      id: string;
+      owner: string;
+      now: string;
+    }): Promise<boolean>;
+    fail(input: {
+      id: string;
+      owner: string;
+      error: string;
+      availableAt: string;
+      now: string;
+    }): Promise<boolean>;
   };
 }

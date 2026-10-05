@@ -9,6 +9,7 @@ import {
 } from './job-runtime';
 import type { SyncRequestOptions } from './queue';
 import { isConnectorSyncQuarantinedAsync } from './control-state';
+import { reconcileActiveExternalAgentDispatches } from '@/lib/external-agents/service';
 
 interface ScheduledJob {
   connectorId: string;
@@ -19,6 +20,12 @@ interface ScheduledJob {
 const STAGGER_DELAY_MS = 30_000;
 const WATCHDOG_INTERVAL_MS = 5 * 60 * 1000;
 const STALE_THRESHOLD_MS = 20 * 60 * 1000;
+const DEFAULT_EXTERNAL_AGENT_RECONCILIATION_INTERVAL_MS = 60_000;
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 async function fetchConnectorConfig(connectorId: string): Promise<ConnectorConfig | null> {
   return (await getWorkerPersistenceRepositories()).connectors.get(connectorId);
@@ -32,6 +39,8 @@ export class SyncCronScheduler {
   private readonly jobs = new Map<string, ScheduledJob>();
   private nightlyFullSyncTask: ScheduledTask | null = null;
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private externalAgentReconciliationTimer: ReturnType<typeof setInterval> | null = null;
+  private externalAgentReconciliationRunning = false;
 
   constructor(
     private readonly requestSync: (
@@ -196,6 +205,39 @@ export class SyncCronScheduler {
     }, WATCHDOG_INTERVAL_MS);
   }
 
+  startExternalAgentReconciliation(): void {
+    if (this.externalAgentReconciliationTimer) return;
+    const reconcile = async () => {
+      if (this.externalAgentReconciliationRunning) return;
+      this.externalAgentReconciliationRunning = true;
+      try {
+        const result = await reconcileActiveExternalAgentDispatches();
+        if (result.failures.length > 0) {
+          syncLogger.warn(
+            {
+              reconciled: result.reconciled,
+              failures: result.failures,
+            },
+            'External agent reconciliation completed with failures',
+          );
+        }
+      } catch (error) {
+        syncLogger.error({ err: error }, 'External agent reconciliation failed');
+      } finally {
+        this.externalAgentReconciliationRunning = false;
+      }
+    };
+    void reconcile();
+    this.externalAgentReconciliationTimer = setInterval(
+      () => void reconcile(),
+      positiveInteger(
+        process.env.MC_EXTERNAL_AGENT_RECONCILIATION_INTERVAL_MS,
+        DEFAULT_EXTERNAL_AGENT_RECONCILIATION_INTERVAL_MS,
+      ),
+    );
+    this.externalAgentReconciliationTimer.unref();
+  }
+
   async getStatus(): Promise<Array<{
     connectorId: string;
     intervalMinutes: number;
@@ -226,6 +268,11 @@ export class SyncCronScheduler {
       clearInterval(this.watchdogTimer);
       this.watchdogTimer = null;
     }
+    if (this.externalAgentReconciliationTimer) {
+      clearInterval(this.externalAgentReconciliationTimer);
+      this.externalAgentReconciliationTimer = null;
+    }
+    this.externalAgentReconciliationRunning = false;
     if (this.nightlyFullSyncTask) {
       this.nightlyFullSyncTask.stop();
       this.nightlyFullSyncTask = null;

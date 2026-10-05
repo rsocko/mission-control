@@ -11,6 +11,7 @@ import type {
   AgentInteraction,
   AgentInteractionContinuationPolicy,
   AgentInteractionKind,
+  AgentDispatchActionType,
 } from './contracts';
 import { SCOUT_WORKER_ACTIONS } from './contracts';
 import { ExternalAgentError } from './errors';
@@ -95,7 +96,31 @@ function positiveInteger(value: number | undefined, fallback: number, maximum: n
       422,
     );
   }
+
   return value;
+}
+
+function assertExternalAgentWorker(): void {
+  if (process.env.MC_PROCESS_ROLE !== 'worker') {
+    throw new ExternalAgentError(
+      'External-agent provider execution is restricted to the packaged worker',
+      'EXECUTION_BOUNDARY_MISMATCH',
+      503,
+    );
+  }
+}
+
+async function enqueueDispatchAction(
+  dispatchId: string,
+  action: AgentDispatchActionType,
+  priority: number,
+): Promise<boolean> {
+  return (await getExternalAgentControlPersistence()).actions.enqueue({
+    dispatchId,
+    action,
+    priority,
+    now: new Date().toISOString(),
+  });
 }
 
 function requiredText(value: unknown, field: string, maxLength: number) {
@@ -661,6 +686,7 @@ async function executeDispatch(
   resolver: TransportResolver,
   scope: AgentDispatchScope,
 ) {
+  assertExternalAgentWorker();
   if (agent.transport === 'pull') return undefined;
   const started = await beginOrResumeAttempt(id);
   if (!started) return undefined;
@@ -682,8 +708,9 @@ async function executeDispatch(
 export async function confirmDispatch(
   id: string,
   previewHash: string,
-  options: { transportResolver?: TransportResolver } = {},
+  _options: { transportResolver?: TransportResolver } = {},
 ) {
+  void _options;
   const dispatch = await getDispatch(id);
   if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
   const agent = await getExternalAgent(dispatch.externalAgentId);
@@ -702,20 +729,13 @@ export async function confirmDispatch(
     maxRequestsPerMinute: agent.dataPolicy.maxRequestsPerMinute,
     now: new Date().toISOString(),
   });
-  let manualUrl: string | undefined;
-  if (
-    confirmed
-    || (dispatch.status === 'queued' && dispatch.attemptCount === 0)
-    || dispatch.status === 'in_progress'
-  ) {
-    manualUrl = await executeDispatch(
-      id,
-      agent,
-      options.transportResolver ?? createTransportResolver(),
-      dispatch.scope,
-    );
+  if (confirmed || (dispatch.status === 'queued' && dispatch.attemptCount === 0)) {
+    await enqueueDispatchAction(id, 'submit', 50);
   }
-  return { dispatch: (await getDispatch(id))!, manualUrl };
+  return {
+    dispatch: (await getDispatch(id))!,
+    manualUrl: undefined as string | undefined,
+  };
 }
 
 export async function claimNextDispatch(
@@ -862,6 +882,9 @@ export async function resolveDispatchInteraction(
     ...(answer ? { answer } : {}),
     now: new Date().toISOString(),
   });
+  if ((await getDispatch(id))?.status === 'queued') {
+    await enqueueDispatchAction(id, 'submit', 50);
+  }
 }
 
 function safeUrl(value: unknown, field: string): string | undefined {
@@ -1043,28 +1066,6 @@ export async function cancelDispatch(id: string) {
   const dispatch = await getDispatch(id);
   if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
   const agent = await getExternalAgent(dispatch.externalAgentId);
-  if (agent?.type === 'paperclip' && dispatch.providerTaskId) {
-    if (dispatch.status === 'cancelled') return false;
-    assertAgentEnabled(agent);
-    const provider = await cancelPaperclipIssue(
-      await paperclipConnection(agent, undefined, dispatch.scope.paperclip),
-      dispatch.providerTaskId,
-    );
-    await submitDispatchResult(
-      dispatch.id,
-      {
-        status: provider.status,
-        result: provider.result,
-        providerTaskId: provider.providerTaskId,
-        providerState: provider.providerState,
-        providerDetail: provider.providerDetail,
-        errorMessage: provider.errorMessage,
-      },
-      { agentAuthenticated: true },
-    );
-    return provider.status === 'cancelled';
-  }
-
   if (agent?.type === 'copilot-cloud' && dispatch.providerTaskId) {
     throw new ExternalAgentError(
       'GitHub Agent Tasks does not currently expose task cancellation; the provider task remains active',
@@ -1072,10 +1073,9 @@ export async function cancelDispatch(id: string) {
       409,
     );
   }
-  return (await getExternalAgentControlPersistence()).dispatches.cancel(
-    id,
-    new Date().toISOString(),
-  );
+  if (dispatch.status === 'cancelled') return false;
+  await enqueueDispatchAction(id, 'cancel', 100);
+  return true;
 }
 
 export async function stopTrackingDispatch(id: string) {
@@ -1095,26 +1095,56 @@ export async function stopTrackingDispatch(id: string) {
   );
 }
 
+const COMPLETED_OUTPUT_RECONCILIATION_MS = 30 * 24 * 60 * 60 * 1_000;
+
+function pullRequestLifecycleState(dispatch: AgentDispatchRecord): string | null {
+  const detail = dispatch.providerDetail;
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return null;
+  const pullRequest = detail.pullRequest;
+  if (!pullRequest || typeof pullRequest !== 'object' || Array.isArray(pullRequest)) {
+    return null;
+  }
+  const snapshot = pullRequest as Record<string, unknown>;
+  return typeof snapshot.state === 'string'
+    ? snapshot.state.toLowerCase()
+    : null;
+}
+
+export function shouldReconcileDispatch(
+  dispatch: AgentDispatchRecord,
+  now = new Date(),
+) {
+  if (['queued', 'claimed', 'in_progress', 'waiting_for_user'].includes(dispatch.status)) {
+    return true;
+  }
+  if (
+    dispatch.status !== 'completed'
+    || dispatch.executionLocality !== 'github-hosted'
+    || !dispatch.providerTaskId
+    || !dispatch.repository
+  ) {
+    return false;
+  }
+  if (
+    dispatch.scope.createPullRequest === true
+    && ['merged', 'closed'].includes(pullRequestLifecycleState(dispatch) ?? '')
+  ) {
+    return false;
+  }
+  const completedAt = dispatch.completedAt ? Date.parse(dispatch.completedAt) : Number.NaN;
+  return !Number.isFinite(completedAt)
+    || now.getTime() - completedAt <= COMPLETED_OUTPUT_RECONCILIATION_MS;
+}
+
 export async function reconcileDispatch(
   id: string,
   options: { fetcher?: typeof fetch } = {},
 ) {
+  assertExternalAgentWorker();
   const dispatch = await getDispatch(id);
   if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
+  if (!shouldReconcileDispatch(dispatch)) return dispatch;
   const agent = await getExternalAgent(dispatch.externalAgentId);
-  const terminal = [
-    'completed',
-    'failed',
-    'timed_out',
-    'dead_letter',
-    'cancelled',
-  ].includes(dispatch.status);
-  const canRefreshCompletedCopilotTask = dispatch.status === 'completed'
-    && agent?.type === 'copilot-cloud'
-    && agent.enabled
-    && !agent.deletedAt
-    && Boolean(dispatch.providerTaskId);
-  if (terminal && !canRefreshCompletedCopilotTask) return dispatch;
   assertAgentEnabled(agent);
   if (agent.type === 'paperclip') {
     if (!dispatch.providerTaskId) return dispatch;
@@ -1136,6 +1166,7 @@ export async function reconcileDispatch(
     );
     return (await getDispatch(id))!;
   }
+
   if (
     dispatch.executionLocality !== 'github-hosted'
     || !dispatch.providerTaskId
@@ -1157,6 +1188,18 @@ export async function reconcileDispatch(
     dispatch.providerTaskId,
     options.fetcher,
   );
+  if (dispatch.status === 'completed' && provider.status === 'completed') {
+    const references = extractReferences(provider.result);
+    await (await getExternalAgentControlPersistence()).dispatches.refreshOutput({
+      id: dispatch.id,
+      providerDetail: provider.providerDetail ?? {},
+      pullRequestUrl: references.pullRequestUrl ?? undefined,
+      branchRef: references.branchRef ?? undefined,
+      commitSha: references.commitSha ?? undefined,
+      now: new Date().toISOString(),
+    });
+    return (await getDispatch(id))!;
+  }
   await submitDispatchResult(
     dispatch.id,
     {
@@ -1173,6 +1216,63 @@ export async function reconcileDispatch(
     },
   );
   return (await getDispatch(id))!;
+}
+
+export async function requestDispatchReconciliation(id: string) {
+  const dispatch = await getDispatch(id);
+  if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
+  if (!shouldReconcileDispatch(dispatch)) return false;
+  return enqueueDispatchAction(id, 'reconcile', 75);
+}
+
+export async function executeExternalAgentWorkerAction(
+  dispatchId: string,
+  action: AgentDispatchActionType,
+  options: { fetcher?: typeof fetch; transportResolver?: TransportResolver } = {},
+): Promise<void> {
+  assertExternalAgentWorker();
+  const dispatch = await getDispatch(dispatchId);
+  if (!dispatch) return;
+  const agent = await getExternalAgent(dispatch.externalAgentId);
+  if (action === 'submit') {
+    assertAgentEnabled(agent);
+    await executeDispatch(
+      dispatch.id,
+      agent,
+      options.transportResolver ?? createTransportResolver({ fetcher: options.fetcher }),
+      dispatch.scope,
+    );
+    return;
+  }
+  if (action === 'reconcile') {
+    await reconcileDispatch(dispatch.id, { fetcher: options.fetcher });
+    return;
+  }
+  if (dispatch.status === 'cancelled') return;
+  if (agent?.type === 'paperclip' && dispatch.providerTaskId) {
+    assertAgentEnabled(agent);
+    const provider = await cancelPaperclipIssue(
+      await paperclipConnection(agent, options.fetcher, dispatch.scope.paperclip),
+      dispatch.providerTaskId,
+    );
+    await submitDispatchResult(
+      dispatch.id,
+      {
+        status: provider.status,
+        result: provider.result,
+        providerTaskId: provider.providerTaskId,
+        providerState: provider.providerState,
+        providerDetail: provider.providerDetail,
+        errorMessage: provider.errorMessage,
+      },
+      { agentAuthenticated: true },
+    );
+    return;
+  }
+  await (await getExternalAgentControlPersistence()).dispatches.cancel(
+    dispatch.id,
+    new Date().toISOString(),
+  );
 }
 
 async function paperclipConnection(
@@ -1199,17 +1299,20 @@ async function paperclipConnection(
 export async function reconcileActiveExternalAgentDispatches(
   options: { fetcher?: typeof fetch } = {},
 ) {
-  const activeStatuses: AgentDispatchRecord['status'][] = [
+  assertExternalAgentWorker();
+  const statuses: AgentDispatchRecord['status'][] = [
     'queued',
     'in_progress',
     'waiting_for_user',
+    'completed',
   ];
   const dispatches = (await Promise.all(
-    activeStatuses.map((status) => listDispatches({ status, limit: 500 })),
+    statuses.map((status) => listDispatches({ status, limit: 500 })),
   )).flat();
   let reconciled = 0;
   const failures: Array<{ dispatchId: string; error: string }> = [];
   for (const dispatch of dispatches) {
+    if (!shouldReconcileDispatch(dispatch)) continue;
     const agent = await getExternalAgent(dispatch.externalAgentId);
     if (
       dispatch.executionLocality !== 'github-hosted'
@@ -1217,12 +1320,17 @@ export async function reconcileActiveExternalAgentDispatches(
     ) {
       continue;
     }
+
     try {
       if (!dispatch.providerTaskId) {
-        const recovered = await confirmDispatch(dispatch.id, dispatch.previewHash, {
-          transportResolver: createTransportResolver({ fetcher: options.fetcher }),
-        });
-        if (recovered.dispatch.providerTaskId) reconciled += 1;
+        assertAgentEnabled(agent);
+        await executeDispatch(
+          dispatch.id,
+          agent,
+          createTransportResolver({ fetcher: options.fetcher }),
+          dispatch.scope,
+        );
+        if ((await getDispatch(dispatch.id))?.providerTaskId) reconciled += 1;
         continue;
       }
       await reconcileDispatch(dispatch.id, options);
@@ -1237,6 +1345,24 @@ export async function reconcileActiveExternalAgentDispatches(
   return { reconciled, failures };
 }
 
+export async function requestActiveExternalAgentReconciliation() {
+  const statuses: AgentDispatchRecord['status'][] = [
+    'queued',
+    'in_progress',
+    'waiting_for_user',
+    'completed',
+  ];
+  const dispatches = (await Promise.all(
+    statuses.map((status) => listDispatches({ status, limit: 500 })),
+  )).flat();
+  let queued = 0;
+  for (const dispatch of dispatches) {
+    if (!shouldReconcileDispatch(dispatch)) continue;
+    if (await enqueueDispatchAction(dispatch.id, 'reconcile', 75)) queued += 1;
+  }
+  return { queued };
+}
+
 export async function reconcileActiveCopilotCloudDispatches(
   options: { fetcher?: typeof fetch } = {},
 ) {
@@ -1245,8 +1371,9 @@ export async function reconcileActiveCopilotCloudDispatches(
 
 export async function retryDispatch(
   id: string,
-  options: { transportResolver?: TransportResolver } = {},
+  _options: { transportResolver?: TransportResolver } = {},
 ) {
+  void _options;
   const dispatch = await getDispatch(id);
   if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
   const agent = await getExternalAgent(dispatch.externalAgentId);
@@ -1258,13 +1385,8 @@ export async function retryDispatch(
     now: new Date().toISOString(),
     executionLocality: dispatch.executionLocality,
   });
-  const manualUrl = await executeDispatch(
-    id,
-    agent,
-    options.transportResolver ?? createTransportResolver(),
-    dispatch.scope,
-  );
-  return { dispatch: (await getDispatch(id))!, manualUrl };
+  await enqueueDispatchAction(id, 'submit', 50);
+  return { dispatch: (await getDispatch(id))! };
 }
 
 export async function markDispatchWaiting(

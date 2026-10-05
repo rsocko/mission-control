@@ -1017,7 +1017,11 @@ function normalizeResult(input: DispatchResultInput) {
 export async function submitDispatchResult(
   dispatchId: string,
   input: DispatchResultInput,
-  authorization: { claimToken?: string; agentAuthenticated?: boolean },
+  authorization: {
+    claimToken?: string;
+    agentAuthenticated?: boolean;
+    allowCompletedProviderTaskUpdate?: boolean;
+  },
   options: { leaseMs?: number } = {},
 ) {
   const normalized = normalizeResult(input);
@@ -1040,6 +1044,8 @@ export async function submitDispatchResult(
         ? hashSecret(authorization.claimToken)
         : undefined,
       agentAuthenticated: authorization.agentAuthenticated,
+      allowCompletedProviderTaskUpdate:
+        authorization.allowCompletedProviderTaskUpdate,
     },
     leaseExpiresAt: new Date(
       nowDate.getTime() + positiveInteger(options.leaseMs, 120_000, 60 * 60_000),
@@ -1114,13 +1120,15 @@ export function shouldReconcileDispatch(
   if (
     dispatch.status !== 'completed'
     || dispatch.executionLocality !== 'github-hosted'
-    || dispatch.scope.createPullRequest !== true
     || !dispatch.providerTaskId
     || !dispatch.repository
   ) {
     return false;
   }
-  if (['merged', 'closed'].includes(pullRequestLifecycleState(dispatch) ?? '')) {
+  if (
+    dispatch.scope.createPullRequest === true
+    && ['merged', 'closed'].includes(pullRequestLifecycleState(dispatch) ?? '')
+  ) {
     return false;
   }
   const completedAt = dispatch.completedAt ? Date.parse(dispatch.completedAt) : Number.NaN;
@@ -1180,7 +1188,7 @@ export async function reconcileDispatch(
     dispatch.providerTaskId,
     options.fetcher,
   );
-  if (dispatch.status === 'completed') {
+  if (dispatch.status === 'completed' && provider.status === 'completed') {
     const references = extractReferences(provider.result);
     await (await getExternalAgentControlPersistence()).dispatches.refreshOutput({
       id: dispatch.id,
@@ -1202,7 +1210,10 @@ export async function reconcileDispatch(
       providerDetail: provider.providerDetail,
       errorMessage: provider.errorMessage,
     },
-    { agentAuthenticated: true },
+    {
+      agentAuthenticated: true,
+      allowCompletedProviderTaskUpdate: dispatch.status === 'completed',
+    },
   );
   return (await getDispatch(id))!;
 }

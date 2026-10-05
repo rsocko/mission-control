@@ -498,13 +498,14 @@ describe('external-agent registry boundaries', () => {
       },
     ));
 
+    let providerState: 'completed' | 'in_progress' = 'completed';
     const fetcherMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith('/tasks/provider-task-1')) {
         return Response.json({
           id: 'provider-task-1',
           name: 'Fix parser',
-          state: 'completed',
+          state: providerState,
           sessions: [{ base_ref: 'main', head_ref: 'copilot/fix-parser' }],
           artifacts: [{
             provider: 'github',
@@ -526,6 +527,27 @@ describe('external-agent registry boundaries', () => {
       baseRef: 'main',
       branchRef: 'copilot/fix-parser',
     });
+
+    sqlite.prepare(`
+      UPDATE agent_dispatches
+      SET deadline_at = '2000-01-01T00:00:00.000Z'
+      WHERE id = ?
+    `).run(preview.id);
+    providerState = 'in_progress';
+    await expect(asWorker(() => service.reconcileDispatch(preview.id, { fetcher })))
+      .resolves.toMatchObject({
+        status: 'in_progress',
+        providerTaskId: 'provider-task-1',
+        completedAt: null,
+        resultStatus: null,
+      });
+    expect((await service.getDispatch(preview.id))?.events).toContainEqual(
+      expect.objectContaining({
+        eventType: 'result_received',
+        fromStatus: 'completed',
+        toStatus: 'in_progress',
+      }),
+    );
   });
 
   it('continues reconciling a completed create-PR dispatch until the PR is merged', async () => {
@@ -643,7 +665,7 @@ describe('external-agent registry boundaries', () => {
     expect(service.shouldReconcileDispatch({
       ...completed,
       scope: { ...completed.scope, createPullRequest: false },
-    })).toBe(false);
+    })).toBe(true);
 
     pullRequestState = 'MERGED';
     await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))

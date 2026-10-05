@@ -59,7 +59,11 @@ export interface DispatchResultPersistenceInput extends Omit<
   'attempt' | 'resultDigest' | 'resultStatus'
 > {
   digest: string;
-  authorization: { claimTokenHash?: string; agentAuthenticated?: boolean };
+  authorization: {
+    claimTokenHash?: string;
+    agentAuthenticated?: boolean;
+    allowCompletedProviderTaskUpdate?: boolean;
+  };
   leaseExpiresAt: string;
 }
 

@@ -983,7 +983,13 @@ export function createPostgresExternalAgentControlRepository(
             401,
           );
         }
-        if (TERMINAL.has(current.status)) {
+        const updatesCompletedProviderTask = current.status === 'completed'
+          && input.authorization.agentAuthenticated
+          && input.authorization.allowCompletedProviderTaskUpdate
+          && current.providerTaskId !== null
+          && input.providerTaskId === current.providerTaskId
+          && input.status !== 'completed';
+        if (TERMINAL.has(current.status) && !updatesCompletedProviderTask) {
           if (current.resultDigest === input.digest) {
             return { duplicate: true, status: current.status };
           }
@@ -993,11 +999,15 @@ export function createPostgresExternalAgentControlRepository(
             409,
           );
         }
-        if (current.deadlineAt && current.deadlineAt <= input.now) {
+        if (
+          !updatesCompletedProviderTask
+          && current.deadlineAt
+          && current.deadlineAt <= input.now
+        ) {
           await expireOne(client, current, input.now);
           return { duplicate: false, status: 'timed_out' as const, expired: true };
         }
-        if (!ACTIVE_RESULT.has(current.status)) {
+        if (!ACTIVE_RESULT.has(current.status) && !updatesCompletedProviderTask) {
           throw new ExternalAgentError(
             `Dispatch cannot accept results while ${current.status}`,
             'INVALID_TRANSITION',
@@ -1023,21 +1033,26 @@ export function createPostgresExternalAgentControlRepository(
             status = $1, provider_task_id = COALESCE($2, provider_task_id),
             provider_detail = COALESCE($3::jsonb, provider_detail),
             result = COALESCE($4::jsonb, result), result_digest = $5,
-            result_status = CASE WHEN $1 = 'completed' THEN 'pending_review' ELSE result_status END,
-            error_message = $6,
-            github_pull_request_url = COALESCE($7, github_pull_request_url),
-            repository = COALESCE($8, repository), base_ref = COALESCE($9, base_ref),
-            branch_ref = COALESCE($10, branch_ref), commit_sha = COALESCE($11, commit_sha),
-            checks = COALESCE($12::jsonb, checks),
-            artifacts = COALESCE($13::jsonb, artifacts),
-            claim_token_hash = CASE WHEN $14 THEN NULL ELSE claim_token_hash END,
-            lease_expires_at = CASE WHEN $14 THEN NULL ELSE $15 END,
-            completed_at = CASE WHEN $16 THEN $17 ELSE NULL END, updated_at = $17
-          WHERE id = $18 AND status = $19
+            result_status = CASE
+              WHEN $1 = 'completed' THEN 'pending_review'
+              WHEN $6 THEN NULL
+              ELSE result_status
+            END,
+            error_message = $7,
+            github_pull_request_url = COALESCE($8, github_pull_request_url),
+            repository = COALESCE($9, repository), base_ref = COALESCE($10, base_ref),
+            branch_ref = COALESCE($11, branch_ref), commit_sha = COALESCE($12, commit_sha),
+            checks = COALESCE($13::jsonb, checks),
+            artifacts = COALESCE($14::jsonb, artifacts),
+            claim_token_hash = CASE WHEN $15 THEN NULL ELSE claim_token_hash END,
+            lease_expires_at = CASE WHEN $15 THEN NULL ELSE $16 END,
+            completed_at = CASE WHEN $17 THEN $18 ELSE NULL END, updated_at = $18
+          WHERE id = $19 AND status = $20
         `, [
           input.status, input.providerTaskId ?? null,
           input.providerDetail ? JSON.stringify(input.providerDetail) : null,
           input.result ? JSON.stringify(input.result) : null, input.digest,
+          updatesCompletedProviderTask,
           input.errorMessage, input.pullRequestUrl, input.repository, input.baseRef,
           input.branchRef, input.commitSha,
           input.checks ? JSON.stringify(input.checks) : null,

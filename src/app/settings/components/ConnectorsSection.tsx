@@ -389,12 +389,38 @@ function ScoutEditPanel({
     id: string;
     name: string;
     enabled: boolean;
+    capabilities?: {
+      scout?: {
+        sourceTypes: string[];
+        actions: string[];
+        triggerTypes: string[];
+        protectedCredentialStorage: boolean;
+      };
+    };
+    providerConfig?: {
+      scout?: {
+        protocolVersion: string;
+        skillVersion: string;
+        onboarding: {
+          status: 'pending_registration' | 'pending_approval' | 'approved' | 'claimed' | 'rejected';
+        };
+        connectivity: {
+          scoutToMissionControl: string;
+          missionControlToScout: string;
+          detail?: string;
+        };
+        client?: { name: string; version: string };
+        lastSeenAt?: string;
+      };
+    };
   } | null>(null);
   const [workerLoading, setWorkerLoading] = useState(true);
   const [workerBusy, setWorkerBusy] = useState(false);
   const [workerError, setWorkerError] = useState('');
   const [setupPrompt, setSetupPrompt] = useState('');
   const [promptCopied, setPromptCopied] = useState(false);
+  const scoutWorker = worker?.providerConfig?.scout;
+  const onboardingStatus = scoutWorker?.onboarding.status;
 
   const mcpSnippet = JSON.stringify({
     'mission-control': {
@@ -430,24 +456,35 @@ function ScoutEditPanel({
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/scout/worker?connectorId=${encodeURIComponent(connector.id)}`)
-      .then(async response => {
+    const refreshWorker = async () => {
+      try {
+        const response = await fetch(
+          `/api/scout/worker?connectorId=${encodeURIComponent(connector.id)}`,
+          { cache: 'no-store' },
+        );
         const body = await response.json() as {
-          worker?: { id: string; name: string; enabled: boolean } | null;
+          worker?: NonNullable<typeof worker> | null;
           error?: string;
         };
         if (!response.ok) throw new Error(body.error || 'Failed to load Scout work pickup');
-        if (!cancelled) setWorker(body.worker ?? null);
-      })
-      .catch(error => {
+        if (!cancelled) {
+          setWorker(body.worker ?? null);
+          setWorkerError('');
+        }
+      } catch (error) {
         if (!cancelled) {
           setWorkerError(error instanceof Error ? error.message : 'Failed to load Scout work pickup');
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setWorkerLoading(false);
-      });
-    return () => { cancelled = true; };
+      }
+    };
+    void refreshWorker();
+    const interval = window.setInterval(() => void refreshWorker(), 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [connector.id]);
 
   function updateDraft(updates: Partial<ScoutConnectorSettings>) {
@@ -485,7 +522,7 @@ function ScoutEditPanel({
     }
   }
 
-  async function configureWorker(action: 'generate-setup' | 'show-setup') {
+  async function configureWorker() {
     setWorkerBusy(true);
     setWorkerError('');
     setSetupPrompt('');
@@ -495,21 +532,49 @@ function ScoutEditPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           connectorId: connector.id,
-          action,
+          action: 'generate-setup',
         }),
       });
       const body = await response.json() as {
-        worker?: { id: string; name: string; enabled: boolean };
+        worker?: NonNullable<typeof worker>;
         setupPrompt?: string;
         error?: string;
       };
       if (!response.ok || !body.worker || !body.setupPrompt) {
         throw new Error(body.error || 'Failed to load the Scout setup prompt');
       }
+
       setWorker(body.worker);
       setSetupPrompt(body.setupPrompt);
     } catch (error) {
       setWorkerError(error instanceof Error ? error.message : 'Failed to load the Scout setup prompt');
+    } finally {
+      setWorkerBusy(false);
+    }
+  }
+
+  async function reviewWorker(action: 'approve' | 'reject') {
+    setWorkerBusy(true);
+    setWorkerError('');
+    try {
+      const response = await fetch('/api/scout/worker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectorId: connector.id, action }),
+      });
+      const body = await response.json() as {
+        worker?: NonNullable<typeof worker>;
+        error?: string;
+      };
+      if (!response.ok || !body.worker) {
+        throw new Error(body.error || `Failed to ${action} Scout registration`);
+      }
+      setWorker(body.worker);
+      if (action === 'reject') setSetupPrompt('');
+    } catch (error) {
+      setWorkerError(
+        error instanceof Error ? error.message : `Failed to ${action} Scout registration`,
+      );
     } finally {
       setWorkerBusy(false);
     }
@@ -528,7 +593,7 @@ function ScoutEditPanel({
         }),
       });
       const body = await response.json() as {
-        worker?: { id: string; name: string; enabled: boolean } | null;
+        worker?: NonNullable<typeof worker> | null;
         error?: string;
       };
       if (!response.ok) throw new Error(body.error || 'Failed to disable Scout work pickup');
@@ -624,7 +689,7 @@ function ScoutEditPanel({
               </pre>
               <button
                 onClick={handleCopy}
-                className="absolute top-2 right-2 px-2 py-1 text-[10px] font-medium rounded bg-[var(--surface-3)] hover:bg-[var(--surface-4)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] border border-[var(--border-subtle)] transition-colors"
+                className="absolute top-2 right-2 px-2 py-1 text-xs font-medium rounded bg-[var(--surface-3)] hover:bg-[var(--surface-4)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] border border-[var(--border-subtle)] transition-colors"
               >
                 {copied ? '✓ Copied' : 'Copy'}
               </button>
@@ -761,16 +826,27 @@ function ScoutEditPanel({
             </span>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {worker?.enabled && (
-                <button
-                  type="button"
-                  disabled={workerBusy}
-                  onClick={() => void configureWorker('show-setup')}
-                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-3 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:opacity-50"
-                >
-                  {workerBusy ? <Loader2 size={13} className="animate-spin" /> : <Eye size={13} />}
-                  Show setup prompt
-                </button>
+              {onboardingStatus === 'pending_approval' && (
+                <>
+                  <button
+                    type="button"
+                    disabled={workerBusy}
+                    onClick={() => void reviewWorker('approve')}
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-3 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:opacity-50"
+                  >
+                    {workerBusy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                    Approve registration
+                  </button>
+                  <button
+                    type="button"
+                    disabled={workerBusy}
+                    onClick={() => void reviewWorker('reject')}
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-red-800/60 px-3 text-xs font-medium text-red-300 hover:bg-red-950/40 disabled:opacity-50"
+                  >
+                    <X size={13} />
+                    Reject
+                  </button>
+                </>
               )}
               {worker?.enabled && (
                 <button
@@ -786,11 +862,11 @@ function ScoutEditPanel({
               <button
                 type="button"
                 disabled={workerBusy}
-                onClick={() => void configureWorker('generate-setup')}
+                onClick={() => void configureWorker()}
                 className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50"
               >
                 {workerBusy ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
-                {worker?.enabled ? 'Rotate credential' : 'Generate setup prompt'}
+                {worker ? 'Restart onboarding' : 'Generate onboarding prompt'}
               </button>
             </div>
           )}
@@ -803,23 +879,75 @@ function ScoutEditPanel({
               : 'border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]'
           }`}>
             <Circle size={7} fill="currentColor" />
-            {worker?.enabled ? 'Available for delegation' : 'Not configured'}
+            {worker?.enabled
+              ? 'Ready for delegated work'
+              : onboardingStatus === 'pending_approval'
+                ? 'Approval required'
+                : onboardingStatus === 'approved'
+                  ? 'Waiting for credential claim'
+                  : onboardingStatus === 'pending_registration'
+                    ? 'Waiting for Scout registration'
+                    : onboardingStatus === 'rejected'
+                      ? 'Registration rejected'
+                      : 'Not configured'}
           </span>
           {worker?.enabled && (
             <span className="text-[var(--text-muted)]">
-              Expected pickup: within 15 minutes after Scout setup. Mission Control
-              cannot verify the automation until it claims work.
+              Last contact: {scoutWorker?.lastSeenAt
+                ? new Date(scoutWorker.lastSeenAt).toLocaleString()
+                : 'waiting for the first identity check'}. Scheduled polling remains
+              the guaranteed pickup path.
             </span>
           )}
         </div>
+
+        {onboardingStatus === 'pending_approval' && worker?.capabilities?.scout && (
+          <div className="mt-4 rounded-xl border border-amber-700/40 bg-amber-950/20 p-4">
+            <div className="flex items-start gap-3">
+              <Shield size={16} className="mt-0.5 shrink-0 text-amber-300" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-100">
+                  Review Scout&apos;s requested access
+                </p>
+                <p className="mt-1 max-w-3xl text-xs leading-5 text-amber-100/80">
+                  {scoutWorker?.client
+                    ? `${scoutWorker.client.name} ${scoutWorker.client.version} `
+                    : 'This Scout runtime '}
+                  verified outbound connectivity and confirmed protected MCP credential storage.
+                  Mission Control cannot directly wake Scout; its schedule remains the recovery path.
+                </p>
+                <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                  <div>
+                    <dt className="text-amber-200/70">Sources</dt>
+                    <dd className="mt-0.5 text-amber-50">
+                      {worker.capabilities.scout.sourceTypes.join(', ')}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-amber-200/70">Actions</dt>
+                    <dd className="mt-0.5 text-amber-50">
+                      {worker.capabilities.scout.actions.join(', ')}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-amber-200/70">Triggers</dt>
+                    <dd className="mt-0.5 text-amber-50">
+                      {worker.capabilities.scout.triggerTypes.join(', ')}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+          </div>
+        )}
 
         {setupPrompt && (
           <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold text-[var(--text-secondary)]">Scout automation setup prompt</p>
-                <p className="mt-0.5 text-[11px] text-amber-300">
-                  Contains a private worker credential. Hide it when you are finished.
+                <p className="text-xs font-semibold text-[var(--text-secondary)]">Scout onboarding prompt</p>
+                <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                  Contains a temporary registration token, never the durable MCP credential.
                 </p>
               </div>
               <div className="flex gap-2">
@@ -1886,17 +2014,17 @@ function DefaultConnectorEditPanel({
           <div>
            <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">Feeds</label>
            <div className="flex flex-wrap gap-1.5">
-             <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12px] font-medium rounded-full border ${editCaps.read ? 'bg-green-900/30 text-green-400 border-green-800/40' : 'bg-zinc-800/50 text-zinc-500 border-zinc-700/40'}`}>
+             <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${editCaps.read ? 'bg-green-900/30 text-green-400 border-green-800/40' : 'bg-zinc-800/50 text-white/70 border-zinc-700/40'}`}>
                {editCaps.read ? <Check size={10} /> : <X size={10} />} Alerts
              </span>
-             <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12px] font-medium rounded-full border ${editCaps.write ? 'bg-green-900/30 text-green-400 border-green-800/40' : 'bg-zinc-800/50 text-zinc-500 border-zinc-700/40'}`}>
+             <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${editCaps.write ? 'bg-green-900/30 text-green-400 border-green-800/40' : 'bg-zinc-800/50 text-white/70 border-zinc-700/40'}`}>
                {editCaps.write ? <Check size={10} /> : <X size={10} />} Tasks
              </span>
-             <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[12px] font-medium rounded-full border ${editCaps.write ? 'bg-green-900/30 text-green-400 border-green-800/40' : 'bg-zinc-800/50 text-zinc-500 border-zinc-700/40'}`}>
+             <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${editCaps.write ? 'bg-green-900/30 text-green-400 border-green-800/40' : 'bg-zinc-800/50 text-white/70 border-zinc-700/40'}`}>
                {editCaps.write ? <Check size={10} /> : <X size={10} />} Write-back
              </span>
              {connector.type === 'outlook-calendar' && (
-               <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[12px] font-medium rounded-full bg-amber-900/30 text-amber-400 border border-amber-800/40"><Check size={10} /> Timeline</span>
+               <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-amber-900/30 text-amber-400 border border-amber-800/40"><Check size={10} /> Timeline</span>
              )}
            </div>
            {editCaps.read && !editCaps.write && (

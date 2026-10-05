@@ -8,7 +8,11 @@ import type {
   AgentDispatchScope,
   AgentPayloadSnapshot,
   AgentResultReference,
+  AgentInteraction,
+  AgentInteractionContinuationPolicy,
+  AgentInteractionKind,
 } from './contracts';
+import { SCOUT_WORKER_ACTIONS } from './contracts';
 import { ExternalAgentError } from './errors';
 import { getExternalAgentControlPersistence } from './persistence';
 import {
@@ -179,6 +183,18 @@ function validateAllowedActions(agent: ExternalAgent, actions: string[]) {
   const unique = [...new Set(actions.map((action) =>
     requiredText(action, 'allowedActions[]', 80)))];
   for (const action of unique) {
+    if (SCOUT_WORKER_ACTIONS.includes(action as (typeof SCOUT_WORKER_ACTIONS)[number])) {
+      if (!agent.capabilities.scout?.actions.includes(
+        action as (typeof SCOUT_WORKER_ACTIONS)[number],
+      )) {
+        throw new ExternalAgentError(
+          `Agent does not support allowed action "${action}"`,
+          'CAPABILITY_MISMATCH',
+          422,
+        );
+      }
+      continue;
+    }
     const capability = ACTION_CAPABILITIES[action as keyof typeof ACTION_CAPABILITIES];
     if (!capability || agent.capabilities[capability] !== true) {
       throw new ExternalAgentError(
@@ -704,7 +720,7 @@ export async function confirmDispatch(
 
 export async function claimNextDispatch(
   agentId: string,
-  options: { leaseMs?: number } = {},
+  options: { leaseMs?: number; dispatchId?: string } = {},
 ) {
   const leaseMs = positiveInteger(options.leaseMs, 120_000, 60 * 60_000);
   const nowDate = new Date();
@@ -713,12 +729,139 @@ export async function claimNextDispatch(
   const claimToken = randomBytes(32).toString('base64url');
   const claim = await (await getExternalAgentControlPersistence()).dispatches.claimNext({
     agentId,
+    dispatchId: options.dispatchId,
     attemptId: randomUUID(),
     claimTokenHash: hashSecret(claimToken),
     now,
     leaseExpiresAt,
   });
   return claim ? { ...claim, claimToken } : null;
+}
+
+export async function requestDispatchInteraction(
+  dispatchId: string,
+  claimToken: string,
+  input: {
+    kind: AgentInteractionKind;
+    prompt: string;
+    choices?: string[];
+    continuationPolicy?: AgentInteractionContinuationPolicy;
+  },
+) {
+  const prompt = requiredText(input.prompt, 'prompt', 2_000);
+  const choices = input.choices?.map((choice, index) =>
+    requiredText(choice, `choices[${index}]`, 200));
+  if (choices && (choices.length < 2 || choices.length > 20)) {
+    throw new ExternalAgentError(
+      'choices must contain between 2 and 20 items',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  if (choices && new Set(choices).size !== choices.length) {
+    throw new ExternalAgentError(
+      'choices must be unique',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  if (input.kind === 'approval' && choices) {
+    throw new ExternalAgentError(
+      'approval interactions use approved or rejected outcomes, not choices',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  const interaction: AgentInteraction = {
+    id: randomUUID(),
+    kind: input.kind,
+    status: 'pending',
+    prompt,
+    ...(choices ? { choices } : {}),
+    continuationPolicy: input.continuationPolicy ?? 'resume_same_dispatch',
+    createdAt: new Date().toISOString(),
+  };
+  await submitDispatchResult(
+    dispatchId,
+    {
+      status: 'waiting_for_user',
+      providerDetail: { interaction },
+    },
+    { claimToken },
+  );
+  return interaction;
+}
+
+export async function resolveDispatchInteraction(
+  id: string,
+  input: {
+    interactionId: string;
+    outcome: 'answered' | 'approved' | 'rejected';
+    answer?: string;
+  },
+) {
+  const interactionId = requiredText(input.interactionId, 'interactionId', 200);
+  const answer = input.answer === undefined
+    ? undefined
+    : requiredText(input.answer, 'answer', 4_000);
+  const dispatch = await getDispatch(id);
+  const stored = dispatch?.providerDetail?.interaction;
+  if (
+    !stored
+    || typeof stored !== 'object'
+    || Array.isArray(stored)
+    || (stored as Record<string, unknown>).id !== interactionId
+    || (stored as Record<string, unknown>).status !== 'pending'
+  ) {
+    throw new ExternalAgentError(
+      'Dispatch has no matching pending interaction',
+      'INVALID_TRANSITION',
+      409,
+    );
+  }
+  const interaction = stored as Record<string, unknown>;
+  if (
+    (interaction.kind === 'question' && input.outcome !== 'answered')
+    || (interaction.kind === 'approval' && input.outcome === 'answered')
+  ) {
+    throw new ExternalAgentError(
+      'Interaction outcome does not match its kind',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  if (input.outcome === 'answered' && !answer) {
+    throw new ExternalAgentError(
+      'Answered interactions require an answer',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  if (
+    answer
+    && Array.isArray(interaction.choices)
+    && !interaction.choices.includes(answer)
+  ) {
+    throw new ExternalAgentError(
+      'Answer must match one of the available choices',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  if (input.outcome !== 'answered' && answer) {
+    throw new ExternalAgentError(
+      'Approval outcomes do not accept an answer',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  await (await getExternalAgentControlPersistence()).dispatches.resolveInteraction({
+    id,
+    interactionId,
+    outcome: input.outcome,
+    ...(answer ? { answer } : {}),
+    now: new Date().toISOString(),
+  });
 }
 
 function safeUrl(value: unknown, field: string): string | undefined {

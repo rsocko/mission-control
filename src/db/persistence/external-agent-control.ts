@@ -74,6 +74,7 @@ export interface ExternalAgentControlPersistence {
       id: string,
       record: ExternalAgentUpdateRecord,
       credential?: string | null,
+      expectedScoutOnboardingStatus?: string,
     ): Promise<ExternalAgentRecord | null>;
     softDelete(id: string, now: string): Promise<boolean>;
   };
@@ -142,6 +143,7 @@ export interface ExternalAgentControlPersistence {
     finalizeAttempt(input: DispatchFinalizeInput): Promise<'updated' | 'stale' | 'expired'>;
     claimNext(input: {
       agentId: string;
+      dispatchId?: string;
       attemptId: string;
       claimTokenHash: string;
       now: string;
@@ -166,6 +168,13 @@ export interface ExternalAgentControlPersistence {
       executionLocality: string;
     }): Promise<void>;
     markWaiting(id: string, detail: Record<string, unknown>, now: string): Promise<void>;
+    resolveInteraction(input: {
+      id: string;
+      interactionId: string;
+      outcome: 'answered' | 'approved' | 'rejected';
+      answer?: string;
+      now: string;
+    }): Promise<void>;
     expire(now: string): Promise<number>;
     review(
       id: string,

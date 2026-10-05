@@ -120,6 +120,23 @@ function validateProviderConfig(
     );
   }
   const common = alwaysInstructions ? { alwaysInstructions } : {};
+  if (type === 'pull-queue' && value?.scout) {
+    const scout = value.scout;
+    if (
+      !scout.connectorId
+      || !scout.protocolVersion
+      || !scout.skillVersion
+      || !scout.onboarding
+      || !scout.connectivity
+    ) {
+      throw new ExternalAgentError(
+        'providerConfig.scout is incomplete',
+        'VALIDATION_ERROR',
+        422,
+      );
+    }
+    return { ...common, scout };
+  }
   if (type !== 'paperclip') return common;
   const paperclip = value?.paperclip;
   if (!paperclip || typeof paperclip !== 'object' || Array.isArray(paperclip)) {
@@ -348,9 +365,27 @@ export function validateExternalAgentInput(input: ExternalAgentInput): Omit<
 
 export function publicExternalAgent(agent: ExternalAgent) {
   const { authCredentialRef: _credentialRef, ...safe } = agent;
+  const scout = agent.providerConfig.scout;
+  let publicScout: typeof scout = undefined;
+  if (scout) {
+    const {
+      registrationTokenHash: _registrationTokenHash,
+      claimTokenHash: _claimTokenHash,
+      ...publicOnboarding
+    } = scout.onboarding;
+    void _registrationTokenHash;
+    void _claimTokenHash;
+    publicScout = { ...scout, onboarding: publicOnboarding };
+  }
   void _credentialRef;
   return {
     ...safe,
+    providerConfig: publicScout
+      ? {
+        ...agent.providerConfig,
+        scout: publicScout,
+      }
+      : agent.providerConfig,
     hasCredentialReference: Boolean(agent.authCredentialRef),
     credentialSource: (
       agent.authCredentialRef === MANAGED_GITHUB_CREDENTIAL
@@ -404,7 +439,11 @@ export async function createExternalAgent(input: ExternalAgentInput) {
   }, credential);
 }
 
-export async function updateExternalAgent(id: string, patch: Partial<ExternalAgentInput>) {
+export async function updateExternalAgent(
+  id: string,
+  patch: Partial<ExternalAgentInput>,
+  options: { expectedScoutOnboardingStatus?: string } = {},
+) {
   const existing = await getExternalAgent(id);
   if (!existing) throw new ExternalAgentError('External agent not found', 'NOT_FOUND', 404);
   const credential = managedCredential(patch, patch.type ?? existing.type);
@@ -444,8 +483,17 @@ export async function updateExternalAgent(id: string, patch: Partial<ExternalAge
   const updated = await (await getExternalAgentControlPersistence()).registry.update(id, {
     ...values,
     updatedAt: new Date().toISOString(),
-  }, credentialUpdate);
-  if (!updated) throw new ExternalAgentError('External agent not found', 'NOT_FOUND', 404);
+  }, credentialUpdate, options.expectedScoutOnboardingStatus);
+  if (!updated) {
+    if (options.expectedScoutOnboardingStatus) {
+      throw new ExternalAgentError(
+        'Scout onboarding state changed concurrently',
+        'INVALID_TRANSITION',
+        409,
+      );
+    }
+    throw new ExternalAgentError('External agent not found', 'NOT_FOUND', 404);
+  }
   return updated;
 }
 

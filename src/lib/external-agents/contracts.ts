@@ -60,6 +60,67 @@ export interface ExternalAgentCapabilities {
   canProposeTasks?: boolean;
   canProposePhases?: boolean;
   canPerformM365Actions?: boolean;
+  scout?: ScoutWorkerCapabilities;
+}
+
+export const SCOUT_WORKER_SOURCE_TYPES = [
+  'email',
+  'teams',
+  'meeting',
+  'planner',
+  'cross-source',
+] as const;
+
+export const SCOUT_WORKER_ACTIONS = [
+  'read_m365',
+  'create_draft',
+  'send_message',
+  'update_planner',
+  'update_calendar',
+] as const;
+
+export type ScoutWorkerSourceType = (typeof SCOUT_WORKER_SOURCE_TYPES)[number];
+export type ScoutWorkerAction = (typeof SCOUT_WORKER_ACTIONS)[number];
+
+export interface ScoutWorkerCapabilities {
+  sourceTypes: ScoutWorkerSourceType[];
+  actions: ScoutWorkerAction[];
+  triggerTypes: Array<'schedule' | 'condition'>;
+  protectedCredentialStorage: boolean;
+  callbackUrl?: string;
+}
+
+export interface ScoutWorkerProviderConfig {
+  connectorId: string;
+  protocolVersion: string;
+  skillVersion: string;
+  onboarding: {
+    status:
+      | 'pending_registration'
+      | 'pending_approval'
+      | 'approved'
+      | 'claimed'
+      | 'rejected';
+    registrationTokenHash?: string;
+    registrationExpiresAt?: string;
+    claimTokenHash?: string;
+    claimExpiresAt?: string;
+    requestedAt?: string;
+    approvedAt?: string;
+    claimedAt?: string;
+    rejectedAt?: string;
+  };
+  connectivity: {
+    scoutToMissionControl: 'untested' | 'verified';
+    missionControlToScout: 'unsupported' | 'untested' | 'verified' | 'failed';
+    testedAt?: string;
+    detail?: string;
+  };
+  client?: {
+    name: string;
+    version: string;
+  };
+  lastSeenAt?: string;
 }
 
 export interface ExternalAgentDataPolicy {
@@ -79,6 +140,24 @@ export interface PaperclipProviderConfig {
 export interface ExternalAgentProviderConfig {
   alwaysInstructions?: string;
   paperclip?: PaperclipProviderConfig;
+  scout?: ScoutWorkerProviderConfig;
+}
+
+export type AgentInteractionKind = 'question' | 'approval';
+export type AgentInteractionContinuationPolicy =
+  | 'resume_same_dispatch'
+  | 'require_new_dispatch';
+
+export interface AgentInteraction {
+  id: string;
+  kind: AgentInteractionKind;
+  status: 'pending' | 'answered' | 'approved' | 'rejected';
+  prompt: string;
+  choices?: string[];
+  continuationPolicy: AgentInteractionContinuationPolicy;
+  createdAt: string;
+  resolvedAt?: string;
+  answer?: string;
 }
 
 export interface AgentDispatchScope {

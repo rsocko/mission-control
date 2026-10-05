@@ -665,16 +665,6 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
       { status: 'queued', providerState: 'requeue' },
       { claimToken: claim.claimToken },
     )).rejects.toThrow(/cannot return an active claim to the queue/);
-    await expect(service.submitDispatchResult(
-      preview.id,
-      { status: 'waiting_for_user', providerState: 'waiting_for_user' },
-      { claimToken: claim.claimToken },
-    )).resolves.toMatchObject({ status: 'waiting_for_user' });
-    await expect(service.submitDispatchResult(
-      preview.id,
-      { status: 'in_progress', providerState: 'resumed' },
-      { claimToken: claim.claimToken },
-    )).resolves.toMatchObject({ status: 'in_progress' });
     const completion = {
       status: 'completed' as const,
       summary: 'Proposed one task',
@@ -695,6 +685,123 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
       completion,
       { claimToken: claim.claimToken },
     )).resolves.toEqual({ duplicate: true, status: 'completed' });
+  });
+
+  it('releases durable interaction claims and resumes only the scoped dispatch', async () => {
+    await pullAgent({
+      capabilities: {
+        canProposeTasks: true,
+        canPerformM365Actions: true,
+        scout: {
+          sourceTypes: ['email'],
+          actions: ['create_draft'],
+          triggerTypes: ['schedule'],
+          protectedCredentialStorage: true,
+        },
+      },
+    });
+    await pullAgent({ id: 'other-pull-agent', name: 'Other pull worker' });
+    const preview = await service.createDispatchPreview({
+      agentId: 'pull-agent',
+      instruction: 'Draft a response after approval',
+      allowedActions: ['create_draft'],
+      idempotencyKey: 'durable-interaction',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+
+    await expect(service.claimNextDispatch('other-pull-agent', {
+      dispatchId: preview.id,
+    })).resolves.toBeNull();
+    const claim = (await service.claimNextDispatch('pull-agent', {
+      dispatchId: preview.id,
+    }))!;
+    const interaction = await service.requestDispatchInteraction(
+      preview.id,
+      claim.claimToken,
+      {
+        kind: 'approval',
+        prompt: 'Approve sending this draft?',
+        continuationPolicy: 'resume_same_dispatch',
+      },
+    );
+    expect(interaction).toMatchObject({
+      kind: 'approval',
+      status: 'pending',
+      continuationPolicy: 'resume_same_dispatch',
+    });
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'waiting_for_user',
+      claimTokenHash: null,
+      leaseExpiresAt: null,
+    });
+    await expect(service.submitDispatchResult(
+      preview.id,
+      { status: 'in_progress', providerState: 'stale-resume' },
+      { claimToken: claim.claimToken },
+    )).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(service.resolveDispatchInteraction(preview.id, {
+      interactionId: interaction.id,
+      outcome: 'answered',
+      answer: 'yes',
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    await service.resolveDispatchInteraction(preview.id, {
+      interactionId: interaction.id,
+      outcome: 'approved',
+    });
+    const resumed = await service.claimNextDispatch('pull-agent', {
+      dispatchId: preview.id,
+    });
+    expect(resumed).toMatchObject({
+      dispatchId: preview.id,
+      attempt: 2,
+      payload: {
+        resumeContext: {
+          reason: 'interaction_resolved',
+          interactionId: interaction.id,
+          outcome: 'approved',
+        },
+      },
+    });
+  });
+
+  it('closes an interaction that requires a new dispatch instead of requeueing it', async () => {
+    await pullAgent();
+    const preview = await service.createDispatchPreview({
+      agentId: 'pull-agent',
+      instruction: 'Ask for requirements before new work is delegated',
+      idempotencyKey: 'new-dispatch-interaction',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    const claim = (await service.claimNextDispatch('pull-agent'))!;
+    const interaction = await service.requestDispatchInteraction(
+      preview.id,
+      claim.claimToken,
+      {
+        kind: 'question',
+        prompt: 'Which tenant should the next dispatch target?',
+        choices: ['Contoso', 'Fabrikam'],
+        continuationPolicy: 'require_new_dispatch',
+      },
+    );
+    await expect(service.resolveDispatchInteraction(preview.id, {
+      interactionId: interaction.id,
+      outcome: 'answered',
+      answer: 'Unknown',
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await service.resolveDispatchInteraction(preview.id, {
+      interactionId: interaction.id,
+      outcome: 'answered',
+      answer: 'Contoso',
+    });
+
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'cancelled',
+      errorMessage: 'Interaction resolved; a new dispatch is required',
+    });
+    await expect(service.claimNextDispatch('pull-agent', {
+      dispatchId: preview.id,
+    })).resolves.toBeNull();
   });
 
   it('dead-letters an expired final lease and permits only an explicit retry', async () => {

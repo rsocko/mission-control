@@ -53,7 +53,7 @@ export interface CreateTaskPayload {
   sourceListName?: string;
   tags?: string[];
   projectIds?: string[];
-  subtasks?: { title: string }[];
+  subtasks?: Array<string | { title: string }>;
   estimatedDuration?: number;
   recurrence?: string;
   recurrenceMode?: 'schedule' | 'completion';

@@ -342,4 +342,82 @@ describe('GitHub Copilot cloud agent adapter', () => {
       },
     });
   });
+
+  it('does not warn about a placeholder pull request while the task is queued', async () => {
+    process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+      [credentialReference]: 'user-token',
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-queued')) {
+        return response({
+          id: 'task-queued',
+          state: 'queued',
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: {},
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    const result = await getCopilotCloudTask(
+      agent(),
+      'octo/example',
+      'main',
+      'task-queued',
+      fetcher,
+    );
+
+    expect(result).toMatchObject({
+      status: 'queued',
+      providerState: 'queued',
+    });
+    expect(result.providerDetail).not.toHaveProperty('outputWarning');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns about an unresolved pull request after the task completes', async () => {
+    process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+      [credentialReference]: 'user-token',
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-completed')) {
+        return response({
+          id: 'task-completed',
+          state: 'completed',
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: {},
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    const result = await getCopilotCloudTask(
+      agent(),
+      'octo/example',
+      'main',
+      'task-completed',
+      fetcher,
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      providerState: 'completed',
+      providerDetail: {
+        outputWarning: 'GitHub reported a pull request output without a resolvable global ID.',
+      },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
 });

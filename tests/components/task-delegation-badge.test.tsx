@@ -25,6 +25,8 @@ function delegation(
     providerState: 'completed',
     providerUpdatedAt: '2026-10-01T00:00:00.000Z',
     outputWarning: null,
+    pullRequestState: null,
+    pullRequestNumber: null,
     latestProgress: null,
     blocker: null,
     pendingApproval: false,
@@ -64,8 +66,18 @@ describe('TaskDelegationBadge', () => {
       canonicalState: 'in_progress',
       displayState: 'running',
       providerState: 'in_progress',
+      pullRequestState: 'open',
     })} />);
 
     expect(screen.getByLabelText('Delegation Review · PR ready')).toBeInTheDocument();
+  });
+
+  it('shows the reconciled lifecycle state when the pull request is merged', () => {
+    render(<TaskDelegationBadge delegation={delegation({
+      pullRequestState: 'merged',
+      pullRequestNumber: 42,
+    })} />);
+
+    expect(screen.getByLabelText('Delegation Merged · PR')).toBeInTheDocument();
   });
 });

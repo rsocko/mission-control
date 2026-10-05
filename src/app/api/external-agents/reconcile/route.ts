@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { reconcileActiveExternalAgentDispatches } from '@/lib/external-agents/service';
+import { requestActiveExternalAgentReconciliation } from '@/lib/external-agents/service';
 import {
   externalAgentErrorResponse,
   requireTrustedMutation,
@@ -8,10 +8,8 @@ import {
 export async function POST(request: Request) {
   try {
     requireTrustedMutation(request);
-    const result = await reconcileActiveExternalAgentDispatches();
-    return NextResponse.json(result, {
-      status: result.failures.length > 0 ? 207 : 200,
-    });
+    const result = await requestActiveExternalAgentReconciliation();
+    return NextResponse.json({ accepted: true, ...result }, { status: 202 });
   } catch (error) {
     return externalAgentErrorResponse(error);
   }

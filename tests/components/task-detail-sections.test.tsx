@@ -175,6 +175,7 @@ describe('TaskTagsSection', () => {
     const onRemoveTag = vi.fn();
     renderWithTooltips(<TaskTagsSection {...tagsProps} onRemoveTag={onRemoveTag} />);
 
+    expect(screen.getByRole('heading', { name: 'Tags' })).toHaveClass('text-[var(--text-heading)]');
     fireEvent.click(screen.getByRole('button', { name: 'Remove tag urgent' }));
 
     expect(onRemoveTag).toHaveBeenCalledWith('tag-1');

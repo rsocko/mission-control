@@ -154,7 +154,7 @@ export function TaskDelegationSection({
         <div className="flex min-h-11 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3">
           <h3
             id={`delegation-heading-${taskId}`}
-            className="flex items-center gap-2 text-sm font-semibold text-[var(--text-secondary)]"
+            className="flex items-center gap-2 text-sm font-semibold text-[var(--text-heading)]"
           >
             <GitMerge
               size={14}

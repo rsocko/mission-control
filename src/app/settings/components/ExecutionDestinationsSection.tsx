@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   AlertTriangle,
   Bot,
   CheckCircle2,
   CloudCog,
+  Copy,
   Eye,
   EyeOff,
   ExternalLink,
@@ -54,6 +56,19 @@ interface ExecutionDestination {
   hasCredentialReference: boolean;
   credentialSource: 'mission-control' | 'deployment-secret';
   updatedAt: string;
+}
+
+interface ScoutConnector {
+  id: string;
+  type: string;
+  name: string;
+  enabled: boolean;
+}
+
+interface ScoutWorker {
+  id: string;
+  name: string;
+  enabled: boolean;
 }
 
 interface DestinationForm {
@@ -196,6 +211,244 @@ function destinationLabel(type: DestinationType) {
 
 function DestinationIcon({ type, size = 18 }: { type: DestinationType; size?: number }) {
   return type === 'copilot-cloud' ? <CloudCog size={size} /> : <Bot size={size} />;
+}
+
+function ScoutDestinationCard() {
+  const [connector, setConnector] = useState<ScoutConnector | null>(null);
+  const [worker, setWorker] = useState<ScoutWorker | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [setupPrompt, setSetupPrompt] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const loadScout = useCallback(async () => {
+    setError(null);
+    try {
+      const connectorsResponse = await fetch('/api/connectors');
+      const connectorsBody = await connectorsResponse.json().catch(() => null) as {
+        connectors?: ScoutConnector[];
+        error?: string;
+      } | null;
+      if (!connectorsResponse.ok) {
+        throw new Error(responseError(connectorsBody, connectorsResponse.status));
+      }
+      const nextConnector = (connectorsBody?.connectors ?? [])
+        .find((candidate) => candidate.type === 'scout') ?? null;
+      setConnector(nextConnector);
+      if (!nextConnector) {
+        setWorker(null);
+        return;
+      }
+
+      const workerResponse = await fetch(
+        `/api/scout/worker?connectorId=${encodeURIComponent(nextConnector.id)}`,
+      );
+      const workerBody = await workerResponse.json().catch(() => null) as {
+        worker?: ScoutWorker | null;
+        error?: string;
+      } | null;
+      if (!workerResponse.ok) {
+        throw new Error(responseError(workerBody, workerResponse.status));
+      }
+      setWorker(workerBody?.worker ?? null);
+    } catch (loadError) {
+      const message = loadError instanceof Error
+        ? loadError.message
+        : 'Failed to load Scout status';
+      setError(message);
+      settingsLogger.error('Failed to load Scout execution status', { error: message });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void loadScout();
+    });
+  }, [loadScout]);
+
+  async function updateWorker(action: 'generate-setup' | 'disable') {
+    if (!connector) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/scout/worker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectorId: connector.id, action }),
+      });
+      const body = await response.json().catch(() => null) as {
+        worker?: ScoutWorker | null;
+        setupPrompt?: string;
+        error?: string;
+      } | null;
+      if (!response.ok) throw new Error(responseError(body, response.status));
+      setWorker(body?.worker ?? null);
+      setSetupPrompt(action === 'generate-setup' ? body?.setupPrompt ?? '' : '');
+    } catch (updateError) {
+      const message = updateError instanceof Error
+        ? updateError.message
+        : 'Failed to update Scout work pickup';
+      setError(message);
+      settingsLogger.error('Failed to update Scout work pickup', { error: message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copySetupPrompt() {
+    try {
+      await navigator.clipboard.writeText(setupPrompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('The setup prompt could not be copied. Select it and copy it manually.');
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-20 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] text-sm text-[var(--text-muted)]">
+        <Loader2 size={15} className="animate-spin" />
+        Checking Scout
+      </div>
+    );
+  }
+
+  if (error && !connector) {
+    return (
+      <div className="flex flex-col gap-4 rounded-xl border border-red-800/40 bg-red-950/20 p-4 sm:flex-row sm:items-center">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-red-950/40 text-red-300">
+          <AlertTriangle size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-red-200">Scout status unavailable</p>
+          <p className="mt-1 text-xs leading-5 text-red-300">{error}</p>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={() => void loadScout()}>
+          <RefreshCw size={14} />
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (!connector) {
+    return (
+      <div className="flex flex-col gap-4 rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] p-4 sm:flex-row sm:items-center">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
+          <Bot size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium text-[var(--text-primary)]">Scout</p>
+            <Badge variant="secondary">Not connected</Badge>
+            <Badge variant="outline">Scheduled pickup</Badge>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+            Add the Scout connector to receive curated M365 work and optionally claim delegated tasks.
+          </p>
+        </div>
+        <Button asChild type="button" variant="outline" size="sm">
+          <Link href="/settings/connectors?setting=Scout">
+            <Plus size={14} />
+            Add Scout
+          </Link>
+        </Button>
+      </div>
+    );
+  }
+
+  const pickupEnabled = worker?.enabled === true;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
+      <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
+          <Bot size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+              {connector.name}
+            </p>
+            <Badge variant={pickupEnabled ? 'success' : 'secondary'}>
+              {pickupEnabled ? 'Pickup enabled' : 'Pickup off'}
+            </Badge>
+            <Badge variant="outline">Scheduled pickup</Badge>
+            {!connector.enabled && <Badge variant="warning">Connector paused</Badge>}
+          </div>
+          <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+            Claims confirmed Mission Control delegations on Scout&apos;s automation schedule.
+            Inbound M365 sources remain managed by the connector.
+          </p>
+          <Link
+            href="/settings/connectors?setting=Scout"
+            className="mt-1 inline-flex text-[11px] font-medium text-[var(--accent)] underline-offset-4 hover:underline"
+          >
+            Manage Scout connector
+          </Link>
+        </div>
+        <div className="flex items-center gap-2 sm:justify-end">
+          <Toggle
+            enabled={pickupEnabled}
+            disabled={busy}
+            onChange={() => void updateWorker(pickupEnabled ? 'disable' : 'generate-setup')}
+            label={`${pickupEnabled ? 'Disable' : 'Enable'} Scout work pickup`}
+          />
+          {pickupEnabled && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => void updateWorker('generate-setup')}
+            >
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              Rotate setup
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {error && (
+        <div role="status" className="border-t border-red-800/30 bg-red-950/20 px-4 py-3 text-xs text-red-300">
+          {error}
+        </div>
+      )}
+
+      {setupPrompt && (
+        <div className="border-t border-[var(--border)] bg-[var(--surface-0)] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-[var(--text-secondary)]">
+                Finish setup in Scout
+              </p>
+              <p className="mt-1 text-[11px] leading-4 text-amber-300">
+                Pickup is registered in Mission Control, but Scout will not claim work until this
+                private setup prompt is applied.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setSetupPrompt('')}>
+                <EyeOff size={13} />
+                Hide
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => void copySetupPrompt()}>
+                {copied ? <CheckCircle2 size={13} /> : <Copy size={13} />}
+                {copied ? 'Copied' : 'Copy prompt'}
+              </Button>
+            </div>
+          </div>
+          <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-xs leading-5 text-[var(--text-secondary)]">
+            {setupPrompt}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ExecutionDestinationsSection() {
@@ -439,6 +692,8 @@ export function ExecutionDestinationsSection() {
         )}
       </div>
 
+      <ScoutDestinationCard />
+
       {loadError && (
         <div
           role="alert"
@@ -465,11 +720,12 @@ export function ExecutionDestinationsSection() {
         <div className="rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-5 py-8 text-center">
           <Bot size={24} className="mx-auto text-[var(--text-muted)]" />
           <p className="mt-3 text-sm font-medium text-[var(--text-primary)]">
-            No execution destinations yet
+            No direct execution destinations yet
           </p>
           <p className="mx-auto mt-1 max-w-lg text-xs leading-5 text-[var(--text-muted)]">
             Add GitHub Copilot Cloud for GitHub-hosted Agent Tasks or bind a validated Paperclip
-            route. Nothing is transmitted until a delegation preview is reviewed and confirmed.
+            route. Scout scheduled pickup is shown separately above. Nothing is transmitted until
+            a delegation preview is reviewed and confirmed.
           </p>
         </div>
       ) : destinations.length > 0 ? (

@@ -8,13 +8,15 @@ import type {
   ExternalAgentCapabilities,
   ExternalAgentLocality,
   ExternalAgentType,
+  PaperclipProviderConfig,
 } from './contracts';
 import { ExternalAgentError } from './errors';
 import { getExternalAgentControlPersistence } from './persistence';
 import {
   assertClassificationAllowed,
   assertRichTaskContextAllowed,
-  resolveDispatchClassification,
+  resolveDispatchClassificationForSources,
+  type DispatchClassificationResolution,
 } from './policy';
 import {
   getExternalAgent,
@@ -29,6 +31,7 @@ import {
 } from './service';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 import { parseSourceId } from '@/lib/connectors/github-issues/issue-transformer';
+import { validatePaperclipConnection } from './paperclip';
 
 const CAPABILITY_ACTIONS: Array<[keyof ExternalAgentCapabilities, string]> = [
   ['canAnalyzeCode', 'analyze_code'],
@@ -79,6 +82,9 @@ export interface TaskDelegationEligibility {
   blocker: string | null;
   repository: string | null;
   repositoryLocked: boolean;
+  dataClassification?: DispatchClassificationResolution['classification'];
+  classificationExplanation?: string;
+  classificationSources?: DispatchClassificationResolution['sources'];
   errorCode?: string;
   statusCode?: number;
 }
@@ -176,6 +182,7 @@ export interface TaskDelegationPreviewInput {
   baseRef?: string;
   model?: string;
   createPullRequest?: boolean;
+  paperclipBinding?: PaperclipProviderConfig;
   maxAttempts?: number;
   timeoutMs?: number;
   callbackBaseUrl?: string;
@@ -402,7 +409,7 @@ async function credentialBlocker(agent: Awaited<ReturnType<typeof getExternalAge
 
 function eligibilityFor(
   task: SnapshotTask,
-  disclosedConnectorTypes: string[],
+  classification: DispatchClassificationResolution,
   target: Awaited<ReturnType<typeof listExternalAgents>>[number],
   activeTaskIds: Set<string>,
   credentialError: string | null,
@@ -417,10 +424,9 @@ function eligibilityFor(
   } else if (credentialError) {
     blocker = credentialError;
   } else {
-    const classification = resolveDispatchClassification(disclosedConnectorTypes);
     try {
       assertClassificationAllowed(
-        classification,
+        classification.classification,
         target.dataPolicy,
         target.executionLocality,
       );
@@ -452,6 +458,9 @@ function eligibilityFor(
     blocker,
     repository,
     repositoryLocked: task.connectorType === 'github-issues',
+    dataClassification: classification.classification,
+    classificationExplanation: classification.explanation,
+    classificationSources: classification.sources,
   };
 }
 
@@ -464,13 +473,27 @@ export async function getTaskDelegationContext(
     taskSnapshot(taskIds),
     persistence.payloads.snapshot({ taskIds }),
   ]);
-  const connectorTypesByTask = new Map(payloadSnapshot.tasks.map((task) => [
+  const connectorSourcesByTask = new Map(payloadSnapshot.tasks.map((task) => [
     task.id,
     [
-      task.connectorType,
-      ...task.subtasks.map((subtask) => subtask.connectorType),
+      {
+        connectorType: task.connectorType,
+        connectorInstanceId: task.connectorInstanceId ?? '',
+      },
+      ...task.subtasks.map((subtask) => ({
+        connectorType: subtask.connectorType,
+        connectorInstanceId: subtask.connectorInstanceId ?? '',
+      })),
     ],
   ]));
+  const classificationByTask = new Map(await Promise.all(
+    payloadSnapshot.tasks.map(async (task) => [
+      task.id,
+      await resolveDispatchClassificationForSources(
+        connectorSourcesByTask.get(task.id) ?? [],
+      ),
+    ] as const),
+  ));
   await expireDispatches();
   let dispatches = await persistence.dispatches.list({
     taskIds,
@@ -536,7 +559,11 @@ export async function getTaskDelegationContext(
       repositories: target.type === 'copilot-cloud' ? repositories : [],
       eligibility: snapshot.tasks.map((task) => eligibilityFor(
         task,
-        connectorTypesByTask.get(task.id) ?? [task.connectorType],
+        classificationByTask.get(task.id) ?? {
+          classification: 'restricted',
+          sources: [],
+          explanation: 'Restricted because the source classification could not be resolved',
+        },
         target,
         activeTaskIds,
         credentialError,
@@ -688,6 +715,36 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
       }
     }
   }
+  let paperclipBinding: PaperclipProviderConfig | undefined;
+  if (target.type === 'paperclip') {
+    paperclipBinding = input.paperclipBinding ?? (
+      target.paperclipBinding
+        ? {
+          companyId: target.paperclipBinding.companyId,
+          assigneeAgentId: target.paperclipBinding.assigneeAgentId,
+          ...(target.paperclipBinding.projectId
+            ? { projectId: target.paperclipBinding.projectId }
+            : {}),
+          ...(target.paperclipBinding.requiredAdapterType
+            ? { requiredAdapterType: target.paperclipBinding.requiredAdapterType }
+            : {}),
+        }
+        : undefined
+    );
+    const internal = await getExternalAgent(target.id);
+    if (!paperclipBinding || !internal?.endpoint) {
+      throw new ExternalAgentError(
+        'Paperclip company and assignee are required',
+        'VALIDATION_ERROR',
+        422,
+      );
+    }
+    await validatePaperclipConnection({
+      endpoint: internal.endpoint,
+      credential: await resolveExternalAgentCredential(internal),
+      config: paperclipBinding,
+    });
+  }
   const idempotencyKey = delegationIdempotencyKey(operationId, input.taskId);
   return createDispatchPreview({
     agentId: target.id,
@@ -701,7 +758,10 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
         model: input.model,
         createPullRequest,
       }
-      : { taskIds: [input.taskId] },
+      : {
+        taskIds: [input.taskId],
+        ...(paperclipBinding ? { paperclip: paperclipBinding } : {}),
+      },
     allowedActions: requested,
     idempotencyKey,
     callbackBaseUrl: input.callbackBaseUrl,

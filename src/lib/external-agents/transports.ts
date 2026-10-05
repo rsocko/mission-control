@@ -3,11 +3,12 @@ import 'server-only';
 import { createHmac } from 'node:crypto';
 import type {
   AgentDispatchResult,
+  AgentDispatchScope,
   AgentDispatchStatus,
   ExternalAgentTransport,
 } from './contracts';
 import type { ExternalAgent } from './registry';
-import { resolveAgentCredential } from './registry';
+import { resolveAgentCredential, resolveExternalAgentCredential } from './registry';
 import { canonicalJson, redactForPersistence } from './policy';
 import { ExternalAgentError } from './errors';
 import { createCopilotCloudTransport } from './copilot-cloud';
@@ -17,6 +18,7 @@ export interface TransportDispatch {
   dispatchId: string;
   attempt: number;
   payload: Record<string, unknown>;
+  scope: AgentDispatchScope;
 }
 
 export interface TransportDispatchResult {
@@ -295,8 +297,8 @@ export function createTransportResolver(options: {
           return dispatchToPaperclip(
             {
               endpoint: paperclipAgent.endpoint,
-              credential: resolveAgentCredential(paperclipAgent.authCredentialRef),
-              config,
+              credential: await resolveExternalAgentCredential(paperclipAgent),
+              config: dispatch.scope.paperclip ?? config,
               fetcher: options.fetcher,
             },
             {

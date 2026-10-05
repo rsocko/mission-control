@@ -5,6 +5,7 @@ import {
   normalizeSyncedLists,
 } from '@/lib/connectors/source-list-selection';
 import type { ContextAppearance } from '@/types';
+import type { ConnectorDataClassification } from '@/lib/connectors/data-classification';
 
 export { getConnectorDisplayName } from '@/lib/connectors/display-name';
 export { isSourceListSelected, normalizeSyncedLists };
@@ -24,6 +25,11 @@ export interface ConnectorConfig {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  dataClassification?: {
+    baseline: ConnectorDataClassification;
+    effective: ConnectorDataClassification;
+    override: ConnectorDataClassification | null;
+  };
   configurationState?: {
     status: 'configured' | 'needs-configuration';
     code: 'household_currency_unavailable' | null;

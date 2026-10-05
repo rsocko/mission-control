@@ -22,6 +22,7 @@ import {
   validateDataPolicy,
 } from './policy';
 import {
+  discoverPaperclip,
   validatePaperclipConnection,
   type PaperclipConnection,
 } from './paperclip';
@@ -46,6 +47,14 @@ export interface ExternalAgentInput {
   inboundWebhookId?: string | null;
   dataPolicy?: Partial<ExternalAgentDataPolicy>;
   enabled?: boolean;
+}
+
+export interface PaperclipDiscoveryInput {
+  endpoint?: string;
+  credential?: string | null;
+  authCredentialRef?: string | null;
+  destinationId?: string | null;
+  companyId?: string | null;
 }
 
 const MANAGED_GITHUB_CREDENTIAL = 'mission-control:github-user';
@@ -457,8 +466,12 @@ export async function updateExternalAgent(
     || 'credential' in patch
     || 'providerConfig' in patch
   );
+  const retainedManagedCredential = !credential
+    && isManagedCredentialReference(existing.authCredentialRef)
+    ? await (await getExternalAgentControlPersistence()).registry.getCredential(existing.id)
+    : null;
   if (values.enabled || connectionChanged) {
-    await validateProviderConnection(values, credential);
+    await validateProviderConnection(values, credential ?? retainedManagedCredential);
   }
   const credentialUpdate = credential
     ?? (
@@ -533,6 +546,42 @@ export async function resolveExternalAgentCredential(
   return resolveAgentCredential(agent.authCredentialRef);
 }
 
+export async function discoverPaperclipSetup(input: PaperclipDiscoveryInput) {
+  const destinationId = optionalText(input.destinationId, 'destinationId');
+  const existing = destinationId ? await getExternalAgent(destinationId) : null;
+  if (destinationId && (!existing || existing.type !== 'paperclip')) {
+    throw new ExternalAgentError('Paperclip destination not found', 'NOT_FOUND', 404);
+  }
+  const endpointInput = optionalText(input.endpoint, 'endpoint') ?? existing?.endpoint;
+  const directCredential = optionalText(input.credential, 'credential');
+  const credentialRef = optionalText(input.authCredentialRef, 'authCredentialRef');
+  let credential = directCredential;
+  if (!credential && credentialRef) credential = resolveAgentCredential(credentialRef);
+  if (!credential && existing) {
+    if (endpointInput !== existing.endpoint) {
+      throw new ExternalAgentError(
+        'Enter the credential again after changing the Paperclip URL',
+        'CREDENTIAL_UNAVAILABLE',
+        422,
+      );
+    }
+    credential = await resolveExternalAgentCredential(existing);
+  }
+  const endpoint = validateEndpoint(
+    endpointInput ?? null,
+    'push',
+    credential ? 'bearer' : 'none',
+    'paperclip',
+  );
+  if (!endpoint) {
+    throw new ExternalAgentError('Paperclip endpoint is required', 'VALIDATION_ERROR', 422);
+  }
+  return discoverPaperclip(
+    { endpoint, credential },
+    optionalText(input.companyId, 'companyId') ?? undefined,
+  );
+}
+
 export async function resolveGitHubAgentCredential(agent: ExternalAgent): Promise<string> {
   if (agent.type !== 'copilot-cloud') {
     throw new ExternalAgentError(
@@ -570,9 +619,14 @@ function managedCredential(
   type: ExternalAgentType,
 ): string | null {
   const credential = optionalText(input.credential, 'credential');
-  if (credential && type !== 'copilot-cloud' && type !== 'pull-queue') {
+  if (
+    credential
+    && type !== 'copilot-cloud'
+    && type !== 'paperclip'
+    && type !== 'pull-queue'
+  ) {
     throw new ExternalAgentError(
-      'Direct credentials are only supported for GitHub Copilot Cloud and pull-queue destinations',
+      'Direct credentials are only supported for GitHub Copilot Cloud, Paperclip, and pull-queue destinations',
       'EXECUTION_BOUNDARY_MISMATCH',
       422,
     );
@@ -593,14 +647,14 @@ function isManagedCredentialReference(reference: string | null) {
 
 async function validateProviderConnection(
   values: Omit<ExternalAgentRecord, 'id' | 'createdAt' | 'updatedAt'>,
-  managedGitHubCredential: string | null = null,
+  managedCredentialValue: string | null = null,
 ) {
-  if (values.type === 'copilot-cloud' && managedGitHubCredential) {
+  if (values.type === 'copilot-cloud' && managedCredentialValue) {
     let response: Response;
     try {
       response = await fetch(new URL('/user', values.endpoint ?? 'https://api.github.com'), {
         headers: {
-          Authorization: `Bearer ${managedGitHubCredential}`,
+          Authorization: `Bearer ${managedCredentialValue}`,
           Accept: 'application/vnd.github+json',
           'X-GitHub-Api-Version': '2026-03-10',
         },
@@ -634,7 +688,7 @@ async function validateProviderConnection(
   }
   const connection: PaperclipConnection = {
     endpoint: values.endpoint,
-    credential: resolveAgentCredential(values.authCredentialRef),
+    credential: managedCredentialValue ?? resolveAgentCredential(values.authCredentialRef),
     config,
   };
   await validatePaperclipConnection(connection);

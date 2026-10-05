@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_AI_ROUTING_POLICY } from '@/lib/ai/sensitivity-policy';
 
 const mocks = vi.hoisted(() => ({
   getOverview: vi.fn(),
@@ -33,6 +34,11 @@ vi.mock('@/lib/sync/connector-lock', () => ({
   runWithConnectorOperationLease: vi.fn(
     async (_id: string, _type: string, work: () => Promise<unknown>) => work(),
   ),
+}));
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: vi.fn(async () => ({
+    routingPolicy: DEFAULT_AI_ROUTING_POLICY,
+  })),
 }));
 
 const sourceList = {

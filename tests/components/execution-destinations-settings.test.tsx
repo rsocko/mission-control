@@ -22,7 +22,8 @@ describe('ExecutionDestinationsSection', () => {
     render(<ExecutionDestinationsSection />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Registry unavailable');
-    expect(screen.queryByText('No execution destinations yet')).not.toBeInTheDocument();
+    expect(screen.getByText('Scout status unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('No direct execution destinations yet')).not.toBeInTheDocument();
     expect(screen.getByRole('button', {
       name: 'Retry loading execution destinations',
     })).toBeInTheDocument();
@@ -67,9 +68,18 @@ describe('ExecutionDestinationsSection', () => {
 
     render(<ExecutionDestinationsSection />);
 
-    expect(await screen.findByText('No execution destinations yet')).toBeInTheDocument();
+    expect(await screen.findByText('No direct execution destinations yet')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'GitHub Copilot Cloud' }));
-    fireEvent.change(screen.getByLabelText('Personal access token'), {
+    expect(screen.getByText(/Agent tasks — Read and write/)).toBeInTheDocument();
+    expect(screen.getByText((_, element) =>
+      element?.tagName === 'LI' && element.textContent === 'Account permissions: None.'))
+      .toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Create fine-grained token/ })).toHaveAttribute(
+      'href',
+      'https://github.com/settings/personal-access-tokens/new',
+    );
+    expect(screen.queryByRole('link', { name: /Create classic token/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Fine-grained personal access token'), {
       target: { value: 'github_pat_test-value' },
     });
     fireEvent.change(screen.getByLabelText('Always instructions'), {
@@ -98,6 +108,30 @@ describe('ExecutionDestinationsSection', () => {
     let requestBody: Record<string, unknown> | null = null;
     const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
+      if (url === '/api/external-agents/paperclip/discover' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { companyId?: string };
+        return response({
+          health: { status: 'ok', version: '1.2.3', deploymentMode: 'local' },
+          companies: [{
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'Acme',
+            status: 'active',
+          }],
+          projects: body.companyId ? [{
+            id: '22222222-2222-4222-8222-222222222222',
+            name: 'Mission Control',
+            status: 'active',
+          }] : [],
+          agents: body.companyId ? [{
+            id: '33333333-3333-4333-8333-333333333333',
+            name: 'Engineer',
+            title: 'Software Engineer',
+            role: 'engineer',
+            status: 'idle',
+            adapterType: 'claude-local',
+          }] : [],
+        });
+      }
       if (url === '/api/external-agents' && init?.method === 'POST') {
         requestBody = JSON.parse(String(init.body)) as Record<string, unknown>;
         return response({ agent: { id: 'paperclip-route' } }, 201);
@@ -110,23 +144,18 @@ describe('ExecutionDestinationsSection', () => {
     vi.stubGlobal('fetch', fetcher);
 
     render(<ExecutionDestinationsSection />);
-    expect(await screen.findByText('No execution destinations yet')).toBeInTheDocument();
+    expect(await screen.findByText('No direct execution destinations yet')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Paperclip route' }));
     fireEvent.change(screen.getByLabelText('Paperclip API origin'), {
       target: { value: 'http://localhost:3100' },
     });
-    fireEvent.change(screen.getByLabelText('Company ID'), {
-      target: { value: '11111111-1111-4111-8111-111111111111' },
+    fireEvent.change(screen.getByLabelText('Access token'), {
+      target: { value: 'paperclip-secret' },
     });
-    fireEvent.change(screen.getByLabelText('Project ID'), {
-      target: { value: '22222222-2222-4222-8222-222222222222' },
-    });
-    fireEvent.change(screen.getByLabelText('Assignee agent ID'), {
-      target: { value: '33333333-3333-4333-8333-333333333333' },
-    });
-    fireEvent.change(screen.getByLabelText('Required adapter type'), {
-      target: { value: 'claude-local' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'Check connection' }));
+    expect(await screen.findByText('Connected · Paperclip 1.2.3')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Default project'));
+    fireEvent.click(screen.getByRole('option', { name: 'Mission Control' }));
     fireEvent.change(screen.getByLabelText('Always instructions'), {
       target: { value: 'Post concise progress updates.' },
     });
@@ -136,8 +165,8 @@ describe('ExecutionDestinationsSection', () => {
     expect(requestBody).toMatchObject({
       type: 'paperclip',
       endpoint: 'http://localhost:3100',
-      authType: 'none',
-      authCredentialRef: null,
+      authType: 'bearer',
+      credential: 'paperclip-secret',
       providerConfig: {
         alwaysInstructions: 'Post concise progress updates.',
         paperclip: {
@@ -148,6 +177,82 @@ describe('ExecutionDestinationsSection', () => {
         },
       },
     });
+  });
+
+  it('shows configured Scout pickup and can disable it from AI settings', async () => {
+    let disabled = false;
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/external-agents') return response({ agents: [] });
+      if (url === '/api/connectors') {
+        return response({
+          connectors: [{ id: 'scout-primary', type: 'scout', name: 'Scout', enabled: true }],
+        });
+      }
+      if (url === '/api/scout/worker?connectorId=scout-primary') {
+        return response({
+          worker: {
+            id: 'scout-pull-worker-scout-primary',
+            name: 'Scout work pickup',
+            enabled: true,
+          },
+        });
+      }
+      if (url === '/api/scout/worker' && init?.method === 'POST') {
+        disabled = true;
+        return response({
+          worker: {
+            id: 'scout-pull-worker-scout-primary',
+            name: 'Scout work pickup',
+            enabled: false,
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<ExecutionDestinationsSection />);
+
+    expect(await screen.findByText('Pickup enabled')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch', { name: 'Disable Scout work pickup' }));
+
+    await waitFor(() => expect(disabled).toBe(true));
+    expect(await screen.findByText('Pickup off')).toBeInTheDocument();
+  });
+
+  it('reveals the required Scout setup prompt when pickup is enabled', async () => {
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/external-agents') return response({ agents: [] });
+      if (url === '/api/connectors') {
+        return response({
+          connectors: [{ id: 'scout-primary', type: 'scout', name: 'Scout', enabled: true }],
+        });
+      }
+      if (url === '/api/scout/worker?connectorId=scout-primary') {
+        return response({ worker: null });
+      }
+      if (url === '/api/scout/worker' && init?.method === 'POST') {
+        return response({
+          worker: {
+            id: 'scout-pull-worker-scout-primary',
+            name: 'Scout work pickup',
+            enabled: true,
+          },
+          setupPrompt: 'Configure Scout to claim Mission Control work.',
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<ExecutionDestinationsSection />);
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Enable Scout work pickup' }));
+
+    expect(await screen.findByText('Finish setup in Scout')).toBeInTheDocument();
+    expect(screen.getByText('Configure Scout to claim Mission Control work.')).toBeInTheDocument();
   });
 
   it('keeps an existing hidden credential reference while editing', async () => {
@@ -202,7 +307,7 @@ describe('ExecutionDestinationsSection', () => {
     expect(await screen.findByText(/Personal access token stored in Mission Control/))
       .toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Edit GitHub Copilot Cloud' }));
-    expect(screen.getByLabelText('Personal access token')).toHaveAttribute(
+    expect(screen.getByLabelText('Fine-grained personal access token')).toHaveAttribute(
       'placeholder',
       'Current token is hidden',
     );

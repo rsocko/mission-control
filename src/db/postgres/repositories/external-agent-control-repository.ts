@@ -404,7 +404,9 @@ export function createPostgresExternalAgentControlRepository(
         ? await query<AgentPayloadSnapshot['tasks'][number] & QueryResultRow>(client, `
             SELECT id, source_id AS "sourceId", metadata->>'url' AS "sourceUrl",
                    title, description, priority, status,
-                   connector_type AS "connectorType", due_date AS "dueDate", effort,
+                   connector_type AS "connectorType",
+                   connector_instance_id AS "connectorInstanceId",
+                   due_date AS "dueDate", effort,
                    assignee, micro_status AS "microStatus",
                    planning_horizon AS "planningHorizon",
                    source_list_name AS "sourceListName",
@@ -420,20 +422,23 @@ export function createPostgresExternalAgentControlRepository(
             & QueryResultRow
           >(client, `
             WITH RECURSIVE hierarchy (
-              "rootId", id, "sourceId", "sourceUrl", "connectorType", title,
-              description, priority, status, "dueDate", effort, assignee,
+              "rootId", id, "sourceId", "sourceUrl", "connectorType",
+              "connectorInstanceId", title, description, priority, status,
+              "dueDate", effort, assignee,
               "microStatus", "planningHorizon", "sourceListName", "siblingOrder",
               depth, "isChecklistItem", "treeOrder"
             ) AS (
-              SELECT id, id, source_id, metadata->>'url', connector_type, title,
-                     description, priority, status, due_date, effort, assignee,
+              SELECT id, id, source_id, metadata->>'url', connector_type,
+                     connector_instance_id, title, description, priority, status,
+                     due_date, effort, assignee,
                      micro_status, planning_horizon, source_list_name, sibling_order,
                      depth, is_checklist_item, ''::text
               FROM tasks
               WHERE id = ANY($1::text[])
               UNION ALL
               SELECT h."rootId", t.id, t.source_id, t.metadata->>'url',
-                     t.connector_type, t.title, t.description, t.priority, t.status,
+                     t.connector_type, t.connector_instance_id, t.title,
+                     t.description, t.priority, t.status,
                      t.due_date, t.effort, t.assignee, t.micro_status,
                      t.planning_horizon, t.source_list_name, t.sibling_order, t.depth,
                      t.is_checklist_item,
@@ -446,8 +451,9 @@ export function createPostgresExternalAgentControlRepository(
               INNER JOIN hierarchy h ON t.parent_id = h.id
               WHERE t.deleted_at IS NULL
             )
-            SELECT "rootId", id, "sourceId", "sourceUrl", "connectorType", title,
-                   description, priority, status, "dueDate", effort, assignee,
+            SELECT "rootId", id, "sourceId", "sourceUrl", "connectorType",
+                   "connectorInstanceId", title, description, priority, status,
+                   "dueDate", effort, assignee,
                    "microStatus", "planningHorizon", "sourceListName",
                    "siblingOrder", depth, "isChecklistItem"
             FROM hierarchy

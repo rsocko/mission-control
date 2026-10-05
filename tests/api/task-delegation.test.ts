@@ -93,6 +93,9 @@ async function createPaperclipAgent() {
   globalThis.fetch = async (input) => {
     const path = new URL(String(input)).pathname;
     if (path === '/api/health') return Response.json({ status: 'ok' });
+    if (path === `/api/projects/${projectId}`) {
+      return Response.json({ id: projectId, companyId });
+    }
     return Response.json({
       id: assigneeAgentId,
       companyId,

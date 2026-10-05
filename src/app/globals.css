@@ -61,6 +61,7 @@
 
   /* ─── Text Colors ───────────────────────────────────────────────────────── */
   --text-primary: #f8fafc;
+  --text-heading: #c4cede;
   --text-secondary: #94a3b8;
   --text-tertiary: #8b9ab5;     /* bumped from #64748b for WCAG AA (4.5:1 on surface-1) */
   --text-muted: #8190a6;        /* WCAG AA on surface-0 through surface-2 */

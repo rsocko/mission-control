@@ -8,11 +8,14 @@ import { loadConnectorData, requestConnectorSync } from '@/lib/connectors/client
 import type { ConnectorConfig, ListGroup, SourceList } from './components/types';
 import { resolveSourceListRefresh } from './source-list-renames';
 import type { ContextAppearance } from '@/types';
+import type { SensitivityClass } from '@/lib/ai/types';
 
 export function useSettingsAdministration() {
   const queryClient = useQueryClient();
   const [connectors, setConnectors] = useState<ConnectorConfig[]>([]);
   const [sourceLists, setSourceLists] = useState<SourceList[]>([]);
+  const [classificationDefaults, setClassificationDefaults] =
+    useState<Record<string, SensitivityClass>>({});
   const [listGroups, setListGroups] = useState<ListGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -57,6 +60,7 @@ export function useSettingsAdministration() {
       if (!groupsResponse.ok) throw new Error(`Failed to load list groups (${groupsResponse.status})`);
       const groupsData = await groupsResponse.json();
       setConnectors(connectorData.connectors);
+      setClassificationDefaults(connectorData.classificationDefaults);
       const resolvedLists = resolveSourceListRefresh(
         connectorData.sourceLists,
         pendingRenamesRef.current,
@@ -255,6 +259,7 @@ export function useSettingsAdministration() {
   return {
     connectors,
     sourceLists,
+    classificationDefaults,
     listGroups,
     loading,
     showAddModal,

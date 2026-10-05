@@ -124,7 +124,7 @@ export function TaskAttachmentSection({ taskId, canEdit, supportsAttachments, co
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-[var(--text-secondary)]">
+        <h3 className="text-sm font-semibold text-[var(--text-heading)]">
           Attachments
           {attachments.length > 0 && (
             <span className="ml-1 text-[var(--text-tertiary)]">({attachments.length})</span>

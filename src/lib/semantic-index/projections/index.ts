@@ -79,6 +79,7 @@ const PER_KIND_PROJECTION_VERSIONS: Readonly<Record<SemanticSourceEntityType, nu
 export type SemanticSensitivityResolver = (input: {
   entityType: SemanticSourceEntityType;
   connectorType: string;
+  dataClassificationOverride?: SemanticSensitivity | null;
 }) => SemanticSensitivity;
 
 export interface SemanticProjectionOptions {
@@ -118,6 +119,7 @@ export function projectTask(
     'task',
     connectorTypes,
     options,
+    source.dataClassificationOverride,
   );
 
   const title = normalizeTitleField(source.title);
@@ -210,12 +212,19 @@ function sourceIdentity(
   entityType: SemanticSourceEntityType,
   connectorTypes: string[],
   options: SemanticProjectionOptions,
+  dataClassificationOverride?: SemanticSensitivity | null,
 ): { projectionVersion: number; sensitivity: SemanticSensitivity } {
   const normalizedConnectorTypes = normalizeKeywords(connectorTypes);
   const sensitivities = (normalizedConnectorTypes.length > 0
     ? normalizedConnectorTypes
     : ['mission-control'])
-    .map((connectorType) => options.resolveSensitivity({ entityType, connectorType }));
+    .map((connectorType) => options.resolveSensitivity({
+      entityType,
+      connectorType,
+      dataClassificationOverride: connectorType === 'mission-control'
+        ? null
+        : dataClassificationOverride,
+    }));
   return {
     projectionVersion: options.projectionVersion ?? SEMANTIC_PROJECTION_VERSION,
     sensitivity: sensitivities.reduce((mostRestrictive, candidate) =>

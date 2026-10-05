@@ -221,6 +221,7 @@ export interface AgentPayloadSnapshot {
     priority: string;
     status: string;
     connectorType: string;
+    connectorInstanceId?: string;
     tags: string[];
     dueDate: string | null;
     effort: number | null;
@@ -236,6 +237,7 @@ export interface AgentPayloadSnapshot {
       sourceId: string | null;
       sourceUrl: string | null;
       connectorType: string;
+      connectorInstanceId?: string;
       title: string;
       description: string | null;
       priority: string;

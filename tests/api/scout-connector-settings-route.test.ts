@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SCOUT_SETTINGS } from '@/lib/connectors/scout/settings';
+import { DEFAULT_AI_ROUTING_POLICY } from '@/lib/ai/sensitivity-policy';
 
 const createConnector = vi.fn(async () => true);
 const ensureSourceLists = vi.fn(async () => undefined);
@@ -22,6 +23,11 @@ vi.mock('@/lib/sync', () => ({
     initializeConnectorFromDb: vi.fn(),
     reconcileScheduleFromDb: vi.fn(async () => undefined),
   },
+}));
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: vi.fn(async () => ({
+    routingPolicy: DEFAULT_AI_ROUTING_POLICY,
+  })),
 }));
 
 describe('Scout connector settings API', () => {
@@ -89,6 +95,50 @@ describe('Scout connector settings API', () => {
     }));
 
     expect(response.status).toBe(400);
+    expect(createConnector).not.toHaveBeenCalled();
+  });
+
+  it('persists a stricter connector classification override', async () => {
+    const { POST } = await import('@/app/api/connectors/route');
+    const response = await POST(new Request('http://localhost/api/connectors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'github-private',
+        type: 'github-issues',
+        name: 'Private GitHub',
+        settings: {
+          repos: ['owner/private'],
+          dataClassificationOverride: 'restricted',
+        },
+      }),
+    }));
+
+    expect(response.status).toBe(201);
+    expect(createConnector).toHaveBeenCalledWith(expect.objectContaining({
+      settings: expect.objectContaining({
+        dataClassificationOverride: 'restricted',
+      }),
+    }));
+  });
+
+  it('rejects an override below the connector baseline', async () => {
+    const { POST } = await import('@/app/api/connectors/route');
+    const response = await POST(new Request('http://localhost/api/connectors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'scout-relaxed',
+        type: 'scout',
+        name: 'Scout',
+        settings: { dataClassificationOverride: 'standard' },
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining('Restricted is the minimum classification'),
+    });
     expect(createConnector).not.toHaveBeenCalled();
   });
 

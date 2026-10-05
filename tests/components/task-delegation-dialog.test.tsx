@@ -17,6 +17,72 @@ afterEach(() => {
 });
 
 describe('TaskDelegationDialog disclosure review', () => {
+  it('only allows destinations with at least one eligible selected task', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response({
+      taskIds: ['task-1'],
+      tasks: [{ id: 'task-1', title: 'Restricted task', connectorType: 'scout' }],
+      targets: [
+        {
+          id: 'public-cloud',
+          name: 'Public Cloud',
+          type: 'copilot-cloud',
+          description: null,
+          alwaysInstructions: '',
+          executionLocality: 'github-hosted',
+          allowedActions: ['write_code'],
+          hasCredential: true,
+          paperclipBinding: null,
+          repositories: [],
+          eligibility: [{
+            taskId: 'task-1',
+            title: 'Restricted task',
+            connectorType: 'scout',
+            ready: false,
+            blocker: 'Agent policy does not allow restricted data',
+            repository: null,
+            repositoryLocked: false,
+          }],
+        },
+        {
+          id: 'private-runner',
+          name: 'Private Runner',
+          type: 'pull-queue',
+          description: null,
+          alwaysInstructions: '',
+          executionLocality: 'mission-control-host',
+          allowedActions: ['write_code'],
+          hasCredential: true,
+          paperclipBinding: null,
+          repositories: [],
+          eligibility: [{
+            taskId: 'task-1',
+            title: 'Restricted task',
+            connectorType: 'scout',
+            ready: true,
+            blocker: null,
+            repository: null,
+            repositoryLocked: false,
+          }],
+        },
+      ],
+      assignments: [],
+      syncErrors: [],
+    })));
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+
+    const blockedTarget = await screen.findByRole('radio', { name: /Public Cloud/ });
+    expect(blockedTarget).toBeDisabled();
+    expect(blockedTarget).toHaveAttribute(
+      'title',
+      'Agent policy does not allow restricted data',
+    );
+    expect(screen.getByText('Agent policy does not allow restricted data')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Private Runner/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Configure' })).toBeEnabled();
+  });
+
   it('shows configured and per-dispatch instructions with the exact rich payload', async () => {
     const payloadPreview = {
       instruction: 'Fix the parser and add coverage.',
@@ -76,6 +142,15 @@ describe('TaskDelegationDialog disclosure review', () => {
             previewHash: 'preview-hash',
             processingLocation: 'github-hosted',
             dataClassification: 'standard',
+            classificationExplanation: 'Standard because GitHub Issues uses the active policy default',
+            classificationSources: [{
+              connectorType: 'github-issues',
+              connectorInstanceId: 'github-primary',
+              connectorName: 'GitHub Issues',
+              baseline: 'standard',
+              effective: 'standard',
+              override: null,
+            }],
             disclosedFields: [
               'instruction',
               'alwaysInstructions',
@@ -106,6 +181,9 @@ describe('TaskDelegationDialog disclosure review', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
 
     expect(await screen.findByText('Effective reviewed context')).toBeInTheDocument();
+    expect(screen.getByText(/Standard because GitHub Issues uses the active policy default/))
+      .toBeInTheDocument();
+    expect(screen.getByText(/GitHub Issues: standard/)).toBeInTheDocument();
     fireEvent.click(screen.getByText('Canonical parser task'));
     await waitFor(() => {
       expect(screen.getByText((_, element) =>

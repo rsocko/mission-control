@@ -60,6 +60,7 @@ export interface SemanticTaskSource {
   dueDate: string | null;
   connectorType: string;
   connectorInstanceId: string;
+  dataClassificationOverride?: 'standard' | 'restricted' | 'local-only' | null;
   sourceListName: string | null;
   parentId: string | null;
   isChecklistItem: boolean;

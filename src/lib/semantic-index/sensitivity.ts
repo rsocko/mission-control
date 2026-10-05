@@ -20,10 +20,11 @@ import type { SemanticSensitivityResolver } from './projections';
 export function createPolicySensitivityResolver(
   getRoutingPolicy: () => AIRoutingPolicyConfig,
 ): SemanticSensitivityResolver {
-  return ({ connectorType }) => {
+  return ({ connectorType, dataClassificationOverride }) => {
     const key = connectorType.trim().toLowerCase();
     return resolveSensitivity('semantic-embedding', getRoutingPolicy(), {
       sources: key ? [key] : [],
+      override: dataClassificationOverride ?? undefined,
     });
   };
 }

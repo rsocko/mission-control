@@ -45,6 +45,10 @@ const SCHEMA = `
     task_id TEXT NOT NULL,
     tag_id TEXT NOT NULL
   );
+  CREATE TABLE connector_configs (
+    id TEXT PRIMARY KEY,
+    settings TEXT NOT NULL DEFAULT '{}'
+  );
   CREATE TABLE hub_projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -124,6 +128,9 @@ describe('SqliteSemanticSourcePort', () => {
     for (const id of ['task-1', 'task-2', 'task-3']) {
       insertTask.run(id, `Title ${id}`, `Body ${id}`);
     }
+    db.prepare(
+      "INSERT INTO connector_configs (id, settings) VALUES ('local', '{\"dataClassificationOverride\":\"restricted\"}')",
+    ).run();
     db.prepare("INSERT INTO tags (id, name) VALUES ('tag-1', 'Platform')").run();
     db.prepare("INSERT INTO tags (id, name) VALUES ('tag-2', 'Search')").run();
     db.prepare("INSERT INTO task_tags (task_id, tag_id) VALUES ('task-1', 'tag-1')").run();
@@ -175,6 +182,7 @@ describe('SqliteSemanticSourcePort', () => {
       title: 'Title task-1',
       description: 'Body task-1',
       connectorType: 'github-issues',
+      dataClassificationOverride: 'restricted',
       isChecklistItem: false,
     });
     expect((record as { tags: string[] }).tags.sort()).toEqual(['Platform', 'Search']);

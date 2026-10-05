@@ -119,10 +119,13 @@ async function main(): Promise<void> {
     repository,
     source,
     embeddings,
-    resolveSensitivity: ({ connectorType }) => resolveSensitivity(
+    resolveSensitivity: ({ connectorType, dataClassificationOverride }) => resolveSensitivity(
       'semantic-embedding',
       DEFAULT_AI_ROUTING_POLICY,
-      { sources: connectorType ? [connectorType.trim().toLowerCase()] : [] },
+      {
+        sources: connectorType ? [connectorType.trim().toLowerCase()] : [],
+        override: dataClassificationOverride ?? undefined,
+      },
     ),
     embeddingTimeoutMs: config.embeddingTimeoutMs,
   });

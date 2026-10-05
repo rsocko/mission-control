@@ -89,6 +89,7 @@ export interface AgentDispatchScope {
   baseRef?: string;
   model?: string;
   createPullRequest?: boolean;
+  paperclip?: PaperclipProviderConfig;
 }
 
 export interface AgentResultReference {

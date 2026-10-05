@@ -172,6 +172,61 @@ describe('Paperclip external-agent provider', () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it('stores a direct credential and reuses it for setup discovery', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer stored-secret');
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/health') return response({ status: 'ok', version: '1.2.3' });
+      if (path === `/api/agents/${assigneeAgentId}`) {
+        return response({
+          id: assigneeAgentId,
+          companyId,
+          name: 'Engineer',
+          adapterType: 'github-copilot-web',
+        });
+      }
+      if (path === '/api/companies') {
+        return response([{ id: companyId, name: 'Acme', status: 'active' }]);
+      }
+      if (path === `/api/companies/${companyId}/projects`) {
+        return response([{
+          id: '33333333-3333-4333-8333-333333333333',
+          companyId,
+          name: 'Mission Control',
+          status: 'active',
+        }]);
+      }
+      if (path === `/api/companies/${companyId}/agents`) {
+        return response([{
+          id: assigneeAgentId,
+          companyId,
+          name: 'Engineer',
+          adapterType: 'github-copilot-web',
+        }]);
+      }
+      throw new Error(`Unexpected Paperclip request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    const created = await paperclipAgent({
+      authCredentialRef: undefined,
+      credential: 'stored-secret',
+    });
+    expect(registry.publicExternalAgent(created)).toMatchObject({
+      hasCredentialReference: true,
+      credentialSource: 'mission-control',
+    });
+
+    await expect(registry.discoverPaperclipSetup({
+      destinationId: created.id,
+      companyId,
+    })).resolves.toMatchObject({
+      companies: [{ id: companyId, name: 'Acme' }],
+      projects: [{ name: 'Mission Control' }],
+      agents: [{ id: assigneeAgentId, name: 'Engineer' }],
+    });
+  });
+
   it('can disable an unavailable Paperclip route without contacting the provider', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const path = new URL(String(input)).pathname;

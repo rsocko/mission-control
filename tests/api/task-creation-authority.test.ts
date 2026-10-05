@@ -62,7 +62,11 @@ describe('POST /api/tasks source authority', () => {
     });
   }
 
-  function request(connectorType: string, connectorInstanceId?: string) {
+  function request(
+    connectorType: string,
+    connectorInstanceId?: string,
+    subtasks?: string[],
+  ) {
     return new Request('http://localhost/api/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -70,9 +74,78 @@ describe('POST /api/tasks source authority', () => {
         title: 'Created task',
         connectorType,
         connectorInstanceId,
+        subtasks,
       }),
     });
   }
+
+  it('persists subtasks submitted with a new local task', async () => {
+    const response = await createTask(request('local', undefined, [
+      'First step',
+      'Second step',
+    ]));
+
+    expect(response.status).toBe(201);
+    const payload = await response.json();
+    expect(payload.subtasks).toEqual([
+      expect.objectContaining({ title: 'First step' }),
+      expect.objectContaining({ title: 'Second step' }),
+    ]);
+    expect(await db.select().from(schema.tasks)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: payload.id,
+        parentId: null,
+        isChecklistItem: false,
+      }),
+      expect.objectContaining({
+        title: 'First step',
+        parentId: payload.id,
+        isChecklistItem: true,
+      }),
+      expect.objectContaining({
+        title: 'Second step',
+        parentId: payload.id,
+        isChecklistItem: true,
+      }),
+    ]));
+  });
+
+  it('accepts object-shaped subtasks from the shared task API client', async () => {
+    const response = await createTask(new Request('http://localhost/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Created task',
+        connectorType: 'local',
+        subtasks: [{ title: 'Structured step' }],
+      }),
+    }));
+
+    expect(response.status).toBe(201);
+    const payload = await response.json();
+    expect(await db.select().from(schema.tasks)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: 'Structured step',
+        parentId: payload.id,
+        isChecklistItem: true,
+      }),
+    ]));
+  });
+
+  it('rejects invalid subtasks before creating the parent task', async () => {
+    const response = await createTask(new Request('http://localhost/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Created task',
+        connectorType: 'local',
+        subtasks: ['Valid step', '   '],
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await db.select().from(schema.tasks)).toEqual([]);
+  });
 
   it('allows create-only Custom REST destinations', async () => {
     await insertConnector(
@@ -86,6 +159,24 @@ describe('POST /api/tasks source authority', () => {
 
     expect(response.status).toBe(201);
     expect(await db.select().from(schema.tasks)).toHaveLength(1);
+  });
+
+  it('rejects subtasks for connectors that cannot persist them', async () => {
+    await insertConnector(
+      'custom-create-only',
+      'custom-rest',
+      { read: true, write: false, delete: false, sync: true },
+      { createEndpoint: '/tasks' },
+    );
+
+    const response = await createTask(request(
+      'custom-rest',
+      'custom-create-only',
+      ['Unsupported step'],
+    ));
+
+    expect(response.status).toBe(400);
+    expect(await db.select().from(schema.tasks)).toEqual([]);
   });
 
   it.each([

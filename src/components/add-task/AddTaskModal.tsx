@@ -168,6 +168,7 @@ export function AddTaskModal({
   const [addAnother, setAddAnother] = useState(false);
   const [showDateSuggestions, setShowDateSuggestions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [subtasks, setSubtasks] = useState<string[]>([]);
   const [subtaskInput, setSubtaskInput] = useState('');
   const [estimatedDuration, setEstimatedDuration] = useState<number | null>(initialParsed?.estimatedDuration || null);
@@ -357,6 +358,7 @@ export function AddTaskModal({
     if (!submittedTitle || submitInFlightRef.current || isSubmitting || listRequired || waitingForPrefillTags) return;
     submitInFlightRef.current = true;
     setIsSubmitting(true);
+    setSubmitError(null);
 
     try {
       const semanticTagSlugs = captureSemantics?.tags || [];
@@ -407,48 +409,54 @@ export function AddTaskModal({
         }),
       });
 
-      if (res.ok) {
-        const { id: newTaskId } = await res.json();
+      if (!res.ok) {
+        const response = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(response?.error || 'Task creation failed. Check your connection and try again.');
+      }
 
-        // Optionally add to My Day
-        if (addToMyDay) {
-          const { getLocalToday } = await import('@/lib/utils/client-date');
-          await fetch('/api/my-day', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId: newTaskId, date: getLocalToday() }),
-          }).catch((err) => { taskLogger.error('Failed to add task to My Day', { err, taskId: newTaskId }); });
-        }
+      const { id: newTaskId } = await res.json();
 
-        // Notify caller of the new task ID
-        onTaskCreated?.(newTaskId);
+      // Optionally add to My Day
+      if (addToMyDay) {
+        const { getLocalToday } = await import('@/lib/utils/client-date');
+        await fetch('/api/my-day', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId: newTaskId, date: getLocalToday() }),
+        }).catch((err) => { taskLogger.error('Failed to add task to My Day', { err, taskId: newTaskId }); });
+      }
 
-        if (addAnother) {
-          // Keep batch-level organization: destination, list, project, and tags.
-          setTitle('');
-          setDescription('');
-          setDueDate('');
-          setDueDateText('');
-          setPriority('none');
-          setPlanningHorizon(null);
-          setSubtasks([]);
-          setSubtaskInput('');
-          setEstimatedDuration(null);
-          setEffort(null);
-          setCustomDurationInput('');
-          setRecurrence('none');
-          setRecurrenceMode('schedule');
-          setRecurrenceOptions({ skipDates: [], catchUp: 'latest' });
-          setAddToMyDay(initialAddToMyDay ?? false);
-          setTagSearchQuery('');
-          setShowTagDropdown(false);
-          titleRef.current?.focus();
-        } else {
-          onSubmit();
-        }
+      // Notify caller of the new task ID
+      onTaskCreated?.(newTaskId);
+
+      if (addAnother) {
+        // Keep batch-level organization: destination, list, project, and tags.
+        setTitle('');
+        setDescription('');
+        setDueDate('');
+        setDueDateText('');
+        setPriority('none');
+        setPlanningHorizon(null);
+        setSubtasks([]);
+        setSubtaskInput('');
+        setEstimatedDuration(null);
+        setEffort(null);
+        setCustomDurationInput('');
+        setRecurrence('none');
+        setRecurrenceMode('schedule');
+        setRecurrenceOptions({ skipDates: [], catchUp: 'latest' });
+        setAddToMyDay(initialAddToMyDay ?? false);
+        setTagSearchQuery('');
+        setShowTagDropdown(false);
+        titleRef.current?.focus();
+      } else {
+        onSubmit();
       }
     } catch (err) {
       taskLogger.error('Failed to create task', { err });
+      setSubmitError(err instanceof Error
+        ? err.message
+        : 'Task creation failed. Check your connection and try again.');
     } finally {
       submitInFlightRef.current = false;
       setIsSubmitting(false);
@@ -1135,6 +1143,15 @@ export function AddTaskModal({
             <span className="text-xs text-[var(--text-secondary)]">Add to My Day</span>
           </label>
         </div>
+
+        {submitError && (
+          <div
+            role="alert"
+            className="border-t border-red-500/30 bg-red-500/10 px-6 py-2 text-xs text-red-300"
+          >
+            {submitError}
+          </div>
+        )}
 
         {/* Footer */}
         <div className="px-6 py-3 bg-[var(--surface-0)] border-t border-[var(--border)] rounded-b-2xl flex items-center justify-between flex-shrink-0">

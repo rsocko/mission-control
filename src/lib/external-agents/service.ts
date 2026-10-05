@@ -1089,20 +1089,52 @@ export async function stopTrackingDispatch(id: string) {
   );
 }
 
+const COMPLETED_OUTPUT_RECONCILIATION_MS = 30 * 24 * 60 * 60 * 1_000;
+
+function pullRequestLifecycleState(dispatch: AgentDispatchRecord): string | null {
+  const detail = dispatch.providerDetail;
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return null;
+  const pullRequest = detail.pullRequest;
+  if (!pullRequest || typeof pullRequest !== 'object' || Array.isArray(pullRequest)) {
+    return null;
+  }
+  const snapshot = pullRequest as Record<string, unknown>;
+  return typeof snapshot.state === 'string'
+    ? snapshot.state.toLowerCase()
+    : null;
+}
+
+export function shouldReconcileDispatch(
+  dispatch: AgentDispatchRecord,
+  now = new Date(),
+) {
+  if (['queued', 'claimed', 'in_progress', 'waiting_for_user'].includes(dispatch.status)) {
+    return true;
+  }
+  if (
+    dispatch.status !== 'completed'
+    || dispatch.executionLocality !== 'github-hosted'
+    || dispatch.scope.createPullRequest !== true
+    || !dispatch.providerTaskId
+    || !dispatch.repository
+  ) {
+    return false;
+  }
+  if (['merged', 'closed'].includes(pullRequestLifecycleState(dispatch) ?? '')) {
+    return false;
+  }
+  const completedAt = dispatch.completedAt ? Date.parse(dispatch.completedAt) : Number.NaN;
+  return !Number.isFinite(completedAt)
+    || now.getTime() - completedAt <= COMPLETED_OUTPUT_RECONCILIATION_MS;
+}
+
 export async function reconcileDispatch(
   id: string,
   options: { fetcher?: typeof fetch } = {},
 ) {
   const dispatch = await getDispatch(id);
   if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
-  const terminal = [
-    'completed',
-    'failed',
-    'timed_out',
-    'dead_letter',
-    'cancelled',
-  ].includes(dispatch.status);
-  if (terminal) return dispatch;
+  if (!shouldReconcileDispatch(dispatch)) return dispatch;
   const agent = await getExternalAgent(dispatch.externalAgentId);
   assertAgentEnabled(agent);
   if (agent.type === 'paperclip') {
@@ -1146,6 +1178,18 @@ export async function reconcileDispatch(
     dispatch.providerTaskId,
     options.fetcher,
   );
+  if (dispatch.status === 'completed') {
+    const references = extractReferences(provider.result);
+    await (await getExternalAgentControlPersistence()).dispatches.refreshOutput({
+      id: dispatch.id,
+      providerDetail: provider.providerDetail ?? {},
+      pullRequestUrl: references.pullRequestUrl ?? undefined,
+      branchRef: references.branchRef ?? undefined,
+      commitSha: references.commitSha ?? undefined,
+      now: new Date().toISOString(),
+    });
+    return (await getDispatch(id))!;
+  }
   await submitDispatchResult(
     dispatch.id,
     {
@@ -1185,17 +1229,19 @@ async function paperclipConnection(
 export async function reconcileActiveExternalAgentDispatches(
   options: { fetcher?: typeof fetch } = {},
 ) {
-  const activeStatuses: AgentDispatchRecord['status'][] = [
+  const statuses: AgentDispatchRecord['status'][] = [
     'queued',
     'in_progress',
     'waiting_for_user',
+    'completed',
   ];
   const dispatches = (await Promise.all(
-    activeStatuses.map((status) => listDispatches({ status, limit: 500 })),
+    statuses.map((status) => listDispatches({ status, limit: 500 })),
   )).flat();
   let reconciled = 0;
   const failures: Array<{ dispatchId: string; error: string }> = [];
   for (const dispatch of dispatches) {
+    if (!shouldReconcileDispatch(dispatch)) continue;
     const agent = await getExternalAgent(dispatch.externalAgentId);
     if (
       dispatch.executionLocality !== 'github-hosted'

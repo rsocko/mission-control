@@ -61,6 +61,15 @@ export interface DispatchResultPersistenceInput extends Omit<
   leaseExpiresAt: string;
 }
 
+export interface DispatchOutputRefreshInput {
+  id: string;
+  providerDetail: Record<string, unknown>;
+  pullRequestUrl?: string;
+  branchRef?: string;
+  commitSha?: string;
+  now: string;
+}
+
 export interface ExternalAgentControlPersistence {
   registry: {
     list(options?: { includeDeleted?: boolean }): Promise<ExternalAgentRecord[]>;
@@ -159,6 +168,7 @@ export interface ExternalAgentControlPersistence {
       status: AgentDispatchStatus;
       expired?: boolean;
     }>;
+    refreshOutput(input: DispatchOutputRefreshInput): Promise<boolean>;
     cancel(id: string, now: string): Promise<boolean>;
     retry(input: {
       id: string;

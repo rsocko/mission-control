@@ -245,7 +245,12 @@ describe('GitHub Copilot cloud agent adapter', () => {
           data: {
             node: {
               __typename: 'PullRequest',
+              number: 42,
               url: 'https://github.com/octo/example/pull/42',
+              state: 'OPEN',
+              isDraft: false,
+              mergedAt: null,
+              closedAt: null,
               headRefName: 'copilot/fix-parser',
               headRefOid: '0123456789abcdef',
               headRepository: { nameWithOwner: 'octo/example' },
@@ -269,6 +274,13 @@ describe('GitHub Copilot cloud agent adapter', () => {
     expect(result).toMatchObject({
       status: 'completed',
       providerTaskId: 'task-42',
+      providerDetail: {
+        pullRequest: {
+          number: 42,
+          state: 'open',
+          url: 'https://github.com/octo/example/pull/42',
+        },
+      },
       result: {
         codeChange: {
           repository: 'octo/example',

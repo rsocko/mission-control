@@ -58,6 +58,8 @@ function assignment(
     providerState: 'in_progress',
     providerUpdatedAt: '2026-10-01T00:00:00.000Z',
     outputWarning: null,
+    pullRequestState: null,
+    pullRequestNumber: null,
     latestProgress: 'Running focused reconciliation tests.',
     blocker: null,
     pendingApproval: false,
@@ -126,7 +128,7 @@ describe('TaskDelegationSection', () => {
     const current = assignment();
     const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith('/api/tasks/task-1/delegation')) {
+      if (url.includes('/api/tasks/task-1/delegation')) {
         return response(context([{ taskId: 'task-1', ...current }]));
       }
       if (url.endsWith('/api/external-agents/dispatches/dispatch-1') && !init?.method) {
@@ -219,13 +221,16 @@ describe('TaskDelegationSection', () => {
       canonicalState: 'completed',
       displayState: 'completed',
       providerState: 'completed',
+      pullRequestState: 'merged',
+      pullRequestNumber: 42,
+      pullRequestUrl: 'https://github.com/octo/repo/pull/42',
       latestProgress: null,
       canStopTracking: false,
       cancellationLimitation: null,
     });
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith('/api/tasks/task-1/delegation')) {
+      if (url.includes('/api/tasks/task-1/delegation')) {
         const current = refreshed ? completed : queued;
         return response(context([{ taskId: 'task-1', ...current }]));
       }
@@ -250,7 +255,11 @@ describe('TaskDelegationSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More details' }));
     const dialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
     expect(await within(dialog).findByText('Completed')).toBeInTheDocument();
-    expect(within(dialog).getByText('The provider reported that the run completed.')).toBeInTheDocument();
+    expect(within(dialog).getByText(
+      'The provider completed the run and its pull request was merged.',
+    )).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: /Pull request #42 · Merged/ }))
+      .toHaveAttribute('href', 'https://github.com/octo/repo/pull/42');
   });
 
   it('keeps approvals, outputs, and retry controls available after failure', async () => {
@@ -296,7 +305,7 @@ describe('TaskDelegationSection', () => {
 
     render(<TaskDelegationSection taskId="task-1" taskTitle="Fix parser" mode="panel" />);
     expect(await screen.findByText('Failed')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Pull request/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Review PR' })).toHaveAttribute(
       'href',
       'https://github.com/octo/repo/pull/42',
     );

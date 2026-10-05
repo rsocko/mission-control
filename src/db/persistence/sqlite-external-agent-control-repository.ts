@@ -11,6 +11,7 @@ import { ExternalAgentError } from '@/lib/external-agents/errors';
 import type {
   DispatchEventInput,
   DispatchFinalizeInput,
+  DispatchOutputRefreshInput,
   DispatchResultPersistenceInput,
   ExternalAgentControlPersistence,
   ExternalAgentCreateRecord,
@@ -1037,6 +1038,35 @@ export function createSqliteExternalAgentControlRepository(
         return { duplicate: false, status: input.status };
       }).immediate();
     },
+
+    async refreshOutput(input: DispatchOutputRefreshInput) {
+      const updated = sqlite.prepare(`
+        UPDATE agent_dispatches SET
+          provider_detail = ?,
+          github_pull_request_url = COALESCE(?, github_pull_request_url),
+          branch_ref = COALESCE(?, branch_ref),
+          commit_sha = COALESCE(?, commit_sha),
+          updated_at = ?
+        WHERE id = ? AND status = 'completed'
+      `).run(
+        JSON.stringify(input.providerDetail),
+        input.pullRequestUrl ?? null,
+        input.branchRef ?? null,
+        input.commitSha ?? null,
+        input.now,
+        input.id,
+      );
+      if (updated.changes === 1) {
+        sqlite.prepare(`
+          UPDATE agent_dispatch_attempts SET provider_detail = ?
+          WHERE dispatch_id = ? AND attempt_number = (
+            SELECT attempt_count FROM agent_dispatches WHERE id = ?
+          )
+        `).run(JSON.stringify(input.providerDetail), input.id, input.id);
+      }
+      return updated.changes === 1;
+    },
+
     async cancel(id, now) {
       return sqlite.transaction(() => {
         const current = state(sqlite, id);

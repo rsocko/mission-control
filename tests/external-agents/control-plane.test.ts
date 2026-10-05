@@ -418,7 +418,7 @@ describe('external-agent registry boundaries', () => {
       }),
     });
 
-    const fetcher = vi.fn(async (input: string | URL | Request) => {
+    const fetcherMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith('/tasks/provider-task-1')) {
         return Response.json({
@@ -434,7 +434,8 @@ describe('external-agent registry boundaries', () => {
         });
       }
       throw new Error(`Unexpected GitHub request: ${url}`);
-    }) as typeof fetch;
+    });
+    const fetcher = fetcherMock as typeof fetch;
 
     await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
       .resolves.toEqual({ reconciled: 1, failures: [] });
@@ -445,6 +446,127 @@ describe('external-agent registry boundaries', () => {
       baseRef: 'main',
       branchRef: 'copilot/fix-parser',
     });
+  });
+
+  it('continues reconciling a completed create-PR dispatch until the PR is merged', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'hosted-pr-lifecycle',
+      name: 'Hosted PR lifecycle',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+      capabilities: { canWriteCode: true, canCreatePullRequest: true },
+    });
+    const preview = await service.createDispatchPreview({
+      agentId: hosted.id,
+      instruction: 'Create a reviewed change',
+      scope: {
+        repository: 'octo/example',
+        baseRef: 'main',
+        createPullRequest: true,
+      },
+      allowedActions: ['write_code', 'create_pull_request'],
+      idempotencyKey: 'completed-pr-reconciliation',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({
+        kind: 'push',
+        async dispatch() {
+          return {
+            status: 'queued',
+            providerTaskId: 'provider-task-pr',
+            providerState: 'queued',
+          };
+        },
+      }),
+    });
+
+    let pullRequestState: 'OPEN' | 'MERGED' = 'OPEN';
+    const lifecycleFetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/provider-task-pr')) {
+        return Response.json({
+          id: 'provider-task-pr',
+          name: 'Create a reviewed change',
+          state: 'completed',
+          sessions: [{ base_ref: 'main', head_ref: 'copilot/reviewed-change' }],
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 7654321, global_id: 'PR_lifecycle' },
+            },
+            {
+              provider: 'github',
+              type: 'branch',
+              data: { base_ref: 'main', head_ref: 'copilot/reviewed-change' },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        return Response.json({
+          data: {
+            node: {
+              __typename: 'PullRequest',
+              number: 42,
+              url: 'https://github.com/octo/example/pull/42',
+              state: pullRequestState,
+              isDraft: false,
+              mergedAt: pullRequestState === 'MERGED'
+                ? '2026-10-05T17:25:45Z'
+                : null,
+              closedAt: pullRequestState === 'MERGED'
+                ? '2026-10-05T17:25:45Z'
+                : null,
+              headRefName: 'copilot/reviewed-change',
+              headRefOid: '0123456789abcdef',
+              headRepository: { nameWithOwner: 'octo/example' },
+              baseRefName: 'main',
+              baseRepository: { nameWithOwner: 'octo/example' },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+    const fetcher = lifecycleFetcher as typeof fetch;
+
+    await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
+      .resolves.toEqual({ reconciled: 1, failures: [] });
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'completed',
+      githubPullRequestUrl: 'https://github.com/octo/example/pull/42',
+      providerDetail: {
+        pullRequest: { number: 42, state: 'open' },
+      },
+    });
+    const completed = (await service.getDispatch(preview.id))!;
+    expect(service.shouldReconcileDispatch(completed)).toBe(true);
+    expect(service.shouldReconcileDispatch({
+      ...completed,
+      scope: { ...completed.scope, createPullRequest: false },
+    })).toBe(false);
+
+    pullRequestState = 'MERGED';
+    await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
+      .resolves.toEqual({ reconciled: 1, failures: [] });
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'completed',
+      providerDetail: {
+        pullRequest: {
+          number: 42,
+          state: 'merged',
+          mergedAt: '2026-10-05T17:25:45Z',
+        },
+      },
+    });
+
+    lifecycleFetcher.mockClear();
+    await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
+      .resolves.toEqual({ reconciled: 0, failures: [] });
+    expect(lifecycleFetcher).not.toHaveBeenCalled();
   });
 
   it('does not pretend a submitted Copilot task was cancelled locally', async () => {

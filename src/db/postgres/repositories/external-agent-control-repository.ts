@@ -11,6 +11,7 @@ import { ExternalAgentError } from '@/lib/external-agents/errors';
 import type {
   DispatchEventInput,
   DispatchFinalizeInput,
+  DispatchOutputRefreshInput,
   DispatchResultPersistenceInput,
   ExternalAgentControlPersistence,
   ExternalAgentCreateRecord,
@@ -1058,6 +1059,36 @@ export function createPostgresExternalAgentControlRepository(
           createdAt: input.now,
         });
         return { duplicate: false, status: input.status };
+      });
+    },
+
+    async refreshOutput(input: DispatchOutputRefreshInput) {
+      return transaction(pool, async (client) => {
+        const updated = await client.query(`
+          UPDATE agent_dispatches SET
+            provider_detail = $1::jsonb,
+            github_pull_request_url = COALESCE($2, github_pull_request_url),
+            branch_ref = COALESCE($3, branch_ref),
+            commit_sha = COALESCE($4, commit_sha),
+            updated_at = $5
+          WHERE id = $6 AND status = 'completed'
+        `, [
+          JSON.stringify(input.providerDetail),
+          input.pullRequestUrl ?? null,
+          input.branchRef ?? null,
+          input.commitSha ?? null,
+          input.now,
+          input.id,
+        ]);
+        if (updated.rowCount === 1) {
+          await client.query(`
+            UPDATE agent_dispatch_attempts SET provider_detail = $1::jsonb
+            WHERE dispatch_id = $2 AND attempt_number = (
+              SELECT attempt_count FROM agent_dispatches WHERE id = $2
+            )
+          `, [JSON.stringify(input.providerDetail), input.id]);
+        }
+        return updated.rowCount === 1;
       });
     },
     async cancel(id, now) {

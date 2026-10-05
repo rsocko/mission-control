@@ -326,6 +326,7 @@ export async function runPackagedSyncWorker(
             );
           }
           syncScheduler.startWatchdog();
+          syncScheduler.startExternalAgentReconciliation();
         },
         stop: () => syncScheduler.stopAll(),
       },

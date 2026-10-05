@@ -147,13 +147,46 @@ function stateDescription(assignment: TaskDelegationSummary) {
     case 'cancelled':
       return 'The run is no longer active.';
     case 'completed':
+      if (assignment.pullRequestState === 'merged') {
+        return 'The provider completed the run and its pull request was merged.';
+      }
+      if (assignment.pullRequestState === 'closed') {
+        return 'The provider completed the run and its pull request was closed without merging.';
+      }
+      if (assignment.pullRequestState === 'draft') {
+        return 'The provider completed the run and its draft pull request is ready for review.';
+      }
+      if (assignment.pullRequestState === 'open') {
+        return 'The provider completed the run and its pull request is ready for review.';
+      }
       return 'The provider reported that the run completed.';
+  }
+}
+
+function pullRequestStatusLabel(assignment: TaskDelegationSummary) {
+  switch (assignment.pullRequestState) {
+    case 'draft':
+      return 'Draft';
+    case 'open':
+      return 'Open';
+    case 'merged':
+      return 'Merged';
+    case 'closed':
+      return 'Closed';
+    default:
+      return null;
   }
 }
 
 function outputLink(assignment: TaskDelegationSummary) {
   if (assignment.pullRequestUrl) {
-    return { href: assignment.pullRequestUrl, label: 'Pull request', icon: GitPullRequest };
+    return {
+      href: assignment.pullRequestUrl,
+      label: assignment.pullRequestState === 'merged' || assignment.pullRequestState === 'closed'
+        ? 'View PR'
+        : 'Review PR',
+      icon: GitPullRequest,
+    };
   }
   if (assignment.runUrl) {
     return { href: assignment.runUrl, label: 'Provider run', icon: ExternalLink };
@@ -181,11 +214,13 @@ export function TaskDelegationSection({
   const [error, setError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (reconcile = true) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/delegation`);
+      const response = await fetch(
+        `/api/tasks/${encodeURIComponent(taskId)}/delegation${reconcile ? '' : '?reconcile=0'}`,
+      );
       if (!response.ok) throw new Error(await responseError(response));
       setContext(await response.json() as TaskDelegationContext);
     } catch (loadError) {
@@ -210,6 +245,7 @@ export function TaskDelegationSection({
     ? context?.syncErrors.find((item) => item.dispatchId === current.dispatchId) ?? null
     : null;
   const relevantOutput = current ? outputLink(current) : null;
+  const pullRequestStatus = current ? pullRequestStatusLabel(current) : null;
   const OutputIcon = relevantOutput?.icon;
 
   return (
@@ -279,6 +315,11 @@ export function TaskDelegationSection({
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--text-muted)]">
                 <span>{current.locality.replaceAll('-', ' ')}</span>
                 {current.baseRef && <span>Base {current.baseRef}</span>}
+                {pullRequestStatus && (
+                  <span>
+                    PR{current.pullRequestNumber ? ` #${current.pullRequestNumber}` : ''}: {pullRequestStatus}
+                  </span>
+                )}
                 <span>Attempt {Math.max(current.attemptCount, 1)} of {current.maxAttempts}</span>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
@@ -316,7 +357,7 @@ export function TaskDelegationSection({
           syncError={syncError?.message ?? null}
           open={detailsOpen}
           onOpenChange={setDetailsOpen}
-          onUpdated={load}
+          onUpdated={() => load(false)}
         />
       )}
     </>
@@ -381,14 +422,26 @@ function TaskDelegationRunDialog({
       'idle',
       'waiting_for_user',
       'blocked',
-    ].includes(assignment.displayState);
+    ].includes(assignment.displayState)
+      || (
+        assignment.displayState === 'completed'
+        && assignment.createPullRequest
+        && assignment.pullRequestState !== 'merged'
+        && assignment.pullRequestState !== 'closed'
+      );
     if (!active) return () => window.clearTimeout(initialRefresh);
     const interval = window.setInterval(() => void load(true), 30_000);
     return () => {
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
     };
-  }, [assignment.displayState, load, open]);
+  }, [
+    assignment.createPullRequest,
+    assignment.displayState,
+    assignment.pullRequestState,
+    load,
+    open,
+  ]);
 
   const act = async (action: 'cancel' | 'stop_tracking' | 'retry') => {
     setBusyAction(action);
@@ -638,7 +691,13 @@ function TaskDelegationRunDialog({
                       <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Outputs</h3>
                       <div className="mt-2 space-y-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-2">
                         {assignment.pullRequestUrl && (
-                          <RunReference href={assignment.pullRequestUrl} icon={GitPullRequest}>Pull request</RunReference>
+                          <RunReference href={assignment.pullRequestUrl} icon={GitPullRequest}>
+                            Pull request
+                            {assignment.pullRequestNumber ? ` #${assignment.pullRequestNumber}` : ''}
+                            {pullRequestStatusLabel(assignment)
+                              ? ` · ${pullRequestStatusLabel(assignment)}`
+                              : ''}
+                          </RunReference>
                         )}
                         {assignment.branchRef && (
                           <div className="flex min-h-8 items-center gap-2 px-2 text-xs text-[var(--text-secondary)]">
@@ -687,6 +746,7 @@ function TaskDelegationRunDialog({
                         ['Model', assignment.model ?? 'Auto'],
                         ['Attempt', `${Math.max(assignment.attemptCount, 1)} of ${assignment.maxAttempts}`],
                         ['Provider state', assignment.providerState],
+                        ['Pull request', pullRequestStatusLabel(assignment)],
                         ['Provider task', assignment.providerTaskId],
                         ['Run ID', assignment.runId],
                         ['Dispatch ID', assignment.dispatchId],

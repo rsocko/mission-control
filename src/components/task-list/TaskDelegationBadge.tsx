@@ -16,15 +16,25 @@ const STATE_CLASSES: Record<TaskDelegationSummary['displayState'], string> = {
 };
 
 export function TaskDelegationBadge({ delegation }: { delegation: TaskDelegationSummary }) {
-  const stateLabel = delegation.pullRequestUrl
-    ? 'Review'
+  const stateLabel = delegation.pullRequestState === 'merged'
+    ? 'Merged'
+    : delegation.pullRequestState === 'closed'
+      ? 'Closed'
+      : delegation.pullRequestState === 'draft'
+        ? 'Draft'
+        : delegation.pullRequestState === 'open' || delegation.pullRequestUrl
+          ? 'Review'
     : delegation.displayState === 'waiting_for_user'
       ? 'Waiting'
       : delegation.displayState === 'preview'
         ? 'Review'
         : delegation.displayState.replaceAll('_', ' ');
-  const destinationLabel = delegation.pullRequestUrl
-    ? 'PR ready'
+  const destinationLabel = delegation.pullRequestState === 'merged'
+    || delegation.pullRequestState === 'closed'
+    || delegation.pullRequestState === 'draft'
+      ? 'PR'
+    : delegation.pullRequestState === 'open' || delegation.pullRequestUrl
+      ? 'PR ready'
     : delegation.targetType === 'copilot-cloud'
       ? 'GitHub Copilot Cloud'
       : delegation.targetType === 'paperclip'

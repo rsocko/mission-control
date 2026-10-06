@@ -446,6 +446,102 @@ describe('GitHub Copilot cloud agent adapter', () => {
     expect(result.providerDetail).not.toHaveProperty('outputWarning');
   });
 
+  it('uses the artifact database ID when a branch has multiple pull requests', async () => {
+    process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+      [credentialReference]: 'user-token',
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-reused-branch')) {
+        return response({
+          id: 'task-reused-branch',
+          state: 'completed',
+          sessions: [{ model: 'gpt-5.4', base_ref: 'main' }],
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 4751477800 },
+            },
+            {
+              provider: 'github',
+              type: 'branch',
+              data: { head_ref: 'copilot/reused-branch', base_ref: 'main' },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        return response({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    __typename: 'PullRequest',
+                    databaseId: 4650000000,
+                    number: 41,
+                    url: 'https://github.com/octo/example/pull/41',
+                    state: 'MERGED',
+                    isDraft: false,
+                    mergedAt: '2026-09-01T00:00:00Z',
+                    closedAt: '2026-09-01T00:00:00Z',
+                    headRefName: 'copilot/reused-branch',
+                    headRefOid: 'old-commit',
+                    headRepository: { nameWithOwner: 'octo/example' },
+                    baseRefName: 'main',
+                    baseRepository: { nameWithOwner: 'octo/example' },
+                  },
+                  {
+                    __typename: 'PullRequest',
+                    databaseId: 4751477800,
+                    number: 42,
+                    url: 'https://github.com/octo/example/pull/42',
+                    state: 'OPEN',
+                    isDraft: true,
+                    mergedAt: null,
+                    closedAt: null,
+                    headRefName: 'copilot/reused-branch',
+                    headRefOid: 'current-commit',
+                    headRepository: { nameWithOwner: 'octo/example' },
+                    baseRefName: 'main',
+                    baseRepository: { nameWithOwner: 'octo/example' },
+                  },
+                ],
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    const result = await getCopilotCloudTask(
+      agent(),
+      'octo/example',
+      'main',
+      'task-reused-branch',
+      fetcher,
+    );
+
+    expect(result).toMatchObject({
+      providerDetail: {
+        pullRequest: {
+          number: 42,
+          state: 'draft',
+          url: 'https://github.com/octo/example/pull/42',
+        },
+      },
+      result: {
+        codeChange: {
+          commitSha: 'current-commit',
+          pullRequestUrl: 'https://github.com/octo/example/pull/42',
+        },
+      },
+    });
+    expect(result.providerDetail).not.toHaveProperty('outputWarning');
+  });
+
   it('does not warn about a placeholder pull request while the task is queued', async () => {
     process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
       [credentialReference]: 'user-token',

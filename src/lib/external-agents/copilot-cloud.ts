@@ -591,6 +591,7 @@ async function pullRequestReference(
             ) {
               nodes {
                 __typename
+                databaseId
                 url
                 number
                 state
@@ -616,7 +617,10 @@ async function pullRequestReference(
       const repository = record(response.data?.repository);
       const pullRequests = record(repository?.pullRequests);
       const nodes = Array.isArray(pullRequests?.nodes) ? pullRequests.nodes : [];
-      const matches = nodes
+      const artifactMatch = typeof pull.id === 'number'
+        ? nodes.find((node) => record(node)?.databaseId === pull.id)
+        : undefined;
+      const matches = (artifactMatch ? [artifactMatch] : nodes)
         .map(parsePullRequestReference)
         .filter((entry): entry is PullRequestReference => Boolean(entry));
       if (!response.errors?.length && matches.length === 1) {

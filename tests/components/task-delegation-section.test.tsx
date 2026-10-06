@@ -52,6 +52,7 @@ function assignment(
     runId: null,
     runUrl: null,
     providerTaskId: 'agent-task-1',
+    providerTaskUrl: null,
     locality: 'github-hosted',
     canonicalState: 'in_progress',
     displayState: 'running',
@@ -224,6 +225,7 @@ describe('TaskDelegationSection', () => {
       pullRequestState: 'merged',
       pullRequestNumber: 42,
       pullRequestUrl: 'https://github.com/octo/repo/pull/42',
+      providerTaskUrl: 'https://github.com/copilot/tasks/agent-task-1',
       latestProgress: null,
       canStopTracking: false,
       cancellationLimitation: null,
@@ -272,8 +274,60 @@ describe('TaskDelegationSection', () => {
     expect(within(dialog).getByText(
       'The provider completed the run and its pull request was merged.',
     )).toBeInTheDocument();
-    expect(within(dialog).getByRole('link', { name: /Pull request #42 · Merged/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close run details' }));
+    expect(screen.getByRole('link', { name: 'View PR' }))
       .toHaveAttribute('href', 'https://github.com/octo/repo/pull/42');
+    expect(screen.getByRole('link', { name: 'Cloud Agent' }))
+      .toHaveAttribute('href', 'https://github.com/copilot/tasks/agent-task-1');
+    fireEvent.click(screen.getByRole('button', { name: 'More details' }));
+    const refreshedDialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
+    expect(within(refreshedDialog).getByRole('link', { name: /Pull request #42 · Merged/ }))
+      .toHaveAttribute('href', 'https://github.com/octo/repo/pull/42');
+    expect(within(refreshedDialog).getByRole('link', { name: 'Open Cloud Agent session' }))
+      .toHaveAttribute('href', 'https://github.com/copilot/tasks/agent-task-1');
+  });
+
+  it('links to the Cloud Agent when pull request details are unavailable', async () => {
+    const current = assignment({
+      canonicalState: 'completed',
+      displayState: 'completed',
+      providerState: 'completed',
+      outputWarning: 'GitHub reported a pull request output, but its details are unavailable.',
+      providerTaskUrl: 'https://github.com/copilot/tasks/agent-task-1',
+      latestProgress: null,
+      canStopTracking: false,
+      cancellationLimitation: null,
+    });
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/api/tasks/task-1/delegation')) {
+        return response(context([{ taskId: 'task-1', ...current }]));
+      }
+      if (url.endsWith('/api/external-agents/dispatches/dispatch-1')) {
+        return response({
+          dispatch: {
+            id: 'dispatch-1',
+            providerTaskId: 'agent-task-1',
+            providerDetail: {
+              state: 'completed',
+              taskUrl: 'https://github.com/copilot/tasks/agent-task-1',
+            },
+            attempts: [],
+            events: [],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<TaskDelegationSection taskId="task-1" taskTitle="Fix parser" mode="dialog" />);
+
+    expect(await screen.findByRole('link', { name: 'Cloud Agent' }))
+      .toHaveAttribute('href', 'https://github.com/copilot/tasks/agent-task-1');
+    fireEvent.click(screen.getByRole('button', { name: 'More details' }));
+    const dialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
+    expect(within(dialog).getByRole('link', { name: 'Open Cloud Agent session' }))
+      .toHaveAttribute('href', 'https://github.com/copilot/tasks/agent-task-1');
   });
 
   it('keeps approvals, outputs, and retry controls available after failure', async () => {

@@ -774,6 +774,81 @@ describe('provider-neutral task delegation API', () => {
       .toEqual({ count: 2 });
   });
 
+  it('combines selected tasks into one idempotent Copilot cloud assignment', async () => {
+    await createCloudAgent();
+    const body = {
+      taskIds: ['task-github', 'task-local'],
+      agentId: 'github-cloud',
+      operationId: 'combined-operation',
+      strategy: 'combined',
+      repository: 'octo/source',
+      baseRef: 'main',
+      instruction: 'Deliver both tasks as one cohesive change.',
+      allowedActions: ['write_code'],
+    };
+
+    const first = await bulkRoute.POST(mutationRequest(
+      'http://localhost/api/tasks/delegation',
+      body,
+    ));
+    const firstBatch = await first.json();
+    const replay = await bulkRoute.POST(mutationRequest(
+      'http://localhost/api/tasks/delegation',
+      body,
+    ));
+    const replayBatch = await replay.json();
+
+    expect(first.status).toBe(201);
+    expect(firstBatch).toMatchObject({
+      readyCount: 2,
+      blockedCount: 0,
+      dispatchCount: 1,
+      strategy: 'combined',
+      previews: [{
+        taskIds: ['task-github', 'task-local'],
+        payloadPreview: {
+          repository: { fullName: 'octo/source' },
+          tasks: expect.arrayContaining([
+            expect.objectContaining({ id: 'task-github', title: 'Fix the parser' }),
+            expect.objectContaining({ id: 'task-local', title: 'Write release notes' }),
+          ]),
+        },
+      }],
+    });
+    expect(replayBatch.previews).toEqual(firstBatch.previews);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
+      .toEqual({ count: 1 });
+    expect(JSON.parse(String(sqlite.prepare(
+      'SELECT scope FROM agent_dispatches LIMIT 1',
+    ).pluck().get()))).toMatchObject({
+      taskIds: ['task-github', 'task-local'],
+      repository: 'octo/source',
+    });
+  });
+
+  it('keeps combined delegation all-or-nothing when any selected task is blocked', async () => {
+    await createCloudAgent();
+    const response = await bulkRoute.POST(mutationRequest(
+      'http://localhost/api/tasks/delegation',
+      {
+        taskIds: ['task-github', 'task-done'],
+        agentId: 'github-cloud',
+        operationId: 'combined-blocked',
+        strategy: 'combined',
+        baseRef: 'main',
+        allowedActions: ['write_code'],
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      code: 'DISCLOSURE_BLOCKED',
+      error: 'Task is done',
+    });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
+      .toEqual({ count: 0 });
+  });
+
   it('isolates oversized bulk tasks while preserving visible idempotent previews', async () => {
     await createCloudAgent();
     sqlite.prepare('UPDATE tasks SET description = ? WHERE id = ?')

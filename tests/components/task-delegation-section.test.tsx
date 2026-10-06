@@ -686,7 +686,9 @@ describe('TaskDelegationDialog', () => {
     });
     confirmation.resolve(await response({ dispatch: { status: 'queued' } }));
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('1 task queued for GitHub Copilot Cloud');
+      expect(toast.success).toHaveBeenCalledWith(
+        '1 task queued in 1 assignment for GitHub Copilot Cloud',
+      );
     });
     expect(fetcher).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
       method: 'PATCH',

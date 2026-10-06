@@ -48,12 +48,25 @@ describe('useHistoryParamSelection', () => {
     expect(window.history.state.__missionControlHistory.position).toBe(1);
   });
 
-  it('uses Back to close a detail opened in the app', () => {
+  it('closes an in-app detail without navigating back', () => {
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
     const { result } = renderHook(() => useHistoryParamSelection('taskId'));
 
     act(() => result.current[1]('task-1'));
     act(() => result.current[1](null));
+
+    expect(back).not.toHaveBeenCalled();
+    expect(result.current[0]).toBeNull();
+    expect(window.location.pathname).toBe('/today');
+    expect(window.location.search).toBe('?keep=1');
+  });
+
+  it('can explicitly use Back to close a detail opened in the app', () => {
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    const { result } = renderHook(() => useHistoryParamSelection('taskId'));
+
+    act(() => result.current[1]('task-1'));
+    act(() => result.current[1](null, { history: 'back' }));
 
     expect(back).toHaveBeenCalledOnce();
   });

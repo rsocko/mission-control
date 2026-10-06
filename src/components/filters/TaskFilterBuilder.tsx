@@ -43,6 +43,7 @@ interface TaskFilterBuilderProps {
   delegateesLoading?: boolean;
   delegateesError?: boolean;
   hiddenCategories?: TaskFilterBuilderCategory[];
+  onDelegateesRequested?: () => void;
   onToggleToken: (type: TaskFilterBuilderCategory, value: string, negated: boolean) => void;
 }
 
@@ -91,6 +92,7 @@ export function TaskFilterBuilder({
   delegateesLoading = false,
   delegateesError = false,
   hiddenCategories = [],
+  onDelegateesRequested,
   onToggleToken,
 }: TaskFilterBuilderProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -141,6 +143,7 @@ export function TaskFilterBuilder({
     setCategory(type);
     setSearch('');
     setDateOperator(null);
+    if (type === 'delegatee') onDelegateesRequested?.();
   }
 
   function isSelected(value: string) {

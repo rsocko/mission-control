@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Filter, HelpCircle, Save, Search, X } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import {
@@ -71,6 +70,18 @@ interface AppliedFilter {
   style: { bg: string; text: string; border: string };
   type: 'source' | 'listGroup' | 'list' | 'priority' | 'status' | 'tag' | 'quick' | 'project';
   value: string;
+}
+
+interface DelegateeOption {
+  id: string;
+  name: string;
+  type: string;
+  deletedAt?: string | null;
+}
+
+interface DelegateesState {
+  status: 'idle' | 'loading' | 'success' | 'error';
+  agents: DelegateeOption[];
 }
 
 const FILTER_UNDO_TOAST_ID = 'filter-undo';
@@ -292,21 +303,36 @@ export function TaskKeywordFilter({
   const [acIndex, setAcIndex] = useState(0);
   // Help tooltip state
   const [showHelp, setShowHelp] = useState(false);
-  const delegateesQuery = useQuery<{
-    agents: Array<{ id: string; name: string; type: string; deletedAt?: string | null }>;
-  }>({
-    queryKey: ['external-agents', 'task-filter-options'],
-    queryFn: async () => {
-      const response = await fetch('/api/external-agents');
-      if (!response.ok) throw new Error('Failed to load delegation filter options');
-      return response.json();
-    },
-    staleTime: 60_000,
+  const [delegateesState, setDelegateesState] = useState<DelegateesState>({
+    status: 'idle',
+    agents: [],
   });
-  const delegatees = useMemo(
-    () => (delegateesQuery.data?.agents ?? []).filter((agent) => !agent.deletedAt),
-    [delegateesQuery.data?.agents],
-  );
+  const delegateesRequestRef = useRef<AbortController | null>(null);
+  const loadDelegatees = useCallback(async () => {
+    if (delegateesState.status === 'loading' || delegateesState.status === 'success') return;
+    const controller = new AbortController();
+    delegateesRequestRef.current = controller;
+    setDelegateesState((state) => ({ ...state, status: 'loading' }));
+    try {
+      const response = await fetch('/api/external-agents', { signal: controller.signal });
+      if (!response.ok) throw new Error('Failed to load delegation filter options');
+      const body = await response.json() as { agents?: DelegateeOption[] };
+      if (!controller.signal.aborted) {
+        setDelegateesState({
+          status: 'success',
+          agents: (body.agents ?? []).filter((agent) => !agent.deletedAt),
+        });
+      }
+    } catch {
+      if (!controller.signal.aborted) {
+        setDelegateesState({ status: 'error', agents: [] });
+      }
+    }
+  }, [delegateesState.status]);
+
+  useEffect(() => () => {
+    delegateesRequestRef.current?.abort();
+  }, []);
 
   // Sync state when store changes externally (e.g., clear-all)
   useEffect(() => {
@@ -946,9 +972,10 @@ export function TaskKeywordFilter({
           tags={tags}
           assignees={assignees}
           projects={projects}
-          delegatees={delegatees}
-          delegateesLoading={delegateesQuery.isPending}
-          delegateesError={delegateesQuery.isError}
+          delegatees={delegateesState.agents}
+          delegateesLoading={delegateesState.status === 'loading'}
+          delegateesError={delegateesState.status === 'error'}
+          onDelegateesRequested={() => void loadDelegatees()}
           hiddenCategories={hiddenBuilderFilters}
           onToggleToken={toggleBuilderToken}
         />

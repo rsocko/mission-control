@@ -484,7 +484,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                 />
               )}
               label={filter.label}
-              count={taskResponse.stats[filter.statKey]}
+              count={taskResponse.stats[filter.statKey] ?? 0}
               active={quickFilter === filter.id}
               onClick={() => setQuickFilter(quickFilter === filter.id ? null : filter.id)}
             />

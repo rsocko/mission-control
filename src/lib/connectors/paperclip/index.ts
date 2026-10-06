@@ -124,9 +124,9 @@ function approvalNotification({
   relatedTaskId?: string;
 }): InboundNotification {
   const approvalType = boundedText(approval.type, 120) ?? 'Approval request';
-  const issueId = boundedText(approval.issueId, 160)
-    ?? linkedIssues[0]?.identifier
-    ?? linkedIssues[0]?.id
+  const issueId = boundedText(linkedIssues[0]?.identifier, 160)
+    ?? boundedText(approval.issueId, 160)
+    ?? boundedText(linkedIssues[0]?.id, 160)
     ?? null;
   const requester = requesterName(approval);
   const risk = approvalRisk(approval);

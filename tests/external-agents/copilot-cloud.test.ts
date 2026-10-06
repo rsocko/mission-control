@@ -140,7 +140,7 @@ describe('GitHub Copilot cloud agent adapter', () => {
         return response({
           id: 'task-1',
           state: 'queued',
-          sessions: [{ prompt: storedPrompt }],
+          sessions: [{}, { prompt: storedPrompt }],
         });
       }
       if (url.endsWith('/tasks') && init?.method === 'POST') {

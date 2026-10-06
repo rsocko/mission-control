@@ -644,7 +644,7 @@ async function findExistingTask(
       'checking an existing Agent task',
     ));
     if (detail.sessions?.some((session) =>
-      session.prompt === prompt || session.prompt.startsWith(`${dispatchMarker}\n`))) {
+      session.prompt === prompt || session.prompt?.startsWith(`${dispatchMarker}\n`))) {
       return detail;
     }
   }

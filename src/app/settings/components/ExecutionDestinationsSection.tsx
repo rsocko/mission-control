@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
-  CloudCog,
   Copy,
   Eye,
   EyeOff,
@@ -17,6 +16,7 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react';
+import { ExecutionDestinationIcon } from '@/components/task-delegation/ExecutionDestinationIcon';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -223,10 +223,6 @@ function destinationLabel(type: DestinationType) {
   return type === 'copilot-cloud' ? 'GitHub Copilot Cloud' : 'Paperclip route';
 }
 
-function DestinationIcon({ type, size = 18 }: { type: DestinationType; size?: number }) {
-  return type === 'copilot-cloud' ? <CloudCog size={size} /> : <Bot size={size} />;
-}
-
 function ScoutDestinationCard() {
   const [connector, setConnector] = useState<ScoutConnector | null>(null);
   const [worker, setWorker] = useState<ScoutWorker | null>(null);
@@ -353,7 +349,7 @@ function ScoutDestinationCard() {
     return (
       <div className="flex flex-col gap-4 rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] p-4 sm:flex-row sm:items-center">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
-          <Bot size={18} />
+          <ExecutionDestinationIcon type="pull-queue" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -381,7 +377,7 @@ function ScoutDestinationCard() {
     <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
       <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
-          <Bot size={18} />
+          <ExecutionDestinationIcon type="pull-queue" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -839,7 +835,7 @@ export function ExecutionDestinationsSection() {
             return (
               <div key={destination.id} className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
-                  <DestinationIcon type={destination.type} />
+                  <ExecutionDestinationIcon type={destination.type} />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -919,7 +915,7 @@ export function ExecutionDestinationsSection() {
               </p>
             </div>
             <Badge variant="outline">
-              <DestinationIcon type={form.type} size={13} />
+              <ExecutionDestinationIcon type={form.type} size={13} />
               {destinationLabel(form.type)}
             </Badge>
           </div>

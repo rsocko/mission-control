@@ -1424,14 +1424,14 @@ export function ProjectPhasesTab({
                             tabIndex={-1}
                             role="region"
                             aria-label={`${phase.name} phase`}
-                            className="overflow-visible rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] shadow-[0_1px_0_rgba(255,255,255,0.04),0_14px_32px_rgba(0,0,0,0.16)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
+                            className="@container overflow-visible rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] shadow-[0_1px_0_rgba(255,255,255,0.04),0_14px_32px_rgba(0,0,0,0.16)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
                             style={{ scrollMarginTop: stickyHeaderHeight + 24 }}
                           >
                             {/* ── Phase Header ── */}
                             <div className="relative rounded-t-[var(--radius-lg)] bg-[var(--surface-1)]">
-                              <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="flex min-w-0 gap-3">
-                                  <div className="mt-1">
+                              <div className="flex flex-col gap-3 p-4 @4xl:flex-row @4xl:items-start @4xl:justify-between">
+                                <div className="flex min-w-0 flex-1 gap-2 sm:gap-3">
+                                  <div className="mt-1 shrink-0">
                                     <PhaseColorPicker
                                       phaseName={phase.name}
                                       value={phase.color}
@@ -1456,7 +1456,7 @@ export function ProjectPhasesTab({
                                   >
                                     {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
                                   </button>
-                                  <div className="min-w-0 space-y-2">
+                                  <div className="min-w-0 flex-1 space-y-2">
                                     <div className="flex flex-wrap items-center gap-2">
                                       {isEditing ? (
                                         <input
@@ -1480,7 +1480,7 @@ export function ProjectPhasesTab({
                                         <button
                                           type="button"
                                           disabled={isPhaseMutationDisabled}
-                                          className="text-left text-base font-semibold text-[var(--text-primary)] cursor-pointer hover:text-[var(--accent)] transition-colors disabled:pointer-events-none"
+                                          className="min-w-0 break-words text-left text-base font-semibold text-[var(--text-primary)] cursor-pointer hover:text-[var(--accent)] transition-colors disabled:pointer-events-none"
                                           onClick={() => {
                                             setEditingPhaseId(phase.id);
                                             setEditingPhaseName(phase.name);
@@ -1580,21 +1580,23 @@ export function ProjectPhasesTab({
                                         className="w-full field-sizing-content resize-none rounded-md border border-[var(--border-strong)] bg-[var(--surface-1)] px-2 py-1 text-sm text-[var(--text-secondary)] outline-none"
                                       />
                                     ) : phase.description ? (
-                                      <div
-                                        className={cn('group/desc flex items-start gap-1.5', isPhaseMutationDisabled ? 'cursor-default' : 'cursor-pointer')}
+                                      <button
+                                        type="button"
+                                        className="group/desc flex max-w-[75ch] items-start gap-1.5 text-left disabled:cursor-default"
                                         onClick={() => {
                                           if (isPhaseMutationDisabled) return;
                                           setEditingPhaseDescId(phase.id);
                                           setEditingPhaseDesc(phase.description || '');
                                         }}
+                                        disabled={isPhaseMutationDisabled}
                                         title="Click to edit description"
-                                        aria-disabled={isPhaseMutationDisabled}
+                                        aria-label={`Edit ${phase.name} description`}
                                       >
-                                        <p className="text-sm text-[var(--text-secondary)] text-pretty whitespace-pre-wrap group-hover/desc:text-[var(--text-primary)] transition-colors">
+                                        <span className="line-clamp-2 whitespace-pre-wrap text-sm text-[var(--text-secondary)] text-pretty transition-colors group-hover/desc:text-[var(--text-primary)]">
                                           {phase.description}
-                                        </p>
+                                        </span>
                                         <PencilLine size={12} className="mt-0.5 shrink-0 text-[var(--text-tertiary)] opacity-0 group-hover/desc:opacity-100 transition-opacity" />
-                                      </div>
+                                      </button>
                                     ) : null}
                                     <div className="flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
                                       <label className="input-glow inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-2 py-1 cursor-pointer hover:bg-[var(--surface-2)] hover:border-[var(--accent-500)]/40" title="Click to edit estimated days">
@@ -1636,8 +1638,11 @@ export function ProjectPhasesTab({
                                   </div>
                                 </div>
 
-                                {/* Right-side actions — use flex-shrink-0 and no-wrap to prevent wrapping issues */}
-                                <div className="flex shrink-0 items-center gap-1.5">
+                                <div
+                                  role="group"
+                                  aria-label={`${phase.name} phase actions`}
+                                  className="grid w-full min-w-0 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 border-t border-[var(--border)] pt-3 @4xl:w-auto @4xl:grid-cols-[auto_minmax(10rem,14rem)_auto] @4xl:border-t-0 @4xl:pt-0"
+                                >
                                   <Tooltip content="Open progress report">
                                   <button
                                     type="button"
@@ -1661,7 +1666,7 @@ export function ProjectPhasesTab({
                                       const value = v || null;
                                       void handleUpdatePhaseField(phase.id, 'startAfterPhaseId', value);
                                     }}>
-                                    <SelectTrigger className={cn('inline-flex min-h-9 items-center rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-1)] px-3 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)]', BUTTON_TRANSITION)} title="Set dependency">
+                                    <SelectTrigger className={cn('inline-flex min-h-9 w-full min-w-0 items-center rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-1)] px-3 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)]', BUTTON_TRANSITION)} title="Set dependency">
                                       <Link2 size={14} className="mr-1.5 shrink-0 text-[var(--text-muted)]" />
                                       <SelectValue />
                                     </SelectTrigger>

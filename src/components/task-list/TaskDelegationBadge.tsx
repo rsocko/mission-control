@@ -16,30 +16,40 @@ const STATE_CLASSES: Record<TaskDelegationSummary['displayState'], string> = {
 };
 
 export function TaskDelegationBadge({ delegation }: { delegation: TaskDelegationSummary }) {
+  const completedWithPullRequest = delegation.displayState === 'completed'
+    && Boolean(delegation.pullRequestUrl);
   const stateLabel = delegation.pullRequestState === 'merged'
     ? 'Merged'
     : delegation.pullRequestState === 'closed'
       ? 'Closed'
       : delegation.pullRequestState === 'draft'
         ? 'Draft'
-        : delegation.pullRequestState === 'open' || delegation.pullRequestUrl
+        : delegation.pullRequestState === 'open'
           ? 'Review'
-    : delegation.displayState === 'waiting_for_user'
-      ? 'Waiting'
-      : delegation.displayState === 'preview'
-        ? 'Review'
-        : delegation.displayState.replaceAll('_', ' ');
+          : completedWithPullRequest
+            ? 'Completed'
+            : delegation.pullRequestUrl
+              ? 'Review'
+              : delegation.displayState === 'waiting_for_user'
+                ? 'Waiting'
+                : delegation.displayState === 'preview'
+                  ? 'Review'
+                  : delegation.displayState.replaceAll('_', ' ');
   const destinationLabel = delegation.pullRequestState === 'merged'
     || delegation.pullRequestState === 'closed'
     || delegation.pullRequestState === 'draft'
       ? 'PR'
-    : delegation.pullRequestState === 'open' || delegation.pullRequestUrl
-      ? 'PR ready'
-    : delegation.targetType === 'copilot-cloud'
-      ? 'GitHub Copilot Cloud'
-      : delegation.targetType === 'paperclip'
-        ? 'Paperclip'
-        : delegation.targetName;
+      : delegation.pullRequestState === 'open'
+        ? 'PR ready'
+        : completedWithPullRequest
+          ? 'PR created'
+          : delegation.pullRequestUrl
+            ? 'PR ready'
+            : delegation.targetType === 'copilot-cloud'
+              ? 'GitHub Copilot Cloud'
+              : delegation.targetType === 'paperclip'
+                ? 'Paperclip'
+                : delegation.targetName;
   const label = `${stateLabel} · ${destinationLabel}`;
   return (
     <span

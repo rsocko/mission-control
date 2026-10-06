@@ -24,7 +24,7 @@ it('tests Paperclip access and creates a restricted notification connector for t
   render(<AddConnectorModal onClose={() => undefined} onAdded={() => undefined} />);
 
   fireEvent.click(screen.getByText('Paperclip').closest('button')!);
-  fireEvent.change(screen.getByLabelText('Paperclip API origin'), {
+  fireEvent.change(await screen.findByLabelText('Paperclip API origin'), {
     target: { value: 'https://paperclip.example.test' },
   });
   fireEvent.change(screen.getByLabelText('Paperclip company ID'), {

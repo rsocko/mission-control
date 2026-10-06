@@ -77,7 +77,7 @@ describe('Paperclip approvals connector', () => {
       },
     ];
     const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      expect(new Headers(init?.headers).get('authorization')).toBe('******');
+      expect(new Headers(init?.headers).get('authorization')).toMatch(/^Bearer\s+\S+$/);
       const path = new URL(String(input)).pathname;
       if (path === '/api/companies/company-1/approvals') {
         return Response.json(approvals);

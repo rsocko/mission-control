@@ -107,6 +107,7 @@ export const EMPTY_TASK_RESPONSE: DashboardTaskResponseViewModel = {
     recurring: 0,
     waiting: 0,
     inbox: 0,
+    delegated: 0,
   },
   hasMore: false,
   sourceCounts: {},

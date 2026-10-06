@@ -15,7 +15,8 @@ export type QuickFilterIcon =
   | 'completed'
   | 'repeat'
   | 'waiting'
-  | 'no-date';
+  | 'no-date'
+  | 'delegated';
 
 export interface QuickFilterDefinition {
   id: string;
@@ -101,6 +102,15 @@ export const QUICK_FILTERS: readonly QuickFilterDefinition[] = [
     defaultVisibility: 'when-not-empty',
   },
   {
+    id: 'delegated',
+    label: 'Delegated',
+    description: 'Tasks assigned to an external agent',
+    statKey: 'delegated',
+    icon: 'delegated',
+    iconClassName: 'text-blue-400',
+    defaultVisibility: 'when-not-empty',
+  },
+  {
     id: 'recentlyCreated',
     label: 'Recently Created',
     description: 'Created in the last seven days',
@@ -171,5 +181,5 @@ export function isQuickFilterVisible(
   if (options.activeFilter === filter.id) return true;
   if (visibility === 'hidden') return false;
   if (visibility === 'always' || options.loading || options.countsAvailable === false) return true;
-  return stats[filter.statKey] > 0;
+  return (stats[filter.statKey] ?? 0) > 0;
 }

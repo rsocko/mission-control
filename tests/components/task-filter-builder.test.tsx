@@ -129,6 +129,32 @@ describe('TaskFilterBuilder', () => {
     expect(screen.getByRole('button', { name: 'Phase' })).toBeInTheDocument();
   });
 
+  it('adds delegation status and delegatee filters', () => {
+    const onToggleToken = vi.fn();
+    render(
+      <TaskFilterBuilder
+        tokens={[]}
+        sources={[]}
+        sourceLists={[]}
+        tags={[]}
+        assignees={[]}
+        projects={[]}
+        delegatees={[{ id: 'copilot-cloud', name: 'GitHub Copilot', type: 'copilot-cloud' }]}
+        onToggleToken={onToggleToken}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Filter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delegation Status' }));
+    fireEvent.click(screen.getByRole('button', { name: /Active/ }));
+    expect(onToggleToken).toHaveBeenCalledWith('delegation', 'active', false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to filter categories' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Agent' }));
+    fireEvent.click(screen.getByRole('button', { name: /GitHub Copilot/ }));
+    expect(onToggleToken).toHaveBeenCalledWith('delegatee', 'copilot-cloud', false);
+  });
+
   it.each([
     ['Assignee', 'No assignee', 'assignee'],
     ['Tag', 'No tags', 'tag'],

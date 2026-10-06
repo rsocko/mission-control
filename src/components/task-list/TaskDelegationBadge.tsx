@@ -50,18 +50,24 @@ export function TaskDelegationBadge({ delegation }: { delegation: TaskDelegation
               : delegation.targetType === 'paperclip'
                 ? 'Paperclip'
                 : delegation.targetName;
-  const label = `${stateLabel} · ${destinationLabel}`;
+  const targetLabel = delegation.targetType === 'copilot-cloud'
+    ? 'Copilot'
+    : delegation.targetType === 'paperclip'
+      ? 'Paperclip'
+      : delegation.targetName;
+  const label = `${targetLabel} · ${stateLabel}`;
+  const detail = `${stateLabel} · ${destinationLabel}`;
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center gap-1 rounded border px-1 py-0.5 text-xs font-medium',
+        'inline-flex max-w-40 shrink-0 items-center gap-1 rounded border px-1 py-0.5 text-xs font-medium',
         STATE_CLASSES[delegation.displayState],
       )}
-      title={`${delegation.targetName}: ${label}`}
+      title={`${delegation.targetName}: ${detail}`}
       aria-label={`Delegation ${label}`}
     >
       <Bot size={9} aria-hidden="true" />
-      <span className="capitalize">{label}</span>
+      <span className="truncate">{label}</span>
     </span>
   );
 }

@@ -20,6 +20,7 @@ const stats: TaskListStatsDto = {
   recurring: 1,
   waiting: 0,
   inbox: 1,
+  delegated: 1,
 };
 
 describe('quick filter visibility', () => {
@@ -36,6 +37,17 @@ describe('quick filter visibility', () => {
       statKey: 'recurring',
       defaultVisibility: 'when-not-empty',
     });
+  });
+
+  it('offers delegated work as a conditional Quick View', () => {
+    const delegated = getQuickFilterDefinition('delegated')!;
+
+    expect(delegated).toMatchObject({
+      label: 'Delegated',
+      statKey: 'delegated',
+      defaultVisibility: 'when-not-empty',
+    });
+    expect(isQuickFilterVisible(delegated, stats, {})).toBe(true);
   });
 
   it('uses catalog defaults and preserves legacy hidden preferences', () => {

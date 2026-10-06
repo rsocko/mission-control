@@ -94,6 +94,7 @@ export interface TaskListStatsDto {
   recurring: number;
   waiting: number;
   inbox: number;
+  delegated?: number;
 }
 
 export interface TaskListResponseDto {

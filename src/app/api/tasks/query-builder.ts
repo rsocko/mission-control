@@ -1,6 +1,7 @@
 import type { SQL } from 'drizzle-orm';
 import {
   getAssignedFilterCondition as compileAssignedCondition,
+  getDelegatedFilterCondition as compileDelegatedCondition,
   getInboxFilterCondition as compileInboxCondition,
   getQuickFilterCondition as compileQuickFilterCondition,
   withCondition as composeCondition,
@@ -39,6 +40,10 @@ export function getQuickFilterCondition(
 export async function getAssignedFilterCondition(): Promise<SQL | undefined> {
   const { filterInputs } = await getTaskCorePersistence();
   return compileAssignedCondition(await filterInputs.listAssignedGitHubUsernames());
+}
+
+export function getDelegatedFilterCondition(): SQL {
+  return compileDelegatedCondition();
 }
 
 export function withCondition(

@@ -459,11 +459,14 @@ describe('TaskDelegationDialog disclosure review', () => {
     expect(reviewButton).toBeEnabled();
     fireEvent.click(reviewButton);
 
-    expect(await screen.findByText('Effective reviewed context')).toBeInTheDocument();
+    expect(await screen.findByText('Task brief')).toBeInTheDocument();
+    expect(screen.queryByText('Disclosed fields')).not.toBeInTheDocument();
+    expect(screen.getByText('Request')).toBeInTheDocument();
+    expect(screen.getByText('Fix the parser and add coverage.')).toBeInTheDocument();
+    expect(screen.getByText('Destination instructions')).toBeInTheDocument();
     expect(screen.getByText(/Standard because GitHub Issues uses the active policy default/))
       .toBeInTheDocument();
-    expect(screen.getByText(/GitHub Issues: standard/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Canonical parser task'));
+    fireEvent.click(screen.getByText('View technical dispatch data'));
     await waitFor(() => {
       expect(screen.getByText((_, element) =>
         element?.tagName === 'PRE'

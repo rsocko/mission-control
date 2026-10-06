@@ -119,7 +119,13 @@ describe('project phases (Plan) tab', () => {
       .toBeInTheDocument();
 
     const build = phaseRegion('Build');
-    expect(within(build).getByText('Ship the first slice')).toBeInTheDocument();
+    const description = within(build).getByText('Ship the first slice');
+    expect(description).toHaveClass('line-clamp-2');
+    expect(description.closest('button')).toHaveAccessibleName('Edit Build description');
+    expect(within(build).getByRole('group', { name: 'Build phase actions' })).toHaveClass(
+      'w-full',
+      '@4xl:w-auto',
+    );
     expect(within(build).getByText('100%')).toBeInTheDocument();
 
     const unassigned = screen.getByRole('heading', { name: 'Unassigned Tasks' }).parentElement!;

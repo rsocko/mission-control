@@ -130,6 +130,7 @@ export interface TaskDelegationSummary {
   runId: string | null;
   runUrl: string | null;
   providerTaskId: string | null;
+  providerTaskUrl: string | null;
   locality: ExternalAgentLocality;
   canonicalState: AgentDispatchStatus;
   displayState: TaskDelegationDisplayState;
@@ -259,6 +260,19 @@ function providerLink(endpoint: string | null, path: string | null) {
   }
 }
 
+function externalUrl(value: unknown) {
+  const candidate = text(value);
+  if (!candidate) return null;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'https:' || url.protocol === 'http:'
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function assignmentSummary(
   dispatch: AgentDispatchRecord,
   target: Awaited<ReturnType<typeof listExternalAgents>>[number] | undefined,
@@ -294,6 +308,7 @@ function assignmentSummary(
         : null,
     ),
     providerTaskId: dispatch.providerTaskId,
+    providerTaskUrl: externalUrl(detail?.taskUrl),
     locality: dispatch.executionLocality,
     canonicalState: dispatch.status,
     displayState: taskDelegationDisplayState(dispatch, detail),

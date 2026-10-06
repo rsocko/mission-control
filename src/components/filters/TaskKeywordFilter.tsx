@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Filter, HelpCircle, Save, Search, X } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import {
@@ -96,6 +97,8 @@ const SUGGESTIONS: Suggestion[] = [
   { prefix: 'project:',  hint: 'Project ID / none' },
   { prefix: 'phase:',    hint: 'Phase ID / none' },
   { prefix: 'disposition:', hint: 'active / handled / dismissed' },
+  { prefix: 'delegation:', hint: 'active / waiting / completed…' },
+  { prefix: 'delegatee:', hint: 'External agent ID' },
 ];
 
 // ── Help content ──────────────────────────────────────────────────────────────
@@ -115,6 +118,8 @@ const HELP_ROWS: Array<{ token: string; description: string }> = [
   { token: 'project:none',         description: 'Tasks without a project' },
   { token: 'phase:none',           description: 'Tasks without a phase' },
   { token: 'disposition:handled',   description: 'Local Mission Control disposition' },
+  { token: 'delegation:active',     description: 'Delegated work status' },
+  { token: 'delegatee:agent-id',    description: 'Delegated to an external agent' },
   { token: '-tag:wontfix',         description: 'Exclude matching tasks' },
   { token: '(no prefix)',          description: 'Full-text on title, tags, notes' },
 ];
@@ -287,6 +292,21 @@ export function TaskKeywordFilter({
   const [acIndex, setAcIndex] = useState(0);
   // Help tooltip state
   const [showHelp, setShowHelp] = useState(false);
+  const delegateesQuery = useQuery<{
+    agents: Array<{ id: string; name: string; type: string; deletedAt?: string | null }>;
+  }>({
+    queryKey: ['external-agents', 'task-filter-options'],
+    queryFn: async () => {
+      const response = await fetch('/api/external-agents');
+      if (!response.ok) throw new Error('Failed to load delegation filter options');
+      return response.json();
+    },
+    staleTime: 60_000,
+  });
+  const delegatees = useMemo(
+    () => (delegateesQuery.data?.agents ?? []).filter((agent) => !agent.deletedAt),
+    [delegateesQuery.data?.agents],
+  );
 
   // Sync state when store changes externally (e.g., clear-all)
   useEffect(() => {
@@ -926,6 +946,9 @@ export function TaskKeywordFilter({
           tags={tags}
           assignees={assignees}
           projects={projects}
+          delegatees={delegatees}
+          delegateesLoading={delegateesQuery.isPending}
+          delegateesError={delegateesQuery.isError}
           hiddenCategories={hiddenBuilderFilters}
           onToggleToken={toggleBuilderToken}
         />

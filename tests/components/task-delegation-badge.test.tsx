@@ -57,7 +57,8 @@ describe('TaskDelegationBadge', () => {
   it('describes a completed run with a pull request without claiming the PR is still ready', () => {
     render(<TaskDelegationBadge delegation={delegation()} />);
 
-    expect(screen.getByLabelText('Delegation Completed · PR created')).toBeInTheDocument();
+    expect(screen.getByLabelText('Delegation Copilot · Completed')).toBeInTheDocument();
+    expect(screen.getByTitle('GitHub Copilot Cloud: Completed · PR created')).toBeInTheDocument();
     expect(screen.queryByText(/PR ready/i)).not.toBeInTheDocument();
   });
 
@@ -69,7 +70,7 @@ describe('TaskDelegationBadge', () => {
       pullRequestState: 'open',
     })} />);
 
-    expect(screen.getByLabelText('Delegation Review · PR ready')).toBeInTheDocument();
+    expect(screen.getByLabelText('Delegation Copilot · Review')).toBeInTheDocument();
   });
 
   it('shows the reconciled lifecycle state when the pull request is merged', () => {
@@ -78,6 +79,6 @@ describe('TaskDelegationBadge', () => {
       pullRequestNumber: 42,
     })} />);
 
-    expect(screen.getByLabelText('Delegation Merged · PR')).toBeInTheDocument();
+    expect(screen.getByLabelText('Delegation Copilot · Merged')).toBeInTheDocument();
   });
 });

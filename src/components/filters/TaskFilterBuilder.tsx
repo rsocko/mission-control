@@ -7,6 +7,7 @@ import {
   Check,
   ChevronRight,
   CircleUserRound,
+  Bot,
   Flag,
   FolderKanban,
   List,
@@ -15,6 +16,7 @@ import {
   Tag,
   Telescope,
   Unplug,
+  Workflow,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
@@ -37,6 +39,9 @@ interface TaskFilterBuilderProps {
   tags: TaskTag[];
   assignees: string[];
   projects: HubProject[];
+  delegatees?: Array<{ id: string; name: string; type: string }>;
+  delegateesLoading?: boolean;
+  delegateesError?: boolean;
   hiddenCategories?: TaskFilterBuilderCategory[];
   onToggleToken: (type: TaskFilterBuilderCategory, value: string, negated: boolean) => void;
 }
@@ -63,6 +68,8 @@ const CATEGORIES: CategoryDefinition[] = [
   { type: 'list', label: 'List', icon: List },
   { type: 'project', label: 'Project', icon: FolderKanban },
   { type: 'phase', label: 'Phase', icon: Flag },
+  { type: 'delegation', label: 'Delegation Status', icon: Workflow },
+  { type: 'delegatee', label: 'Agent', icon: Bot },
   { type: 'due', label: 'Due Date', icon: CalendarDays },
 ];
 
@@ -80,6 +87,9 @@ export function TaskFilterBuilder({
   tags,
   assignees,
   projects,
+  delegatees = [],
+  delegateesLoading = false,
+  delegateesError = false,
   hiddenCategories = [],
   onToggleToken,
 }: TaskFilterBuilderProps) {
@@ -91,8 +101,8 @@ export function TaskFilterBuilder({
   const [date, setDate] = useState('');
 
   const options = useMemo(
-    () => getOptions(category, sources, sourceLists, tags, assignees, projects),
-    [category, sources, sourceLists, tags, assignees, projects]
+    () => getOptions(category, sources, sourceLists, tags, assignees, projects, delegatees),
+    [category, sources, sourceLists, tags, assignees, projects, delegatees]
   );
   const normalizedSearch = search.trim().toLowerCase();
   const filteredCategories = CATEGORIES.filter(({ type, label }) =>
@@ -204,7 +214,8 @@ export function TaskFilterBuilder({
           )}
 
           <div className="max-h-64 overflow-y-auto py-1">
-            {filteredOptions.map((option) => {
+            {!(category === 'delegatee' && (delegateesLoading || delegateesError))
+              && filteredOptions.map((option) => {
               const selected = isSelected(option.value);
               return (
                 <button
@@ -229,9 +240,16 @@ export function TaskFilterBuilder({
                 </button>
               );
             })}
-            {filteredOptions.length === 0 && category !== 'due' && (
+            {(
+              filteredOptions.length === 0
+              || (category === 'delegatee' && (delegateesLoading || delegateesError))
+            ) && category !== 'due' && (
               <p className="px-3 py-5 text-center text-xs text-[var(--text-muted)]">
-                No matching values
+                {category === 'delegatee' && delegateesLoading
+                  ? 'Loading agents…'
+                  : category === 'delegatee' && delegateesError
+                    ? 'Agents could not be loaded'
+                    : 'No matching values'}
               </p>
             )}
           </div>
@@ -339,7 +357,8 @@ function getOptions(
   sourceLists: SourceList[],
   tags: TaskTag[],
   assignees: string[],
-  projects: HubProject[]
+  projects: HubProject[],
+  delegatees: Array<{ id: string; name: string; type: string }>
 ): FilterOption[] {
   switch (category) {
     case 'priority':
@@ -403,6 +422,22 @@ function getOptions(
           detail: project.name,
         }))
       ), 'No phase');
+    case 'delegation':
+      return [
+        { value: 'active', label: 'Active', detail: 'Queued or running' },
+        { value: 'waiting', label: 'Needs input' },
+        { value: 'preview', label: 'Awaiting confirmation' },
+        { value: 'completed', label: 'Completed' },
+        { value: 'failed', label: 'Failed' },
+        { value: 'cancelled', label: 'Cancelled' },
+        { value: 'none', label: 'Not delegated' },
+      ];
+    case 'delegatee':
+      return withNoneOption(delegatees.map((delegatee) => ({
+        value: delegatee.id,
+        label: delegatee.name,
+        detail: capitalize(delegatee.type),
+      })), 'No agent');
     case 'due':
       return DUE_OPTIONS;
     default:

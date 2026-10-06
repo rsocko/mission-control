@@ -33,6 +33,7 @@ type EmptyResponse = {
     recurring: number;
     waiting: number;
     inbox: number;
+    delegated: number;
   };
   hasMore: boolean;
   sourceCounts: Record<string, number>;
@@ -53,6 +54,7 @@ const EMPTY_STATS = {
   recurring: 0,
   waiting: 0,
   inbox: 0,
+  delegated: 0,
 };
 
 export function createEmptyResponse(): EmptyResponse {

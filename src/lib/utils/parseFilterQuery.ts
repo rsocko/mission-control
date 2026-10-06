@@ -15,6 +15,8 @@
  *   project:id       – exact hub project ID (or none)
  *   phase:id         – exact project phase ID (or none)
  *   disposition:value – Mission Control local disposition (active / handled / dismissed)
+ *   delegation:value – latest delegated-work status
+ *   delegatee:id      – exact external-agent ID
  *
  * Any word without a recognised prefix is treated as a free-text term that
  * matches against title, tags and notes.
@@ -36,6 +38,8 @@ export type FilterTokenType =
   | 'project'
   | 'phase'
   | 'disposition'
+  | 'delegation'
+  | 'delegatee'
   | 'text';
 
 export interface FilterToken {
@@ -65,6 +69,8 @@ export interface ParsedFilterQuery {
   projectTokens: string[];
   phaseTokens: string[];
   dispositionTokens: string[];
+  delegationTokens: string[];
+  delegateeTokens: string[];
   textTerms: string[];
   negatedTokens: FilterToken[];
   /** True when at least one structured (prefixed) token is present */
@@ -85,6 +91,8 @@ const RECOGNISED_PREFIXES: FilterTokenType[] = [
   'project',
   'phase',
   'disposition',
+  'delegation',
+  'delegatee',
 ];
 
 /**
@@ -115,7 +123,10 @@ export function parseFilterQuery(query: string): ParsedFilterQuery {
 
     if (prefix && (RECOGNISED_PREFIXES as string[]).includes(prefix)) {
       const rawValue = quotedValue ?? unquotedValue ?? '';
-      const preservesIdentifierCase = prefix === 'listid' || prefix === 'project' || prefix === 'phase';
+      const preservesIdentifierCase = prefix === 'listid'
+        || prefix === 'project'
+        || prefix === 'phase'
+        || prefix === 'delegatee';
       const value = preservesIdentifierCase && rawValue.toLowerCase() !== 'none'
         ? rawValue
         : rawValue.toLowerCase();
@@ -195,6 +206,8 @@ function buildResult(tokens: FilterToken[]): ParsedFilterQuery {
   const projectTokens: string[] = [];
   const phaseTokens: string[] = [];
   const dispositionTokens: string[] = [];
+  const delegationTokens: string[] = [];
+  const delegateeTokens: string[] = [];
   const textTerms: string[] = [];
   const negatedTokens: FilterToken[] = [];
 
@@ -218,6 +231,8 @@ function buildResult(tokens: FilterToken[]): ParsedFilterQuery {
       case 'project':  projectTokens.push(t.value); break;
       case 'phase':    phaseTokens.push(t.value); break;
       case 'disposition': dispositionTokens.push(t.value); break;
+      case 'delegation': delegationTokens.push(t.value); break;
+      case 'delegatee': delegateeTokens.push(t.value); break;
       case 'text':     textTerms.push(t.value); break;
     }
   }
@@ -239,6 +254,8 @@ function buildResult(tokens: FilterToken[]): ParsedFilterQuery {
     projectTokens,
     phaseTokens,
     dispositionTokens,
+    delegationTokens,
+    delegateeTokens,
     textTerms,
     negatedTokens,
     hasStructuredTokens,

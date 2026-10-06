@@ -170,6 +170,7 @@ export async function GET(request: Request) {
           recurring: 0,
           waiting: 0,
           inbox: 0,
+          delegated: 0,
         },
         hasMore: false,
         sourceCounts: {},

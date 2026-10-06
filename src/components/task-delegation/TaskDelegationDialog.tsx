@@ -91,6 +91,20 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Delegation request failed';
 }
 
+function payloadRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function payloadText(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function humanizeAction(action: string) {
+  return action.replaceAll('_', ' ');
+}
+
 async function responseError(response: Response) {
   const body = await response.json().catch(() => null) as {
     error?: string;
@@ -1266,7 +1280,6 @@ function ReviewStep({
   paperclipBinding: PaperclipProviderConfig | null;
   paperclipOptions: PaperclipOptions | null;
 }) {
-  const fields = [...new Set(batch.previews.flatMap(({ disclosedFields }) => disclosedFields))];
   const actions = [...new Set(batch.previews.flatMap(({ allowedActions }) => allowedActions))];
   const classifications = [...new Set(
     batch.previews.map(({ dataClassification }) => dataClassification),
@@ -1331,8 +1344,8 @@ function ReviewStep({
       </section>
 
       <section>
-        <h3 className="text-xs font-semibold text-[var(--text-primary)]">Disclosure and authorization</h3>
-        <div className="mt-2 grid gap-3 sm:grid-cols-3">
+        <h3 className="text-xs font-semibold text-[var(--text-primary)]">Data and permissions</h3>
+        <div className="mt-2 grid gap-4 sm:grid-cols-2">
           <div>
             <p className="text-[11px] text-[var(--text-muted)]">Data handling</p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -1346,76 +1359,93 @@ function ReviewStep({
                 </span>
               ))}
             </div>
-          </div>
-          <div>
-            <p className="text-[11px] text-[var(--text-muted)]">Disclosed fields</p>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {fields.map((field) => (
-                <span key={field} className="rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-xs text-[var(--text-secondary)]">
-                  {field}
-                </span>
+            <div className="mt-2 space-y-1">
+              {batch.previews.map((preview) => (
+                <p
+                  key={preview.dispatchId}
+                  className="text-[11px] leading-relaxed text-[var(--text-muted)]"
+                >
+                  {preview.classificationExplanation
+                    ?? `${preview.dataClassification.replace('-', ' ')} source policy`}
+                </p>
               ))}
             </div>
           </div>
           <div>
-            <p className="text-[11px] text-[var(--text-muted)]">Allowed actions</p>
+            <p className="text-[11px] text-[var(--text-muted)]">
+              What {target.name} can do
+            </p>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {actions.map((action) => (
                 <span key={action} className="inline-flex items-center gap-1 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-xs text-[var(--text-secondary)]">
                   <Check size={9} />
-                  {action.replaceAll('_', ' ')}
+                  {humanizeAction(action)}
                 </span>
               ))}
             </div>
           </div>
-        </div>
-        <div className="mt-3 space-y-1.5">
-          {batch.previews.map((preview) => (
-            <p
-              key={preview.dispatchId}
-              className="text-[11px] leading-relaxed text-[var(--text-muted)]"
-            >
-              <span className="font-medium text-[var(--text-secondary)]">
-                {preview.classificationExplanation
-                  ?? `${preview.dataClassification.replace('-', ' ')} source policy`}.
-              </span>{' '}
-              {(preview.classificationSources ?? []).map((source) => (
-                `${source.connectorName}: ${source.effective.replace('-', ' ')}`
-              )).join(' · ')}
-            </p>
-          ))}
         </div>
       </section>
 
       <section>
         <h3 className="text-xs font-semibold text-[var(--text-primary)]">
-          Effective reviewed context
+          Task brief
         </h3>
         <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
-          This is the exact redacted payload sent for each ready task, including destination
-          always instructions and separate per-dispatch instructions.
+          Review the instructions and task context that will be sent to {target.name}.
         </p>
         <div className="mt-2 space-y-2">
-          {batch.previews.map((preview) => (
-            <details
-              key={preview.dispatchId}
-              className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)]"
-            >
-              <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
-                {String(
-                  Array.isArray(preview.payloadPreview.tasks)
-                  && preview.payloadPreview.tasks[0]
-                  && typeof preview.payloadPreview.tasks[0] === 'object'
-                  && !Array.isArray(preview.payloadPreview.tasks[0])
-                    ? (preview.payloadPreview.tasks[0] as Record<string, unknown>).title
-                    : preview.taskId,
+          {batch.previews.map((preview) => {
+            const task = Array.isArray(preview.payloadPreview.tasks)
+              ? payloadRecord(preview.payloadPreview.tasks[0])
+              : null;
+            const title = payloadText(task?.title) ?? preview.taskId;
+            const description = payloadText(task?.description);
+            const instruction = payloadText(preview.payloadPreview.instruction);
+            const alwaysInstructions = payloadText(preview.payloadPreview.alwaysInstructions);
+            return (
+              <article
+                key={preview.dispatchId}
+                className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-3"
+              >
+                <h4 className="text-sm font-medium text-[var(--text-primary)]">{title}</h4>
+                {instruction && (
+                  <div className="mt-3">
+                    <p className="text-[11px] font-medium text-[var(--text-muted)]">Request</p>
+                    <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
+                      {instruction}
+                    </p>
+                  </div>
                 )}
-              </summary>
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-t border-[var(--border-subtle)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)]">
-                {JSON.stringify(preview.payloadPreview, null, 2)}
-              </pre>
-            </details>
-          ))}
+                {alwaysInstructions && (
+                  <div className="mt-3">
+                    <p className="text-[11px] font-medium text-[var(--text-muted)]">
+                      Destination instructions
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
+                      {alwaysInstructions}
+                    </p>
+                  </div>
+                )}
+                {description && (
+                  <div className="mt-3">
+                    <p className="text-[11px] font-medium text-[var(--text-muted)]">Task context</p>
+                    <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
+                      {description}
+                    </p>
+                  </div>
+                )}
+                <details className="mt-3 border-t border-[var(--border-subtle)] pt-2">
+                  <summary className="cursor-pointer text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
+                    View technical dispatch data
+                  </summary>
+                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--background)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+                    {JSON.stringify(preview.payloadPreview, null, 2)}
+                  </pre>
+                </details>
+              </article>
+            );
+          })}
         </div>
       </section>
 

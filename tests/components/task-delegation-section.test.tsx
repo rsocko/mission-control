@@ -393,7 +393,7 @@ describe('TaskDelegationDialog', () => {
     render(<TaskDelegationDialog />);
 
     act(() => openTaskDelegation(['task-1']));
-    const dialog = await screen.findByRole('dialog', { name: 'Delegate task' });
+    const dialog = await screen.findByRole('dialog', { name: 'Delegate task: Fix parser' });
     expect(within(dialog).getByText('No execution destinations configured')).toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: 'Configure AI & Agents' })).toHaveAttribute(
       'href',
@@ -440,7 +440,8 @@ describe('TaskDelegationDialog', () => {
         eligibility: [],
       }],
     }));
-    expect(await screen.findByText('Current destination')).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'Delegate task: Current task' }))
+      .toBeInTheDocument();
 
     first.resolve(await response({
       taskIds: ['task-1'],
@@ -464,8 +465,9 @@ describe('TaskDelegationDialog', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(screen.getByText('Current destination')).toBeInTheDocument();
-    expect(screen.queryByText('Stale destination')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Delegate task: Current task' }))
+      .toBeInTheDocument();
+    expect(screen.queryByText('Delegate task: Stale task')).not.toBeInTheDocument();
   });
 
   it('refreshes accepted tasks when bulk confirmation partially succeeds', async () => {
@@ -648,8 +650,8 @@ describe('TaskDelegationDialog', () => {
     render(<TaskDelegationDialog />);
 
     act(() => openTaskDelegation(['task-1']));
-    const dialog = await screen.findByRole('dialog', { name: 'Delegate task' });
-    expect(within(dialog).getByText('Destination')).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog', { name: 'Delegate task: Fix parser' });
+    expect(within(dialog).getByText('Choose provider')).toBeInTheDocument();
     expect(within(dialog).getByRole('radio', { name: /GitHub Copilot Cloud/ })).toBeChecked();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Configure' }));
 

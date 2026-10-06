@@ -97,6 +97,7 @@ export interface TaskDelegationTarget {
   hasCredential: boolean;
   paperclipBinding: {
     companyId: string;
+    companyName?: string | null;
     projectId: string | null;
     assigneeAgentId: string;
     requiredAdapterType: string | null;
@@ -569,6 +570,7 @@ export async function getTaskDelegationContext(
       paperclipBinding: paperclip
         ? {
           companyId: paperclip.companyId,
+          companyName: paperclip.companyName ?? null,
           projectId: paperclip.projectId ?? null,
           assigneeAgentId: paperclip.assigneeAgentId,
           requiredAdapterType: paperclip.requiredAdapterType ?? null,

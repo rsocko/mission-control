@@ -1,0 +1,99 @@
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { IconPickerButton } from '@/components/ui/icon-picker/IconPickerButton';
+
+vi.mock('@/components/ui/icon-picker/IconPicker', () => ({
+  IconPicker: () => <div>Picker contents</div>,
+}));
+
+vi.mock('@/components/ui/icon-picker/IconRenderer', () => ({
+  IconRenderer: () => <span>Selected icon</span>,
+}));
+
+function setViewport(width: number, height: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+}
+
+function mockTriggerRect(rect: Partial<DOMRect>) {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    bottom: 540,
+    height: 40,
+    left: 900,
+    right: 964,
+    top: 500,
+    width: 64,
+    x: 900,
+    y: 500,
+    toJSON: () => ({}),
+    ...rect,
+  });
+}
+
+describe('IconPickerButton', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('opens above the trigger and clamps to the viewport when space is constrained', () => {
+    setViewport(1000, 600);
+    mockTriggerRect({});
+
+    render(<IconPickerButton value={null} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByTitle('Pick an icon'));
+
+    const dialog = screen.getByRole('dialog', { name: 'Choose an icon' });
+    expect(dialog).toHaveStyle({
+      height: '488px',
+      left: '572px',
+      top: '8px',
+      width: '420px',
+      visibility: 'visible',
+    });
+  });
+
+  it('repositions and resizes while open when the viewport changes', () => {
+    setViewport(1200, 800);
+    mockTriggerRect({
+      bottom: 140,
+      left: 100,
+      right: 164,
+      top: 100,
+      x: 100,
+      y: 100,
+    });
+
+    render(<IconPickerButton value={null} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByTitle('Pick an icon'));
+
+    const dialog = screen.getByRole('dialog', { name: 'Choose an icon' });
+    expect(dialog).toHaveStyle({ height: '520px', left: '100px', top: '144px' });
+
+    setViewport(1200, 400);
+    act(() => window.dispatchEvent(new Event('resize')));
+
+    expect(dialog).toHaveStyle({ height: '248px', left: '100px', top: '144px' });
+  });
+
+  it('uses the viewport as an overlay when neither side is usable', () => {
+    setViewport(360, 300);
+    mockTriggerRect({
+      bottom: 170,
+      left: 280,
+      right: 344,
+      top: 130,
+      x: 280,
+      y: 130,
+    });
+
+    render(<IconPickerButton value={null} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByTitle('Pick an icon'));
+
+    expect(screen.getByRole('dialog', { name: 'Choose an icon' })).toHaveStyle({
+      height: '284px',
+      left: '8px',
+      top: '8px',
+      width: '344px',
+    });
+  });
+});

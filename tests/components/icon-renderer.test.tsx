@@ -86,6 +86,17 @@ describe('IconRenderer', () => {
     expect(onColorChange).toHaveBeenCalledWith('');
   });
 
+  it('keeps every icon source available in the responsive source group', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
+    render(<IconPicker value={null} onChange={vi.fn()} />);
+
+    const sourceGroup = screen.getByRole('group', { name: 'Icon sources' });
+    expect(sourceGroup).toHaveClass('flex-wrap');
+    for (const source of ['Emoji', 'Lucide', 'Material', 'Phosphor', 'Apps', 'Brands']) {
+      expect(screen.getByRole('button', { name: source })).toBeVisible();
+    }
+  });
+
   it('renders aliases in the default Iconify icon groups', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);

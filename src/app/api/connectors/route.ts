@@ -42,6 +42,7 @@ import {
   withConnectorClassificationOverride,
 } from '@/lib/connectors/data-classification';
 import { loadAIProviderConfiguration } from '@/lib/ai/provider-configuration-service';
+import { validatePaperclipConnectorConfig } from '@/lib/connectors/paperclip';
 
 function configsNameMatch(
   connectors: Array<{ id: string; type: string; name: string; deletedAt?: string | null }>,
@@ -215,6 +216,18 @@ export async function POST(request: Request) {
       );
       if (duplicate) {
         return ApiErrors.conflict('A Home Assistant connector with this name already exists');
+      }
+    }
+    if (type === 'paperclip') {
+      try {
+        connectorSettings = {
+          ...connectorSettings,
+          ...validatePaperclipConnectorConfig(connectorSettings, credentials ?? {}),
+        };
+      } catch (error) {
+        return ApiErrors.badRequest(
+          error instanceof Error ? error.message : 'Invalid Paperclip connector configuration',
+        );
       }
     }
     let workTodoSettings = null;

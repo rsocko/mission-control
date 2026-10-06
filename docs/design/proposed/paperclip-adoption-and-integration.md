@@ -197,7 +197,9 @@ tools, credentials, skills, budget, and approval policy.
 ## Mission Control integration
 
 Implement Paperclip as a concrete provider over the existing external-agent
-control plane, not as a conventional task connector.
+control plane, not as a task-producing connector. A separate notification-only
+Paperclip connector polls company approvals; Paperclip remains available as an
+external-agent dispatch destination as well.
 
 ### Dispatch
 
@@ -311,6 +313,11 @@ related MC task/Paperclip issue, expiry, and deep link.
 The first version opens Paperclip to decide. A later version may approve or
 reject through MC only after adding narrowly scoped API authority, explicit
 confirmation, concurrency protection, and authoritative response handling.
+The notification connector polls the configured company approval collection,
+deduplicates by approval ID, and closes an existing notification only after a
+successful authoritative poll observes a terminal approval state. It stores a
+bounded summary rather than the approval payload, classifies the source as
+restricted, and disables push previews by default.
 
 ### Human work
 

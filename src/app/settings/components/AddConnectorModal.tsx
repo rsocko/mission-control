@@ -48,7 +48,7 @@ const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
 
 // --- Add Connector Modal --------------------------------------------------
 
-type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-home-assistant' | 'configure-rymessage' | 'configure-other';
+type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-paperclip' | 'configure-home-assistant' | 'configure-rymessage' | 'configure-other';
 
 function AddConnectorModal({
   onClose,
@@ -84,6 +84,8 @@ function AddConnectorModal({
       setStep('configure-outlook-calendar');
     } else if (type === 'scout') {
       setStep('configure-scout');
+    } else if (type === 'paperclip') {
+      setStep('configure-paperclip');
     } else if (type === 'home-assistant') {
       setStep('configure-home-assistant');
     } else if (type === 'rymessage') {
@@ -172,6 +174,11 @@ function AddConnectorModal({
           {step === 'configure-scout' && (
             <motion.div key="scout" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.15 }}>
               <ScoutSetup onBack={() => setStep('select')} onClose={onClose} onAdded={onAdded} />
+            </motion.div>
+          )}
+          {step === 'configure-paperclip' && (
+            <motion.div key="paperclip" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.15 }}>
+              <PaperclipSetup onBack={() => setStep('select')} onClose={onClose} onAdded={onAdded} />
             </motion.div>
           )}
           {step === 'configure-home-assistant' && (
@@ -2213,6 +2220,162 @@ function ScoutSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose:
           {creation.status === 'success' ? 'Done' : 'Close'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function PaperclipSetup({
+  onBack,
+  onClose,
+  onAdded,
+}: {
+  onBack: () => void;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const creation = useConnectorCreation();
+  const [apiOrigin, setApiOrigin] = useState('');
+  const [companyId, setCompanyId] = useState('');
+  const [apiToken, setApiToken] = useState('');
+  const [status, setStatus] = useState<'idle' | 'testing' | 'creating' | 'success' | 'error'>('idle');
+  const [error, setError] = useState('');
+
+  async function testAndCreate() {
+    setStatus('testing');
+    setError('');
+    const settings = {
+      apiOrigin: apiOrigin.trim(),
+      companyId: companyId.trim(),
+    };
+    const credentials = { apiToken: apiToken.trim() };
+    try {
+      const testResponse = await fetch('/api/connectors/test-pre-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'paperclip', settings, credentials }),
+      });
+      const testResult = await testResponse.json() as {
+        success?: boolean;
+        error?: string;
+        sources?: Record<string, unknown>;
+      };
+      if (!testResponse.ok || !testResult.success) {
+        throw new Error(testResult.error || 'Paperclip connection test failed');
+      }
+
+      const verifiedCompanyName = typeof testResult.sources?.companyName === 'string'
+        ? testResult.sources.companyName
+        : settings.companyId;
+      const connectorSettings = { ...settings, companyName: verifiedCompanyName };
+      setStatus('creating');
+      await creation.create({
+        type: 'paperclip',
+        name: `Paperclip — ${verifiedCompanyName}`,
+        enabled: true,
+        syncMode: 'poll',
+        pollIntervalMinutes: 5,
+        capabilities: {
+          read: true,
+          write: false,
+          delete: false,
+          sync: true,
+          subtasks: false,
+          lists: false,
+          tags: false,
+          tagWriteBack: false,
+          notificationOnly: true,
+          listSelectionMode: 'not-applicable',
+        },
+        credentials,
+        settings: connectorSettings,
+        syncedLists: [],
+      });
+      setStatus('success');
+      onAdded();
+    } catch (setupError) {
+      setStatus('error');
+      setError(setupError instanceof Error ? setupError.message : String(setupError));
+    }
+  }
+
+  return (
+    <div>
+      <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Paperclip approvals</h3>
+      <p className="text-sm text-[var(--text-tertiary)] mb-4">
+        Mirror one authorized company&apos;s pending approvals into Mission Control. Decisions remain in Paperclip.
+      </p>
+      {status === 'success' ? (
+        <div className="py-4 text-center">
+          <CheckCircle2 size={32} className="mx-auto mb-2 text-emerald-400" />
+          <p className="text-sm text-[var(--text-primary)]">Paperclip approvals connector added.</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">Pending approvals will appear on the next poll.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <label className="block text-xs text-[var(--text-secondary)]">
+            Paperclip API origin
+            <input
+              aria-label="Paperclip API origin"
+              autoComplete="url"
+              placeholder="https://paperclip.example.com"
+              value={apiOrigin}
+              onChange={(event) => setApiOrigin(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+            />
+          </label>
+          <label className="block text-xs text-[var(--text-secondary)]">
+            Company ID
+            <input
+              aria-label="Paperclip company ID"
+              value={companyId}
+              onChange={(event) => setCompanyId(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none"
+            />
+          </label>
+          <label className="block text-xs text-[var(--text-secondary)]">
+            Paperclip API token
+            <input
+              aria-label="Paperclip API token"
+              type="password"
+              autoComplete="new-password"
+              value={apiToken}
+              onChange={(event) => setApiToken(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none"
+            />
+          </label>
+          <p className="text-xs text-[var(--text-muted)]">
+            Use a token authorized to read this company&apos;s approvals. The token is stored server-side and is never shown again.
+          </p>
+          {(error || creation.error) && (
+            <p role="alert" className="text-xs text-red-400">
+              <AlertTriangle size={12} className="mr-1 inline" />
+              {error || creation.error}
+            </p>
+          )}
+          <div className="flex justify-between pt-2">
+            <button onClick={onBack} className="flex items-center gap-1 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
+              <ChevronRight size={12} className="rotate-180" /> Back
+            </button>
+            <button
+              onClick={testAndCreate}
+              disabled={status === 'testing' || status === 'creating' || !apiOrigin.trim() || !companyId.trim() || !apiToken.trim()}
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {status === 'testing' || status === 'creating'
+                ? <Loader2 size={14} className="animate-spin" />
+                : null}
+              {status === 'testing' ? 'Testing…' : status === 'creating' ? 'Adding…' : 'Test and add'}
+            </button>
+          </div>
+        </div>
+      )}
+      {status === 'success' && (
+        <div className="flex justify-end">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+            Done
+          </button>
+        </div>
+      )}
     </div>
   );
 }

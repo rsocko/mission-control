@@ -178,27 +178,38 @@ function pullRequestStatusLabel(assignment: TaskDelegationSummary) {
   }
 }
 
-function outputLink(assignment: TaskDelegationSummary) {
+function outputLinks(assignment: TaskDelegationSummary) {
+  const links: Array<{
+    href: string;
+    label: string;
+    icon: typeof ExternalLink;
+  }> = [];
   if (assignment.pullRequestUrl) {
-    return {
+    links.push({
       href: assignment.pullRequestUrl,
       label: assignment.pullRequestState === 'merged' || assignment.pullRequestState === 'closed'
         ? 'View PR'
         : 'Review PR',
       icon: GitPullRequest,
-    };
+    });
   }
-  if (assignment.runUrl) {
-    return { href: assignment.runUrl, label: 'Provider run', icon: ExternalLink };
+  if (assignment.providerTaskUrl) {
+    links.push({
+      href: assignment.providerTaskUrl,
+      label: assignment.targetType === 'copilot-cloud' ? 'Cloud Agent' : 'Provider task',
+      icon: ExternalLink,
+    });
+  } else if (assignment.runUrl) {
+    links.push({ href: assignment.runUrl, label: 'Provider run', icon: ExternalLink });
   }
-  if (assignment.issueUrl) {
-    return {
+  if (!links.length && assignment.issueUrl) {
+    links.push({
       href: assignment.issueUrl,
       label: assignment.issueIdentifier ?? 'Provider issue',
       icon: ExternalLink,
-    };
+    });
   }
-  return null;
+  return links;
 }
 
 export function TaskDelegationSection({
@@ -244,9 +255,8 @@ export function TaskDelegationSection({
   const syncError = current
     ? context?.syncErrors.find((item) => item.dispatchId === current.dispatchId) ?? null
     : null;
-  const relevantOutput = current ? outputLink(current) : null;
+  const outputLinksForCurrent = current ? outputLinks(current) : [];
   const pullRequestStatus = current ? pullRequestStatusLabel(current) : null;
-  const OutputIcon = relevantOutput?.icon;
 
   return (
     <>
@@ -323,17 +333,23 @@ export function TaskDelegationSection({
                 <span>Attempt {Math.max(current.attemptCount, 1)} of {current.maxAttempts}</span>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                {relevantOutput && OutputIcon ? (
-                  <a
-                    href={relevantOutput.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[var(--accent-300)] hover:bg-[var(--surface-2)]"
-                  >
-                    <OutputIcon size={12} />
-                    {relevantOutput.label}
-                  </a>
-                ) : <span />}
+                <div className="flex flex-wrap items-center gap-1">
+                  {outputLinksForCurrent.map((link) => {
+                    const OutputIcon = link.icon;
+                    return (
+                      <a
+                        key={`${link.label}-${link.href}`}
+                        href={link.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[var(--accent-300)] hover:bg-[var(--surface-2)]"
+                      >
+                        <OutputIcon size={12} />
+                        {link.label}
+                      </a>
+                    );
+                  })}
+                </div>
                 <button
                   type="button"
                   onClick={() => setDetailsOpen(true)}
@@ -698,7 +714,7 @@ function TaskDelegationRunDialog({
                     </ol>
                   </section>
 
-                  {(assignment.pullRequestUrl || assignment.branchRef || assignment.commitSha || references.length > 0) && (
+                  {(assignment.pullRequestUrl || assignment.providerTaskUrl || assignment.branchRef || assignment.commitSha || references.length > 0) && (
                     <section>
                       <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Outputs</h3>
                       <div className="mt-2 space-y-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-2">
@@ -709,6 +725,13 @@ function TaskDelegationRunDialog({
                             {pullRequestStatusLabel(assignment)
                               ? ` · ${pullRequestStatusLabel(assignment)}`
                               : ''}
+                          </RunReference>
+                        )}
+                        {assignment.providerTaskUrl && (
+                          <RunReference href={assignment.providerTaskUrl} icon={ExternalLink}>
+                            {assignment.targetType === 'copilot-cloud'
+                              ? 'Open Cloud Agent session'
+                              : 'Open provider task'}
                           </RunReference>
                         )}
                         {assignment.branchRef && (

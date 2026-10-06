@@ -972,6 +972,13 @@ describe('provider-neutral task delegation API', () => {
         preview.id,
       );
     }
+    sqlite.prepare(`
+      UPDATE agent_dispatches
+      SET provider_detail = ?
+      WHERE id = ?
+    `).run(JSON.stringify({
+      taskUrl: 'https://github.com/copilot/tasks/cloud-task-1',
+    }), latestGithubId);
 
     const summaries = await delegation.listTaskDelegationSummaries([
       'task-github',
@@ -979,6 +986,8 @@ describe('provider-neutral task delegation API', () => {
     ]);
     expect(summaries.size).toBe(2);
     expect(summaries.get('task-github')?.dispatchId).toBe(latestGithubId);
+    expect(summaries.get('task-github')?.providerTaskUrl)
+      .toBe('https://github.com/copilot/tasks/cloud-task-1');
     expect(summaries.get('task-local')?.dispatchId).toBe(local.id);
   });
 });

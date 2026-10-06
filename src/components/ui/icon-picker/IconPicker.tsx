@@ -251,6 +251,8 @@ export interface IconPickerProps {
   color?: string;
   /** Called when color changes */
   onColorChange?: (color: string) => void;
+  /** Extra className on the picker container */
+  className?: string;
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────────────────────
@@ -261,6 +263,7 @@ export const IconPicker = memo(function IconPicker({
   onClose,
   color,
   onColorChange,
+  className,
 }: IconPickerProps) {
   const [query, setQuery] = useState('');
   const [sourceGroups, setSourceGroups] = useState<SourceGroup[]>([]);
@@ -432,7 +435,12 @@ export const IconPicker = memo(function IconPicker({
   }, [displayGroups]);
 
   return (
-    <div className="flex flex-col w-[420px] max-h-[520px] bg-[var(--surface-1)] rounded-xl border border-[var(--border)] shadow-2xl overflow-hidden">
+    <div
+      className={cn(
+        'flex w-[420px] max-h-[520px] flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)] shadow-2xl',
+        className,
+      )}
+    >
       {/* ── Search Bar (always visible, top of picker) ────── */}
       <div className="input-glow flex items-center gap-1.5 px-3 py-2.5 border-b border-[var(--border)] bg-[var(--surface-0)]">
         <Search size={15} className="shrink-0 text-[var(--text-muted)]" />
@@ -459,7 +467,11 @@ export const IconPicker = memo(function IconPicker({
       </div>
 
       {/* ── Filter Chips ────────────────────────────────────── */}
-      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[var(--border)]">
+      <div
+        role="group"
+        aria-label="Icon sources"
+        className="flex flex-wrap items-center gap-1 border-b border-[var(--border)] px-3 py-1.5"
+      >
         {ALL_SOURCE_FILTERS.map((sf) => {
           const active = activeFilters.size === 0 || activeFilters.has(sf.id);
           return (
@@ -482,48 +494,50 @@ export const IconPicker = memo(function IconPicker({
 
       {/* ── Color Picker Row (only when color is controllable) ── */}
       {onColorChange && (
-      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-[var(--border)]">
+      <div className="flex items-start gap-1.5 border-b border-[var(--border)] px-3 py-1.5">
         <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-medium mr-0.5">Color</span>
-        <button
-          type="button"
-          onClick={() => onColorChange('')}
-          className={cn(
-            'flex h-6 items-center gap-1 rounded-md border px-1.5 text-xs transition-colors',
-            !color
-              ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
-              : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
-          )}
-          title="Use theme color"
-          aria-label="Use theme color"
-        >
-          <SunMoon size={11} />
-          Auto
-        </button>
-        {ICON_COLORS.map((c) => (
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           <button
-            key={c}
             type="button"
-            onClick={() => onColorChange?.(c)}
+            onClick={() => onColorChange('')}
             className={cn(
-              'w-4 h-4 rounded-full border transition-transform hover:scale-125 flex items-center justify-center flex-shrink-0',
-              color === c ? 'border-[var(--accent)] scale-110' : 'border-[var(--border-subtle,var(--border))]',
+              'flex h-6 items-center gap-1 rounded-md border px-1.5 text-xs transition-colors',
+              !color
+                ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
+                : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
             )}
-            style={{ backgroundColor: c }}
-            title={c}
+            title="Use theme color"
+            aria-label="Use theme color"
           >
-            {color === c && (
-              <span
-                className="w-1 h-1 rounded-full"
-                style={{ backgroundColor: c === '#ffffff' ? '#000' : '#fff' }}
-              />
-            )}
+            <SunMoon size={11} />
+            Auto
           </button>
-        ))}
+          {ICON_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => onColorChange?.(c)}
+              className={cn(
+                'w-4 h-4 rounded-full border transition-transform hover:scale-125 flex items-center justify-center flex-shrink-0',
+                color === c ? 'border-[var(--accent)] scale-110' : 'border-[var(--border-subtle,var(--border))]',
+              )}
+              style={{ backgroundColor: c }}
+              title={c}
+            >
+              {color === c && (
+                <span
+                  className="w-1 h-1 rounded-full"
+                  style={{ backgroundColor: c === '#ffffff' ? '#000' : '#fff' }}
+                />
+              )}
+            </button>
+          ))}
+        </div>
       </div>
       )}
 
       {/* ── Results / Browse Area ────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {/* Browse emoji (full picker widget) — shown when user clicks "Browse all emoji" */}
         {showBrowseEmoji && !isSearching ? (
           <div>

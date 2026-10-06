@@ -11,6 +11,50 @@ function response(data: unknown, status = 200) {
   });
 }
 
+const workerContext = {
+  taskIds: ['task-1'],
+  tasks: [{ id: 'task-1', title: 'Background task', connectorType: 'local' }],
+  targets: [{
+    id: 'worker-queue',
+    name: 'Worker queue',
+    type: 'pull-queue',
+    description: null,
+    alwaysInstructions: '',
+    executionLocality: 'mission-control-host',
+    allowedActions: ['write_code'],
+    hasCredential: true,
+    paperclipBinding: null,
+    repositories: [],
+    eligibility: [{
+      taskId: 'task-1',
+      title: 'Background task',
+      connectorType: 'local',
+      ready: true,
+      blocker: null,
+      repository: null,
+      repositoryLocked: false,
+    }],
+  }],
+  assignments: [],
+  syncErrors: [],
+};
+
+const workerPreview = {
+  previews: [{
+    taskId: 'task-1',
+    dispatchId: 'dispatch-1',
+    previewHash: 'preview-hash',
+    processingLocation: 'mission-control-host',
+    dataClassification: 'standard',
+    disclosedFields: ['tasks.title'],
+    allowedActions: ['write_code'],
+    payloadPreview: { tasks: [{ id: 'task-1', title: 'Background task' }] },
+  }],
+  blocked: [],
+  readyCount: 1,
+  blockedCount: 0,
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
@@ -317,53 +361,16 @@ describe('TaskDelegationDialog disclosure review', () => {
     const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
-        return response({
-          taskIds: ['task-1'],
-          tasks: [{ id: 'task-1', title: 'Background task', connectorType: 'local' }],
-          targets: [{
-            id: 'worker-queue',
-            name: 'Worker queue',
-            type: 'pull-queue',
-            description: null,
-            alwaysInstructions: '',
-            executionLocality: 'mission-control-host',
-            allowedActions: ['write_code'],
-            hasCredential: true,
-            paperclipBinding: null,
-            repositories: [],
-            eligibility: [{
-              taskId: 'task-1',
-              title: 'Background task',
-              connectorType: 'local',
-              ready: true,
-              blocker: null,
-              repository: null,
-              repositoryLocked: false,
-            }],
-          }],
-          assignments: [],
-          syncErrors: [],
-        });
+        return response(workerContext);
       }
       if (url === '/api/tasks/delegation' && init?.method === 'POST') {
-        return response({
-          previews: [{
-            taskId: 'task-1',
-            dispatchId: 'dispatch-1',
-            previewHash: 'preview-hash',
-            processingLocation: 'mission-control-host',
-            dataClassification: 'standard',
-            disclosedFields: ['tasks.title'],
-            allowedActions: ['write_code'],
-            payloadPreview: { tasks: [{ id: 'task-1', title: 'Background task' }] },
-          }],
-          blocked: [],
-          readyCount: 1,
-          blockedCount: 0,
-        }, 201);
+        return response(workerPreview, 201);
       }
       if (url === '/api/external-agents/dispatch' && init?.method === 'POST') {
         return pendingConfirmation;
+      }
+      if (url === '/api/tasks/task-1' && init?.method === 'PATCH') {
+        return response({ id: 'task-1', status: 'in_progress' });
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -403,6 +410,48 @@ describe('TaskDelegationDialog disclosure review', () => {
       resolveConfirmation(await response({ dispatch: { status: 'queued' } }, 202));
       await pendingConfirmation;
     });
+    expect(fetcher).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'in_progress' }),
+    }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('lets the user keep delegated task statuses unchanged', async () => {
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response(workerContext);
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        return response(workerPreview, 201);
+      }
+      if (url === '/api/external-agents/dispatch' && init?.method === 'POST') {
+        return response({ dispatch: { status: 'queued' } }, 202);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+    expect(await screen.findByText('Worker queue')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+
+    const statusPreference = screen.getByRole('checkbox', {
+      name: /Mark delegated tasks as In Progress/,
+    });
+    expect(statusPreference).toBeChecked();
+    fireEvent.click(statusPreference);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
+    expect(await screen.findByText('Leave unchanged')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and delegate 1' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(fetcher).not.toHaveBeenCalledWith(
+      '/api/tasks/task-1',
+      expect.objectContaining({ method: 'PATCH' }),
+    );
   });
 });

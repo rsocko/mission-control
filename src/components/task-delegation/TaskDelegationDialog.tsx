@@ -116,6 +116,7 @@ export function TaskDelegationDialog() {
   const [baseRef, setBaseRef] = useState('main');
   const [model, setModel] = useState('');
   const [createPullRequest, setCreatePullRequest] = useState(true);
+  const [markInProgress, setMarkInProgress] = useState(true);
   const [maxAttempts, setMaxAttempts] = useState(3);
   const [timeoutHours, setTimeoutHours] = useState(24);
   const [allowedActions, setAllowedActions] = useState<string[]>([]);
@@ -164,6 +165,7 @@ export function TaskDelegationDialog() {
     setBaseRef('main');
     setModel('');
     setCreatePullRequest(true);
+    setMarkInProgress(true);
     setMaxAttempts(3);
     setTimeoutHours(24);
     setAllowedActions([]);
@@ -347,7 +349,8 @@ export function TaskDelegationDialog() {
       total: previewBatch.previews.length,
     });
     setError(null);
-    const failures: string[] = [];
+    const delegationFailures: string[] = [];
+    const statusFailures: string[] = [];
     const confirmedTaskIds: string[] = [];
     let confirmed = 0;
     for (const [index, preview] of previewBatch.previews.entries()) {
@@ -380,8 +383,22 @@ export function TaskDelegationDialog() {
         }
         confirmed += 1;
         confirmedTaskIds.push(preview.taskId);
+        if (markInProgress) {
+          try {
+            const statusResponse = await fetch(`/api/tasks/${preview.taskId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'in_progress' }),
+            });
+            if (!statusResponse.ok) {
+              throw new Error(await responseError(statusResponse));
+            }
+          } catch (statusError) {
+            statusFailures.push(`${preview.taskId}: ${errorMessage(statusError)}`);
+          }
+        }
       } catch (confirmError) {
-        failures.push(`${preview.taskId}: ${errorMessage(confirmError)}`);
+        delegationFailures.push(`${preview.taskId}: ${errorMessage(confirmError)}`);
       } finally {
         setConfirmationProgress({
           active: Math.min(index + 2, previewBatch.previews.length),
@@ -392,14 +409,19 @@ export function TaskDelegationDialog() {
     }
     setSubmitting(false);
     setConfirmationProgress(null);
-    if (failures.length) {
+    if (delegationFailures.length || statusFailures.length) {
       if (confirmedTaskIds.length) {
         notifyTaskDelegationUpdated(confirmedTaskIds);
       }
-      setError(
-        `${confirmed} delegation${confirmed === 1 ? '' : 's'} confirmed. `
-        + `${failures.length} failed: ${failures.join('; ')}`,
-      );
+      const details = [
+        delegationFailures.length
+          ? `${delegationFailures.length} delegation${delegationFailures.length === 1 ? '' : 's'} failed: ${delegationFailures.join('; ')}`
+          : null,
+        statusFailures.length
+          ? `${statusFailures.length} task status update${statusFailures.length === 1 ? '' : 's'} failed: ${statusFailures.join('; ')}`
+          : null,
+      ].filter(Boolean).join(' ');
+      setError(`${confirmed} delegation${confirmed === 1 ? '' : 's'} confirmed. ${details}`);
       return;
     }
     setOpen(false);
@@ -500,6 +522,8 @@ export function TaskDelegationDialog() {
                 onModelChange={setModel}
                 createPullRequest={createPullRequest}
                 onCreatePullRequestChange={setCreatePullRequest}
+                markInProgress={markInProgress}
+                onMarkInProgressChange={setMarkInProgress}
                 allowedActions={allowedActions}
                 onAllowedActionsChange={setAllowedActions}
                 maxAttempts={maxAttempts}
@@ -527,6 +551,7 @@ export function TaskDelegationDialog() {
                 baseRef={baseRef}
                 model={model}
                 createPullRequest={createPullRequest}
+                markInProgress={markInProgress}
                 paperclipBinding={paperclipBinding}
                 paperclipOptions={paperclipOptions}
               />
@@ -800,6 +825,8 @@ function ConfigureStep({
   onModelChange,
   createPullRequest,
   onCreatePullRequestChange,
+  markInProgress,
+  onMarkInProgressChange,
   allowedActions,
   onAllowedActionsChange,
   maxAttempts,
@@ -825,6 +852,8 @@ function ConfigureStep({
   onModelChange: (value: string) => void;
   createPullRequest: boolean;
   onCreatePullRequestChange: (value: boolean) => void;
+  markInProgress: boolean;
+  onMarkInProgressChange: (value: boolean) => void;
   allowedActions: string[];
   onAllowedActionsChange: (value: string[]) => void;
   maxAttempts: number;
@@ -842,6 +871,26 @@ function ConfigureStep({
   const blocked = target.eligibility.filter(({ ready }) => !ready);
   return (
     <div className="space-y-5">
+      <section>
+        <h3 className="text-xs font-semibold text-[var(--text-primary)]">Task status</h3>
+        <label className="mt-2 flex min-h-12 items-center justify-between gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2">
+          <span>
+            <span className="block text-xs font-medium text-[var(--text-secondary)]">
+              Mark delegated tasks as In Progress
+            </span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--text-muted)]">
+              Applies after each task is successfully queued.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={markInProgress}
+            onChange={(event) => onMarkInProgressChange(event.target.checked)}
+            className="h-4 w-4 shrink-0 accent-[var(--accent-500)]"
+          />
+        </label>
+      </section>
+
       {target.type === 'paperclip' && target.paperclipBinding && (
         <section className="space-y-3">
           <div>
@@ -1204,6 +1253,7 @@ function ReviewStep({
   baseRef,
   model,
   createPullRequest,
+  markInProgress,
   paperclipBinding,
   paperclipOptions,
 }: {
@@ -1212,6 +1262,7 @@ function ReviewStep({
   baseRef: string;
   model: string;
   createPullRequest: boolean;
+  markInProgress: boolean;
   paperclipBinding: PaperclipProviderConfig | null;
   paperclipOptions: PaperclipOptions | null;
 }) {
@@ -1269,6 +1320,14 @@ function ReviewStep({
             </div>
           </dl>
         )}
+        <dl className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-xs">
+          <div>
+            <dt className="text-[var(--text-muted)]">Task status</dt>
+            <dd className="mt-0.5 text-[var(--text-secondary)]">
+              {markInProgress ? 'Mark as In Progress' : 'Leave unchanged'}
+            </dd>
+          </div>
+        </dl>
       </section>
 
       <section>

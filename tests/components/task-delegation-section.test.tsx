@@ -551,6 +551,9 @@ describe('TaskDelegationDialog', () => {
           ? response({ dispatch: { status: 'queued' } })
           : response({ error: 'Provider rejected the task' }, 502);
       }
+      if (url === '/api/tasks/task-1' && init?.method === 'PATCH') {
+        return response({ id: 'task-1', status: 'in_progress' });
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal('fetch', fetcher);
@@ -570,12 +573,16 @@ describe('TaskDelegationDialog', () => {
     fireEvent.click(confirm);
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
-      '1 delegation confirmed. 1 failed',
+      '1 delegation confirmed. 1 delegation failed: task-2: Provider rejected the task',
     );
     expect(refreshed).toHaveBeenCalledOnce();
     expect((refreshed.mock.calls[0][0] as CustomEvent).detail).toEqual({
       taskIds: ['task-1'],
     });
+    expect(fetcher).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'in_progress' }),
+    }));
     window.removeEventListener(TASKS_REFRESH_REQUESTED_EVENT, refreshed);
   });
 
@@ -632,6 +639,9 @@ describe('TaskDelegationDialog', () => {
       if (url === '/api/external-agents/dispatch' && init?.method === 'POST') {
         return confirmation.promise;
       }
+      if (url === '/api/tasks/task-1' && init?.method === 'PATCH') {
+        return response({ id: 'task-1', status: 'in_progress' });
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal('fetch', fetcher);
@@ -678,5 +688,9 @@ describe('TaskDelegationDialog', () => {
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('1 task queued for GitHub Copilot Cloud');
     });
+    expect(fetcher).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'in_progress' }),
+    }));
   });
 });

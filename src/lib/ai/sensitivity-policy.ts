@@ -59,6 +59,7 @@ export const DEFAULT_AI_ROUTING_POLICY: AIRoutingPolicyConfig = {
     'custom-rest': 'restricted',
     'home-assistant': 'restricted',
     scout: 'restricted',
+    paperclip: 'restricted',
     'microsoft-todo': 'standard',
     'github-issues': 'standard',
   },

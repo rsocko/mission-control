@@ -218,6 +218,7 @@ export const CONNECTOR_SOURCE_PROFILES = Object.freeze({
   finance: { production: 'notifications-only' },
   'finance-manager': { production: 'notifications-only' },
   'monarch-money': { production: 'notifications-only' },
+  paperclip: { production: 'notifications-only' },
 } as const satisfies Record<string, ConnectorSourceProfile>);
 
 export type RegisteredConnectorType = keyof typeof CONNECTOR_SOURCE_PROFILES;
@@ -239,6 +240,7 @@ export const NOTIFICATION_ONLY_CONNECTOR_TYPES = Object.freeze([
   'finance',
   'finance-manager',
   'monarch-money',
+  'paperclip',
 ] as const satisfies readonly RegisteredConnectorType[]);
 
 export function isRegisteredConnectorType(type: string): type is RegisteredConnectorType {

@@ -52,7 +52,7 @@ interface PaperclipWorkProduct {
   metadata?: Record<string, unknown> | null;
 }
 
-interface PaperclipIssue {
+export interface PaperclipIssue {
   id: string;
   identifier?: string;
   companyId?: string;
@@ -89,6 +89,12 @@ interface PaperclipRun {
   nextAction?: string | null;
   livenessState?: string | null;
   livenessReason?: string | null;
+}
+
+export interface PaperclipApproval extends Record<string, unknown> {
+  id: string;
+  companyId?: string;
+  status: string;
 }
 
 export interface PaperclipDispatchInput {
@@ -323,6 +329,83 @@ function arrayResponse<T extends { id: string }>(value: unknown, label: string):
     );
   }
   return value as T[];
+}
+
+export async function listPaperclipApprovals(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  companyId: string,
+): Promise<PaperclipApproval[]> {
+  if (!companyId.trim()) {
+    throw new ExternalAgentError(
+      'Paperclip company is required to list approvals',
+      'TRANSPORT_INVALID',
+      422,
+    );
+  }
+  const approvals = arrayResponse<PaperclipApproval>(
+    await request<unknown>(
+      { ...connection, config: { companyId, assigneeAgentId: '' } },
+      `/companies/${encodeURIComponent(companyId)}/approvals`,
+    ),
+    'approvals',
+  );
+  if (approvals.some((approval) =>
+    !approval.id.trim()
+    || typeof approval.status !== 'string'
+    || (approval.companyId !== undefined && approval.companyId !== companyId))) {
+    throw new ExternalAgentError(
+      'Paperclip returned approvals outside the configured company or with invalid state',
+      'PROVIDER_SCOPE_MISMATCH',
+      502,
+    );
+  }
+  return approvals;
+}
+
+export async function getPaperclipCompanyName(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  companyId: string,
+): Promise<string> {
+  const companies = arrayResponse<PaperclipCompany>(
+    await request<unknown>(
+      { ...connection, config: { companyId, assigneeAgentId: '' } },
+      '/companies',
+    ),
+    'companies',
+  );
+  const company = companies.find((candidate) => candidate.id === companyId);
+  if (!company) {
+    throw new ExternalAgentError(
+      'Paperclip company is not accessible with this credential',
+      'PROVIDER_SCOPE_MISMATCH',
+      403,
+    );
+  }
+  return typeof company.name === 'string' && company.name.trim()
+    ? company.name.trim().slice(0, 120)
+    : company.id;
+}
+
+export async function listPaperclipApprovalIssues(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  companyId: string,
+  approvalId: string,
+): Promise<PaperclipIssue[]> {
+  const issues = arrayResponse<PaperclipIssue>(
+    await request<unknown>(
+      { ...connection, config: { companyId, assigneeAgentId: '' } },
+      `/approvals/${encodeURIComponent(approvalId)}/issues`,
+    ),
+    'approval issues',
+  );
+  if (issues.some((issue) => issue.companyId && issue.companyId !== companyId)) {
+    throw new ExternalAgentError(
+      'Paperclip returned an issue outside the configured company',
+      'PROVIDER_SCOPE_MISMATCH',
+      502,
+    );
+  }
+  return issues;
 }
 
 export async function discoverPaperclip(

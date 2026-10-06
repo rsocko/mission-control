@@ -13,7 +13,6 @@ import {
   Clock,
   Loader2,
   Lock,
-  Paperclip,
   Send,
   X,
 } from 'lucide-react';
@@ -36,6 +35,7 @@ import {
   notifyTaskDelegationUpdated,
   TASK_DELEGATION_OPEN_EVENT,
 } from './events';
+import { ExecutionDestinationIcon } from './ExecutionDestinationIcon';
 
 type WizardStep = 'destination' | 'configure' | 'review';
 
@@ -97,12 +97,6 @@ async function responseError(response: Response) {
     message?: string;
   } | null;
   return body?.error ?? body?.message ?? `Request failed (${response.status})`;
-}
-
-function destinationIcon(type: TaskDelegationTarget['type']) {
-  if (type === 'copilot-cloud') return <CloudCog size={18} />;
-  if (type === 'pull-queue') return <Bot size={18} />;
-  return <Paperclip size={18} />;
 }
 
 function targetSubtitle(target: TaskDelegationTarget) {
@@ -764,7 +758,7 @@ function DestinationStep({
               )}
             >
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
-                {destinationIcon(target.type)}
+                <ExecutionDestinationIcon type={target.type} />
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium text-[var(--text-primary)]">
@@ -1231,7 +1225,7 @@ function ReviewStep({
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
         <div className="flex items-center gap-3">
           <span className="grid h-9 w-9 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
-            {destinationIcon(target.type)}
+            <ExecutionDestinationIcon type={target.type} />
           </span>
           <div>
             <h3 className="text-sm font-medium text-[var(--text-primary)]">{target.name}</h3>

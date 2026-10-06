@@ -32,6 +32,7 @@ export const AI_FEATURE_DEFAULTS: Record<AIFeatureId, SensitivityClass> = {
   'project-phase-refinement': 'standard',
   'reset-summary': 'restricted',
   'task-breakdown': 'standard',
+  'delegation-planning': 'standard',
   'document-intake': 'restricted',
   'notification-enrichment': 'restricted',
   'triage-action-extraction': 'restricted',

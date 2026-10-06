@@ -20,6 +20,7 @@ import { ExecutionDestinationIcon } from '@/components/task-delegation/Execution
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { ConnectorBrandIcon } from './ConnectorBrandIcon';
 import {
   Select,
   SelectContent,
@@ -349,7 +350,7 @@ function ScoutDestinationCard() {
     return (
       <div className="flex flex-col gap-4 rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] p-4 sm:flex-row sm:items-center">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
-          <ExecutionDestinationIcon type="pull-queue" />
+          <ConnectorBrandIcon type="scout" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -377,7 +378,7 @@ function ScoutDestinationCard() {
     <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
       <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
-          <ExecutionDestinationIcon type="pull-queue" />
+          <ConnectorBrandIcon type="scout" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -781,7 +782,7 @@ export function ExecutionDestinationsSection() {
               size="sm"
               onClick={() => openForm(emptyForm('paperclip'))}
             >
-              <Plus size={14} />
+              <ExecutionDestinationIcon type="paperclip" size={14} />
               Paperclip route
             </Button>
             <Button
@@ -789,7 +790,7 @@ export function ExecutionDestinationsSection() {
               size="sm"
               onClick={() => openForm(emptyForm('copilot-cloud'))}
             >
-              <Plus size={14} />
+              <ExecutionDestinationIcon type="copilot-cloud" size={14} />
               GitHub Copilot Cloud
             </Button>
           </div>

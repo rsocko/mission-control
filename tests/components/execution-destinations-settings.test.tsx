@@ -16,6 +16,37 @@ afterEach(() => {
 });
 
 describe('ExecutionDestinationsSection', () => {
+  it('uses destination brand marks for setup actions and Scout', async () => {
+    const fetcher = vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/external-agents') return response({ agents: [] });
+      if (url === '/api/connectors') return response({ connectors: [] });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<ExecutionDestinationsSection />);
+
+    expect(await screen.findByText('No direct execution destinations yet')).toBeInTheDocument();
+
+    const paperclipButton = screen.getByRole('button', { name: 'Paperclip route' });
+    expect(paperclipButton.querySelector('svg path')).toHaveAttribute(
+      'd',
+      'm16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551',
+    );
+
+    const githubButton = screen.getByRole('button', { name: 'GitHub Copilot Cloud' });
+    expect(githubButton.querySelector('img')).toHaveAttribute(
+      'src',
+      '/icons/connectors/github.svg',
+    );
+
+    expect(screen.getByAltText('dash:microsoft-copilot')).toHaveAttribute(
+      'src',
+      'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/microsoft-copilot.svg',
+    );
+  });
+
   it('shows a retryable load error instead of a false empty state', async () => {
     vi.stubGlobal('fetch', vi.fn(() => response({ error: 'Registry unavailable' }, 503)));
 

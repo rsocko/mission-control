@@ -500,8 +500,132 @@ async function preflight(
     : [];
 }
 
+function readableLabel(value: string) {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replaceAll('_', ' ')
+    .toLowerCase()
+    .replace(/^./, (character) => character.toUpperCase());
+}
+
+function scalarText(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() || null;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return null;
+}
+
+function detailLines(
+  value: Record<string, unknown>,
+  excluded: ReadonlySet<string> = new Set(),
+  parentLabel = '',
+): string[] {
+  return Object.entries(value).flatMap(([key, item]) => {
+    if (excluded.has(key) || item === null || item === undefined || item === '') return [];
+    const keyLabel = readableLabel(key);
+    const parentTail = parentLabel.split(' ').at(-1)?.toLowerCase();
+    const childLabel = parentTail && keyLabel.toLowerCase().startsWith(`${parentTail} `)
+      ? keyLabel.slice(parentTail.length + 1)
+      : keyLabel.toLowerCase();
+    const label = parentLabel ? `${parentLabel} ${childLabel}` : keyLabel;
+    const scalar = scalarText(item);
+    if (scalar) return [`- **${label}:** ${scalar}`];
+    if (Array.isArray(item) && item.every((entry) => scalarText(entry) !== null)) {
+      return item.length
+        ? [`- **${label}:** ${item.map(scalarText).join(', ')}`]
+        : [];
+    }
+    const child = record(item);
+    if (child) return detailLines(child, new Set(), label);
+    return [`- **${label}:** ${canonicalJson(item)}`];
+  });
+}
+
+function taskBrief(taskValue: unknown, index: number) {
+  const task = record(taskValue);
+  if (!task) return `### Task ${index + 1}\n\n${String(taskValue)}`;
+  const title = scalarText(task.title) ?? `Task ${index + 1}`;
+  const lines = [`### ${title}`];
+  const description = scalarText(task.description);
+  if (description) lines.push('', description);
+  const details = detailLines(task, new Set(['title', 'description', 'subtasks']));
+  if (details.length) lines.push('', ...details);
+  if (Array.isArray(task.subtasks) && task.subtasks.length) {
+    lines.push('', '#### Subtasks');
+    task.subtasks.forEach((subtaskValue, subtaskIndex) => {
+      const subtask = record(subtaskValue);
+      if (!subtask) {
+        lines.push(`${subtaskIndex + 1}. ${String(subtaskValue)}`);
+        return;
+      }
+      const subtaskTitle = scalarText(subtask.title) ?? `Subtask ${subtaskIndex + 1}`;
+      lines.push(`${subtaskIndex + 1}. **${subtaskTitle}**`);
+      const subtaskDescription = scalarText(subtask.description);
+      if (subtaskDescription) lines.push(`   ${subtaskDescription.replaceAll('\n', '\n   ')}`);
+      detailLines(subtask, new Set(['title', 'description'])).forEach((line) => {
+        lines.push(`   ${line}`);
+      });
+    });
+  }
+  return lines.join('\n');
+}
+
 function taskPrompt(dispatch: TransportDispatch): string {
-  return `Mission Control dispatch ${dispatch.dispatchId}\n\n${canonicalJson(dispatch.payload)}`;
+  const payload = dispatch.payload;
+  const sections = [
+    `Mission Control dispatch ${dispatch.dispatchId}`,
+    '',
+    '# Task',
+  ];
+  const instruction = scalarText(payload.instruction);
+  if (instruction) sections.push('', '## Request', '', instruction);
+  const alwaysInstructions = scalarText(payload.alwaysInstructions);
+  if (alwaysInstructions) {
+    sections.push('', '## Destination instructions', '', alwaysInstructions);
+  }
+  if (Array.isArray(payload.tasks) && payload.tasks.length) {
+    sections.push(
+      '',
+      '## Task context',
+      '',
+      ...payload.tasks.map((task, index) => taskBrief(task, index)),
+    );
+  }
+  const project = record(payload.project);
+  if (project) sections.push('', '## Project', '', ...detailLines(project));
+  if (Array.isArray(payload.phases) && payload.phases.length) {
+    sections.push(
+      '',
+      '## Project phases',
+      '',
+      ...payload.phases.map((phase, index) => {
+        const phaseRecord = record(phase);
+        return phaseRecord
+          ? [`### ${scalarText(phaseRecord.name) ?? `Phase ${index + 1}`}`, ...detailLines(
+            phaseRecord,
+            new Set(['name']),
+          )].join('\n')
+          : String(phase);
+      }),
+    );
+  }
+  const allowedActions = Array.isArray(payload.allowedActions)
+    ? payload.allowedActions.map(scalarText).filter((action): action is string => Boolean(action))
+    : [];
+  const controls = [
+    ...detailLines(record(payload.repository) ?? {}, new Set(), 'Repository'),
+    ...detailLines(record(payload.execution) ?? {}, new Set(), 'Execution'),
+    ...(allowedActions.length
+      ? [`- **Allowed actions:** ${allowedActions.map((action) => readableLabel(action)).join(', ')}`]
+      : []),
+    ...(scalarText(payload.dataClassification)
+      ? [`- **Data classification:** ${scalarText(payload.dataClassification)}`]
+      : []),
+    ...(scalarText(payload.callbackUrl)
+      ? [`- **Callback URL:** ${scalarText(payload.callbackUrl)}`]
+      : []),
+  ];
+  if (controls.length) sections.push('', '## Execution details', '', ...controls);
+  return sections.join('\n');
 }
 
 async function findExistingTask(
@@ -510,6 +634,7 @@ async function findExistingTask(
   tasks: GitHubAgentTask[],
   prompt: string,
 ): Promise<GitHubAgentTask | null> {
+  const dispatchMarker = prompt.split('\n', 1)[0];
   for (const task of tasks) {
     const detail = parseTask(await assertGitHubResponse(
       await client.restFetch(
@@ -518,7 +643,10 @@ async function findExistingTask(
       ),
       'checking an existing Agent task',
     ));
-    if (detail.sessions?.some((session) => session.prompt === prompt)) return detail;
+    if (detail.sessions?.some((session) =>
+      session.prompt === prompt || session.prompt?.startsWith(`${dispatchMarker}\n`))) {
+      return detail;
+    }
   }
   return null;
 }

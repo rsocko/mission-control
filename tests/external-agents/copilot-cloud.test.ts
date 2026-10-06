@@ -114,6 +114,7 @@ describe('GitHub Copilot cloud agent adapter', () => {
       [credentialReference]: 'user-token',
     });
     let storedPrompt: string | undefined;
+    let submittedPrompt: string | undefined;
     let storedBody: Record<string, unknown> | undefined;
     let created = false;
     const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -139,12 +140,13 @@ describe('GitHub Copilot cloud agent adapter', () => {
         return response({
           id: 'task-1',
           state: 'queued',
-          sessions: [{ prompt: storedPrompt }],
+          sessions: [{}, { prompt: storedPrompt }],
         });
       }
       if (url.endsWith('/tasks') && init?.method === 'POST') {
         storedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
         storedPrompt = String(storedBody.prompt);
+        submittedPrompt = storedPrompt;
         created = true;
         return response({ id: 'task-1', state: 'queued' }, 201);
       }
@@ -153,17 +155,23 @@ describe('GitHub Copilot cloud agent adapter', () => {
     const transport = createCopilotCloudTransport(fetcher as typeof fetch);
 
     const first = await transport.dispatch(agent(), dispatch());
+    storedPrompt = 'Mission Control dispatch dispatch-123\n\n{"instruction":"legacy format"}';
     const duplicate = await transport.dispatch(agent(), dispatch());
 
     expect(first).toMatchObject({ providerTaskId: 'task-1', status: 'queued' });
     expect(duplicate).toMatchObject({ providerTaskId: 'task-1', status: 'queued' });
     expect(fetcher.mock.calls.filter(([input, init]) =>
       String(input).endsWith('/tasks') && init?.method === 'POST')).toHaveLength(1);
-    expect(storedPrompt).toContain('Mission Control dispatch dispatch-123');
-    expect(storedPrompt).toContain('"fullName":"octo/example"');
-    expect(storedPrompt).toContain('"alwaysInstructions":"Run focused tests before handoff."');
-    expect(storedPrompt).toContain('"sourceIssue":{"issueNumber":42');
-    expect(storedPrompt).not.toContain('user-token');
+    expect(submittedPrompt).toContain('Mission Control dispatch dispatch-123\n\n# Task');
+    expect(submittedPrompt).toContain('## Request\n\nFix the failing parser');
+    expect(submittedPrompt).toContain(
+      '## Destination instructions\n\nRun focused tests before handoff.',
+    );
+    expect(submittedPrompt).toContain('### Fix the parser');
+    expect(submittedPrompt).toContain('**Repository full name:** octo/example');
+    expect(submittedPrompt).toContain('**Source issue number:** 42');
+    expect(submittedPrompt).toContain('**Allowed actions:** Write code, Create pull request');
+    expect(submittedPrompt).not.toContain('user-token');
     expect(storedBody).toMatchObject({
       base_ref: 'main',
       model: 'gpt-5.4',

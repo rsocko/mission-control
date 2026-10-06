@@ -191,6 +191,11 @@ export interface TaskDelegationPreviewInput {
   callbackBaseUrl?: string;
 }
 
+export interface CombinedTaskDelegationPreviewInput
+  extends Omit<TaskDelegationPreviewInput, 'taskId'> {
+  taskIds: string[];
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -649,6 +654,10 @@ function delegationIdempotencyKey(
   return `task-delegation:${operationId}:${taskId}`;
 }
 
+function combinedDelegationIdempotencyKey(operationId: string) {
+  return `task-delegation:${operationId}:combined`;
+}
+
 export async function hasTaskDelegationOperation(
   agentId: string,
   operationId: string,
@@ -771,6 +780,119 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
         taskIds: [input.taskId],
         ...(paperclipBinding ? { paperclip: paperclipBinding } : {}),
       },
+    allowedActions: requested,
+    idempotencyKey,
+    callbackBaseUrl: input.callbackBaseUrl,
+    maxAttempts: input.maxAttempts,
+    timeoutMs: input.timeoutMs,
+  });
+}
+
+export async function previewCombinedTaskDelegation(
+  input: CombinedTaskDelegationPreviewInput,
+) {
+  const operationId = input.operationId.trim();
+  if (!operationId) {
+    throw new ExternalAgentError(
+      'operationId is required',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  const taskIds = [...new Set(input.taskIds)];
+  if (taskIds.length < 2) {
+    throw new ExternalAgentError(
+      'Combined delegation requires at least two tasks',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  const context = await getTaskDelegationContext(taskIds);
+  const target = context.targets.find(({ id }) => id === input.agentId);
+  if (!target || target.type !== 'copilot-cloud') {
+    throw new ExternalAgentError(
+      'Combined delegation is currently available only for GitHub Copilot Cloud',
+      'CAPABILITY_MISMATCH',
+      422,
+    );
+  }
+  const idempotencyKey = combinedDelegationIdempotencyKey(operationId);
+  const existing = await (
+    await getExternalAgentControlPersistence()
+  ).dispatches.findPreview(target.id, idempotencyKey);
+  const eligibility = taskIds.map((taskId) =>
+    target.eligibility.find((item) => item.taskId === taskId));
+  const blocker = eligibility.find((item) => !item || !item.ready)?.blocker;
+  if ((!existing && blocker) || eligibility.some((item) => !item)) {
+    throw new ExternalAgentError(
+      blocker ?? 'Execution target is not eligible for every selected task',
+      'DISCLOSURE_BLOCKED',
+      403,
+    );
+  }
+  const requested = input.allowedActions ?? target.allowedActions;
+  if (requested.some((action) => !target.allowedActions.includes(action))) {
+    throw new ExternalAgentError(
+      'Requested action is not allowed for this execution target',
+      'CAPABILITY_MISMATCH',
+      422,
+    );
+  }
+  const createPullRequest = input.createPullRequest === true;
+  if (createPullRequest && !requested.includes('create_pull_request')) {
+    throw new ExternalAgentError(
+      'Creating a pull request requires the create_pull_request action',
+      'CONFIRMATION_REQUIRED',
+      422,
+    );
+  }
+  const lockedRepositories = [...new Set(eligibility
+    .filter((item) => item?.repositoryLocked)
+    .map((item) => item?.repository?.toLowerCase())
+    .filter((value): value is string => Boolean(value)))];
+  if (lockedRepositories.length > 1) {
+    throw new ExternalAgentError(
+      'Combined delegation requires every GitHub-origin task to use the same repository',
+      'REPOSITORY_SCOPE_MISMATCH',
+      409,
+    );
+  }
+  let repository: string;
+  if (lockedRepositories.length === 1) {
+    const locked = eligibility.find((item) =>
+      item?.repository?.toLowerCase() === lockedRepositories[0])?.repository;
+    repository = locked!;
+    if (input.repository && input.repository.toLowerCase() !== lockedRepositories[0]) {
+      throw new ExternalAgentError(
+        'Combined delegation must use the repository shared by its GitHub-origin tasks',
+        'REPOSITORY_SCOPE_MISMATCH',
+        409,
+      );
+    }
+  } else {
+    repository = normalizeRepository(input.repository);
+    if (!target.repositories.some(
+      (option) => option.repository.toLowerCase() === repository.toLowerCase(),
+    )) {
+      throw new ExternalAgentError(
+        'Repository is not configured and validated for delegation',
+        'REPOSITORY_SCOPE_MISMATCH',
+        403,
+      );
+    }
+  }
+  return createDispatchPreview({
+    agentId: target.id,
+    instruction: input.instruction?.trim()
+      || 'Complete the selected tasks as one cohesive change using the task details provided.',
+    scope: {
+      taskIds,
+      repository,
+      defaultBranch: input.baseRef,
+      baseRef: input.baseRef,
+      model: input.model,
+      createPullRequest,
+    },
     allowedActions: requested,
     idempotencyKey,
     callbackBaseUrl: input.callbackBaseUrl,

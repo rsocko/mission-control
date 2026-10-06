@@ -508,6 +508,7 @@ class SqliteTaskQueryRepository implements TaskQueryRepository {
       recurring,
       waiting,
       inbox,
+      delegated,
     ] = await Promise.all([
       this.countWhere(openWhere),
       this.countWhere(withCondition(openWhere, quick('overdue'))),
@@ -522,6 +523,7 @@ class SqliteTaskQueryRepository implements TaskQueryRepository {
       this.countWhere(withCondition(openWhere, quick('recurring'))),
       this.countWhere(withCondition(openWhere, quick('waiting'))),
       this.countWhere(withCondition(openWhere, quick('inbox'))),
+      this.countWhere(withCondition(openWhere, quick('delegated'))),
     ]);
 
     return {
@@ -538,6 +540,7 @@ class SqliteTaskQueryRepository implements TaskQueryRepository {
       recurring,
       waiting,
       inbox,
+      delegated,
     };
   }
 

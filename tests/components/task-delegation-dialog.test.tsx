@@ -61,6 +61,233 @@ afterEach(() => {
 });
 
 describe('TaskDelegationDialog disclosure review', () => {
+  it('offers one combined Copilot cloud assignment for compatible selected tasks', async () => {
+    let previewRequest: Record<string, unknown> | null = null;
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response({
+          taskIds: ['task-1', 'task-2'],
+          tasks: [
+            { id: 'task-1', title: 'Update parser', connectorType: 'github-issues' },
+            { id: 'task-2', title: 'Add parser tests', connectorType: 'github-issues' },
+          ],
+          targets: [{
+            id: 'github-cloud',
+            name: 'GitHub Cloud',
+            type: 'copilot-cloud',
+            description: null,
+            alwaysInstructions: '',
+            executionLocality: 'github-hosted',
+            allowedActions: ['write_code'],
+            hasCredential: true,
+            paperclipBinding: null,
+            repositories: [],
+            eligibility: [
+              {
+                taskId: 'task-1',
+                title: 'Update parser',
+                connectorType: 'github-issues',
+                ready: true,
+                blocker: null,
+                repository: 'octo/example',
+                repositoryLocked: true,
+              },
+              {
+                taskId: 'task-2',
+                title: 'Add parser tests',
+                connectorType: 'github-issues',
+                ready: true,
+                blocker: null,
+                repository: 'octo/example',
+                repositoryLocked: true,
+              },
+            ],
+          }],
+          assignments: [],
+          syncErrors: [],
+        });
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        previewRequest = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response({
+          previews: [{
+            taskId: 'task-1',
+            taskIds: ['task-1', 'task-2'],
+            dispatchId: 'dispatch-combined',
+            previewHash: 'preview-hash',
+            processingLocation: 'github-hosted',
+            dataClassification: 'standard',
+            disclosedFields: ['tasks.title'],
+            allowedActions: ['write_code'],
+            payloadPreview: {
+              tasks: [
+                { id: 'task-1', title: 'Update parser' },
+                { id: 'task-2', title: 'Add parser tests' },
+              ],
+            },
+          }],
+          blocked: [],
+          readyCount: 2,
+          blockedCount: 0,
+          dispatchCount: 1,
+          strategy: 'combined',
+        }, 201);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1', 'task-2']);
+
+    expect(await screen.findByText('GitHub Cloud')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('radio', { name: /Combined/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review combined delegation' }));
+
+    await waitFor(() => expect(previewRequest).toMatchObject({
+      taskIds: ['task-1', 'task-2'],
+      strategy: 'combined',
+    }));
+    expect(await screen.findByText('2 tasks combined')).toBeInTheDocument();
+    expect(screen.getByText(/1 durable assignment for 2 tasks/)).toBeInTheDocument();
+    expect(screen.getByRole('button', {
+      name: 'Confirm and delegate 2 tasks together',
+    })).toBeInTheDocument();
+  });
+
+  it('shows and applies an editable Auto execution proposal before review', async () => {
+    const previewRequests: Array<Record<string, unknown>> = [];
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response({
+          taskIds: ['task-1', 'task-2'],
+          tasks: [
+            { id: 'task-1', title: 'Update parser', connectorType: 'github-issues' },
+            { id: 'task-2', title: 'Add parser tests', connectorType: 'github-issues' },
+          ],
+          targets: [{
+            id: 'github-cloud',
+            name: 'GitHub Cloud',
+            type: 'copilot-cloud',
+            description: null,
+            alwaysInstructions: '',
+            executionLocality: 'github-hosted',
+            allowedActions: ['write_code'],
+            hasCredential: true,
+            paperclipBinding: null,
+            repositories: [],
+            eligibility: [
+              {
+                taskId: 'task-1',
+                title: 'Update parser',
+                connectorType: 'github-issues',
+                ready: true,
+                blocker: null,
+                repository: 'octo/example',
+                repositoryLocked: true,
+              },
+              {
+                taskId: 'task-2',
+                title: 'Add parser tests',
+                connectorType: 'github-issues',
+                ready: true,
+                blocker: null,
+                repository: 'octo/example',
+                repositoryLocked: true,
+              },
+            ],
+          }],
+          assignments: [],
+          syncErrors: [],
+        });
+      }
+      if (url === '/api/tasks/delegation/plan' && init?.method === 'POST') {
+        return response({
+          groups: [{
+            id: 'group-1',
+            taskIds: ['task-1', 'task-2'],
+            strategy: 'combined',
+            repository: 'octo/example',
+            rationale: 'The implementation and regression coverage form one reviewable change.',
+            confidence: 0.91,
+          }],
+          blocked: [],
+          taskTitles: {
+            'task-1': 'Update parser',
+            'task-2': 'Add parser tests',
+          },
+          routing: { provider: 'openai', model: 'test-model' },
+        });
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        const request = JSON.parse(String(init.body)) as Record<string, unknown>;
+        previewRequests.push(request);
+        return response({
+          previews: [
+            {
+              taskId: 'task-1',
+              taskIds: ['task-1'],
+              dispatchId: 'dispatch-1',
+              previewHash: 'hash-1',
+              processingLocation: 'github-hosted',
+              dataClassification: 'standard',
+              disclosedFields: ['tasks.title'],
+              allowedActions: ['write_code'],
+              payloadPreview: { tasks: [{ id: 'task-1', title: 'Update parser' }] },
+            },
+            {
+              taskId: 'task-2',
+              taskIds: ['task-2'],
+              dispatchId: 'dispatch-2',
+              previewHash: 'hash-2',
+              processingLocation: 'github-hosted',
+              dataClassification: 'standard',
+              disclosedFields: ['tasks.title'],
+              allowedActions: ['write_code'],
+              payloadPreview: { tasks: [{ id: 'task-2', title: 'Add parser tests' }] },
+            },
+          ],
+          blocked: [],
+          readyCount: 2,
+          blockedCount: 0,
+          dispatchCount: 2,
+          strategy: 'separate',
+        }, 201);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1', 'task-2']);
+
+    expect(await screen.findByText('GitHub Cloud')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('radio', { name: /Auto/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Propose delegation plan' }));
+
+    expect(await screen.findByText('Proposed execution plan')).toBeInTheDocument();
+    expect(screen.getByText(/1 cloud session proposed by openai/)).toBeInTheDocument();
+    expect(screen.getByText(/implementation and regression coverage/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'separate' }));
+    expect(screen.getByText('2 separate sessions')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Review proposed sessions' }));
+
+    await waitFor(() => expect(previewRequests).toHaveLength(1));
+    expect(previewRequests[0]).toMatchObject({
+      taskIds: ['task-1', 'task-2'],
+      strategy: 'separate',
+      repository: 'octo/example',
+    });
+    expect(await screen.findByText(/2 durable assignments for 2 tasks/)).toBeInTheDocument();
+    expect(screen.getByRole('button', {
+      name: 'Confirm 2 proposed sessions',
+    })).toBeInTheDocument();
+  });
+
   it('only allows destinations with at least one eligible selected task', async () => {
     vi.stubGlobal('fetch', vi.fn(() => response({
       taskIds: ['task-1'],

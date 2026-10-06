@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Filter, Pencil, Plus, Repeat, Trash2 } from 'lucide-react';
+import { Bot, Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Filter, Pencil, Plus, Repeat, Trash2 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { ConnectorIcon, SourceListIcon } from '@/components/sources/SourceIcons';
@@ -484,7 +484,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                 />
               )}
               label={filter.label}
-              count={taskResponse.stats[filter.statKey]}
+              count={taskResponse.stats[filter.statKey] ?? 0}
               active={quickFilter === filter.id}
               onClick={() => setQuickFilter(quickFilter === filter.id ? null : filter.id)}
             />
@@ -842,6 +842,7 @@ function QuickFilterIcon({
     repeat: <Repeat {...props} />,
     waiting: <Hourglass {...props} />,
     'no-date': <CalendarX2 {...props} />,
+    delegated: <Bot {...props} />,
   };
   return icons[icon];
 }

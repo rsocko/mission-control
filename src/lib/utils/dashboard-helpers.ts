@@ -46,6 +46,9 @@ export function removeTaskFromResponse(response: TaskResponse, taskId: string, t
       assignedToMe: isAssignedToMe(task)
         ? Math.max(0, response.stats.assignedToMe - 1)
         : response.stats.assignedToMe,
+      delegated: task.delegation
+        ? Math.max(0, (response.stats.delegated ?? 0) - 1)
+        : response.stats.delegated ?? 0,
     },
   };
 }
@@ -89,6 +92,9 @@ export function restoreTaskToResponse(response: TaskResponse, task: Task, index:
       assignedToMe: isAssignedToMe(task)
         ? response.stats.assignedToMe + 1
         : response.stats.assignedToMe,
+      delegated: task.delegation
+        ? (response.stats.delegated ?? 0) + 1
+        : response.stats.delegated ?? 0,
     },
   };
 }

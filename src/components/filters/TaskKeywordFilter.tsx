@@ -72,6 +72,18 @@ interface AppliedFilter {
   value: string;
 }
 
+interface DelegateeOption {
+  id: string;
+  name: string;
+  type: string;
+  deletedAt?: string | null;
+}
+
+interface DelegateesState {
+  status: 'idle' | 'loading' | 'success' | 'error';
+  agents: DelegateeOption[];
+}
+
 const FILTER_UNDO_TOAST_ID = 'filter-undo';
 
 // ── Token colour map ─────────────────────────────────────────────────────────
@@ -96,6 +108,8 @@ const SUGGESTIONS: Suggestion[] = [
   { prefix: 'project:',  hint: 'Project ID / none' },
   { prefix: 'phase:',    hint: 'Phase ID / none' },
   { prefix: 'disposition:', hint: 'active / handled / dismissed' },
+  { prefix: 'delegation:', hint: 'active / waiting / completed…' },
+  { prefix: 'delegatee:', hint: 'External agent ID' },
 ];
 
 // ── Help content ──────────────────────────────────────────────────────────────
@@ -115,6 +129,8 @@ const HELP_ROWS: Array<{ token: string; description: string }> = [
   { token: 'project:none',         description: 'Tasks without a project' },
   { token: 'phase:none',           description: 'Tasks without a phase' },
   { token: 'disposition:handled',   description: 'Local Mission Control disposition' },
+  { token: 'delegation:active',     description: 'Delegated work status' },
+  { token: 'delegatee:agent-id',    description: 'Delegated to an external agent' },
   { token: '-tag:wontfix',         description: 'Exclude matching tasks' },
   { token: '(no prefix)',          description: 'Full-text on title, tags, notes' },
 ];
@@ -287,6 +303,36 @@ export function TaskKeywordFilter({
   const [acIndex, setAcIndex] = useState(0);
   // Help tooltip state
   const [showHelp, setShowHelp] = useState(false);
+  const [delegateesState, setDelegateesState] = useState<DelegateesState>({
+    status: 'idle',
+    agents: [],
+  });
+  const delegateesRequestRef = useRef<AbortController | null>(null);
+  const loadDelegatees = useCallback(async () => {
+    if (delegateesState.status === 'loading' || delegateesState.status === 'success') return;
+    const controller = new AbortController();
+    delegateesRequestRef.current = controller;
+    setDelegateesState((state) => ({ ...state, status: 'loading' }));
+    try {
+      const response = await fetch('/api/external-agents', { signal: controller.signal });
+      if (!response.ok) throw new Error('Failed to load delegation filter options');
+      const body = await response.json() as { agents?: DelegateeOption[] };
+      if (!controller.signal.aborted) {
+        setDelegateesState({
+          status: 'success',
+          agents: (body.agents ?? []).filter((agent) => !agent.deletedAt),
+        });
+      }
+    } catch {
+      if (!controller.signal.aborted) {
+        setDelegateesState({ status: 'error', agents: [] });
+      }
+    }
+  }, [delegateesState.status]);
+
+  useEffect(() => () => {
+    delegateesRequestRef.current?.abort();
+  }, []);
 
   // Sync state when store changes externally (e.g., clear-all)
   useEffect(() => {
@@ -926,6 +972,10 @@ export function TaskKeywordFilter({
           tags={tags}
           assignees={assignees}
           projects={projects}
+          delegatees={delegateesState.agents}
+          delegateesLoading={delegateesState.status === 'loading'}
+          delegateesError={delegateesState.status === 'error'}
+          onDelegateesRequested={() => void loadDelegatees()}
           hiddenCategories={hiddenBuilderFilters}
           onToggleToken={toggleBuilderToken}
         />

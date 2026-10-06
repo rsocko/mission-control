@@ -158,4 +158,16 @@ describe('parseFilterQuery', () => {
       expect.objectContaining({ type: 'disposition', value: 'dismissed' }),
     ]);
   });
+
+  it('parses delegation status and delegatee filters', () => {
+    const result = parseFilterQuery(
+      'delegation:active delegatee:Agent-A -delegation:completed',
+    );
+
+    expect(result.delegationTokens).toEqual(['active']);
+    expect(result.delegateeTokens).toEqual(['Agent-A']);
+    expect(result.negatedTokens).toEqual([
+      expect.objectContaining({ type: 'delegation', value: 'completed' }),
+    ]);
+  });
 });

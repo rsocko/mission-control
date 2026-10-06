@@ -37,10 +37,12 @@ import {
 } from './events';
 import { ExecutionDestinationIcon } from './ExecutionDestinationIcon';
 
-type WizardStep = 'destination' | 'configure' | 'review';
+type WizardStep = 'destination' | 'configure' | 'plan' | 'review';
+type DispatchStrategy = 'separate' | 'combined' | 'auto';
 
 interface DelegationPreview {
   taskId: string;
+  taskIds?: string[];
   dispatchId: string;
   previewHash: string;
   processingLocation: string;
@@ -72,6 +74,27 @@ interface PreviewBatch {
   blocked: TaskDelegationTarget['eligibility'];
   readyCount: number;
   blockedCount: number;
+  dispatchCount?: number;
+  strategy?: DispatchStrategy;
+}
+
+interface AutoPlanGroup {
+  id: string;
+  taskIds: string[];
+  strategy: 'separate' | 'combined';
+  repository: string;
+  rationale: string;
+  confidence: number;
+}
+
+interface AutoPlan {
+  groups: AutoPlanGroup[];
+  blocked: TaskDelegationTarget['eligibility'];
+  taskTitles: Record<string, string>;
+  routing: {
+    provider: string;
+    model: string;
+  };
 }
 
 interface ConfirmationProgress {
@@ -80,10 +103,11 @@ interface ConfirmationProgress {
   total: number;
 }
 
-const STEP_ORDER: WizardStep[] = ['destination', 'configure', 'review'];
+const STEP_ORDER: WizardStep[] = ['destination', 'configure', 'plan', 'review'];
 const STEP_LABELS: Record<WizardStep, string> = {
   destination: 'Destination',
   configure: 'Configure',
+  plan: 'Proposal',
   review: 'Review',
 };
 
@@ -130,12 +154,15 @@ export function TaskDelegationDialog() {
   const [baseRef, setBaseRef] = useState('main');
   const [model, setModel] = useState('');
   const [createPullRequest, setCreatePullRequest] = useState(true);
+  const [dispatchStrategy, setDispatchStrategy] =
+    useState<DispatchStrategy>('separate');
   const [markInProgress, setMarkInProgress] = useState(true);
   const [maxAttempts, setMaxAttempts] = useState(3);
   const [timeoutHours, setTimeoutHours] = useState(24);
   const [allowedActions, setAllowedActions] = useState<string[]>([]);
   const [operationId, setOperationId] = useState('');
   const [previewBatch, setPreviewBatch] = useState<PreviewBatch | null>(null);
+  const [autoPlan, setAutoPlan] = useState<AutoPlan | null>(null);
   const [confirmationProgress, setConfirmationProgress] =
     useState<ConfirmationProgress | null>(null);
   const [loading, setLoading] = useState(false);
@@ -179,12 +206,14 @@ export function TaskDelegationDialog() {
     setBaseRef('main');
     setModel('');
     setCreatePullRequest(true);
+    setDispatchStrategy('separate');
     setMarkInProgress(true);
     setMaxAttempts(3);
     setTimeoutHours(24);
     setAllowedActions([]);
     setOperationId(crypto.randomUUID());
     setPreviewBatch(null);
+    setAutoPlan(null);
     setConfirmationProgress(null);
     setError(null);
     setPaperclipOptions(null);
@@ -257,14 +286,20 @@ export function TaskDelegationDialog() {
   );
   const ready = selectedTarget?.eligibility.filter(({ ready: value }) => value) ?? [];
   const blocked = selectedTarget?.eligibility.filter(({ ready: value }) => !value) ?? [];
+  const readyLockedRepositories = [...new Set(ready
+    .filter(({ repositoryLocked }) => repositoryLocked)
+    .map(({ repository: value }) => value?.toLowerCase())
+    .filter((value): value is string => Boolean(value)))];
   const needsRepository = selectedTarget?.type === 'copilot-cloud'
-    && ready.some(({ repositoryLocked }) => !repositoryLocked);
+    && ready.some(({ repositoryLocked }) => !repositoryLocked)
+    && !(dispatchStrategy === 'combined' && readyLockedRepositories.length === 1);
   const currentStepIndex = STEP_ORDER.indexOf(step);
 
   useEffect(() => {
     if (!selectedTarget) return;
     setAllowedActions(selectedTarget.allowedActions);
     setPreviewBatch(null);
+    setAutoPlan(null);
     if (
       selectedTarget.type === 'copilot-cloud'
       && selectedTarget.repositories.length === 1
@@ -320,11 +355,27 @@ export function TaskDelegationDialog() {
     setSubmitting(true);
     setError(null);
     try {
+      if (dispatchStrategy === 'auto') {
+        const response = await fetch('/api/tasks/delegation/plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            taskIds,
+            agentId: selectedTarget.id,
+            repository: needsRepository ? repository : undefined,
+          }),
+        });
+        if (!response.ok) throw new Error(await responseError(response));
+        setAutoPlan(await response.json() as AutoPlan);
+        setStep('plan');
+        return;
+      }
       const response = await fetch('/api/tasks/delegation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           taskIds,
+          strategy: dispatchStrategy,
           agentId: selectedTarget.id,
           instruction: instruction.trim() || undefined,
           operationId,
@@ -354,6 +405,53 @@ export function TaskDelegationDialog() {
     }
   };
 
+  const createAutoPreviews = async () => {
+    if (!selectedTarget || !autoPlan) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const batches: PreviewBatch[] = [];
+      for (const group of autoPlan.groups) {
+        const response = await fetch('/api/tasks/delegation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            taskIds: group.taskIds,
+            strategy: group.strategy,
+            agentId: selectedTarget.id,
+            instruction: instruction.trim() || undefined,
+            operationId: `${operationId}:${group.id}`,
+            allowedActions,
+            repository: group.repository,
+            baseRef: baseRef.trim(),
+            model: model || undefined,
+            createPullRequest,
+            maxAttempts,
+            timeoutMs: timeoutHours * 60 * 60_000,
+          }),
+        });
+        if (!response.ok) throw new Error(await responseError(response));
+        batches.push(await response.json() as PreviewBatch);
+      }
+      setPreviewBatch({
+        previews: batches.flatMap(({ previews }) => previews),
+        blocked: autoPlan.blocked,
+        readyCount: batches.reduce((count, batch) => count + batch.readyCount, 0),
+        blockedCount: autoPlan.blocked.length,
+        dispatchCount: batches.reduce(
+          (count, batch) => count + (batch.dispatchCount ?? batch.previews.length),
+          0,
+        ),
+        strategy: 'auto',
+      });
+      setStep('review');
+    } catch (previewError) {
+      setError(errorMessage(previewError));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const confirm = async () => {
     if (!previewBatch?.previews.length) return;
     setSubmitting(true);
@@ -365,7 +463,7 @@ export function TaskDelegationDialog() {
     setError(null);
     const delegationFailures: string[] = [];
     const statusFailures: string[] = [];
-    const confirmedTaskIds: string[] = [];
+    const confirmedTaskIds = new Set<string>();
     let confirmed = 0;
     for (const [index, preview] of previewBatch.previews.entries()) {
       setConfirmationProgress({
@@ -396,19 +494,21 @@ export function TaskDelegationDialog() {
           throw new Error(`Delegation ended in ${status ?? 'an unknown state'}`);
         }
         confirmed += 1;
-        confirmedTaskIds.push(preview.taskId);
-        if (markInProgress) {
-          try {
-            const statusResponse = await fetch(`/api/tasks/${preview.taskId}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'in_progress' }),
-            });
-            if (!statusResponse.ok) {
-              throw new Error(await responseError(statusResponse));
+        for (const taskId of preview.taskIds ?? [preview.taskId]) {
+          confirmedTaskIds.add(taskId);
+          if (markInProgress) {
+            try {
+              const statusResponse = await fetch(`/api/tasks/${taskId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'in_progress' }),
+              });
+              if (!statusResponse.ok) {
+                throw new Error(await responseError(statusResponse));
+              }
+            } catch (statusError) {
+              statusFailures.push(`${taskId}: ${errorMessage(statusError)}`);
             }
-          } catch (statusError) {
-            statusFailures.push(`${preview.taskId}: ${errorMessage(statusError)}`);
           }
         }
       } catch (confirmError) {
@@ -424,8 +524,8 @@ export function TaskDelegationDialog() {
     setSubmitting(false);
     setConfirmationProgress(null);
     if (delegationFailures.length || statusFailures.length) {
-      if (confirmedTaskIds.length) {
-        notifyTaskDelegationUpdated(confirmedTaskIds);
+      if (confirmedTaskIds.size) {
+        notifyTaskDelegationUpdated([...confirmedTaskIds]);
       }
       const details = [
         delegationFailures.length
@@ -440,9 +540,10 @@ export function TaskDelegationDialog() {
     }
     setOpen(false);
     requestAnimationFrame(() => {
-      notifyTaskDelegationUpdated(confirmedTaskIds);
+      notifyTaskDelegationUpdated([...confirmedTaskIds]);
       toast.success(
-        `${confirmed} task${confirmed === 1 ? '' : 's'} queued for ${selectedTarget?.name}`,
+        `${confirmedTaskIds.size} task${confirmedTaskIds.size === 1 ? '' : 's'} queued in `
+        + `${confirmed} assignment${confirmed === 1 ? '' : 's'} for ${selectedTarget?.name}`,
       );
     });
   };
@@ -486,7 +587,7 @@ export function TaskDelegationDialog() {
             </Dialog.Close>
           </header>
 
-          <ol className="grid grid-cols-3 border-b border-[var(--border-subtle)]" aria-label="Delegation steps">
+          <ol className="grid grid-cols-4 border-b border-[var(--border-subtle)]" aria-label="Delegation steps">
             {STEP_ORDER.map((item, index) => (
               <li
                 key={item}
@@ -519,6 +620,9 @@ export function TaskDelegationDialog() {
                 onSelect={(target) => {
                   setSelectedTargetId(target.id);
                   setAllowedActions(target.allowedActions);
+                  if (target.type !== 'copilot-cloud') {
+                    setDispatchStrategy('separate');
+                  }
                   setError(null);
                 }}
               />
@@ -536,6 +640,9 @@ export function TaskDelegationDialog() {
                 onModelChange={setModel}
                 createPullRequest={createPullRequest}
                 onCreatePullRequestChange={setCreatePullRequest}
+                dispatchStrategy={dispatchStrategy}
+                onDispatchStrategyChange={setDispatchStrategy}
+                taskCount={taskIds.length}
                 markInProgress={markInProgress}
                 onMarkInProgressChange={setMarkInProgress}
                 allowedActions={allowedActions}
@@ -558,6 +665,18 @@ export function TaskDelegationDialog() {
                   void loadPaperclipOptions(selectedTarget.id, companyId);
                 }}
               />
+            ) : step === 'plan' && autoPlan ? (
+              <AutoPlanStep
+                plan={autoPlan}
+                onStrategyChange={(groupId, strategy) => {
+                  setAutoPlan({
+                    ...autoPlan,
+                    groups: autoPlan.groups.map((group) => (
+                      group.id === groupId ? { ...group, strategy } : group
+                    )),
+                  });
+                }}
+              />
             ) : step === 'review' && selectedTarget && previewBatch ? (
               <ReviewStep
                 target={selectedTarget}
@@ -565,6 +684,7 @@ export function TaskDelegationDialog() {
                 baseRef={baseRef}
                 model={model}
                 createPullRequest={createPullRequest}
+                dispatchStrategy={dispatchStrategy}
                 markInProgress={markInProgress}
                 paperclipBinding={paperclipBinding}
                 paperclipOptions={paperclipOptions}
@@ -609,7 +729,13 @@ export function TaskDelegationDialog() {
                   disabled={submitting}
                   onClick={() => {
                     setError(null);
-                    setStep(step === 'review' ? 'configure' : 'destination');
+                    setStep(
+                      step === 'review' && dispatchStrategy === 'auto'
+                        ? 'plan'
+                        : step === 'review' || step === 'plan'
+                          ? 'configure'
+                          : 'destination',
+                    );
                   }}
                   className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50"
                 >
@@ -636,7 +762,22 @@ export function TaskDelegationDialog() {
                   className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-4 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--text-muted)]"
                 >
                   {submitting ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-                  Review {ready.length} delegation{ready.length === 1 ? '' : 's'}
+                  {dispatchStrategy === 'auto'
+                    ? 'Propose delegation plan'
+                    : `Review ${dispatchStrategy === 'combined' ? 'combined delegation' : (
+                      `${ready.length} delegation${ready.length === 1 ? '' : 's'}`
+                    )}`}
+                </button>
+              )}
+              {step === 'plan' && (
+                <button
+                  type="button"
+                  disabled={!autoPlan?.groups.length || submitting}
+                  onClick={() => void createAutoPreviews()}
+                  className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-4 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {submitting ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                  Review proposed sessions
                 </button>
               )}
               {step === 'review' && (
@@ -664,7 +805,11 @@ export function TaskDelegationDialog() {
                   )}
                   {confirmationProgress
                     ? `Queueing ${confirmationProgress.active} of ${confirmationProgress.total}…`
-                    : `Confirm and delegate ${previewBatch?.readyCount ?? 0}`}
+                    : dispatchStrategy === 'combined'
+                      ? `Confirm and delegate ${previewBatch?.readyCount ?? 0} tasks together`
+                      : dispatchStrategy === 'auto'
+                        ? `Confirm ${previewBatch?.dispatchCount ?? 0} proposed sessions`
+                      : `Confirm and delegate ${previewBatch?.readyCount ?? 0}`}
                 </button>
               )}
             </div>
@@ -839,6 +984,9 @@ function ConfigureStep({
   onModelChange,
   createPullRequest,
   onCreatePullRequestChange,
+  dispatchStrategy,
+  onDispatchStrategyChange,
+  taskCount,
   markInProgress,
   onMarkInProgressChange,
   allowedActions,
@@ -866,6 +1014,9 @@ function ConfigureStep({
   onModelChange: (value: string) => void;
   createPullRequest: boolean;
   onCreatePullRequestChange: (value: boolean) => void;
+  dispatchStrategy: DispatchStrategy;
+  onDispatchStrategyChange: (value: DispatchStrategy) => void;
+  taskCount: number;
   markInProgress: boolean;
   onMarkInProgressChange: (value: boolean) => void;
   allowedActions: string[];
@@ -883,8 +1034,92 @@ function ConfigureStep({
 }) {
   const ready = target.eligibility.filter(({ ready }) => ready);
   const blocked = target.eligibility.filter(({ ready }) => !ready);
+  const lockedRepositories = [...new Set(ready
+    .filter(({ repositoryLocked }) => repositoryLocked)
+    .map(({ repository: value }) => value?.toLowerCase())
+    .filter((value): value is string => Boolean(value)))];
+  const combinedBlocker = blocked.length
+    ? 'Every selected task must be ready before they can be combined.'
+    : lockedRepositories.length > 1
+      ? 'Combined work must target one repository.'
+      : null;
   return (
     <div className="space-y-5">
+      {target.type === 'copilot-cloud' && taskCount > 1 && (
+        <fieldset>
+          <legend className="text-xs font-semibold text-[var(--text-primary)]">
+            Execution strategy
+          </legend>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <label className="flex cursor-pointer gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
+              <input
+                type="radio"
+                name="dispatch-strategy"
+                value="separate"
+                checked={dispatchStrategy === 'separate'}
+                onChange={() => onDispatchStrategyChange('separate')}
+                className="mt-0.5 h-4 w-4 accent-[var(--accent-500)]"
+              />
+              <span>
+                <span className="block text-xs font-medium text-[var(--text-primary)]">
+                  Separate
+                </span>
+                <span className="mt-1 block text-[11px] leading-relaxed text-[var(--text-muted)]">
+                  Create one cloud session and assignment per ready task.
+                </span>
+              </span>
+            </label>
+            <label
+              title={combinedBlocker ?? undefined}
+              className={cn(
+                'flex gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3',
+                combinedBlocker ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+              )}
+            >
+              <input
+                type="radio"
+                name="dispatch-strategy"
+                value="combined"
+                checked={dispatchStrategy === 'combined'}
+                disabled={Boolean(combinedBlocker)}
+                onChange={() => onDispatchStrategyChange('combined')}
+                className="mt-0.5 h-4 w-4 accent-[var(--accent-500)]"
+              />
+              <span>
+                <span className="block text-xs font-medium text-[var(--text-primary)]">
+                  Combined
+                </span>
+                <span className="mt-1 block text-[11px] leading-relaxed text-[var(--text-muted)]">
+                  Send one prompt, create one cloud session, and deliver one cohesive change.
+                </span>
+                {combinedBlocker && (
+                  <span className="mt-1 block text-[11px] leading-relaxed text-amber-300">
+                    {combinedBlocker}
+                  </span>
+                )}
+              </span>
+            </label>
+            <label className="flex cursor-pointer gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
+              <input
+                type="radio"
+                name="dispatch-strategy"
+                value="auto"
+                checked={dispatchStrategy === 'auto'}
+                onChange={() => onDispatchStrategyChange('auto')}
+                className="mt-0.5 h-4 w-4 accent-[var(--accent-500)]"
+              />
+              <span>
+                <span className="block text-xs font-medium text-[var(--text-primary)]">
+                  Auto
+                </span>
+                <span className="mt-1 block text-[11px] leading-relaxed text-[var(--text-muted)]">
+                  Propose visible session groups and rationale before anything is dispatched.
+                </span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+      )}
       <section>
         <h3 className="text-xs font-semibold text-[var(--text-primary)]">Task status</h3>
         <label className="mt-2 flex min-h-12 items-center justify-between gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2">
@@ -904,7 +1139,6 @@ function ConfigureStep({
           />
         </label>
       </section>
-
       {target.type === 'paperclip' && target.paperclipBinding && (
         <section className="space-y-3">
           <div>
@@ -1261,12 +1495,108 @@ function EligibilityList({
   );
 }
 
+function AutoPlanStep({
+  plan,
+  onStrategyChange,
+}: {
+  plan: AutoPlan;
+  onStrategyChange: (
+    groupId: string,
+    strategy: AutoPlanGroup['strategy'],
+  ) => void;
+}) {
+  const sessionCount = plan.groups.reduce(
+    (count, group) => count + (
+      group.strategy === 'combined' ? 1 : group.taskIds.length
+    ),
+    0,
+  );
+  return (
+    <div className="space-y-5">
+      <section>
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+          Proposed execution plan
+        </h3>
+        <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+          {sessionCount} cloud session{sessionCount === 1 ? '' : 's'} proposed by {
+            plan.routing.provider
+          } · {plan.routing.model}. Review every group before disclosure preview.
+        </p>
+      </section>
+
+      <div className="space-y-3">
+        {plan.groups.map((group) => (
+          <section
+            key={group.id}
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-semibold text-[var(--text-primary)]">
+                  {group.strategy === 'combined'
+                    ? `1 combined session · ${group.taskIds.length} tasks`
+                    : `${group.taskIds.length} separate session${
+                      group.taskIds.length === 1 ? '' : 's'
+                    }`}
+                </h4>
+                <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                  {group.repository} · {Math.round(group.confidence * 100)}% confidence
+                </p>
+              </div>
+              {group.taskIds.length > 1 && (
+                <div className="inline-flex rounded-lg border border-[var(--border)] p-0.5">
+                  {(['combined', 'separate'] as const).map((strategy) => (
+                    <button
+                      key={strategy}
+                      type="button"
+                      aria-pressed={group.strategy === strategy}
+                      onClick={() => onStrategyChange(group.id, strategy)}
+                      className={cn(
+                        'min-h-8 rounded-md px-2.5 text-[11px] font-medium capitalize',
+                        group.strategy === strategy
+                          ? 'bg-[var(--accent-600)] text-white'
+                          : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]',
+                      )}
+                    >
+                      {strategy}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <ul className="mt-3 space-y-1.5 border-t border-[var(--border-subtle)] pt-3">
+              {group.taskIds.map((taskId) => (
+                <li key={taskId} className="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
+                  <Check size={12} className="mt-0.5 shrink-0 text-emerald-300" />
+                  {plan.taskTitles[taskId] ?? taskId}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[11px] leading-relaxed text-[var(--text-muted)]">
+              {group.rationale}
+            </p>
+          </section>
+        ))}
+      </div>
+
+      {plan.blocked.length > 0 && (
+        <EligibilityList ready={[]} blocked={plan.blocked} />
+      )}
+      <div className="flex gap-2 rounded-lg border border-[var(--accent-500)]/25 bg-[var(--accent-500)]/8 px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+        <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-[var(--accent-300)]" />
+        This is a proposal only. No cloud sessions or durable assignments exist yet.
+      </div>
+    </div>
+  );
+}
+
 function ReviewStep({
   target,
   batch,
   baseRef,
   model,
   createPullRequest,
+  dispatchStrategy,
   markInProgress,
   paperclipBinding,
   paperclipOptions,
@@ -1276,6 +1606,7 @@ function ReviewStep({
   baseRef: string;
   model: string;
   createPullRequest: boolean;
+  dispatchStrategy: DispatchStrategy;
   markInProgress: boolean;
   paperclipBinding: PaperclipProviderConfig | null;
   paperclipOptions: PaperclipOptions | null;
@@ -1294,7 +1625,9 @@ function ReviewStep({
           <div>
             <h3 className="text-sm font-medium text-[var(--text-primary)]">{target.name}</h3>
             <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-              {batch.readyCount} durable assignment{batch.readyCount === 1 ? '' : 's'} · {target.executionLocality.replaceAll('-', ' ')}
+              {batch.dispatchCount ?? batch.previews.length} durable assignment{
+                (batch.dispatchCount ?? batch.previews.length) === 1 ? '' : 's'
+              } for {batch.readyCount} task{batch.readyCount === 1 ? '' : 's'} · {target.executionLocality.replaceAll('-', ' ')}
             </p>
           </div>
         </div>
@@ -1392,15 +1725,25 @@ function ReviewStep({
           Task brief
         </h3>
         <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
-          Review the instructions and task context that will be sent to {target.name}.
+          Review the instructions and task context {
+            dispatchStrategy === 'combined'
+              ? 'for the combined cloud session'
+              : dispatchStrategy === 'auto'
+                ? 'for each proposed cloud session'
+                : `that will be sent to ${target.name}`
+          }.
         </p>
         <div className="mt-2 space-y-2">
           {batch.previews.map((preview) => {
-            const task = Array.isArray(preview.payloadPreview.tasks)
-              ? payloadRecord(preview.payloadPreview.tasks[0])
-              : null;
-            const title = payloadText(task?.title) ?? preview.taskId;
-            const description = payloadText(task?.description);
+            const tasks = Array.isArray(preview.payloadPreview.tasks)
+              ? preview.payloadPreview.tasks
+                .map(payloadRecord)
+                .filter((task): task is Record<string, unknown> => task !== null)
+              : [];
+            const taskCount = preview.taskIds?.length ?? tasks.length;
+            const title = taskCount > 1
+              ? `${taskCount} tasks combined`
+              : payloadText(tasks[0]?.title) ?? preview.taskId;
             const instruction = payloadText(preview.payloadPreview.instruction);
             const alwaysInstructions = payloadText(preview.payloadPreview.alwaysInstructions);
             return (
@@ -1427,12 +1770,29 @@ function ReviewStep({
                     </p>
                   </div>
                 )}
-                {description && (
+                {tasks.length > 0 && (
                   <div className="mt-3">
                     <p className="text-[11px] font-medium text-[var(--text-muted)]">Task context</p>
-                    <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
-                      {description}
-                    </p>
+                    <div className="mt-1 space-y-2">
+                      {tasks.map((task, index) => {
+                        const taskTitle = payloadText(task.title) ?? `Task ${index + 1}`;
+                        const description = payloadText(task.description);
+                        return (
+                          <div key={payloadText(task.id) ?? `${preview.dispatchId}-${index}`}>
+                            {taskCount > 1 && (
+                              <p className="text-xs font-medium text-[var(--text-secondary)]">
+                                {taskTitle}
+                              </p>
+                            )}
+                            {description && (
+                              <p className="whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
+                                {description}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
                 <details className="mt-3 border-t border-[var(--border-subtle)] pt-2">
@@ -1454,7 +1814,13 @@ function ReviewStep({
       )}
       <div className="flex gap-2 rounded-lg border border-[var(--accent-500)]/25 bg-[var(--accent-500)]/8 px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)]">
         <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-[var(--accent-300)]" />
-        Nothing has been sent to the destination. Confirming creates one durable assignment per ready Mission Control task.
+        Nothing has been sent to the destination. Confirming creates {
+          dispatchStrategy === 'combined'
+            ? 'one durable assignment shared by every selected Mission Control task.'
+            : dispatchStrategy === 'auto'
+              ? 'the durable assignments shown in the proposed execution plan.'
+            : 'one durable assignment per ready Mission Control task.'
+        }
       </div>
     </div>
   );

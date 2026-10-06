@@ -14,6 +14,7 @@ import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-
 import {
   getAssignedFilterCondition,
   getDateBounds,
+  getDelegatedFilterCondition,
   getInboxFilterCondition,
   getQuickFilterCondition,
   withCondition,
@@ -157,12 +158,14 @@ export async function buildCanonicalTaskFilterConditions(
     ? await getAssignedFilterCondition()
     : spec.quickFilter === 'inbox'
       ? await getInboxFilterCondition()
-      : getQuickFilterCondition(
-          spec.quickFilter,
-          spec.today,
-          spec.weekFromNow,
-          myDayTaskIds,
-        );
+      : spec.quickFilter === 'delegated'
+        ? getDelegatedFilterCondition()
+        : getQuickFilterCondition(
+            spec.quickFilter,
+            spec.today,
+            spec.weekFromNow,
+            myDayTaskIds,
+          );
 
   return {
     conditions,

@@ -741,7 +741,9 @@ export function createPostgresGraphReportingRepository(
           startedAt: hubProjects.startedAt,
           targetDate: hubProjects.targetDate,
         }).from(hubProjects).where(eq(hubProjects.id, input.projectId)).limit(1);
-        if (!project) return { scope: null, candidateEvents: [], tasks: [] };
+        if (!project) {
+          return { scope: null, candidateEvents: [], currentScopeTaskIds: [], tasks: [] };
+        }
         let scope: 'project' | 'phase' = 'project';
         let scopeId = project.id;
         let scopeName = project.name;
@@ -757,7 +759,9 @@ export function createPostgresGraphReportingRepository(
             eq(projectPhases.id, input.phaseId),
             eq(projectPhases.projectId, input.projectId),
           )).limit(1);
-          if (!phase) return { scope: null, candidateEvents: [], tasks: [] };
+          if (!phase) {
+            return { scope: null, candidateEvents: [], currentScopeTaskIds: [], tasks: [] };
+          }
           scope = 'phase';
           scopeId = phase.id;
           scopeName = phase.name;
@@ -779,11 +783,21 @@ export function createPostgresGraphReportingRepository(
         const scopedCandidates = candidateRows.filter((row) => (
           row.eventType !== 'baseline' || baselineHasScope(row.newValue, scope, scopeId)
         ));
-        const taskIds = [...new Set(scopedCandidates.map(({ taskId }) => taskId))];
+        const currentScopeRows = scope === 'project'
+          ? await db.select({ taskId: taskProjects.taskId }).from(taskProjects)
+              .where(eq(taskProjects.projectId, scopeId))
+          : await db.select({ taskId: projectPhaseItems.taskId }).from(projectPhaseItems)
+              .where(eq(projectPhaseItems.phaseId, scopeId));
+        const currentScopeTaskIds = currentScopeRows.map(({ taskId }) => taskId);
+        const taskIds = [...new Set([
+          ...scopedCandidates.map(({ taskId }) => taskId),
+          ...currentScopeTaskIds,
+        ])];
         if (!taskIds.length) {
           return {
             scope: { projectId: project.id, scope, scopeId, scopeName, scheduleStart, scheduleEnd },
             candidateEvents: [],
+            currentScopeTaskIds: [],
             tasks: [],
           };
         }
@@ -809,6 +823,9 @@ export function createPostgresGraphReportingRepository(
           db.select({
             id: tasks.id,
             title: tasks.title,
+            status: tasks.status,
+            effort: tasks.effort,
+            localDisposition: tasks.localDisposition,
             createdAt: tasks.createdAt,
             completedAt: tasks.completedAt,
             deletedAt: tasks.deletedAt,
@@ -818,6 +835,7 @@ export function createPostgresGraphReportingRepository(
         return {
           scope: { projectId: project.id, scope, scopeId, scopeName, scheduleStart, scheduleEnd },
           candidateEvents: eventRows.map(normalizeHistoryEvent),
+          currentScopeTaskIds,
           tasks: taskRows,
         };
       },

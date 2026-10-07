@@ -44,6 +44,7 @@ export interface BuildBurnReportInput {
   scheduleEnd: string | null;
   events: TaskHistoryEvent[];
   tasks: BurnReportTask[];
+  currentScopeTaskIds?: string[];
   today?: string;
 }
 
@@ -120,9 +121,68 @@ function reconstructTaskLifecycles(
   taskRows: BurnReportTask[],
   scope: BurnReportScope,
   scopeId: string,
+  currentScopeTaskIds: string[] = [],
 ): TaskHistoryEvent[] {
   const taskMap = new Map(taskRows.map((task) => [task.id, task]));
-  const orderedEvents = [...events].sort((left, right) => (
+  const currentScope = new Set(currentScopeTaskIds);
+  const taskIdsWithScopeEvidence = new Set(
+    events.filter((event) => (
+      baselineContainsScope(event, scope, scopeId)
+      || (
+        event.eventType === (scope === 'project' ? 'project_added' : 'phase_added')
+        && (scope === 'project' ? event.projectId : event.phaseId) === scopeId
+      )
+    )).map((event) => event.taskId),
+  );
+  const reconciledEvents = events.map((event) => {
+    if (
+      event.eventType !== 'baseline'
+      || !currentScope.has(event.taskId)
+      || taskIdsWithScopeEvidence.has(event.taskId)
+    ) {
+      return event;
+    }
+    const baseline = parseBaseline(event.newValue);
+    return baseline
+      ? { ...event, newValue: JSON.stringify(addScopeToBaseline(baseline, scope, scopeId)) }
+      : event;
+  });
+  const taskIdsWithBaseline = new Set(
+    reconciledEvents
+      .filter((event) => event.eventType === 'baseline')
+      .map((event) => event.taskId),
+  );
+  let syntheticId = -1_000_000_000;
+  for (const taskId of currentScope) {
+    if (taskIdsWithScopeEvidence.has(taskId) || taskIdsWithBaseline.has(taskId)) continue;
+    const task = taskMap.get(taskId);
+    const occurredAt = eventInstant(task?.createdAt);
+    if (!task || !occurredAt) continue;
+    reconciledEvents.push({
+      id: syntheticId--,
+      taskId,
+      eventType: 'baseline',
+      fieldName: null,
+      previousValue: null,
+      newValue: JSON.stringify(addScopeToBaseline({
+        status: task.status ?? 'todo',
+        effort: task.effort ?? null,
+        localDisposition: task.localDisposition ?? 'active',
+        projectIds: [],
+        phaseIds: [],
+      }, scope, scopeId)),
+      projectId: null,
+      phaseId: null,
+      occurredAt,
+      recordedAt: occurredAt,
+      provenance: 'current_scope_reconciliation',
+      provenanceRef: null,
+      metadata: {
+        reason: 'Current scope membership was missing from task history',
+      },
+    });
+  }
+  const orderedEvents = reconciledEvents.sort((left, right) => (
     left.occurredAt.localeCompare(right.occurredAt) || left.id - right.id
   ));
   const firstBaselineIds = new Map<string, number>();
@@ -348,6 +408,7 @@ export function buildBurnReport(input: BuildBurnReportInput): BurnReport {
     input.tasks,
     input.scope,
     input.scopeId,
+    input.currentScopeTaskIds,
   ).sort((left, right) => (
     left.occurredAt.localeCompare(right.occurredAt) || left.id - right.id
   ));
@@ -560,5 +621,6 @@ export async function getBurnReport(
     ...rows.scope,
     events: rows.candidateEvents,
     tasks: rows.tasks,
+    currentScopeTaskIds: rows.currentScopeTaskIds,
   });
 }

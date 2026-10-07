@@ -353,6 +353,7 @@ const graphReporting: GraphReportingPersistence = {
         scheduleEnd: null,
       },
       candidateEvents: [],
+      currentScopeTaskIds: [],
       tasks: [],
     }),
   },

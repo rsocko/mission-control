@@ -1,12 +1,15 @@
 'use client';
 
 import Image from 'next/image';
-import { Columns3, Maximize2, Minimize2, X } from 'lucide-react';
+import { Columns3, Link2, Maximize2, Minimize2, X } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
+import { buildTaskDeepLinkUrl } from '@/lib/utils/deep-links';
 import type { TaskDetailMode } from './task-detail-types';
 
 export interface TaskDetailHeaderProps {
+  taskId: string;
   mode: TaskDetailMode;
   /** Connector icon path, or null when the connector has no icon. */
   iconSrc: string | null;
@@ -35,6 +38,7 @@ export interface TaskDetailHeaderProps {
 
 /** Task identity, mode affordances, and inline title editing. */
 export function TaskDetailHeader({
+  taskId,
   mode,
   iconSrc,
   connectorType,
@@ -55,6 +59,15 @@ export function TaskDetailHeader({
   onClose,
   onModeChange,
 }: TaskDetailHeaderProps) {
+  const copyTaskLink = async () => {
+    try {
+      await navigator.clipboard.writeText(buildTaskDeepLinkUrl(window.location.origin, taskId));
+      toast.success('Task link copied');
+    } catch {
+      toast.error('Could not copy the task link. Check browser clipboard permissions and try again.');
+    }
+  };
+
   return (
     <header className={cn(
       'border-b border-[var(--border-subtle)] bg-gradient-to-b from-[var(--surface-2)]/45 to-transparent',
@@ -71,6 +84,16 @@ export function TaskDetailHeader({
           </span>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
+          <Tooltip content="Copy task link">
+            <button
+              type="button"
+              onClick={() => { void copyTaskLink(); }}
+              className="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              aria-label="Copy task link"
+            >
+              <Link2 size={15} aria-hidden="true" />
+            </button>
+          </Tooltip>
           {onModeChange && mode !== 'mobile' && mode !== 'panel' && (
             <Tooltip content="Pin to side panel">
               <button

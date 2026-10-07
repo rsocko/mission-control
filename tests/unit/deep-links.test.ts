@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildTaskDeepLinkPath,
+  buildTaskDeepLinkUrl,
   getDeepLinkInfo,
   getLinkedResourceDeepLinkInfo,
 } from '@/lib/utils/deep-links';
+
+describe('Mission Control task deep links', () => {
+  it('builds canonical paths and absolute share URLs', () => {
+    expect(buildTaskDeepLinkPath('task/with spaces')).toBe('/tasks/task%2Fwith%20spaces');
+    expect(buildTaskDeepLinkUrl('https://mc.example', 'task-1')).toBe(
+      'https://mc.example/tasks/task-1',
+    );
+  });
+});
 
 describe('linked resource deep links', () => {
   it('maps an Outlook linked resource to the Outlook action', () => {

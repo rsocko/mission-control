@@ -97,6 +97,21 @@ export interface PaperclipApproval extends Record<string, unknown> {
   status: string;
 }
 
+export interface PaperclipAttentionItem extends Record<string, unknown> {
+  id: string;
+  companyId: string;
+  sourceKind: string;
+  subject?: Record<string, unknown> | null;
+  relatedIssue?: Record<string, unknown> | null;
+  detail?: Record<string, unknown> | null;
+  decisionVerbs?: Array<Record<string, unknown>>;
+  inlineResolvable?: boolean;
+  severity?: string;
+  activityAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface PaperclipDispatchInput {
   dispatchId: string;
   payload: Record<string, unknown>;
@@ -363,6 +378,75 @@ export async function listPaperclipApprovals(
     ...approval,
     companyId,
   }));
+}
+
+export async function listPaperclipAttention(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  companyId: string,
+): Promise<PaperclipAttentionItem[]> {
+  if (!companyId.trim()) {
+    throw new ExternalAgentError(
+      'Paperclip company is required to list attention',
+      'TRANSPORT_INVALID',
+      422,
+    );
+  }
+  const items: PaperclipAttentionItem[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < 100; page += 1) {
+    const query = new URLSearchParams({ limit: '200' });
+    if (cursor) query.set('cursor', cursor);
+    const response = await request<unknown>(
+      { ...connection, config: { companyId, assigneeAgentId: '' } },
+      `/companies/${encodeURIComponent(companyId)}/attention?${query.toString()}`,
+    );
+    if (!response || typeof response !== 'object' || Array.isArray(response)) {
+      throw new ExternalAgentError(
+        'Paperclip returned an invalid attention response',
+        'PROVIDER_RESPONSE_INVALID',
+        502,
+      );
+    }
+    const feed = response as Record<string, unknown>;
+    if (feed.companyId !== undefined && feed.companyId !== companyId) {
+      throw new ExternalAgentError(
+        'Paperclip returned attention outside the configured company',
+        'PROVIDER_SCOPE_MISMATCH',
+        502,
+      );
+    }
+    const pageItems = arrayResponse<PaperclipAttentionItem>(feed.items, 'attention');
+    if (pageItems.some((item) =>
+      item.companyId !== companyId
+      || typeof item.sourceKind !== 'string'
+      || !item.sourceKind.trim())) {
+      throw new ExternalAgentError(
+        'Paperclip returned attention outside the configured company or with invalid state',
+        'PROVIDER_SCOPE_MISMATCH',
+        502,
+      );
+    }
+    items.push(...pageItems);
+    const nextCursor = typeof feed.nextCursor === 'string' && feed.nextCursor.trim()
+      ? feed.nextCursor.trim()
+      : null;
+    if (!nextCursor) return items;
+    if (seenCursors.has(nextCursor)) {
+      throw new ExternalAgentError(
+        'Paperclip repeated an attention cursor',
+        'PROVIDER_RESPONSE_INVALID',
+        502,
+      );
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  throw new ExternalAgentError(
+    'Paperclip attention exceeded the pagination limit',
+    'PROVIDER_RESPONSE_INVALID',
+    502,
+  );
 }
 
 export async function getPaperclipCompanyName(

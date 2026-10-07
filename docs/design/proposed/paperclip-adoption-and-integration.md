@@ -320,6 +320,16 @@ Paperclip remains authoritative for Paperclip approvals. MC mirrors pending
 approvals as actionable notifications with the company, requester, risk,
 related MC task/Paperclip issue, expiry, and deep link.
 
+MC also polls each configured company's authoritative attention feed and
+mirrors active decisions, interactions, reviews, recovery actions, and other
+attention items. Approval rows in that feed are excluded because the dedicated
+approval collection remains authoritative for approval detail and lifecycle.
+Attention pagination must complete successfully before MC reconciles missing
+items as resolved. Paperclip interactions omitted from the company feed, such
+as agent-addressed issue-thread cards, require issue synchronization and are
+tracked separately rather than forcing unbounded issue enumeration into the
+notification-only connector.
+
 The first version opens Paperclip to decide. A later version may approve or
 reject through MC only after adding narrowly scoped API authority, explicit
 confirmation, concurrency protection, and authoritative response handling.

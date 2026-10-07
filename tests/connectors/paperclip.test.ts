@@ -11,7 +11,10 @@ vi.mock('@/lib/external-agents/persistence', () => ({
 }));
 
 import { PaperclipConnector } from '@/lib/connectors/paperclip';
-import { listPaperclipApprovals } from '@/lib/external-agents/paperclip';
+import {
+  listPaperclipApprovals,
+  listPaperclipAttention,
+} from '@/lib/external-agents/paperclip';
 import type { ConnectorConfig } from '@/types';
 
 function connectorConfig(): ConnectorConfig {
@@ -82,6 +85,9 @@ describe('Paperclip approvals connector', () => {
       if (path === '/api/companies/company-1/approvals') {
         return Response.json(approvals);
       }
+      if (path === '/api/companies/company-1/attention') {
+        return Response.json({ companyId: 'company-1', items: [] });
+      }
       if (path === '/api/approvals/approval-1/issues') {
         return Response.json([{
           id: 'issue-1',
@@ -120,13 +126,13 @@ describe('Paperclip approvals connector', () => {
     expect(notifications[0]?.body).toContain('Summary: Approve this small research budget');
     expect(replay[0]?.id).toBe(notifications[0]?.id);
     expect(await connector.getActiveAlertSourceIds()).toEqual([notifications[0]?.id]);
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(6);
     expect(JSON.stringify(notifications)).not.toContain('paperclip-token');
 
     approvals[0]!.status = 'approved';
     expect(await connector.fetchNotifications()).toEqual([]);
     expect(await connector.getActiveAlertSourceIds()).toEqual([]);
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenCalledTimes(8);
     await connector.dispose();
   });
 
@@ -164,6 +170,15 @@ describe('Paperclip approvals connector', () => {
           status: 'pending',
           type: 'deploy_change',
         }]);
+      }
+      if (
+        path === '/api/companies/company-1/attention'
+        || path === '/api/companies/company-2/attention'
+      ) {
+        return Response.json({
+          companyId: path.includes('company-1') ? 'company-1' : 'company-2',
+          items: [],
+        });
       }
       if (path === '/api/approvals/approval-2/issues') {
         return Response.json([]);
@@ -206,7 +221,12 @@ describe('Paperclip approvals connector', () => {
 
   it('warns before the Board credential expires without hiding approval state', async () => {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json([])));
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      return path.endsWith('/attention')
+        ? Response.json({ companyId: 'company-1', items: [] })
+        : Response.json([]);
+    }));
     const connector = new PaperclipConnector();
     await connector.initialize({
       ...connectorConfig(),
@@ -248,6 +268,64 @@ describe('Paperclip approvals connector', () => {
     });
   });
 
+  it('does not accept attention returned for a different company', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      companyId: 'company-1',
+      items: [{
+        id: 'attention-1',
+        companyId: 'another-company',
+        sourceKind: 'review',
+      }],
+    })));
+    await expect(listPaperclipAttention({
+      endpoint: 'https://paperclip.example.test',
+      credential: 'paperclip-token',
+    }, 'company-1')).rejects.toMatchObject({
+      code: 'PROVIDER_SCOPE_MISMATCH',
+      status: 502,
+    });
+  });
+
+  it('paginates the authoritative attention feed', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      const cursor = url.searchParams.get('cursor');
+      return cursor
+        ? Response.json({
+          companyId: 'company-1',
+          nextCursor: null,
+          items: [{
+            id: 'attention-2',
+            companyId: 'company-1',
+            sourceKind: 'review',
+          }],
+        })
+        : Response.json({
+          companyId: 'company-1',
+          nextCursor: 'page-2',
+          items: [{
+            id: 'attention-1',
+            companyId: 'company-1',
+            sourceKind: 'issue_thread_interaction',
+          }],
+        });
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    await expect(listPaperclipAttention({
+      endpoint: 'https://paperclip.example.test',
+      credential: 'paperclip-token',
+    }, 'company-1')).resolves.toEqual([
+      expect.objectContaining({ id: 'attention-1' }),
+      expect.objectContaining({ id: 'attention-2' }),
+    ]);
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      'https://paperclip.example.test/api/companies/company-1/attention?limit=200&cursor=page-2',
+      expect.any(Object),
+    );
+  });
+
   it('keeps listed approvals actionable when linked issue details are inaccessible', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const path = new URL(String(input)).pathname;
@@ -259,6 +337,9 @@ describe('Paperclip approvals connector', () => {
           type: 'approve_budget',
           issueId: 'issue-1',
         }]);
+      }
+      if (path === '/api/companies/company-1/attention') {
+        return Response.json({ companyId: 'company-1', items: [] });
       }
       if (path === '/api/approvals/approval-1/issues') {
         return Response.json({ error: 'not found' }, { status: 404 });
@@ -291,6 +372,86 @@ describe('Paperclip approvals connector', () => {
       code: 'PROVIDER_FORBIDDEN',
       status: 403,
     });
+    await connector.dispose();
+  });
+
+  it('projects attention without duplicating approvals and reconciles disappeared items', async () => {
+    const attentionItems = [
+      {
+        id: 'interaction:interaction-1',
+        companyId: 'company-1',
+        sourceKind: 'issue_thread_interaction',
+        subject: {
+          kind: 'interaction',
+          id: 'interaction-1',
+          title: 'Notification integration test',
+          href: '/issues/PAP-42',
+        },
+        relatedIssue: {
+          kind: 'issue',
+          id: 'issue-1',
+          identifier: 'PAP-42',
+        },
+        detail: {
+          kind: 'confirmation',
+          promptExcerpt: 'Did this notification appear?',
+        },
+        decisionVerbs: [
+          { id: 'accept', label: 'Received notification' },
+          { id: 'reject', label: 'Not received' },
+        ],
+        inlineResolvable: true,
+        severity: 'high',
+        whyNow: 'A teammate needs your confirmation.',
+        activityAt: '2026-10-07T04:24:30.530Z',
+        createdAt: '2026-10-07T04:24:30.530Z',
+      },
+      {
+        id: 'approval:approval-1',
+        companyId: 'company-1',
+        sourceKind: 'approval',
+        subject: { title: 'Duplicate approval feed row' },
+        severity: 'high',
+        createdAt: '2026-10-07T04:24:21.937Z',
+      },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/companies/company-1/approvals') {
+        return Response.json([]);
+      }
+      if (path === '/api/companies/company-1/attention') {
+        return Response.json({ companyId: 'company-1', items: attentionItems });
+      }
+      throw new Error(`Unexpected Paperclip request: ${path}`);
+    }));
+    const connector = new PaperclipConnector();
+    await connector.initialize(connectorConfig());
+
+    await expect(connector.fetchNotifications()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'paperclip-attention:interaction:interaction-1',
+        sourceId: 'attention:interaction:interaction-1',
+        templateKey: 'paperclip_attention',
+        title: 'Notification integration test',
+        level: 'action_needed',
+        isActionable: true,
+        actionUrl: 'https://paperclip.example.test/issues/PAP-42',
+        relatedTaskId: 'mc-task-1',
+        metadata: expect.objectContaining({
+          sourceKind: 'issue_thread_interaction',
+          detailKind: 'confirmation',
+          identifier: 'PAP-42',
+        }),
+      }),
+    ]);
+    expect(await connector.getActiveAlertSourceIds()).toEqual([
+      'paperclip-attention:interaction:interaction-1',
+    ]);
+
+    attentionItems.splice(0);
+    await expect(connector.fetchNotifications()).resolves.toEqual([]);
+    await expect(connector.getActiveAlertSourceIds()).resolves.toEqual([]);
     await connector.dispose();
   });
 

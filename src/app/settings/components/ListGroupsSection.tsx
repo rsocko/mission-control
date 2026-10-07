@@ -345,20 +345,27 @@ function ListGroupsSection({
             </button>
           )}
         </label>
-        <label className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3 text-xs text-[var(--text-muted)]">
+        <div className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3 text-xs text-[var(--text-muted)]">
           Sort by
-          <select
+          <Select
             value={listSort}
-            onChange={(event) => setListSort(event.target.value as SourceListSort)}
-            className="bg-transparent text-sm font-medium text-[var(--text-primary)] outline-none"
-            aria-label="Sort lists by"
+            onValueChange={(value) => setListSort(value as SourceListSort)}
           >
-            <option value="name">Name</option>
-            <option value="connector">Connector</option>
-            <option value="type">Type</option>
-            <option value="manual">Manual order</option>
-          </select>
-        </label>
+            <SelectTrigger
+              variant="inline"
+              className="text-sm text-[var(--text-primary)]"
+              aria-label="Sort lists by"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="connector">Connector</SelectItem>
+              <SelectItem value="type">Type</SelectItem>
+              <SelectItem value="manual">Manual order</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <p className="shrink-0 text-xs tabular-nums text-[var(--text-muted)]" aria-live="polite">
           {filteringLists
             ? `${sortedSourceLists.length} of ${sourceListsWithSelection.length} lists`

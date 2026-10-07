@@ -294,19 +294,18 @@ describe('GitHub connector settings', () => {
 
     expect(visibleNames()).toEqual(['Alpha', 'Beta', 'Gamma']);
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Sort lists by' }), {
-      target: { value: 'connector' },
-    });
+    const selectSort = (name: string) => {
+      fireEvent.click(screen.getByRole('combobox', { name: 'Sort lists by' }));
+      fireEvent.click(screen.getByRole('option', { name }));
+    };
+
+    selectSort('Connector');
     expect(visibleNames()).toEqual(['Beta', 'Alpha', 'Gamma']);
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Sort lists by' }), {
-      target: { value: 'type' },
-    });
+    selectSort('Type');
     expect(visibleNames()).toEqual(['Gamma', 'Beta', 'Alpha']);
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Sort lists by' }), {
-      target: { value: 'manual' },
-    });
+    selectSort('Manual order');
     expect(visibleNames()).toEqual(['Beta', 'Gamma', 'Alpha']);
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search lists' }), {

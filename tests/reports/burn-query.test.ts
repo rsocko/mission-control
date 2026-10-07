@@ -34,9 +34,20 @@ function createDatabase() {
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'todo',
+      effort INTEGER,
+      local_disposition TEXT NOT NULL DEFAULT 'active',
       created_at TEXT NOT NULL,
       completed_at TEXT,
       deleted_at TEXT
+    );
+    CREATE TABLE task_projects (
+      task_id TEXT NOT NULL,
+      project_id TEXT NOT NULL
+    );
+    CREATE TABLE project_phase_items (
+      phase_id TEXT NOT NULL,
+      task_id TEXT NOT NULL
     );
     CREATE TABLE task_history_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -270,6 +281,57 @@ describe('getBurnReport', () => {
     expect(report?.points.find((point) => point.date === '2025-03-25')).toMatchObject({
       total: 1,
       completed: 0,
+    });
+  });
+
+  it('includes current project members when their membership history is missing', async () => {
+    const { sqlite, repository } = createDatabase();
+    sqlite.exec(`
+      INSERT INTO hub_projects (id, name, started_at, target_date) VALUES (
+        'project-1', 'Reporting', '2026-10-01', NULL
+      );
+      INSERT INTO tasks (
+        id, title, status, effort, local_disposition, created_at, completed_at
+      ) VALUES
+        ('task-open', 'Recently created', 'todo', 3, 'active', '2026-10-05T08:00:00.000Z', NULL),
+        ('task-done', 'Recently completed', 'done', 2, 'active', '2026-10-05T09:00:00.000Z', '2026-10-06T10:00:00.000Z');
+      INSERT INTO task_projects (task_id, project_id) VALUES
+        ('task-open', 'project-1'),
+        ('task-done', 'project-1');
+    `);
+    for (const taskId of ['task-open', 'task-done']) {
+      insertEvent(sqlite, {
+        taskId,
+        eventType: 'baseline',
+        occurredAt: taskId === 'task-done'
+          ? '2026-10-06T12:00:00.000Z'
+          : '2026-10-05T12:00:00.000Z',
+        newValue: JSON.stringify({
+          status: taskId === 'task-done' ? 'done' : 'todo',
+          effort: taskId === 'task-done' ? 2 : 3,
+          localDisposition: 'active',
+          projectIds: [],
+          phaseIds: [],
+        }),
+      });
+    }
+
+    const report = await getBurnReport({
+      projectId: 'project-1',
+      mode: 'count',
+      startDate: '2026-10-01',
+      endDate: '2026-10-06',
+      today: '2026-10-06',
+    }, repository);
+
+    expect(report?.points.at(-1)).toMatchObject({
+      total: 2,
+      completed: 1,
+      remaining: 1,
+    });
+    expect(report?.effort).toMatchObject({
+      estimatedTasks: 2,
+      totalTasks: 2,
     });
   });
 });

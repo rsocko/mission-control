@@ -7,6 +7,7 @@ import {
   ChevronRight, ChevronDown, Trash2, Loader2,
   Plus, Eye, EyeOff, FolderTree, GripVertical,
   Save, PenLine, X, Check, ChevronsDownUp, ChevronsUpDown,
+  Search,
 } from 'lucide-react';
 import {
   Select,
@@ -39,6 +40,8 @@ import { ContextAppearancePicker } from '@/components/context-theme/ContextAppea
 import type { ContextAppearance } from '@/types';
 
 import { IconPickerButton as EmojiPickerButton, IconRenderer } from '@/components/ui/icon-picker';
+
+type SourceListSort = 'name' | 'connector' | 'type' | 'manual';
 
 function ListGroupsSection({
   connectors,
@@ -74,6 +77,8 @@ function ListGroupsSection({
   const [localGroupOrder, setLocalGroupOrder] = useState<string[]>([]);
   const [localUngroupedOrder, setLocalUngroupedOrder] = useState<string[]>([]);
   const [collapseAllVersion, setCollapseAllVersion] = useState<{ version: number; collapsed: boolean }>({ version: 1, collapsed: true });
+  const [listQuery, setListQuery] = useState('');
+  const [listSort, setListSort] = useState<SourceListSort>('name');
 
   const connectorById = new Map(connectors.map((connector) => [connector.id, connector]));
   const connectorNameById = new Map(connectors.map((connector) => [connector.id, getConnectorDisplayName(connector)]));
@@ -95,28 +100,66 @@ function ListGroupsSection({
     ? localGroupOrder.map((id) => sortedGroups.find((g) => g.id === id)).filter(Boolean) as ListGroup[]
     : sortedGroups;
 
-  const sortedSourceLists = [...sourceListsWithSelection].sort((a, b) => {
-    const connectorNameCompare = (connectorNameById.get(a.connectorInstanceId) || a.connectorInstanceId)
-      .localeCompare(connectorNameById.get(b.connectorInstanceId) || b.connectorInstanceId);
+  const normalizedListQuery = listQuery.trim().toLocaleLowerCase();
 
-    return connectorNameCompare !== 0
-      ? connectorNameCompare
-      : a.name.localeCompare(b.name);
-  });
+  function matchesListQuery(sourceList: SourceList) {
+    if (!normalizedListQuery) return true;
+    const connectorName = connectorNameById.get(sourceList.connectorInstanceId) || sourceList.connectorInstanceId;
+    return [sourceList.name, sourceList.type, connectorName, sourceList.sourceId]
+      .some((value) => value.toLocaleLowerCase().includes(normalizedListQuery));
+  }
+
+  function compareSourceLists(a: SourceList, b: SourceList) {
+    const connectorA = connectorNameById.get(a.connectorInstanceId) || a.connectorInstanceId;
+    const connectorB = connectorNameById.get(b.connectorInstanceId) || b.connectorInstanceId;
+    const primary = listSort === 'connector'
+      ? connectorA.localeCompare(connectorB, undefined, { numeric: true, sensitivity: 'base' })
+      : listSort === 'type'
+        ? a.type.localeCompare(b.type, undefined, { numeric: true, sensitivity: 'base' })
+        : listSort === 'manual'
+          ? (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
+          : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+
+    return primary
+      || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+      || connectorA.localeCompare(connectorB, undefined, { numeric: true, sensitivity: 'base' })
+      || a.id.localeCompare(b.id);
+  }
+
+  const sortedSourceLists = sourceListsWithSelection
+    .filter(matchesListQuery)
+    .sort(compareSourceLists);
 
   // Ungrouped lists sorted by sortOrder then name
   const ungroupedVisible = sourceListsWithSelection
-    .filter((sl) => !sl.groupId && !sl.hidden)
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
+    .filter((sourceList) => !sourceList.groupId && !sourceList.hidden && matchesListQuery(sourceList))
+    .sort(compareSourceLists);
 
   // Keep local ungrouped order in sync
   useEffect(() => {
-    setLocalUngroupedOrder(ungroupedVisible.map((sl) => sl.id));
+    setLocalUngroupedOrder(
+      sourceListsWithSelection
+        .filter((sourceList) => !sourceList.groupId && !sourceList.hidden)
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name))
+        .map((sourceList) => sourceList.id),
+    );
   }, [sourceLists, connectors]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const orderedUngrouped = localUngroupedOrder.length > 0
+  const manuallyOrderedUngrouped = localUngroupedOrder.length > 0
     ? localUngroupedOrder.map((id) => ungroupedVisible.find((sl) => sl.id === id)).filter(Boolean) as SourceList[]
     : ungroupedVisible;
+  const orderedUngrouped = listSort === 'manual' ? manuallyOrderedUngrouped : ungroupedVisible;
+  const hiddenSourceLists = sourceListsWithSelection
+    .filter((sourceList) => sourceList.hidden && matchesListQuery(sourceList))
+    .sort(compareSourceLists);
+  const visibleGroups = orderedGroups.filter((group) => {
+    if (!normalizedListQuery) return true;
+    if (group.name.toLocaleLowerCase().includes(normalizedListQuery)) return true;
+    return sourceListsWithSelection.some((sourceList) =>
+      sourceList.groupId === group.id && matchesListQuery(sourceList),
+    );
+  });
+  const filteringLists = normalizedListQuery.length > 0;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -124,6 +167,7 @@ function ListGroupsSection({
   );
 
   async function handleGroupDragEnd(event: DragEndEvent) {
+    if (filteringLists) return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
@@ -279,6 +323,56 @@ function ListGroupsSection({
         </div>
       </div>
 
+      <div className="flex flex-col gap-3 border-y border-[var(--border-subtle)] py-3 sm:flex-row sm:items-center">
+        <label className="input-glow flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3">
+          <Search size={15} className="shrink-0 text-[var(--text-muted)]" />
+          <span className="sr-only">Search lists</span>
+          <input
+            type="search"
+            value={listQuery}
+            onChange={(event) => setListQuery(event.target.value)}
+            placeholder="Search by list, connector, or type"
+            className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+          />
+          {listQuery && (
+            <button
+              type="button"
+              onClick={() => setListQuery('')}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color,color] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              aria-label="Clear list search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </label>
+        <div className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3 text-xs text-[var(--text-muted)]">
+          Sort by
+          <Select
+            value={listSort}
+            onValueChange={(value) => setListSort(value as SourceListSort)}
+          >
+            <SelectTrigger
+              variant="inline"
+              className="text-sm text-[var(--text-primary)]"
+              aria-label="Sort lists by"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="connector">Connector</SelectItem>
+              <SelectItem value="type">Type</SelectItem>
+              <SelectItem value="manual">Manual order</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="shrink-0 text-xs tabular-nums text-[var(--text-muted)]" aria-live="polite">
+          {filteringLists
+            ? `${sortedSourceLists.length} of ${sourceListsWithSelection.length} lists`
+            : `${sourceListsWithSelection.length} lists`}
+        </p>
+      </div>
+
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
           <Loader2 size={16} className="animate-spin" />
@@ -287,14 +381,14 @@ function ListGroupsSection({
       ) : (
         <>
           {/* Three-column layout: Groups | Ungrouped | All Lists */}
-          <div className="grid gap-6 xl:grid-cols-3 lg:grid-cols-2 [&>div]:min-w-0">
+          <div className="grid gap-6 xl:grid-cols-3 lg:grid-cols-2 [&>section]:min-w-0">
             {/* Column 1: Groups (collapsible, draggable) */}
-            <div className="space-y-3">
+            <section className="space-y-3" aria-labelledby="list-groups-heading">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                  Groups ({orderedGroups.length})
+                <h3 id="list-groups-heading" className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                  Groups ({filteringLists ? `${visibleGroups.length} of ${orderedGroups.length}` : orderedGroups.length})
                 </h3>
-                {orderedGroups.length > 0 && (
+                {orderedGroups.length > 0 && !filteringLists && (
                   <button
                     type="button"
                     onClick={() => setCollapseAllVersion((prev) => ({ version: prev.version + 1, collapsed: !prev.collapsed }))}
@@ -306,43 +400,58 @@ function ListGroupsSection({
                   </button>
                 )}
               </div>
-              {orderedGroups.length > 0 ? (
+              {visibleGroups.length > 0 ? (
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
                   <SortableContext items={localGroupOrder} strategy={verticalListSortingStrategy}>
                     <div className="space-y-3">
-                      {orderedGroups.map((group) => (
-                        <SortableGroupCard
-                          key={group.id}
-                          group={group}
-                          assignedLists={sourceListsWithSelection.filter((sourceList) => sourceList.groupId === group.id)}
-                          connectorNameById={connectorNameById}
-                          onUpdateGroup={onUpdateGroup}
-                          onDeleteGroup={onDeleteGroup}
-                          onRenameList={handleRenameList}
-                          collapseAllVersion={collapseAllVersion}
-                        />
-                      ))}
+                      {visibleGroups.map((group) => {
+                        const groupNameMatches = filteringLists
+                          && group.name.toLocaleLowerCase().includes(normalizedListQuery);
+                        const assignedLists = sourceListsWithSelection
+                          .filter((sourceList) =>
+                            sourceList.groupId === group.id
+                            && (groupNameMatches || matchesListQuery(sourceList)),
+                          )
+                          .sort(compareSourceLists);
+
+                        return (
+                          <SortableGroupCard
+                            key={group.id}
+                            group={group}
+                            assignedLists={assignedLists}
+                            connectorNameById={connectorNameById}
+                            onUpdateGroup={onUpdateGroup}
+                            onDeleteGroup={onDeleteGroup}
+                            onRenameList={handleRenameList}
+                            collapseAllVersion={collapseAllVersion}
+                            listSort={listSort}
+                            searchActive={filteringLists}
+                          />
+                        );
+                      })}
                     </div>
                   </SortableContext>
                 </DndContext>
               ) : (
                 <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface-1)] p-6 text-center">
                   <FolderTree size={24} className="mx-auto text-[var(--text-muted)]" />
-                  <p className="mt-2 text-sm text-[var(--text-muted)]">Create your first group above — it helps keep things tidy.</p>
+                  <p className="mt-2 text-sm text-[var(--text-muted)]">
+                    {filteringLists ? 'No groups or grouped lists match your search.' : 'Create your first group above — it helps keep things tidy.'}
+                  </p>
                 </div>
               )}
-            </div>
+            </section>
 
             {/* Column 2: Ungrouped lists */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                Ungrouped ({orderedUngrouped.length})
+            <section className="space-y-3" aria-labelledby="ungrouped-lists-heading">
+              <h3 id="ungrouped-lists-heading" className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                Ungrouped ({filteringLists ? `${orderedUngrouped.length} of ${sourceListsWithSelection.filter((sourceList) => !sourceList.groupId && !sourceList.hidden).length}` : orderedUngrouped.length})
               </h3>
               <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface-1)] p-4">
                 <div className="space-y-2">
                   {orderedUngrouped.length > 0 ? (
                     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleUngroupedDragEnd}>
-                      <SortableContext items={localUngroupedOrder} strategy={verticalListSortingStrategy}>
+                      <SortableContext items={orderedUngrouped.map((sourceList) => sourceList.id)} strategy={verticalListSortingStrategy}>
                         {orderedUngrouped.map((sourceList) => (
                           <SortableUngroupedItem
                             key={sourceList.id}
@@ -353,27 +462,27 @@ function ListGroupsSection({
                             onAssign={(groupId) => void handleAssignList(sourceList.id, groupId)}
                             onHide={() => void handleToggleHidden(sourceList.id, true)}
                             onRename={(newName, icon, iconColor) => handleRenameList(sourceList.id, newName, icon, iconColor)}
+                            sortable={listSort === 'manual'}
                           />
                         ))}
                       </SortableContext>
                     </DndContext>
                   ) : (
-                    <p className="py-4 text-center text-sm text-[var(--text-muted)]">All lists are assigned to groups.</p>
+                    <p className="py-4 text-center text-sm text-[var(--text-muted)]">
+                      {filteringLists ? 'No ungrouped lists match your search.' : 'All lists are assigned to groups.'}
+                    </p>
                   )}
                 </div>
 
                 {/* Hidden lists disclosure */}
-                {sourceListsWithSelection.filter((sl) => sl.hidden).length > 0 && (
+                {hiddenSourceLists.length > 0 && (
                   <details className="mt-4">
                     <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-[var(--text-muted)] [&::-webkit-details-marker]:hidden">
                       <EyeOff size={12} />
-                      {sourceListsWithSelection.filter((sl) => sl.hidden).length} hidden list{sourceListsWithSelection.filter((sl) => sl.hidden).length === 1 ? '' : 's'}
+                      {hiddenSourceLists.length} hidden list{hiddenSourceLists.length === 1 ? '' : 's'}
                     </summary>
                     <div className="mt-2 space-y-1.5">
-                      {sourceListsWithSelection
-                        .filter((sl) => sl.hidden)
-                        .sort((a, b) => a.name.localeCompare(b.name))
-                        .map((sourceList) => (
+                      {hiddenSourceLists.map((sourceList) => (
                           <div key={sourceList.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-1.5 opacity-50">
                             <div className="flex items-center gap-1.5 min-w-0">
                               {sourceList.icon && (
@@ -391,17 +500,17 @@ function ListGroupsSection({
                               <Eye size={13} />
                             </button>
                           </div>
-                        ))}
+                      ))}
                     </div>
                   </details>
                 )}
               </div>
-            </div>
+            </section>
 
             {/* Column 3: All Source Lists */}
-            <div className="space-y-3 lg:col-span-2 xl:col-span-1">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                All Lists ({sortedSourceLists.length})
+            <section className="space-y-3 lg:col-span-2 xl:col-span-1" aria-labelledby="all-source-lists-heading">
+              <h3 id="all-source-lists-heading" className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                All Lists ({filteringLists ? `${sortedSourceLists.length} of ${sourceListsWithSelection.length}` : sortedSourceLists.length})
               </h3>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
                 <div className="space-y-2 max-h-[600px] overflow-y-auto">
@@ -418,11 +527,13 @@ function ListGroupsSection({
                     />
                   ))}
                   {sortedSourceLists.length === 0 && (
-                    <p className="text-sm text-[var(--text-muted)]">Source lists appear after your first sync — run one from a connector above.</p>
+                    <p className="text-sm text-[var(--text-muted)]">
+                      {filteringLists ? 'No source lists match your search.' : 'Source lists appear after your first sync — run one from a connector above.'}
+                    </p>
                   )}
                 </div>
               </div>
-            </div>
+            </section>
           </div>
 
           {onUpdateAppearance ? <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-5">
@@ -621,6 +732,7 @@ function SortableUngroupedItem({
   onAssign,
   onHide,
   onRename,
+  sortable,
 }: {
   sourceList: SourceList;
   connectorName: string;
@@ -629,10 +741,11 @@ function SortableUngroupedItem({
   onAssign: (groupId: string | null) => void;
   onHide: () => void;
   onRename: (newName: string, icon?: string, iconColor?: string) => Promise<void>;
+  sortable: boolean;
 }) {
   const {
     attributes, listeners, setNodeRef, transform, transition, isDragging,
-  } = useSortable({ id: sourceList.id });
+  } = useSortable({ id: sourceList.id, disabled: !sortable });
   const {
     editing,
     name: editName,
@@ -668,15 +781,17 @@ function SortableUngroupedItem({
       className="group/ungrouped rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-2"
     >
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          {...attributes}
-          {...listeners}
-          className="flex h-5 w-5 shrink-0 cursor-grab items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
-          title="Drag to reorder"
-        >
-          <GripVertical size={12} />
-        </button>
+        {sortable && (
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            className="flex h-5 w-5 shrink-0 cursor-grab items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
+            title="Drag to reorder"
+          >
+            <GripVertical size={12} />
+          </button>
+        )}
         <div className="min-w-0 flex-1">
           {editing ? (
             <div className="flex items-center gap-1.5">
@@ -765,6 +880,8 @@ function SortableGroupCard({
   onDeleteGroup,
   onRenameList,
   collapseAllVersion,
+  listSort,
+  searchActive,
 }: {
   group: ListGroup;
   assignedLists: SourceList[];
@@ -773,6 +890,8 @@ function SortableGroupCard({
   onDeleteGroup: (id: string) => Promise<void>;
   onRenameList: (listId: string, newName: string, icon?: string, iconColor?: string) => Promise<void>;
   collapseAllVersion: { version: number; collapsed: boolean };
+  listSort: SourceListSort;
+  searchActive: boolean;
 }) {
   const [name, setName] = useState(group.name);
   const [icon, setIcon] = useState(group.icon || '');
@@ -782,13 +901,13 @@ function SortableGroupCard({
   const [collapsed, setCollapsed] = useState(true);
   const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; title: string; message: string; confirmLabel: string; variant: 'danger' | 'warning'; onConfirm: () => void }>({ open: false, title: '', message: '', confirmLabel: '', variant: 'danger', onConfirm: () => {} });
   const [localListOrder, setLocalListOrder] = useState<string[]>(
-    assignedLists.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map((l) => l.id)
+    [...assignedLists].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map((list) => list.id),
   );
 
   // Sync local list order when assignedLists changes
   useEffect(() => {
     setLocalListOrder(
-      assignedLists.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map((l) => l.id)
+      [...assignedLists].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map((list) => list.id),
     );
   }, [assignedLists]);
 
@@ -799,13 +918,15 @@ function SortableGroupCard({
     }
   }, [collapseAllVersion]);
 
-  const orderedLists = localListOrder
-    .map((id) => assignedLists.find((l) => l.id === id))
+  const manuallyOrderedLists = localListOrder
+    .map((id) => assignedLists.find((list) => list.id === id))
     .filter(Boolean) as SourceList[];
+  const orderedLists = listSort === 'manual' ? manuallyOrderedLists : assignedLists;
+  const isCollapsed = searchActive ? false : collapsed;
 
   const {
     attributes, listeners, setNodeRef, transform, transition, isDragging,
-  } = useSortable({ id: group.id });
+  } = useSortable({ id: group.id, disabled: searchActive });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -819,6 +940,7 @@ function SortableGroupCard({
   );
 
   async function handleListDragEnd(event: DragEndEvent) {
+    if (listSort !== 'manual') return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
@@ -883,21 +1005,26 @@ function SortableGroupCard({
     <div ref={setNodeRef} style={style} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
       {/* Header — always visible */}
       <div className="flex items-center gap-2 px-2 py-3 pr-4">
-        <button
-          type="button"
-          {...attributes}
-          {...listeners}
-          className="flex h-7 w-7 cursor-grab items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color] hover:bg-[var(--surface-2)] active:cursor-grabbing"
-          title="Drag to reorder"
-        >
-          <GripVertical size={14} />
-        </button>
+        {!searchActive && (
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            className="flex h-7 w-7 cursor-grab items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color] hover:bg-[var(--surface-2)] active:cursor-grabbing"
+            title="Drag to reorder"
+          >
+            <GripVertical size={14} />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}
+          disabled={searchActive}
+          aria-expanded={!isCollapsed}
           className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color] hover:bg-[var(--surface-2)]"
+          title={searchActive ? 'Groups stay expanded while searching' : isCollapsed ? 'Expand group' : 'Collapse group'}
         >
-          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
         </button>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {group.icon && <IconRenderer value={group.icon} size={16} color={group.iconColor || undefined} />}
@@ -923,7 +1050,7 @@ function SortableGroupCard({
 
       {/* Collapsible body */}
       <AnimatePresence initial={false}>
-        {!collapsed && (
+        {!isCollapsed && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
@@ -958,13 +1085,14 @@ function SortableGroupCard({
               <div className="mt-3 space-y-1.5">
                 {orderedLists.length > 0 ? (
                   <DndContext sensors={listSensors} collisionDetection={closestCenter} onDragEnd={handleListDragEnd}>
-                    <SortableContext items={localListOrder} strategy={verticalListSortingStrategy}>
+                    <SortableContext items={orderedLists.map((list) => list.id)} strategy={verticalListSortingStrategy}>
                       {orderedLists.map((sourceList) => (
                         <SortableListItem
                           key={sourceList.id}
                           sourceList={sourceList}
                           connectorName={connectorNameById.get(sourceList.connectorInstanceId) || sourceList.connectorInstanceId}
                           onRename={(newName, icon, iconColor) => onRenameList(sourceList.id, newName, icon, iconColor)}
+                          sortable={listSort === 'manual'}
                         />
                       ))}
                     </SortableContext>
@@ -993,10 +1121,20 @@ function SortableGroupCard({
   );
 }
 
-function SortableListItem({ sourceList, connectorName, onRename }: { sourceList: SourceList; connectorName: string; onRename: (newName: string, icon?: string, iconColor?: string) => Promise<void> }) {
+function SortableListItem({
+  sourceList,
+  connectorName,
+  onRename,
+  sortable,
+}: {
+  sourceList: SourceList;
+  connectorName: string;
+  onRename: (newName: string, icon?: string, iconColor?: string) => Promise<void>;
+  sortable: boolean;
+}) {
   const {
     attributes, listeners, setNodeRef, transform, transition, isDragging,
-  } = useSortable({ id: sourceList.id });
+  } = useSortable({ id: sourceList.id, disabled: !sortable });
   const {
     editing,
     name: editName,
@@ -1031,15 +1169,17 @@ function SortableListItem({ sourceList, connectorName, onRename }: { sourceList:
       style={style}
       className="group/listitem flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-1.5"
     >
-      <button
-        type="button"
-        {...attributes}
-        {...listeners}
-        className="flex h-5 w-5 cursor-grab items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
-        title="Drag to reorder"
-      >
-        <GripVertical size={12} />
-      </button>
+      {sortable && (
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          className="flex h-5 w-5 cursor-grab items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
+          title="Drag to reorder"
+        >
+          <GripVertical size={12} />
+        </button>
+      )}
       <div className="min-w-0 flex-1">
         {editing ? (
           <div className="flex items-center gap-1.5">

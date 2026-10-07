@@ -626,7 +626,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
     fireEvent.click(skipButton);
     fireEvent.click(skipButton);
 
-    expect(skipButton).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Skip to current/ })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
 
     await act(async () => {
@@ -875,7 +875,8 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
     expect(screen.queryByRole('textbox', { name: 'Edit notes' })).not.toBeInTheDocument();
     expect(await screen.findByText('notes')).toBeInTheDocument();
-    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalledOnce();
+    expect(onUpdate).toHaveBeenCalledWith({ description: 'Optimistic **notes**' });
 
     await act(async () => {
       resolvePatch({ ok: true, json: async () => ({}) });
@@ -1892,7 +1893,8 @@ describe('TaskDetailPanel redesigned presentations', () => {
         body: JSON.stringify({ status: 'done' }),
       }),
     ));
-    expect(onUpdate).toHaveBeenCalledWith({ status: 'done' });
+    expect(onUpdate).toHaveBeenNthCalledWith(1, { status: 'done', statusReason: null });
+    expect(onUpdate).toHaveBeenNthCalledWith(2);
     expect(screen.getByRole('combobox', { name: 'Task status' })).toHaveTextContent('Done');
   });
 
@@ -1982,7 +1984,9 @@ describe('TaskDetailPanel redesigned presentations', () => {
       '/api/tasks/task-1',
       expect.objectContaining({ method: 'PATCH' }),
     ));
-    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenNthCalledWith(1, { status: 'done', statusReason: null });
+    expect(onUpdate).toHaveBeenNthCalledWith(2, { status: 'todo', statusReason: null });
+    expect(onUpdate).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('combobox', { name: 'Task status' })).toHaveTextContent('To Do');
   });
 

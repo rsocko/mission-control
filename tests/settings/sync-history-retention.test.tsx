@@ -126,6 +126,46 @@ describe('Sync History retained items', () => {
     expect(screen.queryByText('No changes')).not.toBeInTheDocument();
   });
 
+  it('labels manually triggered sync runs', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      history: [{
+        id: 'log-manual',
+        connectorId: 'finance-1',
+        success: true,
+        tasksAdded: 0,
+        tasksUpdated: 0,
+        tasksRemoved: 0,
+        tasksPushed: 0,
+        localOnlyProtected: 0,
+        notificationsAdded: 0,
+        errors: [],
+        details: [],
+        trigger: 'manual',
+        syncedAt: '2026-10-07T20:00:00.000Z',
+        durationMs: 120,
+      }],
+      hasMore: false,
+    }), { status: 200 }));
+
+    render(<SyncHistorySection connectors={[{
+      id: 'finance-1',
+      type: 'finance-manager',
+      name: 'Tyrion',
+      enabled: true,
+      syncMode: 'poll',
+      pollIntervalMinutes: 5,
+      capabilities: { read: true, sync: true, notificationOnly: true },
+      credentials: {},
+      settings: {},
+      syncedLists: [],
+      createdAt: '',
+      updatedAt: '',
+      deletedAt: null,
+    }]} />);
+
+    expect(await screen.findByText('Manual')).toBeInTheDocument();
+  });
+
   it('explains retained items and shows safe reason-specific actions', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       history: [{

@@ -17,6 +17,7 @@ import type {
   SyncSchedule,
   SyncScheduleHealth,
 } from '@/lib/sync/job-repository';
+import { getSyncJobPriority } from '@/lib/sync/job-repository';
 import { isTerminalSyncJobStatus } from '@/lib/sync/terminal-events';
 import type { SyncResult } from '@/types';
 import { enqueuePostgresEventOutbox } from '@/db/postgres/repositories/event-outbox-repository';
@@ -334,21 +335,24 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
 
     if (existing) {
       const accelerate = availableAt < existing.availableAt;
-      if ((full && !existing.full) || accelerate) {
+      const promote = getSyncJobPriority(source) > getSyncJobPriority(existing.source);
+      if ((full && !existing.full) || accelerate || promote) {
         const nextFull = full || existing.full;
         const nextAvailableAt = accelerate ? availableAt : existing.availableAt;
         const nextScheduledFor = accelerate ? scheduledFor : existing.scheduledFor;
+        const nextSource = promote ? source : existing.source;
         await client.query(
           `
             UPDATE sync_jobs
-            SET "full" = $1, available_at = $2, scheduled_for = $3, updated_at = $4
-            WHERE id = $5
+            SET "full" = $1, source = $2, available_at = $3, scheduled_for = $4, updated_at = $5
+            WHERE id = $6
           `,
-          [nextFull, nextAvailableAt, nextScheduledFor, now, existing.id],
+          [nextFull, nextSource, nextAvailableAt, nextScheduledFor, now, existing.id],
         );
         existing = {
           ...existing,
           full: nextFull,
+          source: nextSource,
           availableAt: nextAvailableAt,
           scheduledFor: nextScheduledFor,
           updatedAt: now,
@@ -463,7 +467,20 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
                 )
               )
             )
-          ORDER BY "full" DESC, scheduled_for ASC, created_at ASC
+          ORDER BY
+            CASE source
+              WHEN 'manual' THEN 100
+              WHEN 'operator-canary' THEN 90
+              WHEN 'recovery' THEN 80
+              WHEN 'watchdog' THEN 60
+              WHEN 'api' THEN 50
+              WHEN 'schedule' THEN 20
+              WHEN 'nightly' THEN 10
+              ELSE 0
+            END DESC,
+            "full" DESC,
+            scheduled_for ASC,
+            created_at ASC
           LIMIT 1
           FOR UPDATE OF sync_jobs SKIP LOCKED
         `,

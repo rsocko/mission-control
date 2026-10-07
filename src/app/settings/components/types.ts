@@ -90,7 +90,7 @@ export interface SyncLogEntry {
   syncedAt: string;
   durationMs: number | null;
   jobId?: string | null;
-  trigger?: 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary' | null;
+  trigger?: 'manual' | 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary' | null;
   scheduledFor?: string | null;
   startedAt?: string | null;
   attempt?: number | null;

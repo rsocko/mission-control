@@ -77,7 +77,7 @@ export async function POST(request: Request) {
     const result = await syncScheduler.runSync(config.id, {
       full: body.full === true,
       signal: request.signal,
-      source: 'api',
+      source: 'manual',
     });
     return NextResponse.json(result);
   } catch (error) {

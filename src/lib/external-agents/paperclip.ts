@@ -395,7 +395,7 @@ export async function listPaperclipAttention(
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
   for (let page = 0; page < 100; page += 1) {
-    const query = new URLSearchParams({ limit: '200' });
+    const query = new URLSearchParams({ limit: '100' });
     if (cursor) query.set('cursor', cursor);
     const response = await request<unknown>(
       { ...connection, config: { companyId, assigneeAgentId: '' } },

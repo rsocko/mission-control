@@ -320,8 +320,13 @@ describe('Paperclip approvals connector', () => {
       expect.objectContaining({ id: 'attention-2' }),
     ]);
     expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      'https://paperclip.example.test/api/companies/company-1/attention?limit=100',
+      expect.any(Object),
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
       2,
-      'https://paperclip.example.test/api/companies/company-1/attention?limit=200&cursor=page-2',
+      'https://paperclip.example.test/api/companies/company-1/attention?limit=100&cursor=page-2',
       expect.any(Object),
     );
   });

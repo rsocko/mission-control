@@ -230,16 +230,30 @@ export async function POST(request: Request) {
           ? credentials.authSessionId.trim()
           : '';
         if (authSessionId) {
+          const monitorAllCompanies = connectorSettings.monitorAllCompanies === true;
+          const requestedCompanyIds = Array.isArray(connectorSettings.companyIds)
+            ? connectorSettings.companyIds.filter(
+              (companyId: unknown): companyId is string => typeof companyId === 'string',
+            )
+            : typeof connectorSettings.companyId === 'string'
+              ? [connectorSettings.companyId]
+              : [];
           const authorized = consumePaperclipAuthorization(
             authSessionId,
             String(connectorSettings.apiOrigin ?? ''),
-            String(connectorSettings.companyId ?? ''),
+            monitorAllCompanies ? null : requestedCompanyIds,
           );
           credentials = { apiToken: authorized.apiToken };
           paperclipAuthSessionId = authSessionId;
           connectorSettings = {
             ...connectorSettings,
-            companyName: authorized.companyName,
+            monitorAllCompanies,
+            companyIds: monitorAllCompanies
+              ? []
+              : authorized.companies.map((company) => company.id),
+            companyNames: Object.fromEntries(
+              authorized.companies.map((company) => [company.id, company.name]),
+            ),
             boardKeyId: authorized.keyId,
             boardKeyExpiresAt: authorized.keyExpiresAt,
             boardUserId: authorized.boardUserId,

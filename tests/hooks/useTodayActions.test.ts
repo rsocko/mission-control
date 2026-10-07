@@ -384,6 +384,52 @@ describe('useTodayActions completion', () => {
     expect(fetchData).not.toHaveBeenCalled();
   });
 
+  it('updates priority before persistence and rolls it back when persistence fails', async () => {
+    vi.useRealTimers();
+    let resolveRequest!: (response: { ok: boolean }) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => {
+      resolveRequest = resolve;
+    })));
+    const fetchData = vi.fn(async () => {});
+    const { result } = renderHook(() => {
+      const [items, setItems] = useState([{
+        ...mirrorTodayItem(),
+        taskId: 'task-1',
+        priority: 'medium',
+        editPolicy: editableTaskPolicy,
+      }]);
+      const actions = useTodayActions({
+        items,
+        setItems,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { items, actions };
+    });
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.actions.setTaskPriority('task-1', 'high');
+    });
+
+    expect(result.current.items[0]?.priority).toBe('high');
+    expect(fetchData).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRequest({ ok: false });
+      await request;
+    });
+
+    expect(result.current.items[0]?.priority).toBe('medium');
+    expect(mocks.toastError).toHaveBeenCalledWith('Failed to update priority');
+    expect(fetchData).not.toHaveBeenCalled();
+  });
+
   it('removes a suggestion-only task from the suggestion groups when completed', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
     const fetchData = vi.fn(async () => {});

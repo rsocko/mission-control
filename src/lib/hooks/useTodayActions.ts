@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type Dispatch, type SetStateAction } from 'react';
+import { useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { toast } from '@/lib/toast';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
@@ -78,6 +78,28 @@ function restoreTaskToSuggestions(
   return next;
 }
 
+type VisibleTaskUpdate = Partial<Pick<SuggestionTask, 'dueDate' | 'priority' | 'status'>>;
+
+function updateVisibleSuggestion(
+  task: SuggestionTask,
+  taskId: string,
+  updates: VisibleTaskUpdate,
+  expected?: VisibleTaskUpdate,
+): SuggestionTask {
+  if (task.id !== taskId) return task;
+  if (
+    expected
+    && (
+      (expected.dueDate !== undefined && task.dueDate !== expected.dueDate)
+      || (expected.priority !== undefined && task.priority !== expected.priority)
+      || (expected.status !== undefined && task.status !== expected.status)
+    )
+  ) {
+    return task;
+  }
+  return { ...task, ...updates };
+}
+
 const DEFAULT_CONFIRM_DIALOG: ConfirmDialogState = {
   open: false,
   title: '',
@@ -112,6 +134,42 @@ export function useTodayActions({
   const [planningDay, setPlanningDay] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(DEFAULT_CONFIRM_DIALOG);
   const [saveTemplateTask, setSaveTemplateTask] = useState<SaveTemplateTask | null>(null);
+  const visibleTaskMutationVersionsRef = useRef<Record<string, number>>({});
+  const beginVisibleTaskMutation = (taskId: string, field: keyof VisibleTaskUpdate) => {
+    const key = `${taskId}:${field}`;
+    const version = (visibleTaskMutationVersionsRef.current[key] ?? 0) + 1;
+    visibleTaskMutationVersionsRef.current[key] = version;
+    return { key, version };
+  };
+  const updateVisibleTask = (
+    taskId: string,
+    updates: VisibleTaskUpdate,
+    expected?: VisibleTaskUpdate,
+  ) => {
+    setItems((current) => current.map((item) => {
+      if (item.taskId !== taskId) return item;
+      if (
+        expected
+        && (
+          (expected.dueDate !== undefined && item.dueDate !== expected.dueDate)
+          || (expected.priority !== undefined && item.priority !== expected.priority)
+          || (expected.status !== undefined && item.status !== expected.status)
+        )
+      ) {
+        return item;
+      }
+      return { ...item, ...updates };
+    }));
+    setSuggestions((current) => {
+      const next = { ...current };
+      for (const key of Object.keys(next) as (keyof SuggestionGroups)[]) {
+        next[key] = next[key].map((task) => (
+          updateVisibleSuggestion(task, taskId, updates, expected)
+        ));
+      }
+      return next;
+    });
+  };
   const taskPolicy = (taskId: string, context?: { editPolicy?: TaskEditPolicy }) => (
     items.find((item) => item.taskId === taskId)?.editPolicy ?? context?.editPolicy
   );
@@ -317,6 +375,11 @@ export function useTodayActions({
 
   async function setTaskDueDate(taskId: string, date: string | null, taskContext?: { editPolicy?: TaskEditPolicy }) {
     if (!ensureFieldEditable(taskId, 'dueDate', taskContext)) return;
+    const currentTask = items.find((item) => item.taskId === taskId)
+      ?? findSuggestedTask(suggestions, taskId);
+    const previousDate = currentTask?.dueDate ?? null;
+    const mutation = beginVisibleTaskMutation(taskId, 'dueDate');
+    updateVisibleTask(taskId, { dueDate: date });
     try {
       const res = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -326,15 +389,24 @@ export function useTodayActions({
       if (!res.ok) throw new Error('Failed');
       notifyTaskChanged(taskId);
       toast.success('Due date updated');
-      fetchData();
+      if (visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version) {
+        void fetchData({ skipSync: true });
+      }
     } catch {
-      toast.error('Failed to update due date');
+      if (visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version) {
+        updateVisibleTask(taskId, { dueDate: previousDate }, { dueDate: date });
+        toast.error('Failed to update due date');
+      }
     }
 
   }
 
   async function setTaskPriority(taskId: string, priority: string, taskContext?: { editPolicy?: TaskEditPolicy }) {
     if (!ensureFieldEditable(taskId, 'priority', taskContext)) return;
+    const previousPriority = items.find((item) => item.taskId === taskId)?.priority
+      ?? findSuggestedTask(suggestions, taskId)?.priority;
+    const mutation = beginVisibleTaskMutation(taskId, 'priority');
+    updateVisibleTask(taskId, { priority });
     try {
       const res = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -344,9 +416,17 @@ export function useTodayActions({
       if (!res.ok) throw new Error('Failed');
       notifyTaskChanged(taskId);
       toast.success('Priority updated');
-      fetchData();
+      if (visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version) {
+        void fetchData({ skipSync: true });
+      }
     } catch {
-      toast.error('Failed to update priority');
+      if (
+        visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version
+        && previousPriority !== undefined
+      ) {
+        updateVisibleTask(taskId, { priority: previousPriority }, { priority });
+        toast.error('Failed to update priority');
+      }
     }
   }
 
@@ -383,6 +463,10 @@ export function useTodayActions({
 
   async function setTaskStatus(taskId: string, status: string, taskContext?: { editPolicy?: TaskEditPolicy }) {
     if (!ensureFieldEditable(taskId, 'status', taskContext)) return;
+    const previousStatus = items.find((item) => item.taskId === taskId)?.status
+      ?? findSuggestedTask(suggestions, taskId)?.status;
+    const mutation = beginVisibleTaskMutation(taskId, 'status');
+    updateVisibleTask(taskId, { status });
     try {
       const res = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -392,9 +476,17 @@ export function useTodayActions({
       if (!res.ok) throw new Error('Failed');
       notifyTaskChanged(taskId);
       toast.success('Status updated');
-      fetchData();
+      if (visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version) {
+        void fetchData({ skipSync: true });
+      }
     } catch {
-      toast.error('Failed to update status');
+      if (
+        visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version
+        && previousStatus !== undefined
+      ) {
+        updateVisibleTask(taskId, { status: previousStatus }, { status });
+        toast.error('Failed to update status');
+      }
     }
   }
 

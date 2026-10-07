@@ -16,6 +16,7 @@ import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edi
 import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import { formatDueDate } from '@/lib/utils/date-format';
+import type { TaskFieldUpdate } from '@/components/task-detail/task-detail-types';
 
 interface ZenTask {
   id: string;
@@ -136,6 +137,27 @@ export function ZenMode() {
   const openTask = useCallback((taskId: string) => {
     setOpenTaskId(taskId);
   }, []);
+
+  const handleTaskDetailUpdate = useCallback((fields?: TaskFieldUpdate) => {
+    if (openTaskId && fields) {
+      setTasks((current) => current.map((task) => task.id === openTaskId
+        ? {
+            ...task,
+            ...(typeof fields.title === 'string' ? { title: fields.title } : {}),
+            ...(typeof fields.status === 'string' ? { status: fields.status } : {}),
+            ...(typeof fields.priority === 'string' ? { priority: fields.priority } : {}),
+            ...(fields.dueDate === null || typeof fields.dueDate === 'string'
+              ? { dueDate: fields.dueDate }
+              : {}),
+            ...(fields.microStatus === null || typeof fields.microStatus === 'string'
+              ? { microStatus: fields.microStatus }
+              : {}),
+          }
+        : task));
+      return;
+    }
+    void fetchScoreSortedTasks();
+  }, [fetchScoreSortedTasks, openTaskId]);
 
   return (
     <AnimatePresence>
@@ -273,7 +295,7 @@ export function ZenMode() {
                   <TaskDetailPanel
                     taskId={openTaskId}
                     onClose={() => setOpenTaskId(null)}
-                    onUpdate={() => fetchScoreSortedTasks()}
+                    onUpdate={handleTaskDetailUpdate}
                     mode="dialog"
                   />
                 </motion.div>

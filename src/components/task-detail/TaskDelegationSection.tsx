@@ -122,11 +122,17 @@ function StateLine({
   );
 }
 
-function stateDescription(assignment: TaskDelegationSummary) {
+function assignmentMessage(assignment: TaskDelegationSummary) {
   if (assignment.blocker) return assignment.blocker;
   if (assignment.errorMessage) return assignment.errorMessage;
   if (assignment.latestProgress) return assignment.latestProgress;
   if (assignment.pendingApproval) return 'Approval is waiting for your review.';
+  return null;
+}
+
+function stateDescription(assignment: TaskDelegationSummary) {
+  const message = assignmentMessage(assignment);
+  if (message) return message;
   switch (assignment.displayState) {
     case 'preview':
       return 'Review the assignment before sending it to the provider.';
@@ -257,6 +263,7 @@ export function TaskDelegationSection({
     : null;
   const outputLinksForCurrent = current ? outputLinks(current) : [];
   const pullRequestStatus = current ? pullRequestStatusLabel(current) : null;
+  const currentDescription = current ? assignmentMessage(current) : null;
 
   return (
     <>
@@ -307,11 +314,13 @@ export function TaskDelegationSection({
               </button>
             </div>
           ) : current ? (
-            <div className="space-y-2 text-xs">
+            <div className="space-y-1.5 text-xs">
               <StateLine assignment={current} stale={Boolean(syncError)} />
-              <p className="leading-relaxed text-[var(--text-secondary)]">
-                {stateDescription(current)}
-              </p>
+              {currentDescription && (
+                <p className="leading-relaxed text-[var(--text-secondary)]">
+                  {currentDescription}
+                </p>
+              )}
               {syncError && (
                 <p className="text-amber-200" role="status">
                   State refresh failed: {syncError.message}
@@ -327,10 +336,12 @@ export function TaskDelegationSection({
                 {current.baseRef && <span>Base {current.baseRef}</span>}
                 {pullRequestStatus && (
                   <span>
-                    PR{current.pullRequestNumber ? ` #${current.pullRequestNumber}` : ''}: {pullRequestStatus}
+                    PR{current.pullRequestNumber ? ` #${current.pullRequestNumber}` : ''} {pullRequestStatus.toLowerCase()}
                   </span>
                 )}
-                <span>Attempt {Math.max(current.attemptCount, 1)} of {current.maxAttempts}</span>
+                {current.displayState !== 'completed' && (
+                  <span>Attempt {Math.max(current.attemptCount, 1)}/{current.maxAttempts}</span>
+                )}
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 <div className="flex flex-wrap items-center gap-1">
@@ -355,7 +366,7 @@ export function TaskDelegationSection({
                   onClick={() => setDetailsOpen(true)}
                   className="min-h-8 rounded-md border border-[var(--border)] px-2.5 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
                 >
-                  More details
+                  Details
                 </button>
               </div>
             </div>

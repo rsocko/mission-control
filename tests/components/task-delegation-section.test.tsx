@@ -186,7 +186,7 @@ describe('TaskDelegationSection', () => {
     expect(screen.getByText('Running focused reconciliation tests.')).toBeInTheDocument();
     expect(screen.getByText('Base main')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'More details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     const dialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
     expect(await within(dialog).findByText('provider started')).toBeInTheDocument();
     expect(within(dialog).getAllByText('in_progress')).not.toHaveLength(0);
@@ -266,7 +266,7 @@ describe('TaskDelegationSection', () => {
     render(<TaskDelegationSection taskId="task-1" taskTitle="Fix parser" mode="dialog" />);
 
     expect(await screen.findByText('Queued')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'More details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     const dialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Request refresh' }));
     expect(await within(dialog).findByText('Completed')).toBeInTheDocument();
@@ -279,7 +279,12 @@ describe('TaskDelegationSection', () => {
       .toHaveAttribute('href', 'https://github.com/octo/repo/pull/42');
     expect(screen.getByRole('link', { name: 'Cloud Agent' }))
       .toHaveAttribute('href', 'https://github.com/copilot/tasks/agent-task-1');
-    fireEvent.click(screen.getByRole('button', { name: 'More details' }));
+    expect(screen.getByText('PR #42 merged')).toBeInTheDocument();
+    expect(screen.queryByText('Attempt 1/3')).not.toBeInTheDocument();
+    expect(screen.queryByText(
+      'The provider completed the run and its pull request was merged.',
+    )).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     const refreshedDialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
     expect(within(refreshedDialog).getByRole('link', { name: /Pull request #42 · Merged/ }))
       .toHaveAttribute('href', 'https://github.com/octo/repo/pull/42');
@@ -324,7 +329,7 @@ describe('TaskDelegationSection', () => {
 
     expect(await screen.findByRole('link', { name: 'Cloud Agent' }))
       .toHaveAttribute('href', 'https://github.com/copilot/tasks/agent-task-1');
-    fireEvent.click(screen.getByRole('button', { name: 'More details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     const dialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
     expect(within(dialog).getByRole('link', { name: 'Open Cloud Agent session' }))
       .toHaveAttribute('href', 'https://github.com/copilot/tasks/agent-task-1');
@@ -378,7 +383,7 @@ describe('TaskDelegationSection', () => {
       'https://github.com/octo/repo/pull/42',
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'More details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     const dialog = await screen.findByRole('dialog', { name: 'Paperclip build route run' });
     expect(within(dialog).getByText('1234567890abcdef')).toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: /Check: CI/ })).toBeInTheDocument();

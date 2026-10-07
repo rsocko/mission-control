@@ -116,6 +116,7 @@ async function createPaperclipAgent() {
         alwaysInstructions: 'Keep Paperclip progress concise.',
         paperclip: {
           companyId,
+          companyName: 'Acme Corp',
           projectId,
           assigneeAgentId,
           requiredAdapterType: 'github-copilot-web',
@@ -432,6 +433,7 @@ describe('provider-neutral task delegation API', () => {
         type: 'paperclip',
         paperclipBinding: {
           companyId,
+          companyName: 'Acme Corp',
           projectId,
           assigneeAgentId,
           requiredAdapterType: 'github-copilot-web',

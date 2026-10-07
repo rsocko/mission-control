@@ -141,7 +141,7 @@ describe('TaskDelegationDialog disclosure review', () => {
     render(<TaskDelegationDialog />);
     openTaskDelegation(['task-1', 'task-2']);
 
-    expect(await screen.findByText('GitHub Cloud')).toBeInTheDocument();
+    expect(await screen.findByText('GitHub Copilot Cloud')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
     fireEvent.click(screen.getByRole('radio', { name: /Combined/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Review combined delegation' }));
@@ -264,7 +264,7 @@ describe('TaskDelegationDialog disclosure review', () => {
     render(<TaskDelegationDialog />);
     openTaskDelegation(['task-1', 'task-2']);
 
-    expect(await screen.findByText('GitHub Cloud')).toBeInTheDocument();
+    expect(await screen.findByText('GitHub Copilot Cloud')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
     fireEvent.click(screen.getByRole('radio', { name: /Auto/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Propose delegation plan' }));
@@ -343,14 +343,14 @@ describe('TaskDelegationDialog disclosure review', () => {
     render(<TaskDelegationDialog />);
     openTaskDelegation(['task-1']);
 
-    const blockedTarget = await screen.findByRole('radio', { name: /Public Cloud/ });
+    const blockedTarget = await screen.findByRole('radio', { name: /GitHub Copilot Cloud/ });
     expect(blockedTarget).toBeDisabled();
     expect(blockedTarget).toHaveAttribute(
       'title',
       'Agent policy does not allow restricted data',
     );
     expect(screen.getByText('Agent policy does not allow restricted data')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /Private Runner/ })).toBeEnabled();
+    expect(screen.getByRole('radio', { name: /Microsoft Scout/ })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Configure' })).toBeEnabled();
   });
 
@@ -443,7 +443,7 @@ describe('TaskDelegationDialog disclosure review', () => {
     render(<TaskDelegationDialog />);
     openTaskDelegation(['task-1']);
 
-    expect(await screen.findByText('GitHub Cloud')).toBeInTheDocument();
+    expect(await screen.findByText('GitHub Copilot Cloud')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
     expect(screen.getByText('Run focused tests before handoff.')).toBeInTheDocument();
     const instructionInput = screen.getByLabelText('Per-dispatch instructions');
@@ -577,9 +577,130 @@ describe('TaskDelegationDialog disclosure review', () => {
           companyId: '11111111-1111-4111-8111-111111111111',
           projectId: '22222222-2222-4222-8222-222222222222',
           assigneeAgentId: '33333333-3333-4333-8333-333333333333',
-          requiredAdapterType: 'claude-local',
         },
       }));
+  });
+
+  it('groups duplicate Paperclip routes by company and lets the user choose the connection', async () => {
+    const acmeCompanyId = '11111111-1111-4111-8111-111111111111';
+    const contosoCompanyId = '22222222-2222-4222-8222-222222222222';
+    const agentId = '33333333-3333-4333-8333-333333333333';
+    const paperclipTarget = (
+      id: string,
+      name: string,
+      companyId: string,
+      companyName: string,
+    ) => ({
+      id,
+      name,
+      type: 'paperclip',
+      description: null,
+      alwaysInstructions: '',
+      executionLocality: 'external',
+      allowedActions: ['write_code'],
+      hasCredential: true,
+      paperclipBinding: {
+        companyId,
+        companyName,
+        projectId: null,
+        assigneeAgentId: agentId,
+        requiredAdapterType: null,
+      },
+      repositories: [],
+      eligibility: [{
+        taskId: 'task-1',
+        title: 'Implement parser',
+        connectorType: 'local',
+        ready: true,
+        blocker: null,
+        repository: null,
+        repositoryLocked: false,
+      }],
+    });
+    const discoveryRequests: Array<Record<string, unknown>> = [];
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response({
+          taskIds: ['task-1'],
+          tasks: [{ id: 'task-1', title: 'Implement parser', connectorType: 'local' }],
+          targets: [
+            paperclipTarget('acme-primary', 'A · Acme primary', acmeCompanyId, 'Acme Corp'),
+            paperclipTarget('acme-backup', 'Z · Acme backup', acmeCompanyId, 'Acme Corp'),
+            paperclipTarget('contoso-primary', 'Contoso primary', contosoCompanyId, 'Contoso Labs'),
+          ],
+          assignments: [],
+          syncErrors: [],
+        });
+      }
+      if (url === '/api/external-agents/paperclip/discover' && init?.method === 'POST') {
+        const request = JSON.parse(String(init.body)) as Record<string, unknown>;
+        discoveryRequests.push(request);
+        const companyId = String(request.companyId);
+        return response({
+          companies: [{
+            id: companyId,
+            name: companyId === acmeCompanyId ? 'Acme Corp' : 'Contoso Labs',
+            status: 'active',
+          }],
+          projects: [],
+          agents: [
+            {
+              id: agentId,
+              name: 'Parser Engineer',
+              title: 'Software Engineer',
+              role: 'engineer',
+              status: 'idle',
+              adapterType: 'claude-local',
+            },
+            {
+              id: '44444444-4444-4444-8444-444444444444',
+              name: 'Release Coordinator',
+              title: 'Engineering Operations',
+              role: 'coordination',
+              status: 'paused',
+              adapterType: 'process',
+            },
+            {
+              id: '55555555-5555-4555-8555-555555555555',
+              name: 'Proposed Hire',
+              title: 'Developer',
+              role: 'engineer',
+              status: 'pending_approval',
+              adapterType: 'claude-local',
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+
+    expect(await screen.findByRole('radio', { name: /Paperclip/ }))
+      .toHaveTextContent('3 registered routes');
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+
+    expect(await screen.findByRole('combobox', { name: 'Paperclip company' }))
+      .toBeInTheDocument();
+    const routeSelect = screen.getByRole('combobox', { name: 'Paperclip connection route' });
+    expect(routeSelect).toHaveTextContent('A · Acme primary');
+    expect(screen.getByText(/Multiple Mission Control routes connect this company/))
+      .toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Release Coordinator/ })).toBeEnabled();
+    expect(screen.getByRole('radio', { name: /Proposed Hire/ })).toBeDisabled();
+    expect(screen.getByText('Pending hire approval')).toBeInTheDocument();
+
+    fireEvent.click(routeSelect);
+    fireEvent.click(screen.getByRole('option', { name: 'Z · Acme backup' }));
+    await waitFor(() => {
+      expect(discoveryRequests.at(-1)).toMatchObject({
+        destinationId: 'acme-backup',
+        companyId: acmeCompanyId,
+      });
+    });
   });
 
   it('releases the modal pointer lock when closed during worker handoff', async () => {
@@ -608,7 +729,7 @@ describe('TaskDelegationDialog disclosure review', () => {
 
     render(<TaskDelegationDialog />);
     openTaskDelegation(['task-1']);
-    expect(await screen.findByText('Worker queue')).toBeInTheDocument();
+    expect(await screen.findByText('Microsoft Scout')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
     fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
     expect(await screen.findByRole('button', { name: 'Confirm and delegate 1' }))
@@ -665,7 +786,7 @@ describe('TaskDelegationDialog disclosure review', () => {
 
     render(<TaskDelegationDialog />);
     openTaskDelegation(['task-1']);
-    expect(await screen.findByText('Worker queue')).toBeInTheDocument();
+    expect(await screen.findByText('Microsoft Scout')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
 
     const statusPreference = screen.getByRole('checkbox', {

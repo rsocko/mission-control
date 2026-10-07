@@ -53,7 +53,7 @@ describe('ExecutionDestinationsSection', () => {
     render(<ExecutionDestinationsSection />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Registry unavailable');
-    expect(screen.getByText('Scout status unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Microsoft Scout status unavailable')).toBeInTheDocument();
     expect(screen.queryByText('No direct execution destinations yet')).not.toBeInTheDocument();
     expect(screen.getByRole('button', {
       name: 'Retry loading execution destinations',
@@ -180,11 +180,13 @@ describe('ExecutionDestinationsSection', () => {
     fireEvent.change(screen.getByLabelText('Paperclip API origin'), {
       target: { value: 'http://localhost:3100' },
     });
-    fireEvent.change(screen.getByLabelText('Access token'), {
+    fireEvent.change(screen.getByLabelText('Agent API key'), {
       target: { value: 'paperclip-secret' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Check connection' }));
-    expect(await screen.findByText('Connected · Paperclip 1.2.3')).toBeInTheDocument();
+    expect(await screen.findByText(
+      'Connected · company roster visibility verified · Paperclip 1.2.3',
+    )).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Default project'));
     fireEvent.click(screen.getByRole('option', { name: 'Mission Control' }));
     fireEvent.change(screen.getByLabelText('Always instructions'), {
@@ -202,9 +204,9 @@ describe('ExecutionDestinationsSection', () => {
         alwaysInstructions: 'Post concise progress updates.',
         paperclip: {
           companyId: '11111111-1111-4111-8111-111111111111',
+          companyName: 'Acme',
           projectId: '22222222-2222-4222-8222-222222222222',
           assigneeAgentId: '33333333-3333-4333-8333-333333333333',
-          requiredAdapterType: 'claude-local',
         },
       },
     });
@@ -330,7 +332,9 @@ describe('ExecutionDestinationsSection', () => {
     render(<ExecutionDestinationsSection />);
 
     expect(await screen.findByText('Pickup enabled')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('switch', { name: 'Disable Scout work pickup' }));
+    fireEvent.click(screen.getByRole('switch', {
+      name: 'Disable Microsoft Scout work pickup',
+    }));
 
     await waitFor(() => expect(disabled).toBe(true));
     expect(await screen.findByText('Pickup off')).toBeInTheDocument();
@@ -364,9 +368,11 @@ describe('ExecutionDestinationsSection', () => {
 
     render(<ExecutionDestinationsSection />);
 
-    fireEvent.click(await screen.findByRole('switch', { name: 'Enable Scout work pickup' }));
+    fireEvent.click(await screen.findByRole('switch', {
+      name: 'Enable Microsoft Scout work pickup',
+    }));
 
-    expect(await screen.findByText('Finish setup in Scout')).toBeInTheDocument();
+    expect(await screen.findByText('Finish setup in Microsoft Scout')).toBeInTheDocument();
     expect(screen.getByText('Configure Scout to claim Mission Control work.')).toBeInTheDocument();
   });
 
@@ -443,5 +449,62 @@ describe('ExecutionDestinationsSection', () => {
       },
     });
     expect(getCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('recommends one standard integration agent and flags duplicate company routes', async () => {
+    const paperclipRoute = (id: string, name: string) => ({
+      id,
+      name,
+      type: 'paperclip',
+      description: null,
+      endpoint: 'https://paperclip.example.com',
+      authType: 'bearer',
+      providerConfig: {
+        paperclip: {
+          companyId: '11111111-1111-4111-8111-111111111111',
+          companyName: 'Acme Corp',
+          assigneeAgentId: '22222222-2222-4222-8222-222222222222',
+        },
+      },
+      capabilities: { canWriteCode: true },
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+        fieldAllowlist: [],
+        retentionDays: 30,
+        maxRequestsPerMinute: 60,
+      },
+      enabled: true,
+      executionLocality: 'external',
+      hasCredentialReference: true,
+      credentialSource: 'mission-control',
+      updatedAt: '2026-10-06T00:00:00.000Z',
+    });
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/connectors') return response({ connectors: [] });
+      if (url === '/api/external-agents') {
+        return response({
+          agents: [
+            paperclipRoute('paperclip-primary', 'Acme primary'),
+            paperclipRoute('paperclip-backup', 'Acme backup'),
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<ExecutionDestinationsSection />);
+
+    expect((await screen.findAllByText('2 routes for this company'))).toHaveLength(2);
+    expect(screen.getAllByText(/Acme Corp/)).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Paperclip route' }));
+
+    expect(screen.getByText('Use one integration agent per Paperclip company'))
+      .toBeInTheDocument();
+    expect(screen.getByText(/Mission Control Dispatcher/)).toBeInTheDocument();
+    expect(screen.getByText(/standard trust/)).toBeInTheDocument();
+    expect(screen.getByText(/A CEO key works, but is not required/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Agent API key')).toBeInTheDocument();
   });
 });

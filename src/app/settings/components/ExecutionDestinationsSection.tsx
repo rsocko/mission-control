@@ -97,9 +97,9 @@ interface DestinationForm {
   credentialSource: 'mission-control' | 'deployment-secret' | 'paperclip-connector';
   connectorId: string;
   companyId: string;
+  companyName: string;
   projectId: string;
   assigneeAgentId: string;
-  requiredAdapterType: string;
   alwaysInstructions: string;
   capabilities: ExternalAgentCapabilities;
   allowedClassifications: AgentDataClassification[];
@@ -197,9 +197,9 @@ function emptyForm(type: DestinationType): DestinationForm {
     credentialSource: 'mission-control',
     connectorId: '',
     companyId: '',
+    companyName: '',
     projectId: '',
     assigneeAgentId: '',
-    requiredAdapterType: '',
     alwaysInstructions: '',
     capabilities: DEFAULT_CAPABILITIES[type],
     allowedClassifications: ['standard'],
@@ -220,9 +220,9 @@ function editForm(destination: ExecutionDestination): DestinationForm {
     credentialSource: destination.credentialSource ?? 'deployment-secret',
     connectorId: destination.paperclipConnectorId ?? '',
     companyId: paperclip?.companyId ?? '',
+    companyName: paperclip?.companyName ?? '',
     projectId: paperclip?.projectId ?? '',
     assigneeAgentId: paperclip?.assigneeAgentId ?? '',
-    requiredAdapterType: paperclip?.requiredAdapterType ?? '',
     alwaysInstructions: destination.providerConfig.alwaysInstructions ?? '',
     capabilities: destination.capabilities,
     allowedClassifications: destination.dataPolicy.allowedClassifications,
@@ -340,7 +340,7 @@ function ScoutDestinationCard() {
     return (
       <div className="flex min-h-20 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] text-sm text-[var(--text-muted)]">
         <Loader2 size={15} className="animate-spin" />
-        Checking Scout
+        Checking Microsoft Scout
       </div>
     );
   }
@@ -352,7 +352,7 @@ function ScoutDestinationCard() {
           <AlertTriangle size={18} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-red-200">Scout status unavailable</p>
+          <p className="text-sm font-medium text-red-200">Microsoft Scout status unavailable</p>
           <p className="mt-1 text-xs leading-5 text-red-300">{error}</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={() => void loadScout()}>
@@ -371,18 +371,18 @@ function ScoutDestinationCard() {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-medium text-[var(--text-primary)]">Scout</p>
+            <p className="text-sm font-medium text-[var(--text-primary)]">Microsoft Scout</p>
             <Badge variant="secondary">Not connected</Badge>
             <Badge variant="outline">Scheduled pickup</Badge>
           </div>
           <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-            Add the Scout connector to receive curated M365 work and optionally claim delegated tasks.
+            Connect Microsoft Scout to handle delegated work with authorized Microsoft 365 resources.
           </p>
         </div>
         <Button asChild type="button" variant="outline" size="sm">
           <Link href="/settings/connectors?setting=Scout">
             <Plus size={14} />
-            Add Scout
+            Add Microsoft Scout
           </Link>
         </Button>
       </div>
@@ -409,14 +409,14 @@ function ScoutDestinationCard() {
             {!connector.enabled && <Badge variant="warning">Connector paused</Badge>}
           </div>
           <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-            Claims confirmed Mission Control delegations on Scout&apos;s automation schedule.
+            Claims confirmed Mission Control delegations on Microsoft Scout&apos;s automation schedule.
             Inbound M365 sources remain managed by the connector.
           </p>
           <Link
             href="/settings/connectors?setting=Scout"
             className="mt-1 inline-flex text-[11px] font-medium text-[var(--accent)] underline-offset-4 hover:underline"
           >
-            Manage Scout connector
+            Manage Microsoft Scout connector
           </Link>
         </div>
         <div className="flex items-center gap-2 sm:justify-end">
@@ -424,7 +424,7 @@ function ScoutDestinationCard() {
             enabled={pickupEnabled}
             disabled={busy}
             onChange={() => void updateWorker(pickupEnabled ? 'disable' : 'generate-setup')}
-            label={`${pickupEnabled ? 'Disable' : 'Enable'} Scout work pickup`}
+            label={`${pickupEnabled ? 'Disable' : 'Enable'} Microsoft Scout work pickup`}
           />
           {pickupEnabled && (
             <Button
@@ -452,10 +452,10 @@ function ScoutDestinationCard() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold text-[var(--text-secondary)]">
-                Finish setup in Scout
+                Finish setup in Microsoft Scout
               </p>
               <p className="mt-1 text-[11px] leading-4 text-amber-300">
-                Pickup is registered in Mission Control, but Scout will not claim work until this
+                Pickup is registered in Mission Control, but Microsoft Scout will not claim work until this
                 private setup prompt is applied.
               </p>
             </div>
@@ -543,6 +543,12 @@ export function ExecutionDestinationsSection() {
     form?.id
     && formDestination?.credentialSource !== form.credentialSource,
   );
+  const duplicateFormRoutes = form?.type === 'paperclip' && form.companyId
+    ? destinations.filter((destination) =>
+      destination.type === 'paperclip'
+      && destination.id !== form.id
+      && destination.providerConfig.paperclip?.companyId === form.companyId)
+    : [];
 
   function updateForm(patch: Partial<DestinationForm>) {
     setForm((current) => current ? { ...current, ...patch } : current);
@@ -615,13 +621,13 @@ export function ExecutionDestinationsSection() {
       const selectedProject = discovery.projects.some(({ id }) => id === form.projectId)
         ? form.projectId
         : '';
-      const selectedAgentRecord = discovery.agents.find(({ id }) => id === selectedAgent);
+      const selectedCompanyRecord = discovery.companies.find(({ id }) => id === selectedCompany);
       setPaperclipDiscovery(discovery);
       updateForm({
         companyId: selectedCompany ?? '',
+        companyName: selectedCompanyRecord?.name ?? '',
         projectId: selectedProject,
         assigneeAgentId: selectedAgent,
-        requiredAdapterType: selectedAgentRecord?.adapterType ?? '',
       });
     } catch (error) {
       if (requestId !== paperclipCheckRef.current) return;
@@ -713,11 +719,9 @@ export function ExecutionDestinationsSection() {
             : {}),
           paperclip: {
             companyId: form.companyId.trim(),
+            ...(form.companyName.trim() ? { companyName: form.companyName.trim() } : {}),
             assigneeAgentId: form.assigneeAgentId.trim(),
             ...(form.projectId.trim() ? { projectId: form.projectId.trim() } : {}),
-            ...(form.requiredAdapterType.trim()
-              ? { requiredAdapterType: form.requiredAdapterType.trim() }
-              : {}),
           },
         }
         : {
@@ -868,7 +872,7 @@ export function ExecutionDestinationsSection() {
           </p>
           <p className="mx-auto mt-1 max-w-lg text-xs leading-5 text-[var(--text-muted)]">
             Add GitHub Copilot Cloud for GitHub-hosted Agent Tasks or bind a validated Paperclip
-            route. Scout scheduled pickup is shown separately above. Nothing is transmitted until
+            route. Microsoft Scout scheduled pickup is shown separately above. Nothing is transmitted until
             a delegation preview is reviewed and confirmed.
           </p>
         </div>
@@ -876,6 +880,11 @@ export function ExecutionDestinationsSection() {
         <div className="divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
           {destinations.map((destination) => {
             const paperclip = destination.providerConfig.paperclip;
+            const duplicateCompanyRoutes = paperclip
+              ? destinations.filter((candidate) =>
+                candidate.type === 'paperclip'
+                && candidate.providerConfig.paperclip?.companyId === paperclip.companyId)
+              : [];
             return (
               <div key={destination.id} className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
@@ -890,12 +899,18 @@ export function ExecutionDestinationsSection() {
                       {destination.enabled ? 'Ready' : 'Disabled'}
                     </Badge>
                     <Badge variant="outline">{destinationLabel(destination.type)}</Badge>
+                    {duplicateCompanyRoutes.length > 1 && (
+                      <Badge variant="warning">
+                        {duplicateCompanyRoutes.length} routes for this company
+                      </Badge>
+                    )}
                   </div>
                   <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
                     {destination.description
                       || (destination.type === 'copilot-cloud'
                         ? 'GitHub-hosted execution using the official Agent Tasks API.'
-                        : `${destination.endpoint} · company ${paperclip?.companyId ?? 'not bound'}`)}
+                        : `${destination.endpoint} · ${paperclip?.companyName
+                          ?? `company ${paperclip?.companyId ?? 'not bound'}`}`)}
                   </p>
                   <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
                     {destination.hasCredentialReference
@@ -966,6 +981,27 @@ export function ExecutionDestinationsSection() {
             </Badge>
           </div>
 
+          {form.type === 'paperclip' && (
+            <div className="flex gap-3 rounded-lg border border-[var(--accent-500)]/30 bg-[var(--accent-500)]/8 p-3">
+              <Bot size={18} className="mt-0.5 shrink-0 text-[var(--accent-300)]" />
+              <div>
+                <p className="text-sm font-medium text-[var(--text-primary)]">
+                  Use one integration agent per Paperclip company
+                </p>
+                <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                  Recommended: create a dedicated <strong>Mission Control Dispatcher</strong>{' '}
+                  agent with standard trust, then use its API key here. It needs company roster
+                  visibility and task assignment access. A CEO key works, but is not required.
+                </p>
+                <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">
+                  In Paperclip: Agents → select the integration agent → Governance → API Keys.
+                  One registered route can discover and delegate to eligible agents across that
+                  company.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Name" htmlFor="destination-name">
               <input
@@ -1001,7 +1037,7 @@ export function ExecutionDestinationsSection() {
                   <SelectItem value="mission-control">
                     {form.type === 'copilot-cloud'
                       ? 'Fine-grained personal access token'
-                      : 'Access token'}
+                      : 'Agent API key'}
                   </SelectItem>
                   <SelectItem value="deployment-secret">
                     Deployment secret reference
@@ -1053,7 +1089,7 @@ export function ExecutionDestinationsSection() {
 
           {form.credentialSource === 'mission-control' && (
             <Field
-              label={form.type === 'copilot-cloud' ? 'Fine-grained personal access token' : 'Access token'}
+              label={form.type === 'copilot-cloud' ? 'Fine-grained personal access token' : 'Agent API key'}
               htmlFor="github-cloud-token"
               hint={form.id && !switchingCredentialSource
                 ? 'Leave blank to keep the currently stored token.'
@@ -1076,14 +1112,16 @@ export function ExecutionDestinationsSection() {
                     : updateForm({ credential: event.target.value })}
                   placeholder={form.id && !switchingCredentialSource
                     ? 'Current token is hidden'
-                    : 'github_pat_...'}
+                    : form.type === 'copilot-cloud' ? 'github_pat_...' : 'Paste the agent API key'}
                   className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 pr-10 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
                 />
                 <button
                   type="button"
                   onClick={() => setShowCredential((current) => !current)}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                  aria-label={`${showCredential ? 'Hide' : 'Show'} personal access token`}
+                  aria-label={`${showCredential ? 'Hide' : 'Show'} ${
+                    form.type === 'copilot-cloud' ? 'personal access token' : 'agent API key'
+                  }`}
                 >
                   {showCredential ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
@@ -1223,13 +1261,29 @@ export function ExecutionDestinationsSection() {
                 <>
                   <div className="flex items-center gap-2 rounded-lg border border-emerald-800/40 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300">
                     <CheckCircle2 size={15} />
-                    Connected
+                    Connected · company roster visibility verified
                     {paperclipDiscovery.health.version
                       ? ` · Paperclip ${String(paperclipDiscovery.health.version)}`
                       : ''}
                   </div>
+                  {duplicateFormRoutes.length > 0 && (
+                    <div role="status" className="flex items-start gap-2 rounded-lg border border-amber-700/40 bg-amber-950/20 p-3 text-xs leading-5 text-amber-200">
+                      <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                      <span>
+                        {duplicateFormRoutes.length === 1
+                          ? `${duplicateFormRoutes[0].name} already connects this company.`
+                          : `${duplicateFormRoutes.length} other routes already connect this company.`}{' '}
+                        One route is normally sufficient. If you keep duplicates, the delegation
+                        wizard will group them under this company and let you choose the connection.
+                      </span>
+                    </div>
+                  )}
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Default company" htmlFor="paperclip-company">
+                    <Field
+                      label="Paperclip company"
+                      htmlFor="paperclip-company"
+                      hint="This route represents one company. Register another route for another company."
+                    >
                       <Select
                         value={form.companyId}
                         onValueChange={(value) => void checkPaperclipConnection(value)}
@@ -1270,16 +1324,14 @@ export function ExecutionDestinationsSection() {
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field label="Default agent" htmlFor="paperclip-agent">
+                    <Field
+                      label="Default assignee"
+                      htmlFor="paperclip-agent"
+                      hint="The API-key owner is the integration identity. This chooses who receives work by default."
+                    >
                       <Select
                         value={form.assigneeAgentId}
-                        onValueChange={(value) => {
-                          const agent = paperclipDiscovery.agents.find(({ id }) => id === value);
-                          updateForm({
-                            assigneeAgentId: value,
-                            requiredAdapterType: agent?.adapterType ?? '',
-                          });
-                        }}
+                        onValueChange={(value) => updateForm({ assigneeAgentId: value })}
                       >
                         <SelectTrigger id="paperclip-agent" className="w-full">
                           <SelectValue placeholder="Choose an agent" />
@@ -1293,37 +1345,11 @@ export function ExecutionDestinationsSection() {
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field
-                      label="Adapter guard"
-                      htmlFor="paperclip-adapter"
-                      hint="Fail if the selected agent changes runtime."
-                    >
-                      <Select
-                        value={form.requiredAdapterType || '__any__'}
-                        onValueChange={(value) => updateForm({
-                          requiredAdapterType: value === '__any__' ? '' : value,
-                        })}
-                      >
-                        <SelectTrigger id="paperclip-adapter" className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__any__">Any adapter</SelectItem>
-                          {[...new Set(paperclipDiscovery.agents
-                            .map(({ adapterType }) => adapterType)
-                            .filter((value): value is string => Boolean(value)))].map((adapter) => (
-                              <SelectItem key={adapter} value={adapter}>
-                                {adapter}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
                   </div>
                 </>
               ) : (
                 <p className="rounded-lg border border-dashed border-[var(--border-strong)] px-3 py-3 text-xs leading-5 text-[var(--text-muted)]">
-                  Check the connection to load accessible companies, projects, agents, and adapters.
+                  Check the connection to verify company roster access and load projects and agents.
                 </p>
               )}
             </div>

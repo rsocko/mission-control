@@ -140,6 +140,35 @@ describe('Paperclip approvals connector', () => {
     })).rejects.toThrow('require HTTPS');
   });
 
+  it('warns before the Board credential expires without hiding approval state', async () => {
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json([])));
+    const connector = new PaperclipConnector();
+    await connector.initialize({
+      ...connectorConfig(),
+      settings: {
+        ...connectorConfig().settings,
+        boardKeyId: 'board-key-1',
+        boardKeyExpiresAt: expiresAt,
+        boardUserName: 'Mission Control operator',
+      },
+    });
+
+    await expect(connector.fetchNotifications()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'paperclip-credential-expiry:paperclip-connector',
+        sourceId: 'credential-expiry:board-key-1',
+        templateKey: 'paperclip_credential_expiring',
+        actionUrl: '/settings/connectors',
+        metadata: expect.objectContaining({ expiresAt, expired: false }),
+      }),
+    ]);
+    await expect(connector.getActiveAlertSourceIds()).resolves.toEqual([
+      'credential-expiry:board-key-1',
+    ]);
+    await connector.dispose();
+  });
+
   it('does not accept approvals returned for a different company', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json([{
       id: 'approval-1',

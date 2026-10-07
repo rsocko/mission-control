@@ -40,10 +40,10 @@
     "note": "Zero normal production web/API SQLite evaluation under PostgreSQL, per plan.md's final target, with only a minimal, audited, fail-closed exception list (throwing before any SQLite import/effect) surviving."
   },
   "counts": {
-    "apiRoutes": 283,
+    "apiRoutes": 284,
     "tierARoutes": 0,
     "tierBRoutes": 7,
-    "cleanRoutes": 276,
+    "cleanRoutes": 277,
     "directTaintSourceRoutes": 0,
     "transitiveOnlyTaintSourceRoutes": 0,
     "directDbNamespaceRoutes": 2,
@@ -113,6 +113,7 @@
     "src/app/api/connectors/[id]/work-todo/route.ts",
     "src/app/api/connectors/github-bulk-transfer/route.ts",
     "src/app/api/connectors/github-repos/route.ts",
+    "src/app/api/connectors/paperclip/auth/route.ts",
     "src/app/api/connectors/route.ts",
     "src/app/api/connectors/test-pre-save/route.ts",
     "src/app/api/daily-completions/route.ts",
@@ -407,6 +408,7 @@
     "src/app/api/connectors/[id]/validate-repo/route.ts",
     "src/app/api/connectors/[id]/work-todo/route.ts",
     "src/app/api/connectors/github-repos/route.ts",
+    "src/app/api/connectors/paperclip/auth/route.ts",
     "src/app/api/connectors/route.ts",
     "src/app/api/connectors/test-pre-save/route.ts",
     "src/app/api/daily-completions/route.ts",

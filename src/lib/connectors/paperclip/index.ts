@@ -81,6 +81,14 @@ const PENDING_STATES = new Set(['pending', 'resubmitted']);
 const SUMMARY_FIELDS = ['summary', 'description', 'reason', 'requestSummary', 'plan'] as const;
 const CREDENTIAL_WARNING_MS = 14 * 24 * 60 * 60 * 1000;
 
+function approvalNotificationId(approvalId: string): string {
+  return `paperclip-approval:${approvalId}`;
+}
+
+function credentialExpiryNotificationId(connectorId: string): string {
+  return `paperclip-credential-expiry:${connectorId}`;
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -167,7 +175,7 @@ function approvalNotification({
   const apiOrigin = new URL(settings.apiOrigin).origin;
 
   return {
-    id: `paperclip-approval:${approval.id}`,
+    id: approvalNotificationId(approval.id),
     sourceId: `approval:${approval.id}`,
     connectorType: 'paperclip',
     connectorInstanceId: connectorId,
@@ -223,7 +231,7 @@ function credentialExpiryNotification(
       .join(', ');
   const warningAt = new Date(expiresAtMs - CREDENTIAL_WARNING_MS).toISOString();
   return {
-    id: `paperclip-credential-expiry:${connectorId}`,
+    id: credentialExpiryNotificationId(connectorId),
     sourceId: `credential-expiry:${settings.boardKeyId ?? connectorId}`,
     connectorType: 'paperclip',
     connectorInstanceId: connectorId,
@@ -463,13 +471,13 @@ export class PaperclipConnector implements IConnector {
     const approvals = this.approvals ?? await this.fetchApprovals();
     const approvalIds = approvals
       .filter(isAuthoritativelyActive)
-      .map((approval) => `approval:${approval.id}`);
+      .map((approval) => approvalNotificationId(approval.id));
     const credentialNotification = credentialExpiryNotification(
       this.requireSettings(),
       this.id,
     );
     return credentialNotification
-      ? [credentialNotification.sourceId, ...approvalIds]
+      ? [credentialExpiryNotificationId(this.id), ...approvalIds]
       : approvalIds;
   }
 

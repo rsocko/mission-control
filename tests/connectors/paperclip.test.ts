@@ -119,7 +119,7 @@ describe('Paperclip approvals connector', () => {
     expect(notifications[0]?.body).toContain('Risk: high');
     expect(notifications[0]?.body).toContain('Summary: Approve this small research budget');
     expect(replay[0]?.id).toBe(notifications[0]?.id);
-    expect(await connector.getActiveAlertSourceIds()).toEqual(['approval:approval-1']);
+    expect(await connector.getActiveAlertSourceIds()).toEqual([notifications[0]?.id]);
     expect(fetcher).toHaveBeenCalledTimes(4);
     expect(JSON.stringify(notifications)).not.toContain('paperclip-token');
 
@@ -228,7 +228,7 @@ describe('Paperclip approvals connector', () => {
       }),
     ]);
     await expect(connector.getActiveAlertSourceIds()).resolves.toEqual([
-      'credential-expiry:board-key-1',
+      'paperclip-credential-expiry:paperclip-connector',
     ]);
     await connector.dispose();
   });
@@ -271,7 +271,7 @@ describe('Paperclip approvals connector', () => {
     const [notification] = await connector.fetchNotifications();
     expect(notification?.body).toContain('Paperclip issue: issue-1');
     expect(notification?.actionUrl).toBe('https://paperclip.example.test/approvals/approval-1');
-    expect(await connector.getActiveAlertSourceIds()).toEqual(['approval:approval-1']);
+    expect(await connector.getActiveAlertSourceIds()).toEqual([notification?.id]);
     await connector.dispose();
   });
 

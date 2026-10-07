@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ChevronRight, Loader2, Shield, Eye, EyeOff,
@@ -63,7 +63,11 @@ function AddConnectorModal({
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [classificationOverride, setClassificationOverride] =
     useState<ConnectorDataClassification | null>(null);
-  useCloseOnEscape(onClose);
+  const [dismissible, setDismissible] = useState(true);
+  const requestClose = useCallback(() => {
+    if (dismissible) onClose();
+  }, [dismissible, onClose]);
+  useCloseOnEscape(requestClose, dismissible);
 
   function handleSelectType(type: string) {
     setSelectedType(type);
@@ -102,7 +106,7 @@ function AddConnectorModal({
       animate="show"
       exit="exit"
       className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
-      onClick={onClose}
+      onClick={requestClose}
     >
       <motion.div
         variants={modalContent}
@@ -178,7 +182,12 @@ function AddConnectorModal({
           )}
           {step === 'configure-paperclip' && (
             <motion.div key="paperclip" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.15 }}>
-              <PaperclipSetup onBack={() => setStep('select')} onClose={onClose} onAdded={onAdded} />
+              <PaperclipSetup
+                onBack={() => setStep('select')}
+                onClose={onClose}
+                onAdded={onAdded}
+                setModalDismissible={setDismissible}
+              />
             </motion.div>
           )}
           {step === 'configure-home-assistant' && (
@@ -2228,14 +2237,17 @@ function PaperclipSetup({
   onBack,
   onClose,
   onAdded,
+  setModalDismissible,
 }: {
   onBack: () => void;
   onClose: () => void;
   onAdded: () => void;
+  setModalDismissible: (dismissible: boolean) => void;
 }) {
   const creation = useConnectorCreation();
   const [apiOrigin, setApiOrigin] = useState('');
-  const [companyId, setCompanyId] = useState('');
+  const [monitorAllCompanies, setMonitorAllCompanies] = useState(true);
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
   const [authSessionId, setAuthSessionId] = useState('');
   const [approvalUrl, setApprovalUrl] = useState('');
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
@@ -2244,6 +2256,14 @@ function PaperclipSetup({
     'idle' | 'starting' | 'awaiting-approval' | 'approved' | 'creating' | 'success' | 'error'
   >('idle');
   const [error, setError] = useState('');
+  const authorizationInProgress = status === 'starting'
+    || status === 'awaiting-approval'
+    || status === 'approved'
+    || status === 'creating';
+
+  useEffect(() => {
+    setModalDismissible(!authorizationInProgress);
+  }, [authorizationInProgress, setModalDismissible]);
 
   async function connectPaperclip() {
     setStatus('starting');
@@ -2298,7 +2318,7 @@ function PaperclipSetup({
           throw new Error('This Paperclip account has no accessible companies');
         }
         setCompanies(authorizedCompanies);
-        setCompanyId(authorizedCompanies[0]!.id);
+        setSelectedCompanyIds(authorizedCompanies.map((company) => company.id));
         setKeyExpiresAt(result.keyExpiresAt ?? null);
         setStatus('approved');
         return;
@@ -2311,14 +2331,21 @@ function PaperclipSetup({
   }
 
   async function addConnector() {
-    const company = companies.find((candidate) => candidate.id === companyId);
-    if (!company || !authSessionId) return;
+    const selectedCompanies = monitorAllCompanies
+      ? companies
+      : companies.filter((company) => selectedCompanyIds.includes(company.id));
+    if (selectedCompanies.length === 0 || !authSessionId) return;
+    const connectorName = monitorAllCompanies
+      ? 'Paperclip — All companies'
+      : selectedCompanies.length === 1
+        ? `Paperclip — ${selectedCompanies[0]!.name}`
+        : `Paperclip — ${selectedCompanies.length} companies`;
     setStatus('creating');
     setError('');
     try {
       await creation.create({
         type: 'paperclip',
-        name: `Paperclip — ${company.name}`,
+        name: connectorName,
         enabled: true,
         syncMode: 'poll',
         pollIntervalMinutes: 5,
@@ -2337,8 +2364,10 @@ function PaperclipSetup({
         credentials: { authSessionId },
         settings: {
           apiOrigin: apiOrigin.trim(),
-          companyId,
-          companyName: company.name,
+          monitorAllCompanies,
+          companyIds: monitorAllCompanies
+            ? []
+            : selectedCompanies.map((company) => company.id),
         },
         syncedLists: [],
       });
@@ -2350,11 +2379,16 @@ function PaperclipSetup({
     }
   }
 
+  function goBack() {
+    setModalDismissible(true);
+    onBack();
+  }
+
   return (
     <div>
       <h3 className="mb-1 text-lg font-semibold text-[var(--text-primary)]">Connect Paperclip</h3>
       <p className="text-sm text-[var(--text-tertiary)] mb-4">
-        Approve Mission Control in Paperclip, then choose the company to monitor. No API key copy and paste required.
+        Approve Mission Control in Paperclip, then choose which companies to monitor. No API key copy and paste required.
       </p>
       {status === 'success' ? (
         <div className="py-4 text-center">
@@ -2399,24 +2433,55 @@ function PaperclipSetup({
           )}
           {(status === 'approved' || status === 'creating') && (
             <>
-              <label className="block text-xs text-[var(--text-secondary)]">
-                Paperclip company
-                <Select value={companyId} onValueChange={setCompanyId}>
-                  <SelectTrigger aria-label="Paperclip company" className="mt-1 w-full">
-                    <SelectValue placeholder="Choose a company" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {companies.map((company) => (
-                      <SelectItem key={company.id} value={company.id}>
-                        {company.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3 text-xs leading-5 text-[var(--text-muted)]">
-                <span className="font-medium text-[var(--text-secondary)]">Board connection approved.</span>{' '}
-                Mission Control created a named 90-day key and revoked the temporary login key.
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-medium text-[var(--text-secondary)]">
+                  Companies to monitor
+                </legend>
+                <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
+                  <input
+                    type="checkbox"
+                    checked={monitorAllCompanies}
+                    onChange={(event) => setMonitorAllCompanies(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-[var(--border-strong)]"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-[var(--text-primary)]">
+                      All accessible companies
+                    </span>
+                    <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
+                      Newly accessible companies will be included automatically.
+                    </span>
+                  </span>
+                </label>
+                {!monitorAllCompanies && (
+                  <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-2">
+                    {companies.map((company) => {
+                      const checked = selectedCompanyIds.includes(company.id);
+                      return (
+                        <label
+                          key={company.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setSelectedCompanyIds((current) => (
+                              checked
+                                ? current.filter((companyId) => companyId !== company.id)
+                                : [...current, company.id]
+                            ))}
+                            className="h-4 w-4 rounded border-[var(--border-strong)]"
+                          />
+                          {company.name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </fieldset>
+              <div role="status" className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3 text-xs leading-5 text-[var(--text-muted)]">
+                <span className="font-medium text-[var(--text-secondary)]">Authorization approved; setup is not finished.</span>{' '}
+                Confirm the company scope, then select Add connector to save this connection. Mission Control created a named 90-day key and revoked the temporary login key.
                 {keyExpiresAt ? ` Renewal is due ${new Date(keyExpiresAt).toLocaleDateString()}.` : ''}
               </div>
             </>
@@ -2428,13 +2493,16 @@ function PaperclipSetup({
             </p>
           )}
           <div className="flex justify-between pt-2">
-            <button onClick={onBack} className="flex items-center gap-1 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
+            <button onClick={goBack} className="flex items-center gap-1 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
               <ChevronRight size={12} className="rotate-180" /> Back
             </button>
             {status === 'approved' || status === 'creating' ? (
               <button
                 onClick={() => void addConnector()}
-                disabled={status === 'creating' || !companyId}
+                disabled={
+                  status === 'creating'
+                  || (!monitorAllCompanies && selectedCompanyIds.length === 0)
+                }
                 className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {status === 'creating' ? <Loader2 size={14} className="animate-spin" /> : null}

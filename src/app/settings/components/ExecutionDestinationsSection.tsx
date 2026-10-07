@@ -75,7 +75,10 @@ interface PaperclipConnector {
   settings: {
     apiOrigin?: string;
     companyId?: string;
+    companyIds?: string[];
     companyName?: string;
+    companyNames?: Record<string, string>;
+    monitorAllCompanies?: boolean;
     boardKeyExpiresAt?: string | null;
   };
 }
@@ -1064,15 +1067,23 @@ export function ExecutionDestinationsSection() {
                 value={form.connectorId}
                 onValueChange={(connectorId) => {
                   const connector = paperclipConnectors.find(({ id }) => id === connectorId);
+                  const configuredCompanyIds = Array.isArray(connector?.settings.companyIds)
+                    ? connector.settings.companyIds.filter(
+                      (companyId): companyId is string => typeof companyId === 'string',
+                    )
+                    : [];
+                  const legacyCompanyId = typeof connector?.settings.companyId === 'string'
+                    ? connector.settings.companyId
+                    : '';
                   updatePaperclipConnection({
                     connectorId,
                     endpoint: connector?.settings.apiOrigin ?? '',
-                    companyId: connector?.settings.companyId ?? '',
+                    companyId: legacyCompanyId || configuredCompanyIds[0] || '',
                   });
                 }}
               >
                 <SelectTrigger id="destination-paperclip-connector" className="w-full">
-                  <SelectValue placeholder="Choose a connected company" />
+                  <SelectValue placeholder="Choose a Paperclip connection" />
                 </SelectTrigger>
                 <SelectContent>
                   {paperclipConnectors.map((connector) => (

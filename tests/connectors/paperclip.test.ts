@@ -140,6 +140,70 @@ describe('Paperclip approvals connector', () => {
     })).rejects.toThrow('require HTTPS');
   });
 
+  it('discovers and monitors every accessible company when configured for all companies', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/health') {
+        return Response.json({ status: 'ok' });
+      }
+      if (path === '/api/companies') {
+        return Response.json([
+          { id: 'company-1', name: 'Research', status: 'active' },
+          { id: 'company-2', name: 'Operations', status: 'active' },
+        ]);
+      }
+      if (path === '/api/projects' || path === '/api/agents') {
+        return Response.json([]);
+      }
+      if (path === '/api/companies/company-1/approvals') {
+        return Response.json([]);
+      }
+      if (path === '/api/companies/company-2/approvals') {
+        return Response.json([{
+          id: 'approval-2',
+          status: 'pending',
+          type: 'deploy_change',
+        }]);
+      }
+      if (path === '/api/approvals/approval-2/issues') {
+        return Response.json([]);
+      }
+      throw new Error(`Unexpected Paperclip request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const connector = new PaperclipConnector();
+    await connector.initialize({
+      ...connectorConfig(),
+      name: 'Paperclip — All companies',
+      settings: {
+        apiOrigin: 'https://paperclip.example.test',
+        monitorAllCompanies: true,
+        companyIds: [],
+      },
+    });
+
+    const notifications = await connector.fetchNotifications();
+
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        id: 'paperclip-approval:approval-2',
+        metadata: expect.objectContaining({
+          companyId: 'company-2',
+          companyName: 'Operations',
+        }),
+      }),
+    ]);
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://paperclip.example.test/api/companies/company-1/approvals',
+      expect.any(Object),
+    );
+    expect(fetcher).toHaveBeenCalledWith(
+      'https://paperclip.example.test/api/companies/company-2/approvals',
+      expect.any(Object),
+    );
+    await connector.dispose();
+  });
+
   it('warns before the Board credential expires without hiding approval state', async () => {
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     vi.stubGlobal('fetch', vi.fn(async () => Response.json([])));

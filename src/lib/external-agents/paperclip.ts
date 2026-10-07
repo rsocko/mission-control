@@ -359,7 +359,10 @@ export async function listPaperclipApprovals(
       502,
     );
   }
-  return approvals;
+  return approvals.map((approval) => ({
+    ...approval,
+    companyId,
+  }));
 }
 
 export async function getPaperclipCompanyName(

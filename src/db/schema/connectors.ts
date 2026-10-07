@@ -232,7 +232,7 @@ export const syncLog = sqliteTable('sync_log', {
   durationMs: integer('duration_ms'),
   jobId: text('job_id'),
   trigger: text('trigger')
-    .$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>(),
+    .$type<'manual' | 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>(),
   scheduledFor: text('scheduled_for'),
   startedAt: text('started_at'),
   attempt: integer('attempt'),
@@ -252,7 +252,7 @@ export const syncJobs = sqliteTable('sync_jobs', {
   connectorId: text('connector_id').notNull(),
   full: integer('full', { mode: 'boolean' }).notNull().default(false),
   source: text('source')
-    .$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>()
+    .$type<'manual' | 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>()
     .notNull(),
   status: text('status')
     .$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'>()

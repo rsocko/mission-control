@@ -113,7 +113,7 @@ export async function POST(request: Request) {
       const result = await syncScheduler.runSync(connectorId, {
         full,
         signal: request.signal,
-        source: 'api',
+        source: 'manual',
       });
       results = [result];
     } else {

@@ -246,7 +246,7 @@ export const CONNECTOR_ICONS: Record<string, string> = {
   'outlook-email': '/icons/connectors/outlook.svg',
   'rymessage': '/icons/connectors/rymessage.svg',
   'scout': 'dash:microsoft-copilot',
-  'paperclip': 'lucide:paperclip',
+  'paperclip': '/icons/connectors/paperclip.svg',
   finance: '/icons/connectors/tyrion.svg',
   'finance-manager': '/icons/connectors/tyrion.svg',
   'monarch-money': '/icons/connectors/tyrion.svg',

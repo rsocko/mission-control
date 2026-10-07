@@ -43,6 +43,10 @@ import {
 } from '@/lib/connectors/data-classification';
 import { loadAIProviderConfiguration } from '@/lib/ai/provider-configuration-service';
 import { validatePaperclipConnectorConfig } from '@/lib/connectors/paperclip';
+import {
+  completePaperclipAuthorization,
+  consumePaperclipAuthorization,
+} from '@/lib/connectors/paperclip/auth-session';
 
 function configsNameMatch(
   connectors: Array<{ id: string; type: string; name: string; deletedAt?: string | null }>,
@@ -181,7 +185,9 @@ export async function POST(request: Request) {
     const persistence = await getConnectorManagementPersistence();
     const body = await request.json();
     const sanitizedBody = sanitizeFinanceConnectorWrite(body);
-    const { id: requestedId, type, name, enabled, syncMode, pollIntervalMinutes, capabilities, credentials, settings, syncedLists } = sanitizedBody;
+    const { id: requestedId, type, name, enabled, syncMode, pollIntervalMinutes, capabilities, settings, syncedLists } = sanitizedBody;
+    let credentials = sanitizedBody.credentials;
+    let paperclipAuthSessionId = '';
     const { routingPolicy } = await loadAIProviderConfiguration();
 
     const id = requestedId || crypto.randomUUID();
@@ -220,6 +226,26 @@ export async function POST(request: Request) {
     }
     if (type === 'paperclip') {
       try {
+        const authSessionId = typeof credentials?.authSessionId === 'string'
+          ? credentials.authSessionId.trim()
+          : '';
+        if (authSessionId) {
+          const authorized = consumePaperclipAuthorization(
+            authSessionId,
+            String(connectorSettings.apiOrigin ?? ''),
+            String(connectorSettings.companyId ?? ''),
+          );
+          credentials = { apiToken: authorized.apiToken };
+          paperclipAuthSessionId = authSessionId;
+          connectorSettings = {
+            ...connectorSettings,
+            companyName: authorized.companyName,
+            boardKeyId: authorized.keyId,
+            boardKeyExpiresAt: authorized.keyExpiresAt,
+            boardUserId: authorized.boardUserId,
+            boardUserName: authorized.boardUserName,
+          };
+        }
         connectorSettings = {
           ...connectorSettings,
           ...validatePaperclipConnectorConfig(connectorSettings, credentials ?? {}),
@@ -303,6 +329,9 @@ export async function POST(request: Request) {
       syncedLists: syncedLists || [],
       now,
     });
+    if (paperclipAuthSessionId) {
+      completePaperclipAuthorization(paperclipAuthSessionId);
+    }
 
     // Auto-create source lists for Scout connector
     if (type === 'scout') {

@@ -215,12 +215,21 @@ a parent issue with:
 Use Paperclip's REST/OpenAPI surface first. MCP is useful for interactive tool
 use, but REST provides a simpler durable dispatch and reconciliation contract.
 
-The implemented provider registers an API origin, a server-owned direct
-credential or deployment-secret reference, and default company, assignee,
-optional project, and optional adapter guard. Setup first checks the URL and
-credential, then discovers accessible companies, projects, agents, and adapter
-types for selection. Registration verifies `/api/health`, the selected
-assignee, and any selected project before persistence.
+The notification connector uses Paperclip's browser-approved Board
+authorization flow. Mission Control exchanges the temporary approval credential
+for a named 90-day Board API key, revokes the temporary key, stores the named key
+server-side, and warns 14 days before it expires. A connector instance remains
+bound to one monitored company even when the Board identity can access several
+companies.
+
+The implemented provider registers an API origin, a connector-owned credential,
+a server-owned direct credential, or a deployment-secret reference, plus a
+default company, assignee, optional project, and optional adapter guard.
+Connector-backed routes store only `paperclip-connector:<connectorId>` and
+resolve the key on the server; they never duplicate or expose it. Setup first
+checks the URL and credential, then discovers accessible companies, projects,
+agents, and adapter types for selection. Registration verifies `/api/health`,
+the selected assignee, and any selected project before persistence.
 
 The saved route values are delegation defaults rather than immutable bindings.
 The delegation review flow can select another discovered company, project,

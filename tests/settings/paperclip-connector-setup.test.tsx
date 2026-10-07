@@ -2,9 +2,22 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AddConnectorModal } from '@/app/settings/components/AddConnectorModal';
+import { ConnectorBrandIcon } from '@/app/settings/components/ConnectorBrandIcon';
+import { CONNECTOR_ICONS } from '@/app/settings/components/types';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+it('renders the vendored upstream Paperclip logo', () => {
+  expect(CONNECTOR_ICONS.paperclip).toBe('/icons/connectors/paperclip.svg');
+
+  const { container } = render(<ConnectorBrandIcon type="paperclip" />);
+
+  expect(container.querySelector('img')).toHaveAttribute(
+    'src',
+    '/icons/connectors/paperclip.svg',
+  );
 });
 
 it('authorizes Paperclip in the browser and creates a connector for the selected company', async () => {

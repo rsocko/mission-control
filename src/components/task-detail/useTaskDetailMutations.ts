@@ -181,7 +181,7 @@ export function useTaskDetailMutations({
         ));
         onUpdate?.({ [field]: previousValue });
         if (reportError) {
-          toast.error(`Failed to save ${field}`);
+          toast.error(`Failed to save ${field === 'description' ? 'notes' : field}`);
         }
       }
       return false;

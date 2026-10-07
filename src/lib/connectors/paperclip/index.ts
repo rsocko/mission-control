@@ -4,6 +4,7 @@ import type {
   ConnectorCapabilities,
   ConnectorConfig,
   InboundNotification,
+  NotificationLevel,
   SourceList,
   TaskItem,
 } from '@/types';
@@ -19,6 +20,8 @@ import {
   discoverPaperclip,
   listPaperclipApprovalIssues,
   listPaperclipApprovals,
+  listPaperclipAttention,
+  type PaperclipAttentionItem,
   type PaperclipIssue,
   type PaperclipApproval,
 } from '@/lib/external-agents/paperclip';
@@ -54,6 +57,16 @@ const PAPERCLIP_NOTIFICATION_TYPES: readonly ConnectorNotificationTypeDefinition
     sensitivity: 'sensitive',
     defaultPreview: 'title_only',
   },
+  {
+    key: 'paperclip_attention',
+    label: 'Paperclip attention',
+    description: 'A Paperclip decision, interaction, review, or operational item needs attention.',
+    defaultLevel: 'heads_up',
+    pushEligible: true,
+    pushRecommendation: 'off',
+    sensitivity: 'sensitive',
+    defaultPreview: 'title_only',
+  },
 ];
 
 const CONNECTOR_CAPABILITIES: ConnectorCapabilities = {
@@ -83,6 +96,10 @@ const CREDENTIAL_WARNING_MS = 14 * 24 * 60 * 60 * 1000;
 
 function approvalNotificationId(approvalId: string): string {
   return `paperclip-approval:${approvalId}`;
+}
+
+function attentionNotificationId(attentionId: string): string {
+  return `paperclip-attention:${attentionId}`;
 }
 
 function credentialExpiryNotificationId(connectorId: string): string {
@@ -209,6 +226,125 @@ function approvalNotification({
       status: approval.status,
       createdAt,
       expiresAt,
+      relatedTaskId: relatedTaskId ?? null,
+    },
+  };
+}
+
+function attentionLevel(value: unknown): NotificationLevel {
+  switch (value) {
+    case 'critical': return 'urgent';
+    case 'high': return 'action_needed';
+    case 'medium': return 'heads_up';
+    default: return 'fyi';
+  }
+}
+
+function attentionActionUrl(
+  settings: PaperclipConnectorSettings,
+  attention: PaperclipAttentionItem,
+): string {
+  const apiOrigin = new URL(settings.apiOrigin).origin;
+  const href = boundedText(record(attention.subject).href, 2048);
+  if (!href) return apiOrigin;
+  try {
+    const url = new URL(href, apiOrigin);
+    return url.origin === apiOrigin ? url.toString() : apiOrigin;
+  } catch {
+    return apiOrigin;
+  }
+}
+
+function attentionNotification({
+  attention,
+  settings,
+  companyName,
+  connectorId,
+  relatedTaskId,
+}: {
+  attention: PaperclipAttentionItem;
+  settings: PaperclipConnectorSettings;
+  companyName: string;
+  connectorId: string;
+  relatedTaskId?: string;
+}): InboundNotification {
+  const subject = record(attention.subject);
+  const relatedIssue = record(attention.relatedIssue);
+  const detail = record(attention.detail);
+  const sourceKind = boundedText(attention.sourceKind, 120) ?? 'attention';
+  const detailKind = boundedText(detail.kind, 120);
+  const title = boundedText(subject.title, 240)
+    ?? boundedText(detail.title, 240)
+    ?? `Paperclip ${sourceKind.replaceAll('_', ' ')}`;
+  const identifier = boundedText(subject.identifier, 160)
+    ?? boundedText(relatedIssue.identifier, 160);
+  const whyNow = boundedText(attention.whyNow, 600);
+  const summary = boundedText(detail.summaryExcerpt, 600)
+    ?? boundedText(detail.promptExcerpt, 600);
+  const createdAt = dateText(attention.createdAt)
+    ?? dateText(attention.activityAt)
+    ?? new Date().toISOString();
+  const activityAt = dateText(attention.activityAt)
+    ?? dateText(attention.updatedAt)
+    ?? createdAt;
+  const decisionVerbs = Array.isArray(attention.decisionVerbs)
+    ? attention.decisionVerbs
+      .map((verb) => boundedText(record(verb).label, 80))
+      .filter((label): label is string => Boolean(label))
+      .slice(0, 10)
+    : [];
+  const detailLines = [
+    `Company: ${companyName}`,
+    `Type: ${sourceKind}`,
+    ...(detailKind ? [`Detail: ${detailKind}`] : []),
+    ...(identifier ? [`Paperclip issue: ${identifier}`] : []),
+    ...(relatedTaskId ? [`Mission Control task: ${relatedTaskId}`] : []),
+    ...(whyNow ? [`Why now: ${whyNow}`] : []),
+    ...(summary ? [`Summary: ${summary}`] : []),
+    ...(decisionVerbs.length > 0 ? [`Available decisions: ${decisionVerbs.join(', ')}`] : []),
+    `Created: ${createdAt}`,
+  ];
+  const isActionable = attention.inlineResolvable === true
+    || decisionVerbs.length > 0
+    || ['decision', 'issue_thread_interaction', 'join_request', 'recovery_action']
+      .includes(sourceKind);
+
+  return {
+    id: attentionNotificationId(attention.id),
+    sourceId: `attention:${attention.id}`,
+    connectorType: 'paperclip',
+    connectorInstanceId: connectorId,
+    title,
+    body: detailLines.join('\n'),
+    level: attentionLevel(attention.severity),
+    category: 'automation',
+    templateKey: 'paperclip_attention',
+    isRead: false,
+    isActionable,
+    actionUrl: attentionActionUrl(settings, attention),
+    receivedAt: createdAt,
+    sourceState: 'active',
+    sourceActivityAt: activityAt,
+    sourceActivityKey: activityAt,
+    reopenPolicy: 'handled_and_dismissed',
+    ...(relatedTaskId ? { relatedTaskId } : {}),
+    hubProjectIds: [],
+    tags: [],
+    metadata: {
+      attentionId: attention.id,
+      companyId: attention.companyId,
+      companyName,
+      sourceKind,
+      detailKind,
+      subjectKind: boundedText(subject.kind, 120),
+      subjectId: boundedText(subject.id, 160),
+      relatedIssueId: boundedText(relatedIssue.id, 160),
+      identifier,
+      whyNow,
+      summary,
+      severity: boundedText(attention.severity, 80),
+      decisionVerbs,
+      inlineResolvable: attention.inlineResolvable === true,
       relatedTaskId: relatedTaskId ?? null,
     },
   };
@@ -365,6 +501,7 @@ export class PaperclipConnector implements IConnector {
   private settings: PaperclipConnectorSettings | null = null;
   private credential = '';
   private approvals: PaperclipApproval[] | null = null;
+  private attention: PaperclipAttentionItem[] | null = null;
   private companyNames = new Map<string, string>();
 
   async initialize(config: ConnectorConfig): Promise<void> {
@@ -375,8 +512,8 @@ export class PaperclipConnector implements IConnector {
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      await this.fetchApprovals();
-      return { success: true, message: 'Connected to Paperclip approvals' };
+      await this.fetchPaperclipState();
+      return { success: true, message: 'Connected to Paperclip approvals and attention' };
     } catch (error) {
       return {
         success: false,
@@ -389,6 +526,7 @@ export class PaperclipConnector implements IConnector {
     this.settings = null;
     this.credential = '';
     this.approvals = null;
+    this.attention = null;
     this.companyNames.clear();
   }
 
@@ -399,11 +537,8 @@ export class PaperclipConnector implements IConnector {
   async fetchNotifications(): Promise<InboundNotification[]> {
     const settings = this.requireSettings();
     const credentialNotification = credentialExpiryNotification(settings, this.id);
-    const approvals = await this.fetchApprovals();
+    const { approvals, attention } = await this.fetchPaperclipState();
     const pendingApprovals = approvals.filter(isPending);
-    if (pendingApprovals.length === 0) {
-      return credentialNotification ? [credentialNotification] : [];
-    }
     const issuesByApproval = new Map<string, PaperclipIssue[]>();
     for (let index = 0; index < pendingApprovals.length; index += 5) {
       const batch = pendingApprovals.slice(index, index + 5);
@@ -462,23 +597,50 @@ export class PaperclipConnector implements IConnector {
         ...(relatedTaskId ? { relatedTaskId } : {}),
       });
     });
-    return credentialNotification
-      ? [credentialNotification, ...approvalNotifications]
-      : approvalNotifications;
+    const attentionNotifications = attention
+      .filter((item) => item.sourceKind !== 'approval')
+      .map((item) => {
+        const subject = record(item.subject);
+        const relatedIssue = record(item.relatedIssue);
+        const relatedTaskId = [
+          boundedText(subject.id, 160),
+          boundedText(relatedIssue.id, 160),
+        ]
+          .filter((issueId): issueId is string => Boolean(issueId))
+          .map((issueId) => taskByIssueId.get(issueId))
+          .find((taskId): taskId is string => Boolean(taskId));
+        return attentionNotification({
+          attention: item,
+          settings,
+          companyName: this.companyNames.get(item.companyId) ?? item.companyId,
+          connectorId: this.id,
+          ...(relatedTaskId ? { relatedTaskId } : {}),
+        });
+      });
+    return [
+      ...(credentialNotification ? [credentialNotification] : []),
+      ...approvalNotifications,
+      ...attentionNotifications,
+    ];
   }
 
   async getActiveAlertSourceIds(): Promise<string[]> {
-    const approvals = this.approvals ?? await this.fetchApprovals();
-    const approvalIds = approvals
+    const state = this.approvals && this.attention
+      ? { approvals: this.approvals, attention: this.attention }
+      : await this.fetchPaperclipState();
+    const approvalIds = state.approvals
       .filter(isAuthoritativelyActive)
       .map((approval) => approvalNotificationId(approval.id));
+    const attentionIds = state.attention
+      .filter((item) => item.sourceKind !== 'approval')
+      .map((item) => attentionNotificationId(item.id));
     const credentialNotification = credentialExpiryNotification(
       this.requireSettings(),
       this.id,
     );
     return credentialNotification
-      ? [credentialExpiryNotificationId(this.id), ...approvalIds]
-      : approvalIds;
+      ? [credentialExpiryNotificationId(this.id), ...approvalIds, ...attentionIds]
+      : [...approvalIds, ...attentionIds];
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {
@@ -494,7 +656,10 @@ export class PaperclipConnector implements IConnector {
     return this.settings;
   }
 
-  private async fetchApprovals(): Promise<PaperclipApproval[]> {
+  private async fetchPaperclipState(): Promise<{
+    approvals: PaperclipApproval[];
+    attention: PaperclipAttentionItem[];
+  }> {
     const settings = this.requireSettings();
     const connection = {
       endpoint: settings.apiOrigin,
@@ -507,10 +672,15 @@ export class PaperclipConnector implements IConnector {
         name: settings.companyNames[companyId] ?? companyId,
       }));
     this.companyNames = new Map(companies.map((company) => [company.id, company.name]));
-    const approvals = (await Promise.all(companies.map((company) =>
-      listPaperclipApprovals(connection, company.id)))).flat();
+    const [approvals, attention] = await Promise.all([
+      Promise.all(companies.map((company) =>
+        listPaperclipApprovals(connection, company.id))).then((items) => items.flat()),
+      Promise.all(companies.map((company) =>
+        listPaperclipAttention(connection, company.id))).then((items) => items.flat()),
+    ]);
     this.approvals = approvals;
-    return approvals;
+    this.attention = attention;
+    return { approvals, attention };
   }
 }
 

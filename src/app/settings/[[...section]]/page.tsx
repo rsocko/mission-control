@@ -423,6 +423,7 @@ export default function SettingsPage() {
           onClose={() => setShowAddModal(false)}
           onAdded={() => { setShowAddModal(false); fetchData(); }}
           classificationDefaults={classificationDefaults}
+          connectors={connectors}
         />
       )}
     </AnimatePresence>

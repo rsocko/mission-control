@@ -5,8 +5,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   ChevronRight, Loader2, Shield, Eye, EyeOff,
   AlertTriangle, ExternalLink, CheckCircle2, XCircle, Save, Activity, Wifi,
+  Info, Search, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipProvider } from '@/components/ui/Tooltip';
 import {
   Select,
   SelectContent,
@@ -18,7 +20,7 @@ import {
   staggerContainer, fadeSlideUp, modalOverlay, modalContent,
 } from '@/lib/motion';
 import type { ConnectorConfig } from './types';
-import { CONNECTOR_TYPES } from './types';
+import { CONNECTOR_TYPES, isFinanceConnectorType } from './types';
 import { DEFAULT_DOCUMENT_INTELLIGENCE_URL } from '@/lib/connectors/document-intelligence';
 import {
   DEFAULT_TYRION_BRIDGE_URL,
@@ -46,6 +48,21 @@ const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
   process.env.NODE_ENV,
 );
 
+const CONNECTOR_SEARCH_KEYWORDS: Record<string, string[]> = {
+  'microsoft-todo': ['tasks', 'lists', 'personal'],
+  'microsoft-todo-work': ['tasks', 'lists', 'corporate', 'm365'],
+  'github-issues': ['code', 'development', 'repository', 'repos'],
+  'outlook-calendar': ['meetings', 'events', 'schedule', 'm365'],
+  'outlook-email': ['mail', 'inbox', 'm365'],
+  scout: ['microsoft', 'email', 'teams', 'meetings', 'planner'],
+  paperclip: ['agents', 'approvals'],
+  rymessage: ['messages', 'sms', 'text'],
+  'finance-manager': ['finance', 'budget', 'transactions', 'money'],
+  'custom-rest': ['api', 'webhook', 'custom', 'http'],
+  'document-intelligence': ['documents', 'paperless', 'files'],
+  'home-assistant': ['smart home', 'devices', 'automation'],
+};
+
 // --- Add Connector Modal --------------------------------------------------
 
 type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-paperclip' | 'configure-home-assistant' | 'configure-rymessage' | 'configure-other';
@@ -54,10 +71,12 @@ function AddConnectorModal({
   onClose,
   onAdded,
   classificationDefaults,
+  connectors = [],
 }: {
   onClose: () => void;
   onAdded: () => void;
   classificationDefaults?: Record<string, ConnectorDataClassification>;
+  connectors?: ConnectorConfig[];
 }) {
   const [step, setStep] = useState<ConnectorSetupStep>('select');
   const [selectedType, setSelectedType] = useState<string | null>(null);
@@ -101,7 +120,7 @@ function AddConnectorModal({
       initial="hidden"
       animate="show"
       exit="exit"
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       onClick={onClose}
     >
       <motion.div
@@ -112,8 +131,10 @@ function AddConnectorModal({
         role="dialog"
         aria-modal="true"
         aria-label="Add connector"
-        className={`bg-[var(--surface-1)] rounded-2xl shadow-2xl w-full p-6 border border-[var(--border)] max-h-[90vh] overflow-y-auto ${
-          step === 'configure-home-assistant' ? 'max-w-2xl' : 'max-w-lg'
+        className={`bg-[var(--surface-1)] rounded-2xl shadow-2xl w-full border border-[var(--border)] max-h-[90vh] ${
+          step === 'select'
+            ? 'max-w-3xl overflow-hidden'
+            : `${step === 'configure-home-assistant' ? 'max-w-2xl' : 'max-w-lg'} overflow-y-auto p-6`
         }`}
         onClick={e => e.stopPropagation()}
       >
@@ -133,6 +154,7 @@ function AddConnectorModal({
                 onSelect={handleSelectType}
                 onClose={onClose}
                 classificationDefaults={classificationDefaults}
+                connectors={connectors}
               />
             </motion.div>
           )}
@@ -799,46 +821,275 @@ function ConnectorTypeSelector({
   onSelect,
   onClose,
   classificationDefaults,
+  connectors,
 }: {
   onSelect: (type: string) => void;
   onClose: () => void;
   classificationDefaults?: Record<string, ConnectorDataClassification>;
+  connectors: ConnectorConfig[];
 }) {
+  type ClassificationFilter = 'all' | ConnectorDataClassification;
+
+  const [query, setQuery] = useState('');
+  const [classificationFilter, setClassificationFilter] =
+    useState<ClassificationFilter>('all');
+  const recommendedTypes = new Set(['microsoft-todo', 'github-issues', 'outlook-email']);
+
+  const connectedCounts = connectors.reduce<Record<string, number>>((counts, connector) => {
+    const catalogType = isFinanceConnectorType(connector.type)
+      ? 'finance-manager'
+      : connector.type;
+    counts[catalogType] = (counts[catalogType] ?? 0) + 1;
+    return counts;
+  }, {});
+
+  const connectorOptions = CONNECTOR_TYPES.map(connector => ({
+    ...connector,
+    classification:
+      classificationDefaults?.[connector.type]
+      ?? connectorBaselineClassification(connector.type),
+  }));
+
+  const filterOptions: Array<{ value: ClassificationFilter; label: string }> = [
+    { value: 'all', label: 'All' },
+    { value: 'standard', label: 'Standard' },
+    { value: 'restricted', label: 'Restricted' },
+  ];
+  if (connectorOptions.some(connector => connector.classification === 'local-only')) {
+    filterOptions.push({ value: 'local-only', label: 'Local only' });
+  }
+
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visibleConnectors = connectorOptions
+    .filter(connector =>
+      classificationFilter === 'all'
+      || connector.classification === classificationFilter)
+    .filter(connector => {
+      if (!normalizedQuery) return true;
+      return [
+        connector.name,
+        connector.description,
+        connector.type,
+        ...(CONNECTOR_SEARCH_KEYWORDS[connector.type] ?? []),
+      ].some(value => value.toLocaleLowerCase().includes(normalizedQuery));
+    });
+
+  const recommendedConnectors = normalizedQuery || classificationFilter !== 'all'
+    ? []
+    : visibleConnectors.filter(connector => recommendedTypes.has(connector.type));
+  const allConnectors = visibleConnectors
+    .filter(connector => !recommendedConnectors.includes(connector))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  function handleGridKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+
+    const cards = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-connector-card]'),
+    );
+    const activeIndex = cards.findIndex(
+      card => card === event.currentTarget.ownerDocument.activeElement,
+    );
+    if (activeIndex < 0) return;
+
+    const columns = event.currentTarget.clientWidth >= 640 ? 2 : 1;
+    const offset = {
+      ArrowDown: columns,
+      ArrowUp: -columns,
+      ArrowRight: 1,
+      ArrowLeft: -1,
+    }[event.key] ?? 0;
+    const nextIndex = Math.max(0, Math.min(cards.length - 1, activeIndex + offset));
+    if (nextIndex === activeIndex) return;
+
+    event.preventDefault();
+    cards[nextIndex]?.focus();
+  }
+
+  function renderConnectorCard(
+    connector: (typeof connectorOptions)[number],
+  ) {
+    const connectedCount = connectedCounts[connector.type] ?? 0;
+    return (
+      <motion.button
+        key={connector.type}
+        data-connector-card
+        variants={fadeSlideUp}
+        onClick={() => onSelect(connector.type)}
+        whileHover={{ y: -1, borderColor: 'rgba(96, 165, 250, 0.5)' }}
+        whileTap={{ scale: 0.98 }}
+        className="group min-h-24 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 text-left transition-colors hover:bg-blue-900/10"
+        aria-label={`${connectedCount > 0 ? 'Add another' : 'Add'} ${connector.name} ${connector.description}${connectedCount > 0 ? `, ${connectedCount} connected` : ''}`}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)]">
+            <ConnectorBrandIcon type={connector.type} size={20} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-sm font-medium text-[var(--text-primary)]">
+                {connector.name}
+              </span>
+              {connectedCount > 0 && (
+                <span className="text-[11px] font-medium text-blue-300">
+                  {connectedCount} connected
+                </span>
+              )}
+            </div>
+            <p className="mt-1 line-clamp-2 text-xs leading-4 text-[var(--text-tertiary)]">
+              {connector.description}
+            </p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <ConnectorClassificationBadge classification={connector.classification} />
+              <span className="text-xs font-medium text-blue-300 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                {connectedCount > 0 ? 'Add another' : 'Add'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </motion.button>
+    );
+  }
+
   return (
-    <>
-      <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">Add Connector</h3>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="grid grid-cols-2 gap-3">
-        {CONNECTOR_TYPES.map(ct => (
-            <motion.button
-              key={ct.type}
-              variants={fadeSlideUp}
-              onClick={() => onSelect(ct.type)}
-              whileHover={{ scale: 1.02, borderColor: 'rgba(96, 165, 250, 0.5)' }}
-              whileTap={{ scale: 0.97 }}
-              className="border border-[var(--border)] rounded-xl p-4 text-left hover:bg-blue-900/10 transition-colors"
+    <div className="flex max-h-[calc(90vh-2px)] flex-col">
+      <div className="border-b border-[var(--border)] bg-[var(--surface-1)] px-4 pb-4 pt-5 sm:px-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--text-primary)]">Add connector</h3>
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+              Choose a source to connect to Mission Control.
+            </p>
+          </div>
+          <div className="flex items-center gap-1">
+            {connectors.length > 0 && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg px-3 py-2 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              >
+                Manage connected
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              aria-label="Close connector picker"
             >
-              <div className="flex items-center gap-2.5 mb-1">
-                <div className="w-8 h-8 rounded-lg bg-[var(--surface-2)] flex items-center justify-center">
-                  <ConnectorBrandIcon type={ct.type} size={20} />
-                </div>
-                <span className="text-sm font-medium text-[var(--text-primary)]">{ct.name}</span>
-              </div>
-              <p className="text-xs text-[var(--text-tertiary)] ml-10">{ct.description}</p>
-              <div className="ml-10 mt-2">
-                <ConnectorClassificationBadge
-                  classification={
-                    classificationDefaults?.[ct.type]
-                    ?? connectorBaselineClassification(ct.type)
-                  }
-                />
-              </div>
-            </motion.button>
-        ))}
-      </motion.div>
-      <div className="flex justify-end mt-6">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">Cancel</button>
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <label className="relative mt-4 block">
+          <Search
+            size={16}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
+          />
+          <span className="sr-only">Search connectors</span>
+          <input
+            type="search"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="Search connectors..."
+            autoFocus
+            className="h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] pl-10 pr-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+          />
+        </label>
+
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Filter connectors by data handling">
+            {filterOptions.map(option => {
+              const count = connectorOptions.filter(connector =>
+                option.value === 'all' || connector.classification === option.value).length;
+              const selected = classificationFilter === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setClassificationFilter(option.value)}
+                  aria-pressed={selected}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    selected
+                      ? 'bg-blue-600 text-white'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  {option.label} {count}
+                </button>
+              );
+            })}
+          </div>
+          <TooltipProvider>
+            <Tooltip
+              placement="left"
+              content="Data handling"
+              subtitle="Standard may use eligible AI routes. Restricted stays private. Local only never leaves this host."
+            >
+              <button
+                type="button"
+                className="shrink-0 rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                aria-label="About connector data handling"
+              >
+                <Info size={15} />
+              </button>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </div>
-    </>
+
+      <div
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6"
+        onKeyDown={handleGridKeyDown}
+      >
+        {visibleConnectors.length === 0 ? (
+          <div className="flex min-h-48 flex-col items-center justify-center text-center">
+            <Search size={24} className="mb-3 text-[var(--text-muted)]" />
+            <p className="text-sm font-medium text-[var(--text-primary)]">No connectors found</p>
+            <p className="mt-1 max-w-xs text-xs text-[var(--text-muted)]">
+              Try another name, product, or category.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                setClassificationFilter('all');
+              }}
+              className="mt-4 rounded-lg px-3 py-2 text-xs font-medium text-blue-300 hover:bg-blue-900/20"
+            >
+              Clear search and filters
+            </button>
+          </div>
+        ) : (
+          <motion.div variants={staggerContainer} initial="hidden" animate="show">
+            {recommendedConnectors.length > 0 && (
+              <section className="mb-6">
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  Recommended
+                </h4>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {recommendedConnectors.map(renderConnectorCard)}
+                </div>
+              </section>
+            )}
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  {recommendedConnectors.length > 0 ? 'More connectors' : 'Connectors'}
+                </h4>
+                <span className="text-xs tabular-nums text-[var(--text-muted)]">
+                  {visibleConnectors.length} result{visibleConnectors.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {allConnectors.map(renderConnectorCard)}
+              </div>
+            </section>
+          </motion.div>
+        )}
+      </div>
+    </div>
   );
 }
 

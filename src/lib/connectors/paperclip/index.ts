@@ -26,6 +26,9 @@ interface PaperclipConnectorSettings {
   apiOrigin: string;
   companyId: string;
   companyName?: string;
+  boardKeyId?: string;
+  boardKeyExpiresAt?: string | null;
+  boardUserName?: string | null;
 }
 
 const PAPERCLIP_NOTIFICATION_TYPES: readonly ConnectorNotificationTypeDefinition[] = [
@@ -36,6 +39,16 @@ const PAPERCLIP_NOTIFICATION_TYPES: readonly ConnectorNotificationTypeDefinition
     defaultLevel: 'action_needed',
     pushEligible: true,
     pushRecommendation: 'off',
+    sensitivity: 'sensitive',
+    defaultPreview: 'title_only',
+  },
+  {
+    key: 'paperclip_credential_expiring',
+    label: 'Paperclip connection expiring',
+    description: 'The Paperclip Board API key used by Mission Control needs renewal.',
+    defaultLevel: 'action_needed',
+    pushEligible: true,
+    pushRecommendation: 'action_needed_or_higher',
     sensitivity: 'sensitive',
     defaultPreview: 'title_only',
   },
@@ -64,6 +77,7 @@ const KNOWN_TERMINAL_STATES = new Set([
 ]);
 const PENDING_STATES = new Set(['pending', 'resubmitted']);
 const SUMMARY_FIELDS = ['summary', 'description', 'reason', 'requestSummary', 'plan'] as const;
+const CREDENTIAL_WARNING_MS = 14 * 24 * 60 * 60 * 1000;
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -187,6 +201,53 @@ function approvalNotification({
   };
 }
 
+function credentialExpiryNotification(
+  settings: PaperclipConnectorSettings,
+  connectorId: string,
+): InboundNotification | null {
+  if (!settings.boardKeyExpiresAt) return null;
+  const expiresAtMs = Date.parse(settings.boardKeyExpiresAt);
+  if (!Number.isFinite(expiresAtMs)) return null;
+  const remainingMs = expiresAtMs - Date.now();
+  if (remainingMs > CREDENTIAL_WARNING_MS) return null;
+  const expired = remainingMs <= 0;
+  const companyName = boundedText(settings.companyName, 120) ?? settings.companyId;
+  const warningAt = new Date(expiresAtMs - CREDENTIAL_WARNING_MS).toISOString();
+  return {
+    id: `paperclip-credential-expiry:${connectorId}`,
+    sourceId: `credential-expiry:${settings.boardKeyId ?? connectorId}`,
+    connectorType: 'paperclip',
+    connectorInstanceId: connectorId,
+    title: expired
+      ? `Paperclip connection expired: ${companyName}`
+      : `Renew Paperclip connection for ${companyName}`,
+    body: expired
+      ? `Mission Control can no longer read Paperclip company ${companyName}. Reconnect Paperclip in Settings.`
+      : `The Paperclip Board API key for ${companyName} expires ${settings.boardKeyExpiresAt}. Reconnect before then to keep approvals and delegated-work status available.`,
+    level: 'action_needed',
+    category: 'system',
+    templateKey: 'paperclip_credential_expiring',
+    isRead: false,
+    isActionable: true,
+    actionUrl: '/settings/connectors',
+    receivedAt: warningAt,
+    sourceState: 'active',
+    sourceActivityAt: warningAt,
+    sourceActivityKey: settings.boardKeyExpiresAt,
+    reopenPolicy: 'handled_and_dismissed',
+    hubProjectIds: [],
+    tags: [],
+    metadata: {
+      companyId: settings.companyId,
+      companyName,
+      boardKeyId: settings.boardKeyId ?? null,
+      boardUserName: settings.boardUserName ?? null,
+      expiresAt: settings.boardKeyExpiresAt,
+      expired,
+    },
+  };
+}
+
 export function validatePaperclipConnectorConfig(
   settingsValue: Record<string, unknown>,
   credentials: Record<string, unknown>,
@@ -234,6 +295,19 @@ function normalizeSettings(value: Record<string, unknown>): PaperclipConnectorSe
     ...(boundedText(value.companyName, 120)
       ? { companyName: boundedText(value.companyName, 120)! }
       : {}),
+    ...(boundedText(value.boardKeyId, 160)
+      ? { boardKeyId: boundedText(value.boardKeyId, 160)! }
+      : {}),
+    ...(value.boardKeyExpiresAt === null
+      ? { boardKeyExpiresAt: null }
+      : dateText(value.boardKeyExpiresAt)
+        ? { boardKeyExpiresAt: dateText(value.boardKeyExpiresAt) }
+        : {}),
+    ...(value.boardUserName === null
+      ? { boardUserName: null }
+      : boundedText(value.boardUserName, 120)
+        ? { boardUserName: boundedText(value.boardUserName, 120) }
+        : {}),
   };
 }
 
@@ -287,10 +361,13 @@ export class PaperclipConnector implements IConnector {
   }
 
   async fetchNotifications(): Promise<InboundNotification[]> {
+    const settings = this.requireSettings();
+    const credentialNotification = credentialExpiryNotification(settings, this.id);
     const approvals = await this.fetchApprovals();
     const pendingApprovals = approvals.filter(isPending);
-    if (pendingApprovals.length === 0) return [];
-    const settings = this.requireSettings();
+    if (pendingApprovals.length === 0) {
+      return credentialNotification ? [credentialNotification] : [];
+    }
     const issuesByApproval = new Map<string, PaperclipIssue[]>();
     for (let index = 0; index < pendingApprovals.length; index += 5) {
       const batch = pendingApprovals.slice(index, index + 5);
@@ -324,7 +401,7 @@ export class PaperclipConnector implements IConnector {
         if (taskId) taskByIssueId.set(dispatch.providerTaskId, taskId);
       }
     }
-    return pendingApprovals.map((approval) => {
+    const approvalNotifications = pendingApprovals.map((approval) => {
       const linkedIssues = issuesByApproval.get(approval.id) ?? [];
       const relatedTaskId = linkedIssues
         .map((issue) => issue.id)
@@ -338,13 +415,23 @@ export class PaperclipConnector implements IConnector {
         ...(relatedTaskId ? { relatedTaskId } : {}),
       });
     });
+    return credentialNotification
+      ? [credentialNotification, ...approvalNotifications]
+      : approvalNotifications;
   }
 
   async getActiveAlertSourceIds(): Promise<string[]> {
     const approvals = this.approvals ?? await this.fetchApprovals();
-    return approvals
+    const approvalIds = approvals
       .filter(isAuthoritativelyActive)
       .map((approval) => `approval:${approval.id}`);
+    const credentialNotification = credentialExpiryNotification(
+      this.requireSettings(),
+      this.id,
+    );
+    return credentialNotification
+      ? [credentialNotification.sourceId, ...approvalIds]
+      : approvalIds;
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {

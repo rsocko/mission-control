@@ -252,6 +252,79 @@ describe('Paperclip external-agent provider', () => {
     });
   });
 
+  it('reuses a Paperclip connector credential without exposing or duplicating it', async () => {
+    const connectorId = 'paperclip-connector-auth';
+    sqlite.prepare('DELETE FROM connector_configs WHERE id = ?').run(connectorId);
+    const { getConnectorManagementPersistence } = await import(
+      '@/lib/connectors/management-service'
+    );
+    await (await getConnectorManagementPersistence()).createConnector({
+      id: connectorId,
+      type: 'paperclip',
+      name: 'Paperclip — Acme',
+      enabled: true,
+      syncMode: 'poll',
+      pollIntervalMinutes: 5,
+      capabilities: { read: true, sync: true, notificationOnly: true },
+      credentials: { apiToken: 'connector-board-token' },
+      settings: {
+        apiOrigin: 'https://paperclip.example.test',
+        companyId,
+        companyName: 'Acme',
+      },
+      syncedLists: [],
+      now: new Date().toISOString(),
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get('authorization'))
+        .toBe('Bearer connector-board-token');
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/health') return response({ status: 'ok', version: '1.2.3' });
+      if (path === `/api/agents/${assigneeAgentId}`) {
+        return response({
+          id: assigneeAgentId,
+          companyId,
+          name: 'Engineer',
+          adapterType: 'github-copilot-web',
+        });
+      }
+      if (path === '/api/companies') {
+        return response([{ id: companyId, name: 'Acme', status: 'active' }]);
+      }
+      if (path === `/api/companies/${companyId}/projects`) return response([]);
+      if (path === `/api/companies/${companyId}/agents`) {
+        return response([{
+          id: assigneeAgentId,
+          companyId,
+          name: 'Engineer',
+          adapterType: 'github-copilot-web',
+        }]);
+      }
+      throw new Error(`Unexpected Paperclip request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    await expect(registry.discoverPaperclipSetup({
+      connectorId,
+      endpoint: 'https://paperclip.example.test',
+      companyId,
+    })).resolves.toMatchObject({
+      companies: [{ id: companyId, name: 'Acme' }],
+      agents: [{ id: assigneeAgentId }],
+    });
+
+    const created = await paperclipAgent({
+      authCredentialRef: `paperclip-connector:${connectorId}`,
+    });
+    expect(registry.publicExternalAgent(created)).toMatchObject({
+      hasCredentialReference: true,
+      credentialSource: 'paperclip-connector',
+      paperclipConnectorId: connectorId,
+    });
+    expect(JSON.stringify(registry.publicExternalAgent(created)))
+      .not.toContain('connector-board-token');
+  });
+
   it('can disable an unavailable Paperclip route without contacting the provider', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const path = new URL(String(input)).pathname;

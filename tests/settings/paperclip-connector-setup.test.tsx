@@ -7,12 +7,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('tests Paperclip access and creates a restricted notification connector for the verified company', async () => {
+it('authorizes Paperclip in the browser and creates a connector for the selected company', async () => {
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    if (String(input) === '/api/connectors/test-pre-save') {
+    if (String(input) === '/api/connectors/paperclip/auth') {
+      const body = JSON.parse(String(init?.body)) as { action: string };
+      if (body.action === 'start') {
+        return Response.json({
+          authSessionId: 'auth-session-1',
+          approvalUrl: 'https://paperclip.example.test/cli-auth/challenge-1',
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          suggestedPollIntervalMs: 1,
+        }, { status: 201 });
+      }
       return Response.json({
-        success: true,
-        sources: { companyName: 'Research team' },
+        status: 'approved',
+        keyExpiresAt: '2027-01-01T00:00:00.000Z',
+        companies: [
+          { id: 'company-1', name: 'Research team' },
+          { id: 'company-2', name: 'Operations' },
+        ],
       });
     }
     if (String(input) === '/api/connectors') {
@@ -21,31 +34,31 @@ it('tests Paperclip access and creates a restricted notification connector for t
     throw new Error(`Unexpected request: ${String(input)}`);
   });
   vi.stubGlobal('fetch', fetchMock);
+  const openWindow = vi.spyOn(window, 'open').mockImplementation(() => null);
   render(<AddConnectorModal onClose={() => undefined} onAdded={() => undefined} />);
 
   fireEvent.click(screen.getByText('Paperclip').closest('button')!);
   fireEvent.change(await screen.findByLabelText('Paperclip API origin'), {
     target: { value: 'https://paperclip.example.test' },
   });
-  fireEvent.change(screen.getByLabelText('Paperclip company ID'), {
-    target: { value: 'company-1' },
-  });
-  fireEvent.change(screen.getByLabelText('Paperclip API token'), {
-    target: { value: 'paperclip-token' },
-  });
-  fireEvent.click(screen.getByRole('button', { name: 'Test and add' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Authorize in Paperclip' }));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-  const [, testInit] = fetchMock.mock.calls[0]!;
-  expect(JSON.parse(String(testInit?.body))).toEqual({
-    type: 'paperclip',
-    settings: {
-      apiOrigin: 'https://paperclip.example.test',
-      companyId: 'company-1',
-    },
-    credentials: { apiToken: 'paperclip-token' },
+  expect(openWindow).toHaveBeenCalledWith(
+    'https://paperclip.example.test/cli-auth/challenge-1',
+    '_blank',
+    'noopener,noreferrer',
+  );
+  expect(await screen.findByText(/Board connection approved/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Add connector' }));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  const [, startInit] = fetchMock.mock.calls[0]!;
+  expect(JSON.parse(String(startInit?.body))).toEqual({
+    action: 'start',
+    apiOrigin: 'https://paperclip.example.test',
   });
-  const [, createInit] = fetchMock.mock.calls[1]!;
+  const [, createInit] = fetchMock.mock.calls[2]!;
   expect(JSON.parse(String(createInit?.body))).toMatchObject({
     type: 'paperclip',
     name: 'Paperclip — Research team',
@@ -54,12 +67,12 @@ it('tests Paperclip access and creates a restricted notification connector for t
       companyId: 'company-1',
       companyName: 'Research team',
     },
-    credentials: { apiToken: 'paperclip-token' },
+    credentials: { authSessionId: 'auth-session-1' },
     capabilities: {
       notificationOnly: true,
       write: false,
       delete: false,
     },
   });
-  expect(await screen.findByText('Paperclip approvals connector added.')).toBeInTheDocument();
+  expect(await screen.findByText('Paperclip connected.')).toBeInTheDocument();
 });

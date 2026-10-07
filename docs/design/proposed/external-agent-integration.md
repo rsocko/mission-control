@@ -292,8 +292,14 @@ Agents**. Mission Control validates the token with GitHub, persists it in the
 destination's server-side credential field, and never returns it in API
 responses or persists it in payload/result logs. Existing installations may
 instead select the advanced deployment-secret-reference mode, which resolves
-`auth_credential_ref` from `MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. Paperclip
-bearer credentials continue to use deployment-secret references.
+`auth_credential_ref` from `MC_EXTERNAL_AGENT_CREDENTIALS_JSON`.
+
+Paperclip's notification connector uses a browser-approved Board identity and
+stores a named Board API key server-side. A Paperclip execution destination can
+reference that credential as `paperclip-connector:<connectorId>`; resolution
+checks that the connector is enabled, is a Paperclip connector, and targets the
+same Paperclip origin. Direct and deployment-secret credentials remain
+available for existing installations and advanced deployments.
 
 Each GitHub Cloud or Paperclip destination may also define **Always
 instructions** in Settings. These are ordinary server-owned configuration, not
@@ -666,8 +672,9 @@ routes are typed execution destinations; source connectors remain separate.
 Operators manage those destinations in **Settings → AI & Agents → Execution
 Destinations**. GitHub Copilot Cloud setup accepts and validates a personal access
 token directly; deployment-secret references remain available as an advanced
-and backward-compatible option. Paperclip references remain server-side in
-`MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. GitHub Copilot Cloud and Paperclip setup,
+and backward-compatible option. Paperclip routes can reuse an enabled Paperclip
+connector's server-side Board credential without registering every Paperclip
+agent or copying the token. GitHub Copilot Cloud and Paperclip setup,
 validation, enablement, capability policy, and data
 classification policy are managed there. Paperclip route bindings are validated
 when saved and remain read-only during individual delegations.

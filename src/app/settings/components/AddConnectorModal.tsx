@@ -2236,41 +2236,89 @@ function PaperclipSetup({
   const creation = useConnectorCreation();
   const [apiOrigin, setApiOrigin] = useState('');
   const [companyId, setCompanyId] = useState('');
-  const [apiToken, setApiToken] = useState('');
-  const [status, setStatus] = useState<'idle' | 'testing' | 'creating' | 'success' | 'error'>('idle');
+  const [authSessionId, setAuthSessionId] = useState('');
+  const [approvalUrl, setApprovalUrl] = useState('');
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [keyExpiresAt, setKeyExpiresAt] = useState<string | null>(null);
+  const [status, setStatus] = useState<
+    'idle' | 'starting' | 'awaiting-approval' | 'approved' | 'creating' | 'success' | 'error'
+  >('idle');
   const [error, setError] = useState('');
 
-  async function testAndCreate() {
-    setStatus('testing');
+  async function connectPaperclip() {
+    setStatus('starting');
     setError('');
-    const settings = {
-      apiOrigin: apiOrigin.trim(),
-      companyId: companyId.trim(),
-    };
-    const credentials = { apiToken: apiToken.trim() };
     try {
-      const testResponse = await fetch('/api/connectors/test-pre-save', {
+      const startResponse = await fetch('/api/connectors/paperclip/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'paperclip', settings, credentials }),
+        body: JSON.stringify({ action: 'start', apiOrigin: apiOrigin.trim() }),
       });
-      const testResult = await testResponse.json() as {
-        success?: boolean;
+      const start = await startResponse.json() as {
+        authSessionId?: string;
+        approvalUrl?: string;
+        expiresAt?: string;
+        suggestedPollIntervalMs?: number;
         error?: string;
-        sources?: Record<string, unknown>;
       };
-      if (!testResponse.ok || !testResult.success) {
-        throw new Error(testResult.error || 'Paperclip connection test failed');
+      if (!startResponse.ok || !start.authSessionId || !start.approvalUrl) {
+        throw new Error(start.error || 'Could not start Paperclip authorization');
       }
+      setAuthSessionId(start.authSessionId);
+      setApprovalUrl(start.approvalUrl);
+      setStatus('awaiting-approval');
+      window.open(start.approvalUrl, '_blank', 'noopener,noreferrer');
+      const deadline = Date.parse(start.expiresAt ?? '');
+      const pollEvery = Math.max(500, start.suggestedPollIntervalMs ?? 1000);
+      while (!Number.isFinite(deadline) || Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, pollEvery));
+        const pollResponse = await fetch('/api/connectors/paperclip/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'poll',
+            authSessionId: start.authSessionId,
+          }),
+        });
+        const result = await pollResponse.json() as {
+          status?: 'pending' | 'approved' | 'cancelled' | 'expired';
+          keyExpiresAt?: string | null;
+          companies?: Array<{ id: string; name: string }>;
+          error?: string;
+        };
+        if (!pollResponse.ok) {
+          throw new Error(result.error || 'Paperclip authorization check failed');
+        }
+        if (result.status === 'cancelled' || result.status === 'expired') {
+          throw new Error(`Paperclip authorization was ${result.status}`);
+        }
+        if (result.status !== 'approved') continue;
+        const authorizedCompanies = result.companies ?? [];
+        if (authorizedCompanies.length === 0) {
+          throw new Error('This Paperclip account has no accessible companies');
+        }
+        setCompanies(authorizedCompanies);
+        setCompanyId(authorizedCompanies[0]!.id);
+        setKeyExpiresAt(result.keyExpiresAt ?? null);
+        setStatus('approved');
+        return;
+      }
+      throw new Error('Paperclip authorization expired before approval');
+    } catch (setupError) {
+      setStatus('error');
+      setError(setupError instanceof Error ? setupError.message : String(setupError));
+    }
+  }
 
-      const verifiedCompanyName = typeof testResult.sources?.companyName === 'string'
-        ? testResult.sources.companyName
-        : settings.companyId;
-      const connectorSettings = { ...settings, companyName: verifiedCompanyName };
-      setStatus('creating');
+  async function addConnector() {
+    const company = companies.find((candidate) => candidate.id === companyId);
+    if (!company || !authSessionId) return;
+    setStatus('creating');
+    setError('');
+    try {
       await creation.create({
         type: 'paperclip',
-        name: `Paperclip — ${verifiedCompanyName}`,
+        name: `Paperclip — ${company.name}`,
         enabled: true,
         syncMode: 'poll',
         pollIntervalMinutes: 5,
@@ -2286,8 +2334,12 @@ function PaperclipSetup({
           notificationOnly: true,
           listSelectionMode: 'not-applicable',
         },
-        credentials,
-        settings: connectorSettings,
+        credentials: { authSessionId },
+        settings: {
+          apiOrigin: apiOrigin.trim(),
+          companyId,
+          companyName: company.name,
+        },
         syncedLists: [],
       });
       setStatus('success');
@@ -2300,18 +2352,20 @@ function PaperclipSetup({
 
   return (
     <div>
-      <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Paperclip approvals</h3>
+      <h3 className="mb-1 text-lg font-semibold text-[var(--text-primary)]">Connect Paperclip</h3>
       <p className="text-sm text-[var(--text-tertiary)] mb-4">
-        Mirror one authorized company&apos;s pending approvals into Mission Control. Decisions remain in Paperclip.
+        Approve Mission Control in Paperclip, then choose the company to monitor. No API key copy and paste required.
       </p>
       {status === 'success' ? (
         <div className="py-4 text-center">
           <CheckCircle2 size={32} className="mx-auto mb-2 text-emerald-400" />
-          <p className="text-sm text-[var(--text-primary)]">Paperclip approvals connector added.</p>
-          <p className="mt-1 text-xs text-[var(--text-muted)]">Pending approvals will appear on the next poll.</p>
+          <p className="text-sm text-[var(--text-primary)]">Paperclip connected.</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Approvals will appear on the next poll. This connection can also authorize Paperclip delegation routes.
+          </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <label className="block text-xs text-[var(--text-secondary)]">
             Paperclip API origin
             <input
@@ -2319,33 +2373,54 @@ function PaperclipSetup({
               autoComplete="url"
               placeholder="https://paperclip.example.com"
               value={apiOrigin}
-              onChange={(event) => setApiOrigin(event.target.value)}
+              disabled={status === 'awaiting-approval' || status === 'approved' || status === 'creating'}
+              onChange={(event) => {
+                setApiOrigin(event.target.value);
+                setError('');
+              }}
               className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
             />
           </label>
-          <label className="block text-xs text-[var(--text-secondary)]">
-            Company ID
-            <input
-              aria-label="Paperclip company ID"
-              value={companyId}
-              onChange={(event) => setCompanyId(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none"
-            />
-          </label>
-          <label className="block text-xs text-[var(--text-secondary)]">
-            Paperclip API token
-            <input
-              aria-label="Paperclip API token"
-              type="password"
-              autoComplete="new-password"
-              value={apiToken}
-              onChange={(event) => setApiToken(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none"
-            />
-          </label>
-          <p className="text-xs text-[var(--text-muted)]">
-            Use a token authorized to read this company&apos;s approvals. The token is stored server-side and is never shown again.
-          </p>
+          {status === 'awaiting-approval' && (
+            <div className="rounded-lg border border-amber-700/40 bg-amber-950/20 p-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-amber-200">
+                <Loader2 size={14} className="animate-spin" />
+                Waiting for approval in Paperclip
+              </div>
+              <a
+                href={approvalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-flex items-center gap-1 text-xs text-[var(--accent)] hover:underline"
+              >
+                Open approval page <ExternalLink size={11} />
+              </a>
+            </div>
+          )}
+          {(status === 'approved' || status === 'creating') && (
+            <>
+              <label className="block text-xs text-[var(--text-secondary)]">
+                Paperclip company
+                <Select value={companyId} onValueChange={setCompanyId}>
+                  <SelectTrigger aria-label="Paperclip company" className="mt-1 w-full">
+                    <SelectValue placeholder="Choose a company" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {companies.map((company) => (
+                      <SelectItem key={company.id} value={company.id}>
+                        {company.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3 text-xs leading-5 text-[var(--text-muted)]">
+                <span className="font-medium text-[var(--text-secondary)]">Board connection approved.</span>{' '}
+                Mission Control created a named 90-day key and revoked the temporary login key.
+                {keyExpiresAt ? ` Renewal is due ${new Date(keyExpiresAt).toLocaleDateString()}.` : ''}
+              </div>
+            </>
+          )}
           {(error || creation.error) && (
             <p role="alert" className="text-xs text-red-400">
               <AlertTriangle size={12} className="mr-1 inline" />
@@ -2356,16 +2431,33 @@ function PaperclipSetup({
             <button onClick={onBack} className="flex items-center gap-1 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
               <ChevronRight size={12} className="rotate-180" /> Back
             </button>
-            <button
-              onClick={testAndCreate}
-              disabled={status === 'testing' || status === 'creating' || !apiOrigin.trim() || !companyId.trim() || !apiToken.trim()}
-              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {status === 'testing' || status === 'creating'
-                ? <Loader2 size={14} className="animate-spin" />
-                : null}
-              {status === 'testing' ? 'Testing…' : status === 'creating' ? 'Adding…' : 'Test and add'}
-            </button>
+            {status === 'approved' || status === 'creating' ? (
+              <button
+                onClick={() => void addConnector()}
+                disabled={status === 'creating' || !companyId}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {status === 'creating' ? <Loader2 size={14} className="animate-spin" /> : null}
+                {status === 'creating' ? 'Adding…' : 'Add connector'}
+              </button>
+            ) : (
+              <button
+                onClick={() => void connectPaperclip()}
+                disabled={status === 'starting' || status === 'awaiting-approval' || !apiOrigin.trim()}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {status === 'starting' || status === 'awaiting-approval'
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <ExternalLink size={14} />}
+                {status === 'starting'
+                  ? 'Starting…'
+                  : status === 'awaiting-approval'
+                    ? 'Waiting…'
+                    : status === 'error'
+                      ? 'Try again'
+                      : 'Authorize in Paperclip'}
+              </button>
+            )}
           </div>
         </div>
       )}

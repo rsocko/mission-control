@@ -55,7 +55,8 @@ interface ExecutionDestination {
   enabled: boolean;
   executionLocality: 'github-hosted' | 'external';
   hasCredentialReference: boolean;
-  credentialSource: 'mission-control' | 'deployment-secret';
+  credentialSource: 'mission-control' | 'deployment-secret' | 'paperclip-connector';
+  paperclipConnectorId: string | null;
   updatedAt: string;
 }
 
@@ -64,6 +65,19 @@ interface ScoutConnector {
   type: string;
   name: string;
   enabled: boolean;
+}
+
+interface PaperclipConnector {
+  id: string;
+  type: 'paperclip';
+  name: string;
+  enabled: boolean;
+  settings: {
+    apiOrigin?: string;
+    companyId?: string;
+    companyName?: string;
+    boardKeyExpiresAt?: string | null;
+  };
 }
 
 interface ScoutWorker {
@@ -80,7 +94,8 @@ interface DestinationForm {
   endpoint: string;
   credential: string;
   credentialRef: string;
-  credentialSource: 'mission-control' | 'deployment-secret';
+  credentialSource: 'mission-control' | 'deployment-secret' | 'paperclip-connector';
+  connectorId: string;
   companyId: string;
   projectId: string;
   assigneeAgentId: string;
@@ -180,6 +195,7 @@ function emptyForm(type: DestinationType): DestinationForm {
     credential: '',
     credentialRef: '',
     credentialSource: 'mission-control',
+    connectorId: '',
     companyId: '',
     projectId: '',
     assigneeAgentId: '',
@@ -202,6 +218,7 @@ function editForm(destination: ExecutionDestination): DestinationForm {
     credential: '',
     credentialRef: '',
     credentialSource: destination.credentialSource ?? 'deployment-secret',
+    connectorId: destination.paperclipConnectorId ?? '',
     companyId: paperclip?.companyId ?? '',
     projectId: paperclip?.projectId ?? '',
     assigneeAgentId: paperclip?.assigneeAgentId ?? '',
@@ -473,6 +490,7 @@ export function ExecutionDestinationsSection() {
   const [deleting, setDeleting] = useState(false);
   const [showCredential, setShowCredential] = useState(false);
   const [paperclipDiscovery, setPaperclipDiscovery] = useState<PaperclipDiscovery | null>(null);
+  const [paperclipConnectors, setPaperclipConnectors] = useState<PaperclipConnector[]>([]);
   const [checkingPaperclip, setCheckingPaperclip] = useState(false);
   const [paperclipCheckError, setPaperclipCheckError] = useState<string | null>(null);
   const paperclipCheckRef = useRef(0);
@@ -480,14 +498,26 @@ export function ExecutionDestinationsSection() {
   const loadDestinations = useCallback(async () => {
     setLoadError(null);
     try {
-      const response = await fetch('/api/external-agents');
+      const [response, connectorsResponse] = await Promise.all([
+        fetch('/api/external-agents'),
+        Promise.resolve()
+          .then(() => fetch('/api/connectors'))
+          .catch(() => null),
+      ]);
       const body = await response.json().catch(() => null) as {
         agents?: ExecutionDestination[];
       } | null;
       if (!response.ok) throw new Error(responseError(body, response.status));
+      const connectorsBody = await connectorsResponse?.json().catch(() => null) as {
+        connectors?: PaperclipConnector[];
+      } | null;
       setDestinations(
         (body?.agents ?? []).filter((agent) =>
           agent.type === 'copilot-cloud' || agent.type === 'paperclip'),
+      );
+      setPaperclipConnectors(
+        (connectorsResponse?.ok ? connectorsBody?.connectors ?? [] : []).filter((connector) =>
+          connector.type === 'paperclip' && connector.enabled),
       );
     } catch (error) {
       const message = error instanceof Error
@@ -550,6 +580,9 @@ export function ExecutionDestinationsSection() {
           : {}),
         ...(form.credentialSource === 'deployment-secret' && form.credentialRef.trim()
           ? { authCredentialRef: form.credentialRef.trim() }
+          : {}),
+        ...(form.credentialSource === 'paperclip-connector' && form.connectorId
+          ? { connectorId: form.connectorId }
           : {}),
       }),
     });
@@ -631,6 +664,10 @@ export function ExecutionDestinationsSection() {
   async function saveDestination(event: React.FormEvent) {
     event.preventDefault();
     if (!form) return;
+    if (form.credentialSource === 'paperclip-connector' && !form.connectorId) {
+      setSaveError('Choose a Paperclip connector');
+      return;
+    }
     setSaving(true);
     setSaveError(null);
 
@@ -640,10 +677,15 @@ export function ExecutionDestinationsSection() {
     const credentialRef = form.credentialRef.trim();
     const credential = form.credential.trim();
     const usesManagedCredential = form.credentialSource === 'mission-control';
+    const connectorCredentialRef = form.credentialSource === 'paperclip-connector'
+      && form.connectorId
+      ? `paperclip-connector:${form.connectorId}`
+      : '';
     const paperclipUsesCredential = form.type === 'paperclip'
       && Boolean(
         credential
         || credentialRef
+        || connectorCredentialRef
         || existing?.hasCredentialReference,
       );
     const body = {
@@ -660,6 +702,7 @@ export function ExecutionDestinationsSection() {
       ...(!usesManagedCredential && credentialRef
         ? { authCredentialRef: credentialRef }
         : {}),
+      ...(connectorCredentialRef ? { authCredentialRef: connectorCredentialRef } : {}),
       ...(form.type === 'paperclip' && !paperclipUsesCredential
         ? { authCredentialRef: null }
         : {}),
@@ -856,9 +899,11 @@ export function ExecutionDestinationsSection() {
                   </p>
                   <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
                     {destination.hasCredentialReference
-                      ? destination.credentialSource === 'mission-control'
-                        ? 'Personal access token stored in Mission Control'
-                        : 'Deployment secret reference configured'
+                     ? destination.credentialSource === 'paperclip-connector'
+                       ? 'Uses a Paperclip connector credential'
+                       : destination.credentialSource === 'mission-control'
+                         ? 'Personal access token stored in Mission Control'
+                         : 'Deployment secret reference configured'
                       : destination.authType === 'none'
                         ? 'Trusted local access; no credential stored'
                         : 'Credential reference required'}
@@ -940,6 +985,7 @@ export function ExecutionDestinationsSection() {
                     credentialSource: value as DestinationForm['credentialSource'],
                     credential: '',
                     credentialRef: '',
+                    connectorId: '',
                   };
                   if (form.type === 'paperclip') {
                     updatePaperclipConnection(update);
@@ -960,10 +1006,50 @@ export function ExecutionDestinationsSection() {
                   <SelectItem value="deployment-secret">
                     Deployment secret reference
                   </SelectItem>
+                  {form.type === 'paperclip' && (
+                    <SelectItem value="paperclip-connector">
+                      Existing Paperclip connector
+                    </SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </Field>
           </div>
+
+          {form.type === 'paperclip' && form.credentialSource === 'paperclip-connector' && (
+            <Field
+              label="Paperclip connector"
+              htmlFor="destination-paperclip-connector"
+              hint={paperclipConnectors.length === 0
+                ? 'Connect Paperclip in Connectors before adding this delegation route.'
+                : 'Reuses the connector Board credential without copying it into this destination.'}
+            >
+              <Select
+                value={form.connectorId}
+                onValueChange={(connectorId) => {
+                  const connector = paperclipConnectors.find(({ id }) => id === connectorId);
+                  updatePaperclipConnection({
+                    connectorId,
+                    endpoint: connector?.settings.apiOrigin ?? '',
+                    companyId: connector?.settings.companyId ?? '',
+                  });
+                }}
+              >
+                <SelectTrigger id="destination-paperclip-connector" className="w-full">
+                  <SelectValue placeholder="Choose a connected company" />
+                </SelectTrigger>
+                <SelectContent>
+                  {paperclipConnectors.map((connector) => (
+                    <SelectItem key={connector.id} value={connector.id}>
+                      {connector.settings.companyName
+                        ? `${connector.settings.companyName} — ${connector.name}`
+                        : connector.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
 
           {form.credentialSource === 'mission-control' && (
             <Field
@@ -1098,6 +1184,7 @@ export function ExecutionDestinationsSection() {
                     id="paperclip-endpoint"
                     type="url"
                     required
+                    readOnly={form.credentialSource === 'paperclip-connector'}
                     value={form.endpoint}
                     onChange={(event) => updatePaperclipConnection({
                       endpoint: event.target.value,
@@ -1110,7 +1197,14 @@ export function ExecutionDestinationsSection() {
                   type="button"
                   variant="outline"
                   onClick={() => void checkPaperclipConnection()}
-                  disabled={checkingPaperclip || !form.endpoint.trim()}
+                  disabled={
+                    checkingPaperclip
+                    || !form.endpoint.trim()
+                    || (
+                      form.credentialSource === 'paperclip-connector'
+                      && !form.connectorId
+                    )
+                  }
                   className="w-full sm:w-auto"
                 >
                   {checkingPaperclip

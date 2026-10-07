@@ -210,6 +210,90 @@ describe('ExecutionDestinationsSection', () => {
     });
   });
 
+  it('reuses a connected Paperclip Board credential for a delegation route', async () => {
+    let discoveryBody: Record<string, unknown> | null = null;
+    let requestBody: Record<string, unknown> | null = null;
+    const companyId = '11111111-1111-4111-8111-111111111111';
+    const agentId = '33333333-3333-4333-8333-333333333333';
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/connectors') {
+        return response({
+          connectors: [{
+            id: 'paperclip-connector-1',
+            type: 'paperclip',
+            name: 'Paperclip — Acme',
+            enabled: true,
+            settings: {
+              apiOrigin: 'https://paperclip.example.test',
+              companyId,
+              companyName: 'Acme',
+            },
+          }],
+        });
+      }
+      if (url === '/api/external-agents' && !init?.method) {
+        return response({ agents: [] });
+      }
+      if (url === '/api/external-agents/paperclip/discover') {
+        discoveryBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return response({
+          health: { status: 'ok', version: '1.2.3', deploymentMode: 'local' },
+          companies: [{ id: companyId, name: 'Acme', status: 'active' }],
+          projects: [],
+          agents: [{
+            id: agentId,
+            name: 'Engineer',
+            title: 'Software Engineer',
+            role: 'engineer',
+            status: 'idle',
+            adapterType: 'claude-local',
+          }],
+        });
+      }
+      if (url === '/api/external-agents' && init?.method === 'POST') {
+        requestBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response({ agent: { id: 'paperclip-route' } }, 201);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<ExecutionDestinationsSection />);
+    expect(await screen.findByText('No direct execution destinations yet')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Paperclip route' }));
+    fireEvent.click(screen.getByLabelText('Credential source'));
+    fireEvent.click(screen.getByRole('option', { name: 'Existing Paperclip connector' }));
+    fireEvent.click(screen.getByLabelText('Paperclip connector'));
+    fireEvent.click(screen.getByRole('option', { name: 'Acme — Paperclip — Acme' }));
+    expect(screen.getByLabelText('Paperclip API origin'))
+      .toHaveValue('https://paperclip.example.test');
+    fireEvent.click(screen.getByRole('button', { name: 'Check connection' }));
+    expect(await screen.findByText('Connected · Paperclip 1.2.3')).toBeInTheDocument();
+    expect(discoveryBody).toMatchObject({
+      connectorId: 'paperclip-connector-1',
+      endpoint: 'https://paperclip.example.test',
+      companyId,
+    });
+    expect(discoveryBody).not.toHaveProperty('credential');
+    fireEvent.click(screen.getByRole('button', { name: 'Add destination' }));
+
+    await waitFor(() => expect(requestBody).not.toBeNull());
+    expect(requestBody).toMatchObject({
+      type: 'paperclip',
+      endpoint: 'https://paperclip.example.test',
+      authType: 'bearer',
+      authCredentialRef: 'paperclip-connector:paperclip-connector-1',
+      providerConfig: {
+        paperclip: {
+          companyId,
+          assigneeAgentId: agentId,
+        },
+      },
+    });
+    expect(requestBody).not.toHaveProperty('credential');
+  });
+
   it('shows configured Scout pickup and can disable it from AI settings', async () => {
     let disabled = false;
     const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {

@@ -16,6 +16,7 @@ import { redactPushText } from '@/lib/notifications/push-text';
 import { ExternalAgentError } from '@/lib/external-agents/errors';
 import { getExternalAgentControlPersistence } from '@/lib/external-agents/persistence';
 import {
+  discoverPaperclip,
   listPaperclipApprovalIssues,
   listPaperclipApprovals,
   type PaperclipIssue,
@@ -24,8 +25,9 @@ import {
 
 interface PaperclipConnectorSettings {
   apiOrigin: string;
-  companyId: string;
-  companyName?: string;
+  monitorAllCompanies: boolean;
+  companyIds: string[];
+  companyNames: Record<string, string>;
   boardKeyId?: string;
   boardKeyExpiresAt?: string | null;
   boardUserName?: string | null;
@@ -127,12 +129,16 @@ function approvalRisk(approval: PaperclipApproval): string {
 function approvalNotification({
   approval,
   settings,
+  companyId,
+  companyName,
   connectorId,
   linkedIssues,
   relatedTaskId,
 }: {
   approval: PaperclipApproval;
   settings: PaperclipConnectorSettings;
+  companyId: string;
+  companyName: string;
   connectorId: string;
   linkedIssues: PaperclipIssue[];
   relatedTaskId?: string;
@@ -147,7 +153,6 @@ function approvalNotification({
   const summary = approvalSummary(approval);
   const createdAt = dateText(approval.createdAt) ?? new Date().toISOString();
   const expiresAt = dateText(approval.expiresAt);
-  const companyName = boundedText(settings.companyName, 120) ?? settings.companyId;
   const detailLines = [
     `Company: ${companyName}`,
     `Requested by: ${requester}`,
@@ -184,7 +189,7 @@ function approvalNotification({
     tags: [],
     metadata: {
       approvalId: approval.id,
-      companyId: settings.companyId,
+      companyId,
       companyName,
       requester,
       requesterAgentId: boundedText(approval.requestedByAgentId, 160),
@@ -211,7 +216,11 @@ function credentialExpiryNotification(
   const remainingMs = expiresAtMs - Date.now();
   if (remainingMs > CREDENTIAL_WARNING_MS) return null;
   const expired = remainingMs <= 0;
-  const companyName = boundedText(settings.companyName, 120) ?? settings.companyId;
+  const companyScope = settings.monitorAllCompanies
+    ? 'all accessible companies'
+    : settings.companyIds
+      .map((companyId) => settings.companyNames[companyId] ?? companyId)
+      .join(', ');
   const warningAt = new Date(expiresAtMs - CREDENTIAL_WARNING_MS).toISOString();
   return {
     id: `paperclip-credential-expiry:${connectorId}`,
@@ -219,11 +228,11 @@ function credentialExpiryNotification(
     connectorType: 'paperclip',
     connectorInstanceId: connectorId,
     title: expired
-      ? `Paperclip connection expired: ${companyName}`
-      : `Renew Paperclip connection for ${companyName}`,
+      ? `Paperclip connection expired: ${companyScope}`
+      : `Renew Paperclip connection for ${companyScope}`,
     body: expired
-      ? `Mission Control can no longer read Paperclip company ${companyName}. Reconnect Paperclip in Settings.`
-      : `The Paperclip Board API key for ${companyName} expires ${settings.boardKeyExpiresAt}. Reconnect before then to keep approvals and delegated-work status available.`,
+      ? `Mission Control can no longer read Paperclip approvals for ${companyScope}. Reconnect Paperclip in Settings.`
+      : `The Paperclip Board API key for ${companyScope} expires ${settings.boardKeyExpiresAt}. Reconnect before then to keep approvals and delegated-work status available.`,
     level: 'action_needed',
     category: 'system',
     templateKey: 'paperclip_credential_expiring',
@@ -238,8 +247,8 @@ function credentialExpiryNotification(
     hubProjectIds: [],
     tags: [],
     metadata: {
-      companyId: settings.companyId,
-      companyName,
+      monitorAllCompanies: settings.monitorAllCompanies,
+      companyIds: settings.companyIds,
       boardKeyId: settings.boardKeyId ?? null,
       boardUserName: settings.boardUserName ?? null,
       expiresAt: settings.boardKeyExpiresAt,
@@ -269,10 +278,28 @@ export function validatePaperclipConnectorConfig(
 
 function normalizeSettings(value: Record<string, unknown>): PaperclipConnectorSettings {
   const apiOrigin = boundedText(value.apiOrigin, 2048);
-  const companyId = boundedText(value.companyId, 160);
-  if (!apiOrigin || !companyId) {
-    throw new Error('Paperclip API origin and company ID are required');
+  const legacyCompanyId = boundedText(value.companyId, 160);
+  const configuredCompanyIds = Array.isArray(value.companyIds)
+    ? value.companyIds
+      .map((companyId) => boundedText(companyId, 160))
+      .filter((companyId): companyId is string => companyId !== null)
+    : [];
+  const companyIds = [...new Set([
+    ...configuredCompanyIds,
+    ...(legacyCompanyId ? [legacyCompanyId] : []),
+  ])];
+  const monitorAllCompanies = value.monitorAllCompanies === true;
+  if (!apiOrigin || (!monitorAllCompanies && companyIds.length === 0)) {
+    throw new Error('Paperclip API origin and at least one company are required');
   }
+  const companyNameValues = record(value.companyNames);
+  const legacyCompanyName = boundedText(value.companyName, 120);
+  const companyNames = Object.fromEntries(companyIds.map((companyId) => [
+    companyId,
+    boundedText(companyNameValues[companyId], 120)
+      ?? (companyId === legacyCompanyId ? legacyCompanyName : null)
+      ?? companyId,
+  ]));
   let url: URL;
   try {
     url = new URL(apiOrigin);
@@ -291,10 +318,9 @@ function normalizeSettings(value: Record<string, unknown>): PaperclipConnectorSe
   }
   return {
     apiOrigin: url.origin,
-    companyId,
-    ...(boundedText(value.companyName, 120)
-      ? { companyName: boundedText(value.companyName, 120)! }
-      : {}),
+    monitorAllCompanies,
+    companyIds: monitorAllCompanies ? [] : companyIds,
+    companyNames,
     ...(boundedText(value.boardKeyId, 160)
       ? { boardKeyId: boundedText(value.boardKeyId, 160)! }
       : {}),
@@ -331,6 +357,7 @@ export class PaperclipConnector implements IConnector {
   private settings: PaperclipConnectorSettings | null = null;
   private credential = '';
   private approvals: PaperclipApproval[] | null = null;
+  private companyNames = new Map<string, string>();
 
   async initialize(config: ConnectorConfig): Promise<void> {
     (this as { id: string }).id = config.id;
@@ -354,6 +381,7 @@ export class PaperclipConnector implements IConnector {
     this.settings = null;
     this.credential = '';
     this.approvals = null;
+    this.companyNames.clear();
   }
 
   async *fetchTasks(): AsyncGenerator<TaskItem[], void, unknown> {
@@ -371,11 +399,15 @@ export class PaperclipConnector implements IConnector {
     const issuesByApproval = new Map<string, PaperclipIssue[]>();
     for (let index = 0; index < pendingApprovals.length; index += 5) {
       const batch = pendingApprovals.slice(index, index + 5);
-      const batchIssues = await Promise.all(batch.map((approval) =>
-        listPaperclipApprovalIssues({
+      const batchIssues = await Promise.all(batch.map((approval) => {
+        const companyId = approval.companyId;
+        if (!companyId) {
+          throw new Error(`Paperclip approval ${approval.id} has no company`);
+        }
+        return listPaperclipApprovalIssues({
           endpoint: settings.apiOrigin,
           credential: this.credential,
-        }, settings.companyId, approval.id).catch((error: unknown) => {
+        }, companyId, approval.id).catch((error: unknown) => {
           if (
             error instanceof ExternalAgentError
             && (error.status === 403 || error.status === 404)
@@ -383,7 +415,8 @@ export class PaperclipConnector implements IConnector {
             return [];
           }
           throw error;
-        })));
+        });
+      }));
       batch.forEach((approval, batchIndex) => {
         issuesByApproval.set(approval.id, batchIssues[batchIndex] ?? []);
       });
@@ -402,6 +435,10 @@ export class PaperclipConnector implements IConnector {
       }
     }
     const approvalNotifications = pendingApprovals.map((approval) => {
+      const companyId = approval.companyId;
+      if (!companyId) {
+        throw new Error(`Paperclip approval ${approval.id} has no company`);
+      }
       const linkedIssues = issuesByApproval.get(approval.id) ?? [];
       const relatedTaskId = linkedIssues
         .map((issue) => issue.id)
@@ -410,6 +447,8 @@ export class PaperclipConnector implements IConnector {
       return approvalNotification({
         approval,
         settings,
+        companyId,
+        companyName: this.companyNames.get(companyId) ?? companyId,
         connectorId: this.id,
         linkedIssues,
         ...(relatedTaskId ? { relatedTaskId } : {}),
@@ -449,10 +488,19 @@ export class PaperclipConnector implements IConnector {
 
   private async fetchApprovals(): Promise<PaperclipApproval[]> {
     const settings = this.requireSettings();
-    const approvals = await listPaperclipApprovals({
+    const connection = {
       endpoint: settings.apiOrigin,
       credential: this.credential,
-    }, settings.companyId);
+    };
+    const companies = settings.monitorAllCompanies
+      ? (await discoverPaperclip(connection)).companies
+      : settings.companyIds.map((companyId) => ({
+        id: companyId,
+        name: settings.companyNames[companyId] ?? companyId,
+      }));
+    this.companyNames = new Map(companies.map((company) => [company.id, company.name]));
+    const approvals = (await Promise.all(companies.map((company) =>
+      listPaperclipApprovals(connection, company.id)))).flat();
     this.approvals = approvals;
     return approvals;
   }

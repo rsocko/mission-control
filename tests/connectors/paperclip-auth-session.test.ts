@@ -94,10 +94,10 @@ describe('Paperclip connector authorization', () => {
     expect(consumePaperclipAuthorization(
       started.authSessionId,
       'https://paperclip.example.test',
-      'company-1',
+      ['company-1'],
     )).toMatchObject({
       apiToken: 'connector-board-token',
-      companyName: 'Research',
+      companies: [{ id: 'company-1', name: 'Research' }],
       keyId: 'connector-key-1',
       boardUserId: 'user-1',
       boardUserName: 'Operator',
@@ -105,8 +105,16 @@ describe('Paperclip connector authorization', () => {
     expect(consumePaperclipAuthorization(
       started.authSessionId,
       'https://paperclip.example.test',
-      'company-1',
-    )).toMatchObject({ apiToken: 'connector-board-token' });
+      null,
+    )).toMatchObject({
+      apiToken: 'connector-board-token',
+      companies: [{ id: 'company-1', name: 'Research' }],
+    });
+    expect(() => consumePaperclipAuthorization(
+      started.authSessionId,
+      'https://paperclip.example.test',
+      [],
+    )).toThrow('At least one Paperclip company must be selected');
     completePaperclipAuthorization(started.authSessionId);
     expect(() => consumePaperclipAuthorization(
       started.authSessionId,

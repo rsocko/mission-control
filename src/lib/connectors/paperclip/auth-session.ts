@@ -278,7 +278,7 @@ function completedSession(session: PaperclipAuthSession) {
 export function consumePaperclipAuthorization(
   id: string,
   apiOriginInput: string,
-  companyId: string,
+  companyIdsInput: string | string[] | null,
 ) {
   const session = requireSession(id);
   const apiOrigin = normalizeOrigin(apiOriginInput);
@@ -296,17 +296,33 @@ export function consumePaperclipAuthorization(
       422,
     );
   }
-  const company = session.companies?.find((candidate) => candidate.id === companyId);
-  if (!company) {
+  const requestedCompanyIds = [...new Set(
+    (Array.isArray(companyIdsInput) ? companyIdsInput : [companyIdsInput ?? ''])
+      .map((companyId) => companyId.trim())
+      .filter(Boolean),
+  )];
+  const accessibleCompanies = session.companies ?? [];
+  if (companyIdsInput !== null && requestedCompanyIds.length === 0) {
+    throw new ExternalAgentError(
+      'At least one Paperclip company must be selected',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  const companyById = new Map(accessibleCompanies.map((company) => [company.id, company]));
+  if (requestedCompanyIds.some((companyId) => !companyById.has(companyId))) {
     throw new ExternalAgentError(
       'Paperclip company is not accessible with this authorization',
       'PROVIDER_SCOPE_MISMATCH',
       422,
     );
   }
+  const companies = companyIdsInput === null
+    ? accessibleCompanies
+    : requestedCompanyIds.map((companyId) => companyById.get(companyId)!);
   return {
     apiToken: session.connectorToken,
-    companyName: company.name,
+    companies,
     keyId: session.keyId,
     keyExpiresAt: session.keyExpiresAt ?? null,
     boardUserId: session.userId,

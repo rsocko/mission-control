@@ -198,8 +198,9 @@ tools, credentials, skills, budget, and approval policy.
 
 Implement Paperclip as a concrete provider over the existing external-agent
 control plane, not as a task-producing connector. A separate notification-only
-Paperclip connector polls company approvals; Paperclip remains available as an
-external-agent dispatch destination as well.
+Paperclip connector polls approvals across all companies accessible to its Board
+credential by default, with an optional selected-company scope. Paperclip remains
+available as an external-agent dispatch destination as well.
 
 ### Dispatch
 

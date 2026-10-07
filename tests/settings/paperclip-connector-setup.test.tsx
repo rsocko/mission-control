@@ -35,7 +35,8 @@ it('authorizes Paperclip in the browser and creates a connector for the selected
   });
   vi.stubGlobal('fetch', fetchMock);
   const openWindow = vi.spyOn(window, 'open').mockImplementation(() => null);
-  render(<AddConnectorModal onClose={() => undefined} onAdded={() => undefined} />);
+  const onClose = vi.fn();
+  render(<AddConnectorModal onClose={onClose} onAdded={() => undefined} />);
 
   fireEvent.click(screen.getByText('Paperclip').closest('button')!);
   fireEvent.change(await screen.findByLabelText('Paperclip API origin'), {
@@ -49,7 +50,11 @@ it('authorizes Paperclip in the browser and creates a connector for the selected
     '_blank',
     'noopener,noreferrer',
   );
-  expect(await screen.findByText(/Board connection approved/)).toBeInTheDocument();
+  expect(await screen.findByText(/Authorization approved; setup is not finished/)).toBeInTheDocument();
+  expect(screen.getByRole('checkbox', { name: /All accessible companies/ })).toBeChecked();
+  fireEvent.click(screen.getByRole('dialog').parentElement!);
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(onClose).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Add connector' }));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
@@ -61,11 +66,11 @@ it('authorizes Paperclip in the browser and creates a connector for the selected
   const [, createInit] = fetchMock.mock.calls[2]!;
   expect(JSON.parse(String(createInit?.body))).toMatchObject({
     type: 'paperclip',
-    name: 'Paperclip — Research team',
+    name: 'Paperclip — All companies',
     pollIntervalMinutes: 5,
     settings: {
-      companyId: 'company-1',
-      companyName: 'Research team',
+      monitorAllCompanies: true,
+      companyIds: [],
     },
     credentials: { authSessionId: 'auth-session-1' },
     capabilities: {

@@ -20,6 +20,16 @@ export interface DeepLinkInfo extends SourceLinkInfo {
   icon: string;
 }
 
+/** Build the canonical Mission Control path for a task. */
+export function buildTaskDeepLinkPath(taskId: string): string {
+  return `/tasks/${encodeURIComponent(taskId)}`;
+}
+
+/** Build an absolute Mission Control task URL suitable for sharing. */
+export function buildTaskDeepLinkUrl(origin: string, taskId: string): string {
+  return new URL(buildTaskDeepLinkPath(taskId), origin).toString();
+}
+
 const CONNECTOR_DISPLAY: Record<string, { label: string; icon: string }> = {
   'github-issues': { label: 'GitHub', icon: '/icons/connectors/github.svg' },
 };

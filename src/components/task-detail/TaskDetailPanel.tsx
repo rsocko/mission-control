@@ -761,6 +761,7 @@ export function TaskDetailPanel({
         mode === 'workspace' && 'grid max-w-[1320px] grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(380px,1.35fr)] items-start gap-5 p-7',
       )}>
         <TaskDetailHeader
+          taskId={task.id}
           mode={mode}
           iconSrc={iconSrc ?? null}
           connectorType={task.connectorType}

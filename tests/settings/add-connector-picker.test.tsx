@@ -86,8 +86,8 @@ it('supports arrow-key navigation across connector cards', () => {
   expect(githubIssues).toHaveFocus();
 });
 
-it('renders icon-library connector assets through the resilient icon renderer', () => {
+it('renders the Paperclip connector asset', () => {
   render(<AddConnectorModal onClose={vi.fn()} onAdded={vi.fn()} />);
 
-  expect(screen.getByRole('img', { name: 'lucide:paperclip' })).toBeInTheDocument();
+  expect(document.querySelector('img[src*="paperclip.svg"]')).toBeInTheDocument();
 });

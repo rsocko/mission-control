@@ -43,6 +43,7 @@ import type {
   SyncStatusEntry,
 } from '@/types/dashboard';
 import type { MyDayItem } from '@/components/today/types';
+import type { TaskFieldUpdate } from '@/components/task-detail/task-detail-types';
 
 const PRIORITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, none: 4 };
 
@@ -118,6 +119,13 @@ export function MobileAllTasksList() {
   const { containerRef, isRefreshing, pullDistance, containerProps, contentStyle } = usePullToRefresh({ onRefresh, enabled: !isSheetOpen });
 
   const filteredTasks = state.taskResponse.tasks;
+  const handleTaskDetailUpdate = useCallback((fields?: TaskFieldUpdate) => {
+    if (selectedTaskId && fields) {
+      actions.patchTaskInList(selectedTaskId, fields);
+      return;
+    }
+    void actions.fetchData(false, true);
+  }, [actions, selectedTaskId]);
 
   // Group tasks by priority
   const groups: TaskGroup[] = useMemo(() => {
@@ -408,7 +416,7 @@ export function MobileAllTasksList() {
               null,
               reason === 'task-removed' ? { history: 'replace' } : undefined,
             )}
-            onUpdate={() => actions.fetchData(false, true)}
+            onUpdate={handleTaskDetailUpdate}
             onSubtaskCountChange={(done, total) => actions.updateSubtaskCount(selectedTaskId, done, total)}
             sourceLists={state.sourceLists}
             onMoveToList={(targetListId) => actions.moveTaskToList(selectedTaskId, targetListId)}

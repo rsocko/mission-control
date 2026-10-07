@@ -49,6 +49,7 @@ import {
   type DocumentView,
   type SortDirection,
 } from './document-workspace';
+import type { TaskFieldUpdate } from '@/components/task-detail/task-detail-types';
 
 type ActionTypeFilter = 'all' | 'pay' | 'respond' | 'file' | 'archive' | 'review' | 'sign' | 'schedule';
 type UrgencyFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
@@ -274,7 +275,23 @@ export default function DocIntelligencePage() {
     localStorage.setItem(STORAGE_KEYS.view, 'all');
   }
 
-  const handleTaskUpdate = useCallback(() => { void fetchTasks(true); }, [fetchTasks]);
+  const handleTaskUpdate = useCallback((fields?: TaskFieldUpdate) => {
+    if (selectedTaskId && fields) {
+      setTasks((current) => current.map((task) => task.id === selectedTaskId
+        ? {
+            ...task,
+            ...(typeof fields.title === 'string' ? { title: fields.title } : {}),
+            ...(typeof fields.status === 'string' ? { status: fields.status } : {}),
+            ...(typeof fields.priority === 'string' ? { priority: fields.priority } : {}),
+            ...(fields.dueDate === null || typeof fields.dueDate === 'string'
+              ? { dueDate: fields.dueDate }
+              : {}),
+          }
+        : task));
+      return;
+    }
+    void fetchTasks(true);
+  }, [fetchTasks, selectedTaskId]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--background)]">

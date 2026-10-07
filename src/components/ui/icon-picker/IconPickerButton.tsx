@@ -206,6 +206,7 @@ export function IconPickerButton({
             ref={pickerRef}
             role="dialog"
             aria-label="Choose an icon"
+            onMouseDown={(event) => event.stopPropagation()}
             className="fixed z-[9999]"
             style={{
               top: pos?.top ?? 0,

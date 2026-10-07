@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IconPickerButton } from '@/components/ui/icon-picker/IconPickerButton';
 
 vi.mock('@/components/ui/icon-picker/IconPicker', () => ({
-  IconPicker: () => <div>Picker contents</div>,
+  IconPicker: () => <input aria-label="Search icons" />,
 }));
 
 vi.mock('@/components/ui/icon-picker/IconRenderer', () => ({
@@ -95,5 +95,21 @@ describe('IconPickerButton', () => {
       top: '8px',
       width: '344px',
     });
+  });
+
+  it('isolates picker mouse events from trigger ancestors', () => {
+    setViewport(1200, 800);
+    mockTriggerRect({});
+    const handleMouseDown = vi.fn((event: React.MouseEvent) => event.preventDefault());
+
+    render(
+      <div onMouseDown={handleMouseDown}>
+        <IconPickerButton value={null} onChange={vi.fn()} />
+      </div>,
+    );
+    fireEvent.click(screen.getByTitle('Pick an icon'));
+    fireEvent.mouseDown(screen.getByRole('textbox', { name: 'Search icons' }));
+
+    expect(handleMouseDown).not.toHaveBeenCalled();
   });
 });

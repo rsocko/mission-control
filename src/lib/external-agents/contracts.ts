@@ -133,6 +133,7 @@ export interface ExternalAgentDataPolicy {
 
 export interface PaperclipProviderConfig {
   companyId: string;
+  companyName?: string;
   assigneeAgentId: string;
   projectId?: string;
   requiredAdapterType?: string;

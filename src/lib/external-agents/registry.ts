@@ -150,6 +150,17 @@ function validateProviderConfig(
     paperclip.requiredAdapterType,
     'providerConfig.paperclip.requiredAdapterType',
   );
+  const companyName = optionalText(
+    paperclip.companyName,
+    'providerConfig.paperclip.companyName',
+  );
+  if (companyName && companyName.length > 120) {
+    throw new ExternalAgentError(
+      'providerConfig.paperclip.companyName exceeds 120 characters',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
   return {
     ...common,
     paperclip: {
@@ -157,6 +168,7 @@ function validateProviderConfig(
         paperclip.companyId,
         'providerConfig.paperclip.companyId',
       ),
+      ...(companyName ? { companyName } : {}),
       assigneeAgentId: requiredUuid(
         paperclip.assigneeAgentId,
         'providerConfig.paperclip.assigneeAgentId',

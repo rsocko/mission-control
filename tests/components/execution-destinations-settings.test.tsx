@@ -271,7 +271,9 @@ describe('ExecutionDestinationsSection', () => {
     expect(screen.getByLabelText('Paperclip API origin'))
       .toHaveValue('https://paperclip.example.test');
     fireEvent.click(screen.getByRole('button', { name: 'Check connection' }));
-    expect(await screen.findByText('Connected · Paperclip 1.2.3')).toBeInTheDocument();
+    expect(await screen.findByText(
+      'Connected · company roster visibility verified · Paperclip 1.2.3',
+    )).toBeInTheDocument();
     expect(discoveryBody).toMatchObject({
       connectorId: 'paperclip-connector-1',
       endpoint: 'https://paperclip.example.test',

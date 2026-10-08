@@ -216,6 +216,97 @@ describe('useSyncStreamConnection history refresh', () => {
     unmount();
   });
 
+  it('tracks concurrent connector progress independently', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('EventSource', MockEventSource);
+    const { result, unmount } = renderHook(() => useSyncStreamConnection(), {
+      wrapper: createQueryWrapper(),
+    });
+    const eventSource = MockEventSource.instances[0];
+
+    act(() => {
+      eventSource.emit('sync:start', {
+        type: 'sync:start',
+        connectorId: 'todo-1',
+        connectorName: 'Microsoft To Do',
+        phase: 'tasks',
+      });
+      eventSource.emit('sync:list-progress', {
+        type: 'sync:list-progress',
+        connectorId: 'todo-1',
+        listName: 'Work',
+        listIndex: 60,
+        totalLists: 96,
+        tasksInList: 10,
+      });
+      eventSource.emit('sync:start', {
+        type: 'sync:start',
+        connectorId: 'paperclip-1',
+        connectorName: 'Paperclip',
+        phase: 'tasks',
+      });
+      eventSource.emit('sync:list-progress', {
+        type: 'sync:list-progress',
+        connectorId: 'paperclip-1',
+        listName: 'All companies',
+        listIndex: 2,
+        totalLists: 4,
+        tasksInList: 3,
+      });
+    });
+    await act(() => vi.advanceTimersByTimeAsync(300));
+
+    expect(result.current.activeProgresses).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        connectorId: 'todo-1',
+        connectorName: 'Microsoft To Do',
+        currentList: 'Work',
+        listIndex: 60,
+        totalLists: 96,
+      }),
+      expect.objectContaining({
+        connectorId: 'paperclip-1',
+        connectorName: 'Paperclip',
+        currentList: 'All companies',
+        listIndex: 2,
+        totalLists: 4,
+      }),
+    ]));
+
+    act(() => {
+      eventSource.emit('sync:complete', {
+        type: 'sync:complete',
+        connectorId: 'todo-1',
+        queueRemaining: 1,
+        result: {
+          tasksAdded: 0,
+          tasksUpdated: 0,
+          tasksRemoved: 0,
+          tasksPushed: 0,
+          localOnlyProtected: 0,
+          notificationsAdded: 0,
+          totalLists: 96,
+          durationMs: 100,
+        },
+      });
+    });
+
+    expect(result.current.activeProgresses).toEqual([
+      expect.objectContaining({
+        connectorId: 'paperclip-1',
+        connectorName: 'Paperclip',
+        currentList: 'All companies',
+      }),
+    ]);
+    expect(result.current.progress).toMatchObject({
+      isSyncing: true,
+      connectorId: 'paperclip-1',
+      connectorName: 'Paperclip',
+      currentList: 'All companies',
+    });
+    unmount();
+  });
+
   it('summarizes sync results received while the page was hidden in one toast', () => {
     vi.stubGlobal('EventSource', MockEventSource);
     let visibilityState: DocumentVisibilityState = 'hidden';

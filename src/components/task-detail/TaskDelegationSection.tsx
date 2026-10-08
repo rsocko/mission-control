@@ -482,7 +482,7 @@ function TaskDelegationRunDialog({
     open,
   ]);
 
-  const act = async (action: 'cancel' | 'stop_tracking' | 'retry') => {
+  const act = async (action: 'cancel' | 'retry') => {
     setBusyAction(action);
     setError(null);
     try {
@@ -498,9 +498,7 @@ function TaskDelegationRunDialog({
       toast.success(
         action === 'retry'
           ? 'Delegation retry queued'
-          : action === 'stop_tracking'
-            ? 'Mission Control stopped tracking the provider task'
-            : 'Cancellation requested',
+          : 'Paperclip cancellation requested',
       );
       await Promise.all([load(), onUpdated()]);
     } catch (actionError) {
@@ -853,18 +851,7 @@ function TaskDelegationRunDialog({
                         className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-red-500/30 px-3 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
                       >
                         <AlertTriangle size={13} />
-                        Cancel
-                      </button>
-                    )}
-                    {assignment.canStopTracking && (
-                      <button
-                        type="button"
-                        disabled={Boolean(busyAction)}
-                        onClick={() => void act('stop_tracking')}
-                        className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-amber-500/30 px-3 text-xs text-amber-200 hover:bg-amber-500/10 disabled:opacity-50"
-                      >
-                        <AlertTriangle size={13} />
-                        Stop tracking
+                        Cancel Paperclip work
                       </button>
                     )}
                   </div>

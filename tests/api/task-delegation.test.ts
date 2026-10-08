@@ -674,6 +674,9 @@ describe('provider-neutral task delegation API', () => {
         operationId: 'validated-repository',
         repository: 'octo/validated',
         instruction: 'Write release notes',
+        taskBriefs: {
+          'task-local': 'Prepare concise release notes for the October update.',
+        },
         allowedActions: ['write_code'],
       },
     ), { params: Promise.resolve({ id: 'task-local' }) });
@@ -681,8 +684,14 @@ describe('provider-neutral task delegation API', () => {
     expect(await valid.json()).toMatchObject({
       payloadPreview: {
         repository: { fullName: 'octo/validated' },
+        tasks: [{
+          id: 'task-local',
+          description: 'Prepare concise release notes for the October update.',
+        }],
       },
     });
+    expect(sqlite.prepare('SELECT description FROM tasks WHERE id = ?').get('task-local'))
+      .toEqual({ description: null });
   });
 
   it('blocks unavailable credentials and restricted context before persistence', async () => {

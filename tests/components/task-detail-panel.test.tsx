@@ -178,7 +178,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
     const dialog = await screen.findByRole('dialog', { name: `Task details: ${task.title}` });
     fireEvent.click(await screen.findByRole('combobox', { name: 'Task status' }));
 
-    expect(screen.getByRole('listbox')).toHaveClass('z-[100]');
+    expect(screen.getByRole('listbox')).toHaveClass('z-[200]');
     expect(dialog.parentElement).toHaveClass('z-[90]');
   });
 

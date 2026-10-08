@@ -307,6 +307,7 @@ export function TaskDelegationDialog() {
   const [context, setContext] = useState<TaskDelegationContext | null>(null);
   const [selectedTargetId, setSelectedTargetId] = useState('');
   const [instruction, setInstruction] = useState('');
+  const [taskBriefs, setTaskBriefs] = useState<Record<string, string>>({});
   const [repository, setRepository] = useState('');
   const [baseRef, setBaseRef] = useState('main');
   const [model, setModel] = useState('');
@@ -382,6 +383,7 @@ export function TaskDelegationDialog() {
     setContext(null);
     setSelectedTargetId(draft?.selectedTargetId ?? '');
     setInstruction(draft?.instruction ?? '');
+    setTaskBriefs({});
     setRepository(draft?.repository ?? '');
     setBaseRef(draft?.baseRef ?? 'main');
     setModel(draft?.model ?? '');
@@ -456,6 +458,9 @@ export function TaskDelegationDialog() {
       const next = await response.json() as TaskDelegationContext;
       if (requestId !== contextRequestRef.current || signal.aborted) return;
       setContext(next);
+      setTaskBriefs(Object.fromEntries(
+        next.tasks.map((task) => [task.id, task.description ?? '']),
+      ));
       const eligibleTargets = next.targets.filter((target) =>
         target.eligibility.some(({ ready }) => ready));
       const eligibleProviders = [...new Set(eligibleTargets.map(({ type }) => type))];
@@ -468,7 +473,7 @@ export function TaskDelegationDialog() {
         : null);
       if (initial) {
         setSelectedTargetId(initial.id);
-        if (restoredTarget) {
+        if (restoredTarget && draft) {
           restoredTargetIdRef.current = restoredTarget.id;
           setAllowedActions(draft.allowedActions.filter((action) =>
             restoredTarget.allowedActions.includes(action)));
@@ -674,6 +679,7 @@ export function TaskDelegationDialog() {
           strategy: dispatchStrategy,
           agentId: selectedTarget.id,
           instruction: instruction.trim() || undefined,
+          taskBriefs,
           operationId,
           allowedActions,
           ...(selectedTarget.type === 'copilot-cloud'
@@ -718,6 +724,7 @@ export function TaskDelegationDialog() {
             strategy: group.strategy,
             agentId: selectedTarget.id,
             instruction: instruction.trim() || undefined,
+            taskBriefs,
             operationId: `${operationId}:${group.id}`,
             allowedActions,
             repository: group.repository,
@@ -1011,6 +1018,12 @@ export function TaskDelegationDialog() {
               ) : step === 'configure' && selectedTarget ? (
                 <ConfigureStep
                 target={selectedTarget}
+                tasks={context?.tasks ?? []}
+                taskBriefs={taskBriefs}
+                onTaskBriefChange={(taskId, value) => setTaskBriefs((current) => ({
+                  ...current,
+                  [taskId]: value,
+                }))}
                 instruction={instruction}
                 onInstructionChange={setInstruction}
                 repository={repository}
@@ -1538,6 +1551,9 @@ function DestinationStep({
 
 function ConfigureStep({
   target,
+  tasks,
+  taskBriefs,
+  onTaskBriefChange,
   instruction,
   onInstructionChange,
   repository,
@@ -1569,6 +1585,9 @@ function ConfigureStep({
   onPaperclipTargetChange,
 }: {
   target: TaskDelegationTarget;
+  tasks: TaskDelegationContext['tasks'];
+  taskBriefs: Record<string, string>;
+  onTaskBriefChange: (taskId: string, value: string) => void;
   instruction: string;
   onInstructionChange: (value: string) => void;
   repository: string;
@@ -2047,6 +2066,38 @@ function ConfigureStep({
             />
           </label>
         </section>
+      )}
+
+      {target.type === 'copilot-cloud' && (
+        <details className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)]">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
+            Task details sent to Copilot
+          </summary>
+          <div className="space-y-3 border-t border-[var(--border-subtle)] p-3">
+            <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
+              Edit this copy for the agent. The original Mission Control task will not change.
+            </p>
+            {tasks.map((task) => (
+              <label
+                key={task.id}
+                className="block text-xs font-medium text-[var(--text-secondary)]"
+              >
+                {task.title}
+                <div className="input-glow mt-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+                  <textarea
+                    aria-label={`Agent brief for ${task.title}`}
+                    value={taskBriefs[task.id] ?? ''}
+                    onChange={(event) => onTaskBriefChange(task.id, event.target.value)}
+                    rows={4}
+                    maxLength={32_000}
+                    placeholder="Add the details Copilot needs to complete this task."
+                    className="w-full resize-y bg-transparent px-3 py-2 text-sm font-normal text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                  />
+                </div>
+              </label>
+            ))}
+          </div>
+        </details>
       )}
 
       {target.type === 'pull-queue' && (

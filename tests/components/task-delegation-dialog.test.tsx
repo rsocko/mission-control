@@ -356,6 +356,7 @@ describe('TaskDelegationDialog disclosure review', () => {
   });
 
   it('shows configured and per-dispatch instructions with the exact rich payload', async () => {
+    let previewRequest: Record<string, unknown> | null = null;
     const payloadPreview = {
       instruction: 'Fix the parser and add coverage.',
       alwaysInstructions: 'Run focused tests before handoff.',
@@ -380,7 +381,12 @@ describe('TaskDelegationDialog disclosure review', () => {
       if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
         return response({
           taskIds: ['task-1'],
-          tasks: [{ id: 'task-1', title: 'Canonical parser task', connectorType: 'github-issues' }],
+          tasks: [{
+            id: 'task-1',
+            title: 'Canonical parser task',
+            description: 'The complete canonical description.',
+            connectorType: 'github-issues',
+          }],
           targets: [{
             id: 'github-cloud',
             name: 'GitHub Cloud',
@@ -407,6 +413,7 @@ describe('TaskDelegationDialog disclosure review', () => {
         });
       }
       if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        previewRequest = JSON.parse(String(init.body)) as Record<string, unknown>;
         return response({
           previews: [{
             taskId: 'task-1',
@@ -446,6 +453,12 @@ describe('TaskDelegationDialog disclosure review', () => {
 
     expect(await screen.findByText('GitHub Copilot Cloud')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByText('Task details sent to Copilot'));
+    const taskBrief = screen.getByLabelText('Agent brief for Canonical parser task');
+    expect(taskBrief).toHaveValue('The complete canonical description.');
+    fireEvent.change(taskBrief, {
+      target: { value: 'Focus on escaped delimiters and preserve compatibility.' },
+    });
     expect(screen.getByText('Run focused tests before handoff.')).toBeInTheDocument();
     const instructionInput = screen.getByLabelText('Per-dispatch instructions');
     const reviewButton = screen.getByRole('button', { name: 'Review 1 delegation' });
@@ -461,6 +474,11 @@ describe('TaskDelegationDialog disclosure review', () => {
     fireEvent.click(reviewButton);
 
     expect(await screen.findByText('What will be sent')).toBeInTheDocument();
+    await waitFor(() => expect(previewRequest).toMatchObject({
+      taskBriefs: {
+        'task-1': 'Focus on escaped delimiters and preserve compatibility.',
+      },
+    }));
     expect(screen.queryByText('Disclosed fields')).not.toBeInTheDocument();
     expect(screen.getByText('Request')).toBeInTheDocument();
     expect(screen.getByText('Fix the parser and add coverage.')).toBeInTheDocument();

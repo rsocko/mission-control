@@ -27,21 +27,52 @@ interface PullRequestNode extends Omit<LinkedPullRequest, 'repository' | 'defaul
   mergeCommit: { statusCheckRollup: { state: LinkedPullRequest['checks'] } | null } | null;
 }
 
+interface PullRequestConnection {
+  nodes: Array<PullRequestNode | null>;
+  pageInfo: { hasNextPage: boolean };
+}
+
+type CrossReferencedSource =
+  | ({ __typename: 'PullRequest' } & PullRequestNode)
+  | { __typename: string };
+
 interface IssueReferences {
-  closedByPullRequestsReferences: {
-    nodes: Array<PullRequestNode | null>;
+  closedByPullRequestsReferences: PullRequestConnection | null;
+  timelineItems: {
+    nodes: Array<{
+      source: CrossReferencedSource | null;
+    } | null>;
     pageInfo: { hasNextPage: boolean };
   } | null;
 }
 
+function isPullRequestSource(
+  source: CrossReferencedSource | null | undefined,
+): source is { __typename: 'PullRequest' } & PullRequestNode {
+  return source?.__typename === 'PullRequest' && 'repository' in source;
+}
+
+const PULL_REQUEST_FIELDS = `
+  number url title state isDraft baseRefName
+  repository { nameWithOwner defaultBranchRef { name } }
+  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+  mergeCommit { statusCheckRollup { state } }
+`;
+
 const REFERENCES = `
   closedByPullRequestsReferences(first: 20, includeClosedPrs: true) {
     pageInfo { hasNextPage }
+    nodes { ${PULL_REQUEST_FIELDS} }
+  }
+  timelineItems(first: 20, itemTypes: [CROSS_REFERENCED_EVENT]) {
+    pageInfo { hasNextPage }
     nodes {
-      number url title state isDraft baseRefName
-      repository { nameWithOwner defaultBranchRef { name } }
-      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-      mergeCommit { statusCheckRollup { state } }
+      ... on CrossReferencedEvent {
+        source {
+          __typename
+          ... on PullRequest { ${PULL_REQUEST_FIELDS} }
+        }
+      }
     }
   }
 `;
@@ -98,11 +129,28 @@ export function getLinkedPullRequests(
         repository?: { issue: IssueReferences | null } | null;
       };
     };
-    const connection = (nodeId ? data?.issue : data?.repository?.issue)?.closedByPullRequestsReferences;
-    if (!connection) throw new Error('GitHub linked pull requests are unavailable');
+    const issue = nodeId ? data?.issue : data?.repository?.issue;
+    const closingReferences = issue?.closedByPullRequestsReferences;
+    const timelineReferences = issue?.timelineItems;
+    if (!closingReferences && !timelineReferences) {
+      throw new Error('GitHub linked pull requests are unavailable');
+    }
+
+    const pullRequests = new Map<string, PullRequestNode>();
+    for (const pullRequest of closingReferences?.nodes ?? []) {
+      if (pullRequest) {
+        pullRequests.set(`${pullRequest.repository.nameWithOwner}#${pullRequest.number}`, pullRequest);
+      }
+    }
+    for (const event of timelineReferences?.nodes ?? []) {
+      if (isPullRequestSource(event?.source)) {
+        const pullRequest = event.source;
+        pullRequests.set(`${pullRequest.repository.nameWithOwner}#${pullRequest.number}`, pullRequest);
+      }
+    }
 
     return {
-      pullRequests: connection.nodes.filter((pr): pr is PullRequestNode => pr !== null).map((pr) => ({
+      pullRequests: [...pullRequests.values()].map((pr) => ({
         number: pr.number,
         url: assertTrustedGitHubUrl(pr.url, origin).href,
         title: pr.title,
@@ -116,7 +164,10 @@ export function getLinkedPullRequests(
           ? pr.mergeCommit?.statusCheckRollup?.state
           : pr.commits?.nodes[0]?.commit.statusCheckRollup?.state) ?? null,
       })),
-      hasMore: connection.pageInfo.hasNextPage,
+      hasMore: Boolean(
+        closingReferences?.pageInfo.hasNextPage
+        || timelineReferences?.pageInfo.hasNextPage,
+      ),
     };
   })();
   const entry = { expiresAt: Date.now() + 60_000, promise };

@@ -25,8 +25,20 @@ const pullRequest = {
   mergeCommit: null,
 };
 
-function upstream(nodes: unknown[] = [pullRequest], hasNextPage = false, byNode = false) {
-  const issue = { closedByPullRequestsReferences: { nodes, pageInfo: { hasNextPage } } };
+function upstream(
+  nodes: unknown[] = [pullRequest],
+  hasNextPage = false,
+  byNode = false,
+  timelineNodes: unknown[] = [],
+  timelineHasNextPage = false,
+) {
+  const issue = {
+    closedByPullRequestsReferences: { nodes, pageInfo: { hasNextPage } },
+    timelineItems: {
+      nodes: timelineNodes,
+      pageInfo: { hasNextPage: timelineHasNextPage },
+    },
+  };
   return new Response(JSON.stringify({ data: byNode ? { issue } : { repository: { issue } } }));
 }
 
@@ -82,6 +94,7 @@ describe('GitHub issue linked pull requests', () => {
     expect(url).toBe('https://api.github.com/graphql');
     const { query, variables } = JSON.parse(options.body);
     expect(query).toContain('first: 20, includeClosedPrs: true');
+    expect(query).toContain('timelineItems(first: 20, itemTypes: [CROSS_REFERENCED_EVENT])');
     expect(query).toContain('commits(last: 1)');
     expect(query).not.toContain('contexts');
     expect(variables).toEqual({ owner: 'owner', name: 'repo', number: 1086 });
@@ -126,6 +139,26 @@ describe('GitHub issue linked pull requests', () => {
   it('returns an empty result when no closing PRs are linked', async () => {
     mocks.fetch.mockResolvedValue(upstream([]));
     expect(await (await invoke()).json()).toEqual({ pullRequests: [], hasMore: false });
+  });
+
+  it('returns cross-referenced PRs that do not close the issue', async () => {
+    mocks.fetch.mockResolvedValue(upstream([], false, false, [
+      { source: { __typename: 'Issue' } },
+      { source: { __typename: 'PullRequest', ...pullRequest, state: 'MERGED' } },
+    ], true));
+
+    expect(await (await invoke()).json()).toMatchObject({
+      pullRequests: [{ number: 42, state: 'MERGED', repository: 'owner/repo' }],
+      hasMore: true,
+    });
+  });
+
+  it('deduplicates PRs returned as both closing and cross-referenced links', async () => {
+    mocks.fetch.mockResolvedValue(upstream([pullRequest], false, false, [
+      { source: { __typename: 'PullRequest', ...pullRequest } },
+    ]));
+
+    expect((await (await invoke()).json()).pullRequests).toHaveLength(1);
   });
 
   it('shares concurrent requests and caches results when reopening details', async () => {

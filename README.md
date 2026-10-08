@@ -17,16 +17,17 @@ Personal task & alert aggregation hub. A local-first, self-hosted system that pr
 
 ### GitHub issue pull requests
 
-Task details (panel and popup) show GitHub's linked closing pull requests, including
-manually linked PRs, with links, open/draft/closed/merged state, target branch, and
-available CI check results. Merged PRs show checks on the merge commit; other PRs
-show checks on the latest head commit. These are aggregate checks, not deployment
-confirmation or proof that a PR targeting the default branch has been merged.
+Task details (panel and popup) show GitHub's linked closing and cross-referenced pull
+requests, including manually linked PRs, with links, open/draft/closed/merged state,
+target branch, and available CI check results. Merged PRs show checks on the merge
+commit; other PRs show checks on the latest head commit. These are aggregate checks,
+not deployment confirmation or proof that a PR targeting the default branch has
+been merged.
 
 This detail-only lookup does not add sync work or list-view requests. Results are
-cached for 60 seconds, concurrent requests are shared, and each lookup is limited
-to 20 PRs with an 8-second timeout. Open the issue in GitHub for additional PRs.
-Ordinary mentions without a GitHub closing link are not included.
+cached for 60 seconds, concurrent requests are shared, and each GitHub relationship
+connection is limited to 20 entries with an 8-second timeout. Open the issue in
+GitHub for additional PRs.
 
 ## Tech Stack
 

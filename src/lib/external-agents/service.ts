@@ -57,6 +57,7 @@ export interface DispatchPreviewInput {
   agentId: string;
   instruction: string;
   scope?: AgentDispatchScope;
+  taskBriefs?: Record<string, string>;
   dataClassification?: AgentDataClassification;
   allowedActions?: string[];
   idempotencyKey: string;
@@ -325,6 +326,7 @@ async function loadPayloadSource(
   agent: ExternalAgent,
   instruction: string,
   scope: AgentDispatchScope,
+  taskBriefs: Map<string, string>,
   classification: AgentDataClassification,
   allowedActions: string[],
   callbackBaseUrl?: string,
@@ -388,6 +390,7 @@ async function loadPayloadSource(
         );
         return {
           ...task,
+          ...(taskBriefs.has(task.id) ? { description: taskBriefs.get(task.id)! } : {}),
           subtasks: task.subtasks.map(({
             connectorType: subtaskConnectorType,
             sourceId: subtaskSourceId,
@@ -450,6 +453,32 @@ export async function createDispatchPreview(input: DispatchPreviewInput) {
     { maxText: 32_000, maxBytes: 64 * 1024 },
   ) as string;
   const scope = normalizeScope(input.scope);
+  const taskBriefs = new Map<string, string>();
+  if (input.taskBriefs !== undefined) {
+    if (
+      !input.taskBriefs
+      || typeof input.taskBriefs !== 'object'
+      || Array.isArray(input.taskBriefs)
+    ) {
+      throw new ExternalAgentError(
+        'taskBriefs must be an object keyed by task ID',
+        'VALIDATION_ERROR',
+        422,
+      );
+    }
+    const scopedTaskIds = new Set(scope.taskIds ?? []);
+    for (const [taskId, brief] of Object.entries(input.taskBriefs)) {
+      if (!scopedTaskIds.has(taskId)) continue;
+      if (typeof brief !== 'string' || brief.length > 32_000) {
+        throw new ExternalAgentError(
+          'Each delegated task brief must be text no longer than 32,000 characters',
+          'VALIDATION_ERROR',
+          422,
+        );
+      }
+      taskBriefs.set(taskId, brief);
+    }
+  }
   const allowedActions = validateAllowedActions(agent, input.allowedActions ?? []);
   if (scope.createPullRequest && !allowedActions.includes('create_pull_request')) {
     throw new ExternalAgentError(
@@ -467,6 +496,7 @@ export async function createDispatchPreview(input: DispatchPreviewInput) {
     agent,
     instruction,
     scope,
+    taskBriefs,
     input.dataClassification ?? 'standard',
     allowedActions,
     input.callbackBaseUrl,
@@ -484,6 +514,7 @@ export async function createDispatchPreview(input: DispatchPreviewInput) {
       agent,
       instruction,
       scope,
+      taskBriefs,
       classification,
       allowedActions,
       input.callbackBaseUrl,

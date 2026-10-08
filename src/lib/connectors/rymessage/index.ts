@@ -185,13 +185,20 @@ export class RyMessageConnector implements IConnector {
   }
 
   async syncDomainData(context: DomainSyncContext): Promise<DomainSyncResult> {
+    const throwIfAborted = () => {
+      if (!context.signal?.aborted) return;
+      throw context.signal.reason ?? new DOMException('RyMessage sync aborted', 'AbortError');
+    };
+    throwIfAborted();
     const persistence = (await getWorkerPersistenceRepositories())
       .connectorState.rymessageActions;
     const initialProjections = await persistence.listV2Projections(this.id);
+    throwIfAborted();
     await flushRyMessageV2MutationOutbox(this.id, this.companionClient!, context.signal);
     let v2Cursor = (await persistence.readV2FeedState(this.id)).cursor;
     let recoveryAttempted = false;
     for (let pageIndex = 0; pageIndex < COMPANION_ACTION_MAX_SYNC_PAGES; pageIndex++) {
+      throwIfAborted();
       let page;
       try {
         page = await this.companionClient!.fetchPageV2(v2Cursor, context.signal);
@@ -201,6 +208,7 @@ export class RyMessageConnector implements IConnector {
           requestedCursor: v2Cursor,
           receivedAt: new Date().toISOString(),
         });
+        throwIfAborted();
       } catch (error) {
         const recoverable = (
           error instanceof CompanionActionHttpError
@@ -230,8 +238,10 @@ export class RyMessageConnector implements IConnector {
         throw new Error('Companion ActionV2 feed exceeded the bounded page limit');
       }
     }
+    throwIfAborted();
     const v2State = await persistence.readV2FeedState(this.id);
     const finalProjections = await persistence.listV2Projections(this.id);
+    throwIfAborted();
     const persistedItems = finalProjections.map(projection => (
       projection.item ?? {
         eventId: randomUUID(),
@@ -252,22 +262,25 @@ export class RyMessageConnector implements IConnector {
       complete: true,
       items: persistedItems,
     };
-    await projectCompanionActionV2PageToNotifications(this.id, persistedPage);
+    await projectCompanionActionV2PageToNotifications(this.id, persistedPage, context.signal);
     await attachImportedRyMessageManagers(
       persistedPage,
       this.companionClient!,
       this.id,
       this.settings.trustedMissionControlOrigin!,
+      context.signal,
     );
     await applyManagedRyMessageCommands(
       persistedPage,
       this.companionClient!,
       this.id,
+      context.signal,
     );
     await observeManagedRyMessageTasks(
       persistedPage,
       this.companionClient!,
       this.id,
+      context.signal,
     );
     const changes = summarizeV2Changes(initialProjections, finalProjections);
     return {

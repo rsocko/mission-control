@@ -295,9 +295,6 @@ function assignmentSummary(
     : [];
   const runId = text(detail?.runId);
   const issueId = text(detail?.issueId) ?? dispatch.providerTaskId;
-  const cloudCancellation = target?.type === 'copilot-cloud'
-    && Boolean(dispatch.providerTaskId)
-    && ACTIVE_STATUSES.includes(dispatch.status);
   return {
     dispatchId: dispatch.id,
     targetId: dispatch.externalAgentId,
@@ -351,15 +348,12 @@ function assignmentSummary(
     allowedActions: dispatch.allowedActions,
     errorMessage: dispatch.errorMessage,
     updatedAt: dispatch.updatedAt,
-    canCancel: (
-      target?.type !== 'copilot-cloud'
-      || !dispatch.providerTaskId
-    ) && ACTIVE_STATUSES.includes(dispatch.status),
-    canStopTracking: cloudCancellation,
+    canCancel: target?.type === 'paperclip'
+      && Boolean(dispatch.providerTaskId)
+      && ACTIVE_STATUSES.includes(dispatch.status),
+    canStopTracking: false,
     canRetry: RETRYABLE_STATUSES.includes(dispatch.status),
-    cancellationLimitation: cloudCancellation
-      ? 'GitHub Agent Tasks does not expose cancellation. Mission Control can stop tracking, but provider work may continue.'
-      : null,
+    cancellationLimitation: null,
   };
 }
 

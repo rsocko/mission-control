@@ -543,7 +543,7 @@ describe('provider-neutral task delegation API', () => {
       assignments: [{
         dispatchId: firstPreview.dispatchId,
         displayState: 'preview',
-        canCancel: true,
+        canCancel: false,
         canStopTracking: false,
         cancellationLimitation: null,
       }],
@@ -583,6 +583,31 @@ describe('provider-neutral task delegation API', () => {
       (await import('@/lib/external-agents/service'))
         .confirmDispatch(first.id, first.previewHash),
     ).rejects.toMatchObject({ code: 'PREVIEW_MISMATCH' });
+  });
+
+  it('does not expose cancellation for Scout work pickup', async () => {
+    await createScoutPullAgent();
+    const preview = await delegation.previewTaskDelegation({
+      taskId: 'task-local',
+      agentId: 'scout-pull-worker-scout-primary',
+      operationId: 'scout-without-cancel',
+      instruction: 'Handle this Microsoft 365 task',
+      allowedActions: ['propose_tasks'],
+    });
+
+    const response = await singleRoute.GET(
+      new Request('http://localhost/api/tasks/task-local/delegation'),
+      { params: Promise.resolve({ id: 'task-local' }) },
+    );
+
+    expect(await response.json()).toMatchObject({
+      assignments: [{
+        dispatchId: preview.id,
+        targetType: 'pull-queue',
+        canCancel: false,
+        canStopTracking: false,
+      }],
+    });
   });
 
   it('uses the task details when per-dispatch instructions are omitted', async () => {

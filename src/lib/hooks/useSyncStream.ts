@@ -41,6 +41,8 @@ export interface SyncProgress {
 
 export interface SyncStreamContextValue {
   progress: SyncProgress;
+  /** Per-connector progress for every sync currently in flight. */
+  activeProgresses: SyncProgress[];
   /** Trigger an incremental sync, optionally scoped to one connector. */
   triggerSync: (connectorId?: string) => void;
 }
@@ -63,6 +65,7 @@ const initialProgress: SyncProgress = {
 
 const SyncStreamContext = createContext<SyncStreamContextValue>({
   progress: initialProgress,
+  activeProgresses: [],
   triggerSync: () => {},
 });
 
@@ -94,6 +97,8 @@ const SYNC_RECONNECT_MAX_MS = 30_000;
 export function useSyncStreamConnection() {
   const queryClient = useQueryClient();
   const [progress, setProgress] = useState<SyncProgress>(initialProgress);
+  const [activeProgresses, setActiveProgresses] = useState<SyncProgress[]>([]);
+  const activeProgressesRef = useRef<Record<string, SyncProgress>>({});
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -106,32 +111,49 @@ export function useSyncStreamConnection() {
   const streamConnectedRef = useRef(false);
   const knownSyncingRef = useRef(false);
 
-  // Track current connector for toast messages (set by sync:start, used by subsequent events)
-  const currentConnectorRef = useRef<{ id: string; name: string } | null>(null);
+  // Connector names are retained for terminal events that can arrive out of order.
+  const connectorNamesRef = useRef<Record<string, string>>({});
 
   // Throttle state: accumulate intermediate updates in a ref, flush periodically
-  const pendingProgressRef = useRef<Partial<SyncProgress> | null>(null);
+  const pendingProgressRef = useRef<Record<string, Partial<SyncProgress>>>({});
   const throttleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFlushRef = useRef<number>(0);
 
   const flushPendingProgress = useCallback(() => {
     const pending = pendingProgressRef.current;
-    if (!pending) return;
-    pendingProgressRef.current = null;
+    if (Object.keys(pending).length === 0) return;
+    pendingProgressRef.current = {};
     throttleTimerRef.current = null;
     lastFlushRef.current = Date.now();
-    setProgress((prev) => ({ ...prev, ...pending }));
+    const next = { ...activeProgressesRef.current };
+    for (const [connectorId, update] of Object.entries(pending)) {
+      if (next[connectorId]) {
+        next[connectorId] = { ...next[connectorId], ...update };
+      }
+    }
+    activeProgressesRef.current = next;
+    setActiveProgresses(Object.values(next));
+    setProgress((prev) => {
+      const update = prev.connectorId ? pending[prev.connectorId] : undefined;
+      return update ? { ...prev, ...update } : prev;
+    });
   }, []);
 
   /**
    * Schedule a throttled progress update.  If enough time has elapsed since
    * the last flush, apply immediately; otherwise queue for later.
    */
-  const throttledSetProgress = useCallback((update: Partial<SyncProgress>) => {
-    // Merge into pending
-    pendingProgressRef.current = pendingProgressRef.current
-      ? { ...pendingProgressRef.current, ...update }
-      : update;
+  const throttledSetProgress = useCallback((
+    connectorId: string,
+    update: Partial<SyncProgress>,
+  ) => {
+    pendingProgressRef.current = {
+      ...pendingProgressRef.current,
+      [connectorId]: {
+        ...pendingProgressRef.current[connectorId],
+        ...update,
+      },
+    };
 
     // If we can flush now, do it
     const elapsed = Date.now() - lastFlushRef.current;
@@ -188,6 +210,10 @@ export function useSyncStreamConnection() {
       const isSyncing = data.isSyncing === true;
       const completedWhileDisconnected = fallbackSawSyncRef.current && !isSyncing;
       fallbackSawSyncRef.current = isSyncing;
+      if (!isSyncing) {
+        activeProgressesRef.current = {};
+        setActiveProgresses([]);
+      }
       setProgress((previous) => ({
         ...previous,
         isSyncing,
@@ -267,36 +293,42 @@ export function useSyncStreamConnection() {
         clearTimeout(throttleTimerRef.current);
         throttleTimerRef.current = null;
       }
-      pendingProgressRef.current = null;
-      currentConnectorRef.current = { id: data.connectorId, name: data.connectorName };
+      flushPendingProgress();
+      connectorNamesRef.current[data.connectorId] = data.connectorName;
       knownSyncingRef.current = true;
-      setProgress((prev) => ({
-        ...prev,
+      const connectorProgress: SyncProgress = {
+        ...(data.phase === 'tasks'
+          ? activeProgressesRef.current[data.connectorId] ?? initialProgress
+          : initialProgress),
         isSyncing: true,
         connectorId: data.connectorId,
         connectorName: data.connectorName,
         phase: data.phase,
-        ...(data.phase === 'push'
-          ? { currentList: null, listIndex: 0, totalLists: 0, totalTasks: 0, parentTasks: 0, subtasks: 0, listsFound: 0, byStatus: { todo: 0, done: 0 } }
-          : data.phase === 'lists'
-          ? { currentList: null, listIndex: 0, totalLists: 0, totalTasks: 0, parentTasks: 0, subtasks: 0, listsFound: 0, byStatus: { todo: 0, done: 0 } }
-          : {}),
+      };
+      activeProgressesRef.current = {
+        ...activeProgressesRef.current,
+        [data.connectorId]: connectorProgress,
+      };
+      setActiveProgresses(Object.values(activeProgressesRef.current));
+      setProgress((prev) => ({
+        ...connectorProgress,
+        refetchKey: prev.refetchKey,
       }));
     };
 
     // Intermediate events — throttled
     const handleListsDiscovered = (e: MessageEvent) => {
       const data = JSON.parse(e.data) as SyncListsDiscoveredEvent;
-      throttledSetProgress({
+      throttledSetProgress(data.connectorId, {
         listsFound: data.listCount,
         totalLists: data.listCount,
       });
       if (Date.now() < toastSuppressedUntilRef.current) return;
-      const c = currentConnectorRef.current;
-      const connectorIcon = connectorToastIcon(c?.id ?? data.connectorId);
-      const label = c
+      const connectorName = connectorNamesRef.current[data.connectorId];
+      const connectorIcon = connectorToastIcon(data.connectorId);
+      const label = connectorName
         ? createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
-            `Found ${data.listCount} lists from `, connectorIcon, c.name,
+            `Found ${data.listCount} lists from `, connectorIcon, connectorName,
           )
         : `Found ${data.listCount} lists`;
       toast(label, { duration: 3000 });
@@ -304,7 +336,7 @@ export function useSyncStreamConnection() {
 
     const handleListProgress = (e: MessageEvent) => {
       const data = JSON.parse(e.data) as SyncListProgressEvent;
-      throttledSetProgress({
+      throttledSetProgress(data.connectorId, {
         currentList: data.listName,
         listIndex: data.listIndex,
         totalLists: data.totalLists,
@@ -313,7 +345,7 @@ export function useSyncStreamConnection() {
 
     const handleTasksBatch = (e: MessageEvent) => {
       const data = JSON.parse(e.data) as SyncTasksBatchEvent;
-      throttledSetProgress({
+      throttledSetProgress(data.connectorId, {
         totalTasks: data.totalSoFar,
         parentTasks: data.parentTasks,
         subtasks: data.subtasks,
@@ -330,24 +362,21 @@ export function useSyncStreamConnection() {
         clearTimeout(throttleTimerRef.current);
         throttleTimerRef.current = null;
       }
-      pendingProgressRef.current = null;
+      flushPendingProgress();
+      const nextActive = { ...activeProgressesRef.current };
+      delete nextActive[data.connectorId];
+      activeProgressesRef.current = data.queueRemaining > 0 ? nextActive : {};
+      setActiveProgresses(Object.values(activeProgressesRef.current));
 
       // If more syncs are still queued/running, keep isSyncing=true and defer
       // the refetchKey increment to avoid cascading refetch storms.
       if (data.queueRemaining > 0) {
         knownSyncingRef.current = true;
+        const replacement = Object.values(nextActive).at(-1);
         setProgress((prev) => ({
-          ...prev,
-          // Reset phase-level details but stay in syncing state
-          phase: null,
-          currentList: null,
-          listIndex: 0,
-          totalLists: 0,
-          totalTasks: 0,
-          parentTasks: 0,
-          subtasks: 0,
-          listsFound: 0,
-          byStatus: { todo: 0, done: 0 },
+          ...(replacement ?? initialProgress),
+          isSyncing: true,
+          refetchKey: prev.refetchKey,
         }));
       } else {
         knownSyncingRef.current = false;
@@ -391,12 +420,12 @@ export function useSyncStreamConnection() {
         ? parts.join(', ')
         : 'everything up to date';
 
-      const c = currentConnectorRef.current;
-      const connectorIcon = connectorToastIcon(c?.id ?? data.connectorId);
-      const sourceLabel = c
+      const connectorName = connectorNamesRef.current[data.connectorId];
+      const connectorIcon = connectorToastIcon(data.connectorId);
+      const sourceLabel = connectorName
         ? createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
             connectorIcon,
-            c.name,
+            connectorName,
           )
         : null;
       toast.success(
@@ -416,22 +445,20 @@ export function useSyncStreamConnection() {
         clearTimeout(throttleTimerRef.current);
         throttleTimerRef.current = null;
       }
-      pendingProgressRef.current = null;
+      flushPendingProgress();
+      const nextActive = { ...activeProgressesRef.current };
+      delete nextActive[data.connectorId];
+      activeProgressesRef.current = data.queueRemaining > 0 ? nextActive : {};
+      setActiveProgresses(Object.values(activeProgressesRef.current));
 
       // If more syncs are still queued/running, stay in syncing state
       if (data.queueRemaining > 0) {
         knownSyncingRef.current = true;
+        const replacement = Object.values(nextActive).at(-1);
         setProgress((prev) => ({
-          ...prev,
-          phase: null,
-          currentList: null,
-          listIndex: 0,
-          totalLists: 0,
-          totalTasks: 0,
-          parentTasks: 0,
-          subtasks: 0,
-          listsFound: 0,
-          byStatus: { todo: 0, done: 0 },
+          ...(replacement ?? initialProgress),
+          isSyncing: true,
+          refetchKey: prev.refetchKey,
         }));
       } else {
         knownSyncingRef.current = false;
@@ -446,12 +473,12 @@ export function useSyncStreamConnection() {
 
       // Suppress toasts during the post-reload grace period
       if (Date.now() < toastSuppressedUntilRef.current) return;
-      const c = currentConnectorRef.current;
-      const connectorIcon = connectorToastIcon(c?.id ?? data.connectorId);
+      const connectorName = connectorNamesRef.current[data.connectorId];
+      const connectorIcon = connectorToastIcon(data.connectorId);
       const release = data.runtimeRelease ?? 'unreported';
-      const errorMsg = c
+      const errorMsg = connectorName
         ? createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' as const } },
-            'Sync failed (', connectorIcon, `${c.name}): ${data.error} [runtime ${release}]`,
+            'Sync failed (', connectorIcon, `${connectorName}): ${data.error} [runtime ${release}]`,
           )
         : `Sync failed: ${data.error} [runtime ${release}]`;
       toast.error(errorMsg, { duration: 5000 });
@@ -480,7 +507,13 @@ export function useSyncStreamConnection() {
       reconnectAttemptRef.current += 1;
       reconnectTimeoutRef.current = setTimeout(connect, delay);
     };
-  }, [refreshActiveQueries, startFallbackPolling, stopFallbackPolling, throttledSetProgress]);
+  }, [
+    flushPendingProgress,
+    refreshActiveQueries,
+    startFallbackPolling,
+    stopFallbackPolling,
+    throttledSetProgress,
+  ]);
 
   useEffect(() => {
     stoppedRef.current = false;
@@ -556,8 +589,8 @@ export function useSyncStreamConnection() {
   }, [progress.isSyncing]);
 
   const contextValue = useMemo<SyncStreamContextValue>(
-    () => ({ progress, triggerSync }),
-    [progress, triggerSync],
+    () => ({ progress, activeProgresses, triggerSync }),
+    [activeProgresses, progress, triggerSync],
   );
 
   return contextValue;

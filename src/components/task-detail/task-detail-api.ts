@@ -245,6 +245,7 @@ export interface ConnectorSupport {
   connectorCaps: TagConnectorCaps | null;
   supportsAttachments: boolean;
   supportsSubtasks: boolean;
+  supportsSubtaskOrderWrite: boolean;
 }
 
 /** Local tasks always support attachments and subtasks regardless of connector reports. */
@@ -261,7 +262,12 @@ export function deriveConnectorSupport(
   isLocal: boolean,
 ): ConnectorSupport {
   if (!capabilities) {
-    return { connectorCaps: null, supportsAttachments: isLocal, supportsSubtasks: isLocal };
+    return {
+      connectorCaps: null,
+      supportsAttachments: isLocal,
+      supportsSubtasks: isLocal,
+      supportsSubtaskOrderWrite: isLocal,
+    };
   }
   return {
     connectorCaps: {
@@ -271,6 +277,7 @@ export function deriveConnectorSupport(
     },
     supportsAttachments: isLocal || !!capabilities.attachments,
     supportsSubtasks: isLocal || !!capabilities.subtasks,
+    supportsSubtaskOrderWrite: isLocal || !!capabilities.subtaskOrderWrite,
   };
 }
 

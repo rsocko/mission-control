@@ -26,8 +26,8 @@ export async function POST(request: Request) {
       const result = await confirmDispatch(body.dispatchId, body.previewHash);
       return NextResponse.json({
         dispatch: publicDispatch(result.dispatch),
-        manualUrl: result.manualUrl,
-      });
+        accepted: true,
+      }, { status: 202 });
     }
     const idempotencyKey = request.headers.get('idempotency-key')
       ?? (body as DispatchPreviewInput).idempotencyKey;

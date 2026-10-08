@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Search, X, Loader2, Check } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import emojilib from 'emojilib';
 import { cn } from '@/lib/utils/cn';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
@@ -16,6 +16,7 @@ import {
   POPULAR_SIMPLE_ICONS,
   serializeIconValue,
   getIconUrl,
+  getSimpleIconNames,
 } from '@/components/ui/icon-picker/types';
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
@@ -140,14 +141,12 @@ let simpleIconsCache: string[] | null = null;
 async function getSimpleIcons(): Promise<string[]> {
   if (simpleIconsCache) return simpleIconsCache;
   try {
-    const res = await fetch('https://cdn.jsdelivr.net/npm/simple-icons/_data/simple-icons.json');
+    const res = await fetch('https://api.iconify.design/collection?prefix=simple-icons');
     if (!res.ok) return POPULAR_SIMPLE_ICONS;
     const data = await res.json();
-    const names = (data.icons || []).map((icon: { slug?: string; title: string }) =>
-      icon.slug || icon.title.toLowerCase().replace(/[^a-z0-9]/g, ''),
-    );
-    simpleIconsCache = names;
-    return names;
+    const names = getSimpleIconNames(data);
+    simpleIconsCache = names.length > 0 ? names : POPULAR_SIMPLE_ICONS;
+    return simpleIconsCache;
   } catch {
     return POPULAR_SIMPLE_ICONS;
   }

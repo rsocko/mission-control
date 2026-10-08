@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock sonner before importing the store
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: Object.assign(vi.fn(), {
     success: vi.fn(),
     error: vi.fn(),
@@ -85,7 +85,7 @@ describe('useUndoStore', () => {
 
 describe('pushUndoWithToast', () => {
   it('adds entry to store and calls toast.success', async () => {
-    const { toast } = await import('sonner');
+    const { toast } = await import('@/lib/toast');
     const undoFn = vi.fn();
     pushUndoWithToast('Task completed', undoFn);
 
@@ -97,7 +97,7 @@ describe('pushUndoWithToast', () => {
   });
 
   it('preserves an entry when undo validation rejects a toast click', async () => {
-    const { toast } = await import('sonner');
+    const { toast } = await import('@/lib/toast');
     const undoFn = vi.fn();
     pushUndoWithToast('Move task', undoFn, {
       validationError: () => 'Undo newer project hierarchy changes first',

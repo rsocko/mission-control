@@ -172,6 +172,26 @@ describe('repointTaskReferences', () => {
       createdAt: now,
       updatedAt: now,
     });
+    await db.insert(schema.taskRecurrenceOccurrences).values({
+      occurrenceId: 'inventory-recurrence-occurrence',
+      taskId: sourceTaskId,
+      generatedFromTaskId: 'inventory-upstream',
+      seriesId: 'inventory-series',
+      ruleRevisionId: 'inventory-revision',
+      effectiveKind: 'local-date',
+      effectiveValue: '2026-08-14',
+      localDate: '2026-08-14',
+      occurrenceNumber: 1,
+      anchorKind: 'completion',
+      anchorValue: now,
+      timezoneId: 'UTC',
+      timezoneKind: 'iana',
+      materializationStrategy: 'on-completion',
+      sourceOwner: 'mission-control',
+      seriesIdentityKind: 'mission-control',
+      stableSeriesId: 'inventory-stable-series',
+      createdAt: now,
+    });
     await db.insert(schema.scoutReconciliationRuns).values({
       id: 'inventory-scout-run',
       scopeKey: 'task:inventory-source',
@@ -262,6 +282,7 @@ describe('repointTaskReferences', () => {
       ['project_phase_items', 'task_id'],
       ['task_linked_sources', 'task_id'],
       ['task_projects', 'task_id'],
+      ['task_recurrence_occurrences', 'task_id'],
       ['task_reminder_occurrences', 'task_id'],
       ['scout_reconciliation_suggestions', 'task_id'],
       ['scout_reconciliation_task_state', 'task_id'],
@@ -302,6 +323,11 @@ describe('repointTaskReferences', () => {
     expect(count('task_dependencies', 'depends_on_task_id', sourceTaskId)).toBe(0);
     expect(count('task_dependencies', 'task_id', successorTaskId)).toBe(1);
     expect(count('task_dependencies', 'depends_on_task_id', successorTaskId)).toBe(1);
+    expect(count(
+      'task_recurrence_occurrences',
+      'generated_from_task_id',
+      'inventory-upstream',
+    )).toBe(1);
     expect(count('scout_reconciliation_evaluations', 'task_id', sourceTaskId)).toBe(1);
   });
 

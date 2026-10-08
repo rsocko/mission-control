@@ -34,6 +34,7 @@ export interface GraphTodoTask {
       type: string;
       startDate?: string;
       endDate?: string;
+      numberOfOccurrences?: number;
     };
   } | null;
 }

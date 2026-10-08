@@ -14,6 +14,7 @@ import {
   type ExternalAgentAuthType,
   type ExternalAgentCapabilities,
   type ExternalAgentDataPolicy,
+  type ExternalAgentProviderConfig,
   type AgentDataClassification,
   type AgentDispatchScope,
   type AgentDispatchStatus,
@@ -38,6 +39,7 @@ export type {
   ExternalAgentAuthType,
   ExternalAgentCapabilities,
   ExternalAgentDataPolicy,
+  ExternalAgentProviderConfig,
   AgentDataClassification,
   AgentDispatchScope,
   AgentDispatchStatus,
@@ -56,6 +58,11 @@ export const externalAgents = pgTable('external_agents', {
   endpoint: text('endpoint'),
   authType: text('auth_type').$type<ExternalAgentAuthType>().notNull().default('none'),
   authCredentialRef: text('auth_credential_ref'),
+  authCredential: text('auth_credential'),
+  providerConfig: jsonb('provider_config')
+    .$type<ExternalAgentProviderConfig>()
+    .notNull()
+    .default({}),
   capabilities: jsonb('capabilities')
     .$type<ExternalAgentCapabilities>()
     .notNull()
@@ -159,4 +166,27 @@ export const agentDispatchEvents = pgTable('agent_dispatch_events', {
 }, (table) => [
   index('idx_agent_dispatch_events_dispatch').on(table.dispatchId, table.id),
   index('idx_agent_dispatch_events_created').on(table.createdAt),
+]);
+
+export const agentDispatchActions = pgTable('agent_dispatch_actions', {
+  id: text('id').primaryKey(),
+  dispatchId: text('dispatch_id')
+    .notNull()
+    .references(() => agentDispatches.id, { onDelete: 'cascade' }),
+  action: text('action').$type<'submit' | 'reconcile' | 'cancel'>().notNull(),
+  status: text('status').$type<'pending' | 'processing' | 'completed'>().notNull(),
+  priority: integer('priority').notNull(),
+  availableAt: text('available_at').notNull(),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  leaseOwner: text('lease_owner'),
+  leaseExpiresAt: text('lease_expires_at'),
+  lastError: text('last_error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_agent_dispatch_actions_open')
+    .on(table.dispatchId, table.action),
+  index('idx_agent_dispatch_actions_claim')
+    .on(table.status, table.availableAt, table.priority, table.createdAt),
+  index('idx_agent_dispatch_actions_lease').on(table.status, table.leaseExpiresAt),
 ]);

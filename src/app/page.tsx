@@ -6,7 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import Image from 'next/image';
 import { Check, Loader2, FolderOpen, Sun, Trash2, List } from 'lucide-react';
 import { IconPickerButton, IconRenderer } from '@/components/ui/icon-picker';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import {
   TaskDetailPanel,
@@ -19,7 +19,7 @@ import { OneThingBanner } from '@/components/OneThingBanner';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
 import { GroupByDropdown } from '@/components/toolbar/GroupByDropdown';
 import { SortDropdown } from '@/components/toolbar/SortDropdown';
-import { ViewDensityToggle } from '@/components/toolbar/ViewDensityToggle';
+import { RowLayoutDropdown } from '@/components/toolbar/ViewDensityToggle';
 import { RecentWins } from '@/components/RecentWins';
 import { RoutineSnapshotWidget } from '@/components/routines/RoutineSnapshotWidget';
 import { TriageQueueWidget } from '@/components/triage/TriageQueueWidget';
@@ -55,6 +55,8 @@ import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { ContextThemeSurface } from '@/components/context-theme/ContextThemeSurface';
+import { TaskDelegationButton } from '@/components/task-delegation/TaskDelegationButton';
 
 const MobileDashboard = dynamic(
   () => import('@/components/dashboard/mobile/MobileDashboard').then(mod => mod.MobileDashboard),
@@ -129,7 +131,18 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
   const notificationsHook = useNotifications();
   const textFilter = useDashboardViewStore((s) => s.textFilter);
   const setTextFilter = useDashboardViewStore((s) => s.setTextFilter);
+  const wrapTaskTitles = useDashboardViewStore((s) => s.wrapTaskTitles);
+  const setWrapTaskTitles = useDashboardViewStore((s) => s.setWrapTaskTitles);
   const parsedTextFilter = useMemo(() => parseFilterQuery(textFilter), [textFilter]);
+  const activeSourceList = state.listFilter
+    ? state.sourceLists.find((list) => (
+        list.sourceId === state.listFilter
+        || `${list.connectorInstanceId}:${list.sourceId}` === state.listFilter
+      ))
+    : null;
+  const activeProject = state.projectFilter
+    ? state.projects.find((project) => project.id === state.projectFilter)
+    : null;
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
   const [subtasksOpenRequest, setSubtasksOpenRequest] = useState<TaskSubtasksOpenRequest | null>(null);
@@ -172,6 +185,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
     groupBy: state.groupBy,
     collapsedGroups: state.collapsedGroups,
     viewDensity: state.viewDensity,
+    wrapTaskTitles,
     listRef: computed.listRef,
     groupTotalCounts: state.groupTotalCounts,
   });
@@ -199,16 +213,22 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
   });
 
   return (
-    <>
+    <ContextThemeSurface
+      kind="list"
+      active={!isAllTasksPage && Boolean(activeSourceList)}
+      accentColor={activeSourceList?.appearance?.accentColor ?? activeSourceList?.iconColor ?? activeProject?.color}
+      appearance={activeSourceList?.appearance ?? activeProject?.appearance}
+      className="h-full min-h-0"
+    >
       {!isAllTasksPage && (
-        <div className="sm:hidden px-4 pt-3 pb-2 overflow-y-auto h-full">
+        <div className="h-full w-full overflow-y-auto px-4 pb-2 pt-3 sm:hidden">
           <InsightsBackLink />
           <MobileDashboard />
         </div>
       )}
 
       {/* Desktop task workspace */}
-      <div className="hidden min-w-0 sm:flex h-full">
+      <div className="hidden h-full w-full min-w-0 sm:flex">
       <div aria-live="polite" aria-atomic="true" className="sr-only" id="task-announcements" />
 
       <DashboardSidebar
@@ -227,7 +247,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
           <div className="flex flex-wrap gap-2 mb-4 items-start">
             <div className={isCollapsed('one-thing') ? 'flex-shrink-0' : 'w-full'}>
               <OneThingBanner
-                onTaskClick={taskSelection.toggleTask}
+                onTaskClick={taskSelection.selectTask}
                 onRefresh={() => actions.setRefreshTrigger((n) => n + 1)}
                 collapsed={isCollapsed('one-thing')}
                 onToggleCollapse={() => toggleSection('one-thing')}
@@ -246,7 +266,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
 
             <div className={isCollapsed('recent-wins') ? 'flex-shrink-0' : 'w-full'}>
               <RecentWins
-                onTaskClick={taskSelection.toggleTask}
+                onTaskClick={taskSelection.selectTask}
                 collapsed={isCollapsed('recent-wins')}
                 onToggleCollapse={() => toggleSection('recent-wins')}
               />
@@ -281,11 +301,11 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
           listGroups={state.listGroups}
           onSaveView={actions.startNewView}
         />
-        {state.savingView && (
+        {state.savedItemEditorKind && (
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              actions.saveCurrentView();
+              actions.saveCurrentSavedItem();
             }}
             onKeyDown={(event) => {
               if (
@@ -302,23 +322,25 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                 Icon
               </label>
               <IconPickerButton
-                value={state.viewIcon}
-                onChange={actions.setViewIcon}
+                value={state.savedItemIcon}
+                onChange={actions.setSavedItemIcon}
                 size="sm"
                 className="w-9 rounded-md"
-                color={state.viewIconColor || undefined}
-                onColorChange={actions.setViewIconColor}
+                color={state.savedItemIconColor || undefined}
+                onColorChange={actions.setSavedItemIconColor}
               />
             </div>
             <label className="min-w-0 flex-1">
               <span className="mb-1 block text-xs font-medium text-[var(--text-tertiary)]">
-                View name
+                {state.savedItemEditorKind === 'view' ? 'View name' : 'Quick filter name'}
               </span>
               <input
                 type="text"
-                value={state.viewName}
-                onChange={(e) => actions.setViewName(e.target.value)}
-                placeholder="e.g. No project assigned"
+                value={state.savedItemName}
+                onChange={(e) => actions.setSavedItemName(e.target.value)}
+                placeholder={state.savedItemEditorKind === 'view'
+                  ? 'e.g. Weekly planning'
+                  : 'e.g. Needs triage'}
                 className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--border-focus)] focus:shadow-[var(--shadow-focus-glow)]"
                 autoFocus
               />
@@ -326,10 +348,10 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
             <div className="flex h-8 items-center gap-1">
               <button
                 type="submit"
-                disabled={!state.viewName.trim()}
+                disabled={!state.savedItemName.trim()}
                 className="h-8 rounded-md bg-[var(--accent-action)] px-3 text-xs font-medium text-white transition-colors hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {state.editingViewId ? 'Update' : 'Save'}
+                {state.editingSavedItemId ? 'Update' : 'Save'}
               </button>
               <button
                 type="button"
@@ -358,7 +380,15 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                 originLabel={originLabel}
               />
               <ShowCompletedToggle />
-              <ViewDensityToggle />
+              <RowLayoutDropdown
+                value={wrapTaskTitles
+                  ? 'wrapped'
+                  : state.viewDensity === 'compact' ? 'compact' : 'normal'}
+                onChange={(layout) => {
+                  setWrapTaskTitles(layout === 'wrapped');
+                  actions.setViewDensity(layout === 'compact' ? 'compact' : 'comfortable');
+                }}
+              />
               <GroupByDropdown />
               <SortDropdown />
             </div>
@@ -636,7 +666,6 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                       {...createTaskRowInteractionHandlers({
                         taskId: task.id,
                         bulkMode: state.bulkMode,
-                        onBeforeClick: taskSelection.cancelPendingDeselect,
                         onSelect: taskSelection.handleTaskClick,
                         onDoubleClick: taskSelection.handleTaskDoubleClick,
                         onModifierClick: (_taskId, e) => {
@@ -721,6 +750,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                         hideSourceListName={!!state.listFilter || state.groupBy === 'list'}
                         showDivider={virtualItem.index < virtualRows.length - 1}
                         compact={state.viewDensity === 'compact'}
+                        wrapTitle={wrapTaskTitles}
                         bulkMode={state.bulkMode}
                         bulkSelected={state.bulkSelected.has(task.id)}
                         isCompleting={state.completingIds.has(task.id)}
@@ -777,8 +807,11 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
           >
             <TaskDetailPanel
               taskId={state.selectedTaskId}
-              onClose={() => {
-                actions.setSelectedTaskId(null);
+              onClose={(reason) => {
+                actions.setSelectedTaskId(
+                  null,
+                  reason === 'task-removed' ? { history: 'replace' } : undefined,
+                );
                 setPendingMoveDialogTaskId(null);
                 setNotesOpenRequest(null);
                 setSubtasksOpenRequest(null);
@@ -845,7 +878,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
         />
       )}
     </div>
-    </>
+    </ContextThemeSurface>
   );
 }
 
@@ -871,6 +904,7 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
   return (
     <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-blue-900/20 flex items-center gap-2 flex-wrap">
       <span className="text-xs font-medium text-blue-300">{state.bulkSelected.size} selected</span>
+      <TaskDelegationButton taskIds={Array.from(state.bulkSelected)} compact />
       <button
         onClick={() => {
           const count = state.bulkSelected.size;
@@ -1046,16 +1080,15 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
         availableTags={state.taskResponse.availableTags}
         disabled={Boolean(tagsBlockedReason)}
         disabledReason={tagsBlockedReason}
-        onAddTag={async (tagId) => {
+        onAddTag={async (tag) => {
           const ids = Array.from(state.bulkSelected);
-          const tagName = state.taskResponse.availableTags.find(t => t.id === tagId)?.name;
           const label = `Tagged ${ids.length} task${ids.length > 1 ? 's' : ''}`;
           await executeBulkOperation(
             ids,
             (id) => fetch(`/api/tasks/${id}/tags`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ tags: [tagName].filter(Boolean) }),
+              body: JSON.stringify({ tags: [tag.name] }),
             }),
             label,
             {
@@ -1066,7 +1099,7 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
                 operation: (id) => fetch(`/api/tasks/${id}/tags`, {
                   method: 'DELETE',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ tagId }),
+                  body: JSON.stringify({ tagId: tag.id }),
                 }),
               },
             },
@@ -1132,26 +1165,45 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
               requestAnimationFrame(() => {
                 const ids = Array.from(state.bulkSelected);
                 actions.setBulkSelected(new Set()); actions.setBulkMode(false);
-                // Optimistically remove tasks from state
-                const previousTasks = state.taskResponse.tasks.filter(t => ids.includes(t.id));
                 actions.setRefreshTrigger((n) => n + 1);
-                // Deferred delete with undo window
-                let undone = false;
-                pushUndoWithToast(`${ids.length} task${ids.length > 1 ? 's' : ''} deleted`, () => {
-                  undone = true;
-                  // Restore is handled by refresh since tasks weren't deleted server-side yet
-                  actions.setRefreshTrigger((n) => n + 1);
-                });
-                setTimeout(async () => {
-                  if (!undone) {
-                    const failedIds: string[] = [];
-                    for (const id of ids) {
-                      try { const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); if (!res.ok) failedIds.push(id); } catch { failedIds.push(id); }
+                void (async () => {
+                  const results = await Promise.all(ids.map(async (id) => {
+                    try {
+                      const response = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+                      const body = await response.json().catch(() => ({})) as {
+                        restorable?: boolean;
+                      };
+                      return { id, ok: response.ok, restorable: body.restorable === true };
+                    } catch {
+                      return { id, ok: false, restorable: false };
                     }
-                    if (failedIds.length > 0) toast.error(`Failed to delete ${failedIds.length} task${failedIds.length > 1 ? 's' : ''}`);
+                  }));
+                  const failed = results.filter((result) => !result.ok);
+                  const restorableIds = results
+                    .filter((result) => result.ok && result.restorable)
+                    .map((result) => result.id);
+                  if (failed.length > 0) {
+                    toast.error(`Failed to delete ${failed.length} task${failed.length > 1 ? 's' : ''}`);
                   }
                   actions.setRefreshTrigger((n) => n + 1);
-                }, 5500);
+                  if (restorableIds.length > 0) {
+                    pushUndoWithToast(
+                      `${results.length - failed.length} task${results.length - failed.length > 1 ? 's' : ''} deleted`,
+                      async () => {
+                        const restores = await Promise.all(restorableIds.map((id) =>
+                          fetch(`/api/tasks/${id}/restore`, { method: 'POST' }),
+                        ));
+                        const restoreFailures = restores.filter((response) => !response.ok).length;
+                        actions.setRefreshTrigger((n) => n + 1);
+                        if (restoreFailures > 0) {
+                          throw new Error(`Failed to restore ${restoreFailures} task${restoreFailures > 1 ? 's' : ''}`);
+                        }
+                      },
+                    );
+                  } else if (failed.length < results.length) {
+                    toast.success(`${results.length - failed.length} task${results.length - failed.length > 1 ? 's' : ''} deleted`);
+                  }
+                })();
               });
             },
           });

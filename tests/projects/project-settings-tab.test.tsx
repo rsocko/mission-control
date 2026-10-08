@@ -19,7 +19,7 @@ vi.mock('motion/react', async () => (
 vi.mock('@/components/ui/select', async () => (
   (await import('./project-tab-fixtures')).uiSelectModule()
 ));
-vi.mock('sonner', async () => (
+vi.mock('@/lib/toast', async () => (
   (await import('./project-tab-fixtures')).sonnerModule()
 ));
 vi.mock('@/lib/hooks/useSyncStream', async () => (
@@ -110,6 +110,34 @@ describe('project settings tab', () => {
 
     await waitFor(() => expect(screen.getByDisplayValue('Settings Project')).toBeInTheDocument());
     expect(harness.requestsFor(PROJECT_PATCHES, 'PATCH')).toHaveLength(0);
+  });
+
+  it('clears the icon color override when Auto is selected', async () => {
+    harness = settingsScenario({
+      project: {
+        icon: 'lucide:building',
+        iconColor: '#8b5cf6',
+      },
+    });
+    await renderProjectTab('Settings');
+
+    fireEvent.click(await screen.findByTitle('Pick an icon'));
+    fireEvent.click(screen.getByRole('button', { name: 'Use theme color' }));
+
+    await waitFor(() => {
+      expect(patchBodies(harness)).toContainEqual({ iconColor: null });
+    });
+    fireEvent.click(screen.getByTitle('🚀'));
+    await waitFor(() => {
+      expect(patchBodies(harness)).toContainEqual({
+        icon: '🚀',
+        iconColor: null,
+      });
+    });
+    expect(toasts).not.toContainEqual({
+      level: 'error',
+      message: 'Failed to update icon color',
+    });
   });
 
   it('saves lifecycle status, category, and target date changes', async () => {

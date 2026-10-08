@@ -48,6 +48,8 @@ import {
   taskIngestSuppressions,
   taskLinkedSources,
   taskProjects,
+  taskRecurrenceBackfillDecisions,
+  taskRecurrenceOccurrences,
   taskReminderOccurrences,
   taskSchedules,
   taskTags,
@@ -56,11 +58,13 @@ import {
   triageItems,
   weeklyOneThing,
 } from '../schema';
+import { taskTimeActivities } from '../schema/tasks';
 import type { PostgresDatabase, PostgresTransaction } from '../runtime';
 import {
   compileCanonicalTaskFilter,
   compileQuickFilterCondition,
   enabledGitHubConnectorCondition,
+  getTaskSourceVisibilityConditions,
   withCondition,
   type PostgresCanonicalTaskFilterInputs,
 } from './task-core-filter';
@@ -69,8 +73,13 @@ import {
   reconcilePostgresTaskTransferIdentityRefreshInTransaction,
   resolvePostgresTaskTransferIdentityTargets,
 } from './task-transfer-identity';
+import { cleanupTaskAssociationsInTransaction } from './task-deletion';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from '@/db/persistence/value-codecs';
 import { eventSubscriptionMatches, parseEventTypes } from '@/db/persistence/event-outbox';
+import {
+  mergeInboxListEntries,
+  parseConfiguredInboxListEntries,
+} from '@/lib/tasks/core/inbox-list-entries';
 import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 import {
@@ -142,6 +151,7 @@ import {
   type TaskDependencyEndpoints,
   type TaskDuplicateDetectionRow,
   type TaskFilterInputRepository,
+  type TaskFacetCounts,
   type TaskFilterSpec,
   type TaskGroupMode,
   type TaskListPage,
@@ -162,6 +172,17 @@ import {
   type TaskMutationOutcome,
   type TaskMutationRepository,
   type TaskMutationRequest,
+  type TaskTimeActivity,
+  type TaskTimeActivityMutationOutcome,
+  type TaskTimeActivityRepository,
+  type TaskTimeActivityStartInput,
+  type TaskTimeActivityTransitionInput,
+  type TaskOccurrenceMaterializationInput,
+  type TaskOccurrenceMaterializationRepository,
+  type TaskRecurrenceBackfillDecision,
+  type TaskRecurrenceBackfillInput,
+  type TaskRecurrenceBackfillOutcome,
+  type RecurrenceBackfillTouchReason,
   type TaskMoveTaskInsert,
   type TaskMoveTaskRow,
   type TaskOrganizationRepository,
@@ -170,6 +191,7 @@ import {
   type TaskQueryScope,
   type TaskRemovalOutcome,
   type TaskRemovalRepository,
+  type TaskRestoreOutcome,
   type TaskQuickSortLogEntry,
   type TaskQuickSortOperation,
   type TaskQuickSortOperationReservation,
@@ -198,7 +220,22 @@ import {
   type TemplateSubtaskInsert,
   type TemplateWorkflowTaskInsert,
   type WriteThroughTaskMoveRepository,
+  elapsedTaskTimeAt,
+  normalizeRecurrenceBackfillInstant,
+  planRecurrenceBackfill,
+  validateRecurrenceBackfillAsOf,
 } from '@/lib/tasks/core/contracts';
+import { writeRecurrenceMetadata } from '@/lib/recurrence/canonical';
+import {
+  assertRecurrenceOccurrenceMatches,
+  assertRecurrenceOccurrenceTaskScope,
+  assertRecurrenceOccurrenceTiming,
+  createPersistedRecurrenceOccurrence,
+  deriveRecurrenceOccurrenceProvenance,
+  type PersistedRecurrenceOccurrence,
+  type RecurrenceOccurrenceProvenance,
+} from '@/lib/recurrence/occurrence-persistence';
+import { projectRecurrence } from '@/lib/recurrence/projection';
 
 /**
  * PostgreSQL implementation of the L04 task-core contracts.
@@ -269,22 +306,31 @@ class PostgresTaskFilterInputRepository implements TaskFilterInputRepository {
   }
 
   async listInboxListEntries(): Promise<InboxListEntry[]> {
-    const [row] = await this.db
-      .select({ value: appSettings.value })
-      .from(appSettings)
-      .where(eq(appSettings.key, 'inbox.lists'))
-      .limit(1);
-    if (!row?.value) return [];
+    const [settingsRows, defaultLists] = await Promise.all([
+      this.db
+        .select({ value: appSettings.value })
+        .from(appSettings)
+        .where(eq(appSettings.key, 'inbox.lists'))
+        .limit(1),
+      this.db
+        .select({
+          connectorType: connectorConfigs.type,
+          connectorInstanceId: sourceLists.connectorInstanceId,
+          sourceListId: sourceLists.sourceId,
+        })
+        .from(sourceLists)
+        .innerJoin(connectorConfigs, eq(sourceLists.connectorInstanceId, connectorConfigs.id))
+        .where(and(
+          eq(sourceLists.wellKnownListName, 'defaultList'),
+          eq(connectorConfigs.enabled, true),
+          isNull(connectorConfigs.deletedAt),
+        )),
+    ]);
 
-    return asArray(row.value).flatMap((entry): InboxListEntry[] => {
-      const record = asRecord(entry);
-      if (typeof record.connectorType !== 'string') return [];
-      return [{
-        connectorType: record.connectorType,
-        sourceListId: typeof record.sourceListId === 'string' ? record.sourceListId : undefined,
-        sourceListName: typeof record.sourceListName === 'string' ? record.sourceListName : undefined,
-      }];
-    });
+    return mergeInboxListEntries(
+      parseConfiguredInboxListEntries(settingsRows[0]?.value),
+      defaultLists,
+    );
   }
 }
 
@@ -442,8 +488,10 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       myDay,
       recentlyCreated,
       recentlyClosed,
+      recurring,
       waiting,
       inbox,
+      delegated,
     ] = await Promise.all([
       this.countWhere(openWhere),
       this.countWhere(withCondition(openWhere, quick('overdue'))),
@@ -455,8 +503,10 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       this.countWhere(withCondition(openWhere, quick('myDay'))),
       this.countWhere(withCondition(openWhere, quick('recentlyCreated'))),
       this.countWhere(withCondition(compiled.baseWhere, quick('recentlyClosed'))),
+      this.countWhere(withCondition(openWhere, quick('recurring'))),
       this.countWhere(withCondition(openWhere, quick('waiting'))),
       this.countWhere(withCondition(openWhere, quick('inbox'))),
+      this.countWhere(withCondition(openWhere, quick('delegated'))),
     ]);
 
     return {
@@ -470,8 +520,10 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       myDay,
       recentlyCreated,
       recentlyClosed,
+      recurring,
       waiting,
       inbox,
+      delegated,
     };
   }
 
@@ -487,6 +539,26 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       accumulator[row.connectorType] = Number(row.count ?? 0);
       return accumulator;
     }, {});
+  }
+
+  async getFacetCounts(spec: TaskFilterSpec): Promise<TaskFacetCounts> {
+    const compiled = compileCanonicalTaskFilter(spec, await this.resolveInputs(spec));
+    const [priorities, statuses] = await Promise.all([
+      this.db
+        .select({ value: tasks.priority, count: sql<number>`count(*)` })
+        .from(tasks)
+        .where(compiled.taskWhere)
+        .groupBy(tasks.priority),
+      this.db
+        .select({ value: tasks.status, count: sql<number>`count(*)` })
+        .from(tasks)
+        .where(compiled.taskWhere)
+        .groupBy(tasks.status),
+    ]);
+    return {
+      priorities: Object.fromEntries(priorities.map((row) => [row.value, Number(row.count ?? 0)])),
+      statuses: Object.fromEntries(statuses.map((row) => [row.value, Number(row.count ?? 0)])),
+    };
   }
 
   async getAvailableTags(spec: TaskFilterSpec): Promise<AvailableTaskTag[]> {
@@ -694,7 +766,11 @@ class PostgresTaskReadRepository implements TaskReadRepository {
     const [sourceTask] = await this.db
       .select({ id: tasks.id })
       .from(tasks)
-      .where(eq(tasks.id, input.taskId))
+      .where(and(
+        eq(tasks.id, input.taskId),
+        ...getTaskSourceVisibilityConditions(),
+        eq(tasks.localDisposition, 'active'),
+      ))
       .limit(1);
     if (!sourceTask) return null;
 
@@ -708,6 +784,8 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       sourceListName: tasks.sourceListName,
     }).from(tasks).where(and(
       ne(tasks.id, input.taskId),
+      ...getTaskSourceVisibilityConditions(),
+      eq(tasks.localDisposition, 'active'),
       normalizedQuery
         ? sql`${tasks.title} COLLATE "C" ILIKE ${`%${normalizedQuery}%`} ESCAPE ''`
         : undefined,
@@ -760,18 +838,24 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       sourceId: tasks.sourceId,
       connectorType: tasks.connectorType,
       createdAt: tasks.createdAt,
-    }).from(tasks).where(
+    }).from(tasks).where(and(
+      ...getTaskSourceVisibilityConditions(),
+      eq(tasks.localDisposition, 'active'),
       input.includeClosedTasks
         ? undefined
         : inArray(tasks.status, ['todo', 'in_progress']),
-    );
+    ));
   }
 
   async listDistinctTaskAssignees(): Promise<string[]> {
     const rows = await this.db
       .select({ assignee: tasks.assignee })
       .from(tasks)
-      .where(isNotNull(tasks.assignee))
+      .where(and(
+        ...getTaskSourceVisibilityConditions(),
+        eq(tasks.localDisposition, 'active'),
+        isNotNull(tasks.assignee),
+      ))
       .groupBy(tasks.assignee)
       .orderBy(asc(sql`${tasks.assignee} COLLATE "C"`));
     return rows.map((row) => row.assignee!);
@@ -880,6 +964,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
 
   private quickSortScopeConditions(input: TaskQuickSortScope): SQL[] {
     const conditions: SQL[] = [
+      isNull(tasks.deletedAt),
       sql`${tasks.connectorInstanceId} NOT IN (
         SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
         WHERE ${connectorConfigs.deletedAt} IS NOT NULL
@@ -964,11 +1049,12 @@ class PostgresTaskReadRepository implements TaskReadRepository {
         .where(and(...scope, condition));
       return Number(row?.count ?? 0);
     };
-    const [noPriority, noEffort, noTags, noPlanningHorizon] = await Promise.all([
+    const [noPriority, noEffort, noTags, noPlanningHorizon, noProject] = await Promise.all([
       countWhere(eq(tasks.priority, 'none')),
       countWhere(isNull(tasks.effort)),
       countWhere(sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`),
       countWhere(isNull(tasks.planningHorizon)),
+      countWhere(sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`),
     ]);
     return {
       no_priority: noPriority,
@@ -976,6 +1062,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       no_effort: noEffort,
       no_tags: noTags,
       no_planning_horizon: noPlanningHorizon,
+      no_project: noProject,
     };
   }
 
@@ -993,6 +1080,8 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       conditions.push(isNull(tasks.effort));
     } else if (input.mode === 'no_tags') {
       conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`);
+    } else if (input.mode === 'no_project') {
+      conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`);
     } else {
       conditions.push(isNull(tasks.planningHorizon));
     }
@@ -1121,7 +1210,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
     taskIds: readonly string[],
   ): Promise<TaskQuickSortSuggestionInputs> {
     if (taskIds.length === 0) {
-      return { tasks: [], sourceRankings: [], tags: [], taskTags: [] };
+      return { tasks: [], sourceRankings: [], tags: [], taskTags: [], projectAffinities: [] };
     }
     const taskRows = await this.db.select({
       id: tasks.id,
@@ -1133,16 +1222,18 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       updatedAt: tasks.updatedAt,
       connectorType: tasks.connectorType,
       connectorInstanceId: tasks.connectorInstanceId,
+      sourceListId: tasks.sourceListId,
       sourceListName: tasks.sourceListName,
       assignee: tasks.assignee,
       snoozedUntil: tasks.snoozedUntil,
       effort: tasks.effort,
     }).from(tasks).where(inArray(tasks.id, [...taskIds]));
     if (taskRows.length === 0) {
-      return { tasks: [], sourceRankings: [], tags: [], taskTags: [] };
+      return { tasks: [], sourceRankings: [], tags: [], taskTags: [], projectAffinities: [] };
     }
 
-    const [rankingRows, tagRows, assignmentRows] = await Promise.all([
+    const connectorInstanceIds = [...new Set(taskRows.map((row) => row.connectorInstanceId))];
+    const [rankingRows, tagRows, assignmentRows, projectAffinityRows] = await Promise.all([
       this.db.select({
         id: sourceRankings.id,
         connectorType: sourceRankings.connectorType,
@@ -1158,6 +1249,25 @@ class PostgresTaskReadRepository implements TaskReadRepository {
         taskId: taskTags.taskId,
         tagId: taskTags.tagId,
       }).from(taskTags),
+      this.db.select({
+        taskId: tasks.id,
+        connectorInstanceId: tasks.connectorInstanceId,
+        sourceListId: tasks.sourceListId,
+        projectId: taskProjects.projectId,
+        projectName: hubProjects.name,
+        projectColor: hubProjects.color,
+      }).from(tasks)
+        .leftJoin(taskProjects, eq(taskProjects.taskId, tasks.id))
+        .leftJoin(hubProjects, eq(hubProjects.id, taskProjects.projectId))
+        .where(and(
+          inArray(tasks.connectorInstanceId, connectorInstanceIds),
+          isNull(tasks.deletedAt),
+          notInArray(tasks.status, [...CLOSED_TASK_STATUSES]),
+          or(
+            isNull(taskProjects.projectId),
+            and(eq(hubProjects.hidden, false), ne(hubProjects.status, 'completed')),
+          ),
+        )),
     ]);
     return {
       tasks: taskRows.map((row) => ({
@@ -1165,6 +1275,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
         description: row.description ?? null,
         priority: row.priority as TaskQuickSortSuggestionInputs['tasks'][number]['priority'],
         dueDate: row.dueDate ?? null,
+        sourceListId: row.sourceListId ?? null,
         sourceListName: row.sourceListName ?? null,
         assignee: row.assignee ?? null,
         snoozedUntil: row.snoozedUntil ?? null,
@@ -1173,6 +1284,10 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       sourceRankings: rankingRows,
       tags: tagRows,
       taskTags: assignmentRows,
+      projectAffinities: projectAffinityRows.map((row) => ({
+        ...row,
+        sourceListId: row.sourceListId ?? null,
+      })),
     };
   }
 }
@@ -1260,28 +1375,7 @@ async function deleteSingleTaskWithinTransaction(
   taskId: string,
 ): Promise<void> {
   await lockTaskTagMutation(tx);
-  await tx.delete(taskTags).where(eq(taskTags.taskId, taskId));
-  await tx.delete(projectAutoIncludeExclusions)
-    .where(eq(projectAutoIncludeExclusions.taskId, taskId));
-  await tx.delete(taskProjects).where(eq(taskProjects.taskId, taskId));
-  await tx.delete(taskSchedules).where(eq(taskSchedules.taskId, taskId));
-  await tx.delete(myDayItems).where(eq(myDayItems.taskId, taskId));
-  await tx.delete(myDayExclusions).where(eq(myDayExclusions.taskId, taskId));
-  await tx.delete(focusItems).where(eq(focusItems.taskId, taskId));
-  await tx.delete(weeklyOneThing).where(eq(weeklyOneThing.taskId, taskId));
-  await tx.delete(prioritySyncLog).where(eq(prioritySyncLog.taskId, taskId));
-  await tx.delete(quickSortLog).where(eq(quickSortLog.taskId, taskId));
-  await tx.delete(quickSortOperations).where(eq(quickSortOperations.taskId, taskId));
-  await tx.delete(taskLinkedSources).where(eq(taskLinkedSources.taskId, taskId));
-  await tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId));
-  await tx.delete(projectPhaseItems).where(eq(projectPhaseItems.taskId, taskId));
-  await tx.update(notifications)
-    .set({ relatedTaskId: null })
-    .where(eq(notifications.relatedTaskId, taskId));
-  await tx.delete(taskDependencies).where(or(
-    eq(taskDependencies.taskId, taskId),
-    eq(taskDependencies.dependsOnTaskId, taskId),
-  ));
+  await cleanupTaskAssociationsInTransaction(tx, taskId);
   await tx.delete(tasks).where(eq(tasks.id, taskId));
 }
 
@@ -1441,11 +1535,6 @@ async function collectTaskGraphIds(
 class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteRepository {
   constructor(private readonly db: PostgresDatabase) {}
 
-  /**
-   * Unlike SQLite, the PostgreSQL schema has no `task_history_events`
-   * append-only DELETE trigger, so this path does not need the SQLite
-   * adapter's drop-trigger/recreate-trigger dance around the history purge.
-   */
   async hardDeleteScoutTask(taskId: string): Promise<ScoutHardDeleteOutcome> {
     return this.db.transaction(async (tx): Promise<ScoutHardDeleteOutcome> => {
       await lockTaskTagMutation(tx);
@@ -1483,6 +1572,9 @@ class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteReposi
         await tx.insert(taskIngestSuppressions).values(suppressions).onConflictDoNothing();
       }
 
+      await tx.execute(
+        sql`SELECT set_config('mission_control.suppress_task_history', 'on', true)`,
+      );
       await tx.delete(taskDependencies).where(or(
         inArray(taskDependencies.taskId, taskIds),
         inArray(taskDependencies.dependsOnTaskId, taskIds),
@@ -1521,6 +1613,9 @@ class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteReposi
       await tx.update(notifications)
         .set({ relatedTaskId: null })
         .where(inArray(notifications.relatedTaskId, taskIds));
+      await tx.update(taskRecurrenceBackfillDecisions)
+        .set({ taskId: null })
+        .where(inArray(taskRecurrenceBackfillDecisions.taskId, taskIds));
       await tx.delete(tasks).where(inArray(tasks.id, taskIds));
 
       return {
@@ -1571,6 +1666,7 @@ async function repointTaskReferences(
 
   const remainingRepoints = [
     sql`UPDATE task_linked_sources SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
+    sql`UPDATE task_recurrence_occurrences SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
     sql`UPDATE task_reminder_occurrences SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
     sql`UPDATE notifications SET related_task_id = ${successorTaskId} WHERE related_task_id = ${sourceTaskId}`,
     sql`UPDATE scout_reconciliation_suggestions SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
@@ -1855,6 +1951,8 @@ const MOVE_TASK_COLUMNS = {
   completedAt: tasks.completedAt,
   recurrenceGeneratedFromTaskId: tasks.recurrenceGeneratedFromTaskId,
   parentId: tasks.parentId,
+  siblingOrder: tasks.siblingOrder,
+  subtaskOrderRevision: tasks.subtaskOrderRevision,
   depth: tasks.depth,
   isChecklistItem: tasks.isChecklistItem,
   sourceListId: tasks.sourceListId,
@@ -1872,6 +1970,10 @@ const MOVE_TASK_COLUMNS = {
   reminderAt: tasks.reminderAt,
   reminderRelative: tasks.reminderRelative,
   reminderDueTime: tasks.reminderDueTime,
+  reminderNagInterval: tasks.reminderNagInterval,
+  reminderNagStopAt: tasks.reminderNagStopAt,
+  reminderNagSeriesId: tasks.reminderNagSeriesId,
+  reminderNagSequence: tasks.reminderNagSequence,
   effort: tasks.effort,
   isBulkImport: tasks.isBulkImport,
 };
@@ -1907,12 +2009,81 @@ function moveTaskInsertValues(task: TaskMoveTaskInsert) {
   return { ...task, metadata: task.metadata };
 }
 
+async function findPostgresRecurrenceOccurrence(
+  tx: PostgresTransaction,
+  provenance: RecurrenceOccurrenceProvenance,
+  taskId: string,
+  generatedFromTaskId: string | null,
+): Promise<PersistedRecurrenceOccurrence> {
+  const [byIdentity] = await tx.select().from(taskRecurrenceOccurrences).where(and(
+    eq(taskRecurrenceOccurrences.seriesId, provenance.seriesId),
+    eq(taskRecurrenceOccurrences.ruleRevisionId, provenance.ruleRevisionId),
+    eq(taskRecurrenceOccurrences.effectiveKind, provenance.effectiveKind),
+    eq(taskRecurrenceOccurrences.effectiveValue, provenance.effectiveValue),
+  )).limit(1);
+  const [byOccurrenceId] = byIdentity
+    ? []
+    : await tx.select().from(taskRecurrenceOccurrences)
+        .where(eq(taskRecurrenceOccurrences.occurrenceId, provenance.occurrenceId))
+        .limit(1);
+  const [byTaskId] = byIdentity || byOccurrenceId
+    ? []
+    : await tx.select().from(taskRecurrenceOccurrences)
+        .where(eq(taskRecurrenceOccurrences.taskId, taskId))
+        .limit(1);
+  const stored = byIdentity ?? byOccurrenceId ?? byTaskId;
+  if (!stored) {
+    throw new Error('Recurrence occurrence conflict did not resolve to a stored claim');
+  }
+  assertRecurrenceOccurrenceMatches(stored, provenance);
+  if (stored.generatedFromTaskId !== generatedFromTaskId) {
+    throw new Error('Stored recurrence occurrence conflicts on generatedFromTaskId');
+  }
+  return stored;
+}
+
+async function claimPostgresRecurrenceOccurrence(
+  tx: PostgresTransaction,
+  provenance: RecurrenceOccurrenceProvenance,
+  taskId: string,
+  generatedFromTaskId: string | null,
+  createdAt: string,
+): Promise<
+  { readonly claimed: true; readonly occurrenceId: string; readonly taskId: string }
+  | { readonly claimed: false; readonly occurrenceId: string; readonly taskId: string }
+> {
+  const claim = createPersistedRecurrenceOccurrence(
+    provenance,
+    taskId,
+    generatedFromTaskId,
+    createdAt,
+  );
+  const inserted = await tx.insert(taskRecurrenceOccurrences)
+    .values(claim)
+    .onConflictDoNothing()
+    .returning({ occurrenceId: taskRecurrenceOccurrences.occurrenceId });
+  if (inserted.length > 0) {
+    return { claimed: true, occurrenceId: provenance.occurrenceId, taskId };
+  }
+  const existing = await findPostgresRecurrenceOccurrence(
+    tx,
+    provenance,
+    taskId,
+    generatedFromTaskId,
+  );
+  return {
+    claimed: false,
+    occurrenceId: existing.occurrenceId,
+    taskId: existing.taskId,
+  };
+}
+
 class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
   constructor(private readonly db: PostgresDatabase) {}
 
   async getTask(taskId: string): Promise<TaskCoreTaskRow | null> {
     const [row] = await this.db.select(MOVE_TASK_COLUMNS)
-      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+      .from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     return row ? toMoveTaskRow(row) : null;
   }
 
@@ -2141,8 +2312,80 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
       priority: tasks.priority,
       effort: tasks.effort,
       parentId: tasks.parentId,
+      siblingOrder: tasks.siblingOrder,
     }).from(tasks).where(eq(tasks.parentId, parentTaskId))
-      .orderBy(asc(tasks.createdAt), asc(tasks.id));
+      .orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      );
+  }
+
+  async getSubtaskOrderState(parentTaskId: string) {
+    const [parent] = await this.db.select({
+      revision: tasks.subtaskOrderRevision,
+    }).from(tasks).where(eq(tasks.id, parentTaskId)).limit(1);
+    if (!parent) return null;
+    return {
+      revision: parent.revision,
+      subtasks: await this.listSubtasks(parentTaskId),
+    };
+  }
+
+  async reorderSubtasks(input: {
+    readonly parentTaskId: string;
+    readonly orderedChildIds: readonly string[];
+    readonly expectedRevision: number;
+  }) {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`subtask-order:${input.parentTaskId}`}))`,
+      );
+      const [parent] = await tx.select({
+        revision: tasks.subtaskOrderRevision,
+      }).from(tasks).where(eq(tasks.id, input.parentTaskId)).limit(1);
+      if (!parent) return { kind: 'parent-not-found' } as const;
+      if (parent.revision !== input.expectedRevision) {
+        return {
+          kind: 'revision-conflict',
+          currentRevision: parent.revision,
+        } as const;
+      }
+
+      const children = await tx.select({ id: tasks.id }).from(tasks)
+        .where(eq(tasks.parentId, input.parentTaskId));
+      const currentIds = new Set(children.map((child) => child.id));
+      const orderedIds = new Set(input.orderedChildIds);
+      if (
+        currentIds.size !== input.orderedChildIds.length
+        || orderedIds.size !== input.orderedChildIds.length
+        || input.orderedChildIds.some((id) => !currentIds.has(id))
+      ) {
+        return { kind: 'invalid-children' } as const;
+      }
+
+      for (const [siblingOrder, taskId] of input.orderedChildIds.entries()) {
+        await tx.update(tasks).set({ siblingOrder }).where(and(
+          eq(tasks.id, taskId),
+          eq(tasks.parentId, input.parentTaskId),
+        ));
+      }
+      const revision = parent.revision + 1;
+      const updated = await tx.update(tasks).set({
+        subtaskOrderRevision: revision,
+      }).where(and(
+        eq(tasks.id, input.parentTaskId),
+        eq(tasks.subtaskOrderRevision, input.expectedRevision),
+      )).returning({ id: tasks.id });
+      if (updated.length !== 1) {
+        return {
+          kind: 'revision-conflict',
+          currentRevision: parent.revision,
+        } as const;
+      }
+      return { kind: 'reordered', revision } as const;
+    });
   }
 
   private async readProposalSnapshot(
@@ -2185,7 +2428,7 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
     return this.db.transaction(async (tx) => {
       if (!input.task.parentId) return { kind: 'parent-not-found' } as const;
       await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${input.task.parentId}`}))`,
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`subtask-order:${input.task.parentId}`}))`,
       );
       const [existing] = await tx.select(MOVE_TASK_COLUMNS).from(tasks)
         .where(eq(tasks.id, input.task.id)).limit(1);
@@ -2197,7 +2440,14 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
       const [parent] = await tx.select({ id: tasks.id }).from(tasks)
         .where(eq(tasks.id, input.task.parentId)).limit(1);
       if (!parent) return { kind: 'parent-not-found' } as const;
-      await tx.insert(tasks).values(moveTaskInsertValues(input.task));
+      const [lastSibling] = await tx.select({
+        siblingOrder: sql<number>`COALESCE(MAX(${tasks.siblingOrder}), -1)`,
+      }).from(tasks).where(eq(tasks.parentId, input.task.parentId))
+        .limit(1);
+      await tx.insert(tasks).values({
+        ...moveTaskInsertValues(input.task),
+        siblingOrder: (lastSibling?.siblingOrder ?? -1) + 1,
+      });
       return { kind: 'created' } as const;
     });
   }
@@ -2209,7 +2459,7 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
     return this.db.transaction(async (tx) => {
       if (!input.task.parentId) return { kind: 'stale' } as const;
       await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${input.task.parentId}`}))`,
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`subtask-order:${input.task.parentId}`}))`,
       );
       const [existing] = await tx.select(MOVE_TASK_COLUMNS).from(tasks)
         .where(eq(tasks.id, input.task.id)).limit(1);
@@ -2221,7 +2471,14 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
           : { kind: 'id-conflict' } as const;
       }
       if (!sameSnapshot(current, input.expected)) return { kind: 'stale' } as const;
-      await tx.insert(tasks).values(moveTaskInsertValues(input.task));
+      const [lastSibling] = await tx.select({
+        siblingOrder: sql<number>`COALESCE(MAX(${tasks.siblingOrder}), -1)`,
+      }).from(tasks).where(eq(tasks.parentId, input.task.parentId))
+        .limit(1);
+      await tx.insert(tasks).values({
+        ...moveTaskInsertValues(input.task),
+        siblingOrder: (lastSibling?.siblingOrder ?? -1) + 1,
+      });
       const snapshot = await this.readProposalSnapshot(tx, input.task.parentId);
       if (!snapshot) throw new Error('Subtask parent disappeared during proposal acceptance');
       return { kind: 'created', snapshot } as const;
@@ -2396,7 +2653,7 @@ class PostgresTaskDetailReadRepository implements TaskDetailReadRepository {
 
   async getTaskDetail(taskId: string, myDayDate: string): Promise<TaskDetailResult | null> {
     const [task] = await this.db.select(MOVE_TASK_COLUMNS)
-      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+      .from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     if (!task) return null;
     const [tagRows, projectRows, subtasks, scheduleRows, myDayRows] = await Promise.all([
       this.db.select({ tagId: taskTags.tagId }).from(taskTags)
@@ -2410,7 +2667,13 @@ class PostgresTaskDetailReadRepository implements TaskDetailReadRepository {
         sourceId: tasks.sourceId,
         connectorType: tasks.connectorType,
         effort: tasks.effort,
-      }).from(tasks).where(eq(tasks.parentId, taskId)).orderBy(asc(tasks.id)),
+        siblingOrder: tasks.siblingOrder,
+      }).from(tasks).where(eq(tasks.parentId, taskId)).orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      ),
       this.db.select({
         estimatedDuration: taskSchedules.estimatedDuration,
         recurrence: taskSchedules.recurrence,
@@ -2426,6 +2689,7 @@ class PostgresTaskDetailReadRepository implements TaskDetailReadRepository {
       tagIds: tagRows.map((row) => row.tagId),
       projectIds: projectRows.map((row) => row.projectId),
       subtasks,
+      subtaskOrderRevision: task.subtaskOrderRevision ?? 0,
       schedule: scheduleRows[0] ?? null,
       isInMyDay: myDayRows.length > 0,
     };
@@ -2616,9 +2880,10 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
     smartScoreCandidateLimit: number;
   }): Promise<TaskCollectionResult> {
     const smart = input.page.order.field === 'smartScore';
-    const [stats, sourceCounts, availableTags, total] = await Promise.all([
+    const [stats, sourceCounts, facetCounts, availableTags, total] = await Promise.all([
       this.queries.getStats(input.spec),
       this.queries.getSourceCounts(input.spec),
+      this.queries.getFacetCounts(input.spec),
       input.countsOnly ? Promise.resolve([]) : this.queries.getAvailableTags(input.spec),
       this.queries.countTasks(input.spec, { includeQuickFilter: true }),
     ]);
@@ -2628,6 +2893,7 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
         total,
         stats,
         sourceCounts,
+        facetCounts,
         availableTags,
         connectorContexts: [],
         smartScore: null,
@@ -2646,6 +2912,7 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
       total,
       stats,
       sourceCounts,
+      facetCounts,
       availableTags,
       smartScore: smart || input.includeScoreInputs
         ? { rows: hydrated.rows, sourceRankings: rankings }
@@ -2908,12 +3175,514 @@ class PostgresTaskCreateRepository implements TaskCreateRepository {
   }
 }
 
+async function materializePostgresOccurrence(
+  tx: PostgresTransaction,
+  input: TaskOccurrenceMaterializationInput,
+) {
+  const { provenance, rule } = deriveRecurrenceOccurrenceProvenance({
+    rule: input.rule,
+    occurrence: input.occurrence,
+  });
+  const task = {
+    ...input.task,
+    metadata: writeRecurrenceMetadata(input.task.metadata, rule),
+  };
+  assertRecurrenceOccurrenceTaskScope(task, provenance);
+  assertRecurrenceOccurrenceTiming(task, input.schedule, provenance, task.id);
+  const generatedFromTaskId = input.generatedFromTaskId ?? null;
+  if (
+    (provenance.materializationStrategy === 'on-completion')
+    !== (generatedFromTaskId !== null)
+  ) {
+    throw new Error('Completion recurrence occurrences require a generating task identity');
+  }
+
+  const claim = await claimPostgresRecurrenceOccurrence(
+    tx,
+    provenance,
+    task.id,
+    generatedFromTaskId,
+    task.createdAt,
+  );
+  if (!claim.claimed) {
+    return {
+      kind: 'existing' as const,
+      occurrenceId: claim.occurrenceId,
+      taskId: claim.taskId,
+    };
+  }
+
+  await tx.insert(tasks).values(moveTaskInsertValues(task));
+  if (input.tagIds.length) {
+    await tx.insert(taskTags).values(
+      [...new Set(input.tagIds)].map((tagId) => ({ taskId: task.id, tagId })),
+    ).onConflictDoNothing();
+  }
+  if (input.projectIds.length) {
+    await tx.insert(taskProjects).values(
+      [...new Set(input.projectIds)].map((projectId) => ({ taskId: task.id, projectId })),
+    ).onConflictDoNothing();
+  }
+  if (input.schedule) await tx.insert(taskSchedules).values(input.schedule);
+  await enqueueTaskCoreEvent(tx, input.event);
+  return {
+    kind: 'created' as const,
+    occurrenceId: claim.occurrenceId,
+    taskId: claim.taskId,
+  };
+}
+
+type PostgresBackfillDecisionRow = typeof taskRecurrenceBackfillDecisions.$inferSelect;
+
+function toBackfillDecision(row: PostgresBackfillDecisionRow): TaskRecurrenceBackfillDecision {
+  return {
+    occurrenceId: row.occurrenceId,
+    decision: row.decision,
+    reason: row.reason,
+    taskId: row.taskId,
+    supersededByOccurrenceId: row.supersededByOccurrenceId,
+    decidedAt: row.decidedAt,
+  };
+}
+
+function markTouched(
+  touched: Map<string, Set<RecurrenceBackfillTouchReason>>,
+  taskIds: readonly string[],
+  reason: RecurrenceBackfillTouchReason,
+): void {
+  for (const taskId of taskIds) {
+    const reasons = touched.get(taskId) ?? new Set<RecurrenceBackfillTouchReason>();
+    reasons.add(reason);
+    touched.set(taskId, reasons);
+  }
+}
+
+class PostgresTaskOccurrenceMaterializationRepository
+implements TaskOccurrenceMaterializationRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+
+  async materializeOccurrence(input: TaskOccurrenceMaterializationInput) {
+    return this.db.transaction((tx) => materializePostgresOccurrence(tx, input));
+  }
+
+  async backfillRange(
+    input: TaskRecurrenceBackfillInput,
+  ): Promise<TaskRecurrenceBackfillOutcome> {
+    const asOfIssues = validateRecurrenceBackfillAsOf(input.range, input.asOf);
+    if (asOfIssues.length > 0) return { status: 'invalid', issues: asOfIssues };
+    const decidedAt = normalizeRecurrenceBackfillInstant(input.decidedAt);
+    if (decidedAt === null) {
+      return { status: 'invalid', issues: ['decidedAt must be a valid instant'] };
+    }
+    const projection = projectRecurrence({
+      rule: input.rule,
+      range: input.range,
+      completionAnchors: input.completionAnchors,
+      limits: input.limits,
+    });
+    if (projection.status !== 'success') return projection;
+    if (projection.occurrences.length === 0) {
+      return { status: 'success', iterations: projection.iterations, decisions: [] };
+    }
+
+    const projected = projection.occurrences.map((occurrence) => ({
+      occurrence,
+      provenance: deriveRecurrenceOccurrenceProvenance({
+        rule: input.rule,
+        occurrence,
+      }).provenance,
+    }));
+    const occurrenceIds = projected.map(({ provenance }) => provenance.occurrenceId);
+
+    const decisions = await this.db.transaction(async (tx) => {
+      const existingDecisionRows = await tx.select().from(taskRecurrenceBackfillDecisions)
+        .where(inArray(taskRecurrenceBackfillDecisions.occurrenceId, occurrenceIds));
+      const decidedById = new Map(
+        existingDecisionRows.map((row) => [row.occurrenceId, row]),
+      );
+      const undecided = projected.filter(
+        ({ provenance }) => !decidedById.has(provenance.occurrenceId),
+      );
+      if (undecided.length > 0) {
+        const undecidedIds = undecided.map(({ provenance }) => provenance.occurrenceId);
+        const occurrenceRows = await tx.select().from(taskRecurrenceOccurrences)
+          .where(inArray(taskRecurrenceOccurrences.occurrenceId, undecidedIds));
+        const taskIds = occurrenceRows.map((row) => row.taskId).sort();
+        const taskRows = taskIds.length === 0
+          ? []
+          : await tx.select({
+              id: tasks.id,
+              status: tasks.status,
+              deletedAt: tasks.deletedAt,
+              description: tasks.description,
+              planningHorizon: tasks.planningHorizon,
+              createdAt: tasks.createdAt,
+              updatedAt: tasks.updatedAt,
+            }).from(tasks).where(inArray(tasks.id, taskIds)).orderBy(asc(tasks.id)).for('update');
+        const taskById = new Map(taskRows.map((row) => [row.id, row]));
+        const touched = new Map<string, Set<RecurrenceBackfillTouchReason>>();
+        markTouched(
+          touched,
+          taskRows.filter((row) => row.description?.trim()).map((row) => row.id),
+          'description',
+        );
+        markTouched(
+          touched,
+          taskRows.filter((row) => row.updatedAt !== row.createdAt).map((row) => row.id),
+          'field-edit',
+        );
+        markTouched(
+          touched,
+          taskRows.filter((row) => row.planningHorizon !== null).map((row) => row.id),
+          'planning-membership',
+        );
+        if (taskIds.length > 0) {
+          markTouched(
+            touched,
+            (await tx.select({ taskId: taskFieldStates.taskId }).from(taskFieldStates).where(and(
+              inArray(taskFieldStates.taskId, taskIds),
+              isNotNull(taskFieldStates.localEditedAt),
+            ))).map((row) => row.taskId),
+            'field-edit',
+          );
+          markTouched(
+            touched,
+            (await tx.select({ taskId: taskHistoryEvents.taskId }).from(taskHistoryEvents).where(and(
+              inArray(taskHistoryEvents.taskId, taskIds),
+              ne(taskHistoryEvents.eventType, 'baseline'),
+            ))).map((row) => row.taskId),
+            'history',
+          );
+          const planningTaskIds = [
+            ...await tx.select({ taskId: taskProjects.taskId }).from(taskProjects)
+              .where(inArray(taskProjects.taskId, taskIds)),
+            ...await tx.select({ taskId: projectPhaseItems.taskId }).from(projectPhaseItems)
+              .where(inArray(projectPhaseItems.taskId, taskIds)),
+            ...await tx.select({ taskId: myDayItems.taskId }).from(myDayItems)
+              .where(inArray(myDayItems.taskId, taskIds)),
+            ...await tx.select({ taskId: focusItems.taskId }).from(focusItems)
+              .where(inArray(focusItems.taskId, taskIds)),
+          ].map((row) => row.taskId);
+          markTouched(touched, planningTaskIds, 'planning-membership');
+          markTouched(
+            touched,
+            (await tx.select({ taskId: taskAttachments.taskId }).from(taskAttachments)
+              .where(inArray(taskAttachments.taskId, taskIds))).map((row) => row.taskId),
+            'attachment',
+          );
+          markTouched(
+            touched,
+            (await tx.select({ taskId: taskTimeActivities.taskId }).from(taskTimeActivities)
+              .where(and(
+                inArray(taskTimeActivities.taskId, taskIds),
+                or(
+                  ne(taskTimeActivities.state, 'cancelled'),
+                  gte(taskTimeActivities.elapsedSeconds, 1),
+                ),
+              ))).map((row) => row.taskId),
+            'time-activity',
+          );
+        }
+        const occurrenceById = new Map(
+          occurrenceRows.map((row) => [row.occurrenceId, row]),
+        );
+        const planned = planRecurrenceBackfill({
+          range: input.range,
+          asOf: input.asOf,
+          occurrences: projected.map(({ occurrence, provenance }) => {
+            const decided = decidedById.get(provenance.occurrenceId);
+            if (decided) {
+              const remainsActionable = decided.decision === 'materialized'
+                || decided.decision === 'preserved';
+              return {
+                occurrenceId: provenance.occurrenceId,
+                occurrence,
+                sourceOwner: provenance.sourceOwner,
+                existing: {
+                  taskId: remainsActionable ? decided.taskId : null,
+                  status: remainsActionable ? 'todo' : null,
+                  deletedAt: remainsActionable ? null : decided.decidedAt,
+                  touchReasons: remainsActionable ? ['history' as const] : [],
+                },
+              };
+            }
+            const stored = occurrenceById.get(provenance.occurrenceId);
+            const task = stored ? taskById.get(stored.taskId) : undefined;
+            return {
+              occurrenceId: provenance.occurrenceId,
+              occurrence,
+              sourceOwner: provenance.sourceOwner,
+              existing: stored
+                ? {
+                    taskId: task ? stored.taskId : null,
+                    status: task?.status ?? null,
+                    deletedAt: task?.deletedAt ?? null,
+                    touchReasons: task ? [...(touched.get(task.id) ?? [])] : [],
+                  }
+                : null,
+            };
+          }),
+        }).filter(({ occurrenceId }) => !decidedById.has(occurrenceId));
+        const candidateById = new Map(
+          undecided.map((candidate) => [candidate.provenance.occurrenceId, candidate]),
+        );
+
+        for (const desired of planned) {
+          const candidate = candidateById.get(desired.occurrenceId)!;
+          const materialization = desired.decision === 'materialized'
+            ? input.materializationFor(candidate.occurrence)
+            : null;
+          const proposed = {
+            occurrenceId: candidate.provenance.occurrenceId,
+            seriesId: candidate.provenance.seriesId,
+            ruleRevisionId: candidate.provenance.ruleRevisionId,
+            effectiveKind: candidate.provenance.effectiveKind,
+            effectiveValue: candidate.provenance.effectiveValue,
+            decision: desired.decision,
+            reason: desired.reason,
+            taskId: materialization?.task.id ?? desired.taskId,
+            supersededByOccurrenceId: desired.supersededByOccurrenceId,
+            decidedAt,
+          };
+          const claimed = await tx.insert(taskRecurrenceBackfillDecisions).values(proposed)
+            .onConflictDoNothing().returning({ occurrenceId: taskRecurrenceBackfillDecisions.occurrenceId });
+          if (claimed.length === 0) {
+            const [existing] = await tx.select().from(taskRecurrenceBackfillDecisions)
+              .where(eq(taskRecurrenceBackfillDecisions.occurrenceId, desired.occurrenceId))
+              .limit(1);
+            if (!existing) throw new Error('Backfill decision conflict did not resolve');
+            decidedById.set(existing.occurrenceId, existing);
+            continue;
+          }
+
+          if (materialization) {
+            const outcome = await materializePostgresOccurrence(tx, {
+              ...materialization,
+              rule: input.rule,
+              occurrence: candidate.occurrence,
+            });
+            if (outcome.taskId !== proposed.taskId) {
+              await tx.update(taskRecurrenceBackfillDecisions).set({ taskId: outcome.taskId })
+                .where(eq(taskRecurrenceBackfillDecisions.occurrenceId, desired.occurrenceId));
+              proposed.taskId = outcome.taskId;
+            }
+          } else if (desired.decision === 'superseded' && desired.taskId) {
+            const superseded = await tx.update(tasks).set({
+              deletedAt: decidedAt,
+              updatedAt: decidedAt,
+            }).where(and(
+              eq(tasks.id, desired.taskId),
+              eq(tasks.connectorType, 'local'),
+              eq(tasks.status, 'todo'),
+              isNull(tasks.deletedAt),
+            )).returning({ id: tasks.id });
+            if (superseded.length !== 1) {
+              throw new Error('Protected recurrence occurrence changed during backfill');
+            }
+          }
+          decidedById.set(proposed.occurrenceId, proposed);
+        }
+      }
+
+      return occurrenceIds.map((occurrenceId) => {
+        const row = decidedById.get(occurrenceId);
+        if (!row) throw new Error('Backfill decision was not persisted');
+        return toBackfillDecision(row);
+      });
+    });
+
+    return { status: 'success', iterations: projection.iterations, decisions };
+  }
+}
+
+type PostgresTaskTimeActivityRow = typeof taskTimeActivities.$inferSelect;
+function toTaskTimeActivity(row: PostgresTaskTimeActivityRow): TaskTimeActivity {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    mode: row.mode,
+    state: row.state,
+    targetSeconds: row.targetSeconds,
+    elapsedSeconds: row.elapsedSeconds,
+    activeStartedAt: row.activeStartedAt,
+    startedAt: row.startedAt,
+    updatedAt: row.updatedAt,
+    version: row.version,
+  };
+}
+async function completeExpiredTaskTimeActivity(
+  tx: PostgresTransaction,
+  row: PostgresTaskTimeActivityRow,
+  serverNow: string,
+): Promise<PostgresTaskTimeActivityRow> {
+  if (
+    row.activeKey !== 1
+    || elapsedTaskTimeAt(toTaskTimeActivity(row), serverNow) < row.targetSeconds
+  ) {
+    return row;
+  }
+  const [updated] = await tx.update(taskTimeActivities).set({
+    state: 'completed',
+    activeKey: null,
+    elapsedSeconds: row.targetSeconds,
+    activeStartedAt: null,
+    updatedAt: serverNow,
+    version: row.version + 1,
+  }).where(and(
+    eq(taskTimeActivities.id, row.id),
+    eq(taskTimeActivities.version, row.version),
+  )).returning();
+  return updated ?? row;
+}
+async function cancelActiveTaskTimeActivity(
+  tx: PostgresTransaction,
+  taskId: string,
+  serverNow: string,
+): Promise<void> {
+  const [active] = await tx.select().from(taskTimeActivities).where(and(
+    eq(taskTimeActivities.taskId, taskId),
+    eq(taskTimeActivities.activeKey, 1),
+  )).limit(1).for('update');
+  if (!active) return;
+  await tx.update(taskTimeActivities).set({
+    state: 'cancelled',
+    activeKey: null,
+    elapsedSeconds: elapsedTaskTimeAt(toTaskTimeActivity(active), serverNow),
+    activeStartedAt: null,
+    updatedAt: serverNow,
+    version: active.version + 1,
+  }).where(and(
+    eq(taskTimeActivities.id, active.id),
+    eq(taskTimeActivities.version, active.version),
+  ));
+}
+class PostgresTaskTimeActivityRepository implements TaskTimeActivityRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+  async getTaskActivity(taskId: string, serverNow: string) {
+    return this.db.transaction(async (tx) => {
+      const [task] = await tx.select({ id: tasks.id }).from(tasks).where(and(
+        eq(tasks.id, taskId),
+        isNull(tasks.deletedAt),
+      )).limit(1);
+      if (!task) return { taskExists: false, activity: null };
+      const [row] = await tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.taskId, taskId))
+        .orderBy(desc(sql`coalesce(${taskTimeActivities.activeKey}, 0)`), desc(taskTimeActivities.startedAt)).limit(1).for('update');
+      const current = row ? await completeExpiredTaskTimeActivity(tx, row, serverNow) : null;
+      return { taskExists: true, activity: current ? toTaskTimeActivity(current) : null };
+    });
+  }
+  async start(input: TaskTimeActivityStartInput): Promise<TaskTimeActivityMutationOutcome> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('task-time-activity-active'))`);
+      const [existing] = await tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.id, input.commandId)).limit(1);
+      if (existing) {
+        return existing.taskId === input.taskId
+          && existing.mode === input.mode
+          && (existing.mode === 'deadline' || existing.targetSeconds === input.targetSeconds)
+          ? { kind: 'replayed', activity: toTaskTimeActivity(existing) }
+          : { kind: 'conflict', reason: 'command' };
+      }
+      const [task] = await tx.select({ id: tasks.id }).from(tasks).where(and(
+        eq(tasks.id, input.taskId),
+        isNull(tasks.deletedAt),
+        notInArray(tasks.status, ['done', 'cancelled']),
+      )).limit(1).for('update');
+      if (!task) return { kind: 'task-not-found' };
+      const [active] = await tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.activeKey, 1)).limit(1).for('update');
+      const current = active
+        ? await completeExpiredTaskTimeActivity(tx, active, input.serverNow)
+        : null;
+      if (current?.activeKey) {
+        return { kind: 'conflict', reason: 'active-timer', activeTaskId: current.taskId };
+      }
+      const [created] = await tx.insert(taskTimeActivities).values({
+        id: input.commandId,
+        taskId: input.taskId,
+        mode: input.mode,
+        state: 'running',
+        activeKey: 1,
+        targetSeconds: input.targetSeconds,
+        elapsedSeconds: 0,
+        activeStartedAt: input.serverNow,
+        startedAt: input.serverNow,
+        updatedAt: input.serverNow,
+        version: 0,
+        lastCommandId: input.commandId,
+        lastCommandAction: 'start',
+      }).returning();
+      return { kind: 'committed', activity: toTaskTimeActivity(created) };
+    });
+  }
+  async transition(input: TaskTimeActivityTransitionInput): Promise<TaskTimeActivityMutationOutcome> {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx.select().from(taskTimeActivities).where(and(
+        eq(taskTimeActivities.id, input.activityId),
+        eq(taskTimeActivities.taskId, input.taskId),
+      )).limit(1).for('update');
+      if (!row) return { kind: 'activity-not-found' };
+      if (row.lastCommandId === input.commandId && row.lastCommandAction === input.action) {
+        return { kind: 'replayed', activity: toTaskTimeActivity(row) };
+      }
+      if (row.version !== input.expectedVersion) return { kind: 'conflict', reason: 'version' };
+      const allowed = input.action === 'pause'
+        ? row.state === 'running'
+        : input.action === 'resume'
+          ? row.state === 'paused'
+          : input.action === 'complete'
+            ? row.state === 'running' || row.state === 'paused'
+            : row.state === 'running' || row.state === 'paused' || row.state === 'completed';
+      if (!allowed) return { kind: 'conflict', reason: 'state' };
+      const requestedState = input.action === 'pause'
+        ? 'paused'
+        : input.action === 'resume'
+          ? 'running'
+          : input.action === 'complete'
+            ? 'completed'
+            : 'cancelled';
+      const elapsedSeconds = input.action === 'resume'
+        ? row.elapsedSeconds
+        : elapsedTaskTimeAt(toTaskTimeActivity(row), input.serverNow);
+      const nextState = input.action !== 'cancel' && elapsedSeconds >= row.targetSeconds
+        ? 'completed' : requestedState;
+      const [updated] = await tx.update(taskTimeActivities).set({
+        state: nextState,
+        activeKey: nextState === 'running' || nextState === 'paused' ? 1 : null,
+        elapsedSeconds,
+        activeStartedAt: nextState === 'running' ? input.serverNow : null,
+        updatedAt: input.serverNow,
+        version: row.version + 1,
+        lastCommandId: input.commandId,
+        lastCommandAction: input.action,
+      }).where(and(
+        eq(taskTimeActivities.id, row.id),
+        eq(taskTimeActivities.version, row.version),
+      )).returning();
+      if (!updated) return { kind: 'conflict', reason: 'version' };
+      return { kind: 'committed', activity: toTaskTimeActivity(updated) };
+    });
+  }
+  async hasDurableTimeActivity(taskId: string): Promise<boolean> {
+    const [row] = await this.db.select({ id: taskTimeActivities.id })
+      .from(taskTimeActivities).where(and(
+        eq(taskTimeActivities.taskId, taskId),
+        or(
+          ne(taskTimeActivities.state, 'cancelled'),
+          gte(taskTimeActivities.elapsedSeconds, 1),
+        ),
+      )).limit(1);
+    return Boolean(row);
+  }
+}
 class PostgresTaskMutationRepository implements TaskMutationRepository {
   constructor(private readonly db: PostgresDatabase) {}
 
   async getTaskWriteContext(taskId: string, requestedTagIds: readonly string[] = []) {
     const [task, scheduleRows, tagRows, requestedTagRows, stateRows, evaluationRows] = await Promise.all([
-      this.db.select(MOVE_TASK_COLUMNS).from(tasks).where(eq(tasks.id, taskId)).limit(1),
+      this.db.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1),
       this.db.select().from(taskSchedules).where(eq(taskSchedules.taskId, taskId)).limit(1),
       this.db.select({ id: tags.id, name: tags.name }).from(taskTags)
         .innerJoin(tags, eq(taskTags.tagId, tags.id)).where(eq(taskTags.taskId, taskId)),
@@ -2979,6 +3748,9 @@ class PostgresTaskMutationRepository implements TaskMutationRepository {
         return latest
           ? { kind: 'revision-conflict', currentUpdatedAt: latest.updatedAt } as const
           : { kind: 'not-found' } as const;
+      }
+      if (request.patch.status === 'done' || request.patch.status === 'cancelled') {
+        await cancelActiveTaskTimeActivity(tx, request.taskId, request.now);
       }
       if (request.schedulePatch) {
         await tx.insert(taskSchedules).values({
@@ -3078,92 +3850,129 @@ class PostgresTaskMutationRepository implements TaskMutationRepository {
       let recurrenceNextTaskId: string | null = null;
       if (request.recurrenceSuccessor) {
         const successor = request.recurrenceSuccessor;
-        const inserted = await tx.insert(tasks).values(moveTaskInsertValues({
-          ...currentTask,
-          id: successor.id,
-          sourceId: `local:${successor.id}`,
-          connectorType: 'local',
-          connectorInstanceId: 'local',
-          status: 'todo',
-          localDisposition: 'active',
-          dueDate: successor.dueDate,
-          createdAt: request.now,
-          updatedAt: request.now,
-          completedAt: null,
-          recurrenceGeneratedFromTaskId: request.taskId,
-          metadata: successor.metadata,
-          syncStatus: 'synced',
-          lastSyncedAt: request.now,
-          pushRetryCount: 0,
-          reminderAt: successor.reminderAt,
-          isBulkImport: false,
-        })).onConflictDoNothing().returning({ id: tasks.id });
-        if (inserted.length) {
-          recurrenceNextTaskId = successor.id;
-          const [schedule] = await tx.select().from(taskSchedules)
-            .where(eq(taskSchedules.taskId, request.taskId)).limit(1);
-          if (schedule) {
-            await tx.insert(taskSchedules).values({
-              ...schedule,
-              taskId: successor.id,
-              scheduledDate: successor.scheduledDate,
-              scheduledTime: successor.scheduledTime,
-            });
-          }
-          const sourceTags = await tx.select({ tagId: taskTags.tagId }).from(taskTags)
-            .where(eq(taskTags.taskId, request.taskId));
-          if (sourceTags.length) {
-            await tx.insert(taskTags).values(sourceTags.map((row) => ({
-              taskId: successor.id,
-              tagId: row.tagId,
-            })));
-          }
-          const sourceProjects = await tx.select({ projectId: taskProjects.projectId })
-            .from(taskProjects).where(eq(taskProjects.taskId, request.taskId));
-          if (sourceProjects.length) {
-            await tx.insert(taskProjects).values(sourceProjects.map((row) => ({
-              taskId: successor.id,
-              projectId: row.projectId,
-            })));
-          }
-          const phases = await tx.select().from(projectPhaseItems)
-            .where(eq(projectPhaseItems.taskId, request.taskId));
-          if (phases.length) {
-            await tx.insert(projectPhaseItems).values(phases.map((row) => ({
-              ...row,
-              id: crypto.randomUUID(),
-              taskId: successor.id,
-              createdAt: request.now,
-            })));
-          }
-          const dependencies = await tx.select().from(taskDependencies)
-            .where(eq(taskDependencies.taskId, request.taskId));
-          if (dependencies.length) {
-            await tx.insert(taskDependencies).values(dependencies.map((row) => ({
-              ...row,
-              id: crypto.randomUUID(),
-              taskId: successor.id,
-              syncStatus: 'local' as const,
-              syncAction: null,
-              syncError: null,
-              lastSyncedAt: null,
-              createdAt: request.now,
-            })));
-          }
-          const attachments = await tx.select().from(taskAttachments)
-            .where(eq(taskAttachments.taskId, request.taskId));
-          if (attachments.length) {
-            await tx.insert(taskAttachments).values(attachments.map((row) => ({
-              ...row,
-              id: crypto.randomUUID(),
-              taskId: successor.id,
-              createdAt: request.now,
-            })));
-          }
+        const [historicalSuccessor] = await tx.select({ id: tasks.id }).from(tasks)
+          .where(eq(tasks.recurrenceGeneratedFromTaskId, request.taskId)).limit(1);
+        const [durableSuccessor] = await tx.select({
+          taskId: taskRecurrenceOccurrences.taskId,
+        }).from(taskRecurrenceOccurrences)
+          .where(eq(taskRecurrenceOccurrences.generatedFromTaskId, request.taskId))
+          .limit(1);
+        if (
+          historicalSuccessor
+          && durableSuccessor
+          && historicalSuccessor.id !== durableSuccessor.taskId
+        ) {
+          throw new Error('Recurrence successor history conflicts with its durable claim');
+        }
+        if (historicalSuccessor || durableSuccessor) {
+          recurrenceNextTaskId = historicalSuccessor?.id ?? durableSuccessor!.taskId;
         } else {
-          const [existing] = await tx.select({ id: tasks.id }).from(tasks)
-            .where(eq(tasks.recurrenceGeneratedFromTaskId, request.taskId)).limit(1);
-          recurrenceNextTaskId = existing?.id ?? null;
+          const { provenance, rule } = deriveRecurrenceOccurrenceProvenance({
+            rule: successor.rule,
+            occurrence: successor.occurrence,
+          });
+          const successorTask = {
+            ...currentTask,
+            id: successor.id,
+            sourceId: `local:${successor.id}`,
+            connectorType: 'local',
+            connectorInstanceId: 'local',
+            status: 'todo',
+            localDisposition: 'active',
+            dueDate: successor.dueDate,
+            createdAt: request.now,
+            updatedAt: request.now,
+            completedAt: null,
+            recurrenceGeneratedFromTaskId: request.taskId,
+            metadata: writeRecurrenceMetadata(successor.metadata, rule),
+            syncStatus: 'synced',
+            lastSyncedAt: request.now,
+            pushRetryCount: 0,
+            reminderAt: successor.reminderAt,
+            reminderNagInterval: successor.reminderNagInterval,
+            reminderNagStopAt: successor.reminderNagStopAt,
+            reminderNagSeriesId: successor.reminderNagSeriesId,
+            reminderNagSequence: 0,
+            isBulkImport: false,
+          } satisfies TaskMoveTaskInsert;
+          assertRecurrenceOccurrenceTaskScope(successorTask, provenance);
+          assertRecurrenceOccurrenceTiming(
+            successorTask,
+            { taskId: successor.id, scheduledDate: successor.scheduledDate },
+            provenance,
+            successor.id,
+          );
+          const claim = await claimPostgresRecurrenceOccurrence(
+            tx,
+            provenance,
+            successor.id,
+            request.taskId,
+            request.now,
+          );
+          recurrenceNextTaskId = claim.taskId;
+          if (claim.claimed) {
+            await tx.insert(tasks).values(moveTaskInsertValues(successorTask));
+            const [schedule] = await tx.select().from(taskSchedules)
+              .where(eq(taskSchedules.taskId, request.taskId)).limit(1);
+            if (schedule) {
+              await tx.insert(taskSchedules).values({
+                ...schedule,
+                taskId: successor.id,
+                scheduledDate: successor.scheduledDate,
+                scheduledTime: successor.scheduledTime,
+              });
+            }
+            const sourceTags = await tx.select({ tagId: taskTags.tagId }).from(taskTags)
+              .where(eq(taskTags.taskId, request.taskId));
+            if (sourceTags.length) {
+              await tx.insert(taskTags).values(sourceTags.map((row) => ({
+                taskId: successor.id,
+                tagId: row.tagId,
+              })));
+            }
+            const sourceProjects = await tx.select({ projectId: taskProjects.projectId })
+              .from(taskProjects).where(eq(taskProjects.taskId, request.taskId));
+            if (sourceProjects.length) {
+              await tx.insert(taskProjects).values(sourceProjects.map((row) => ({
+                taskId: successor.id,
+                projectId: row.projectId,
+              })));
+            }
+            const phases = await tx.select().from(projectPhaseItems)
+              .where(eq(projectPhaseItems.taskId, request.taskId));
+            if (phases.length) {
+              await tx.insert(projectPhaseItems).values(phases.map((row) => ({
+                ...row,
+                id: crypto.randomUUID(),
+                taskId: successor.id,
+                createdAt: request.now,
+              })));
+            }
+            const dependencies = await tx.select().from(taskDependencies)
+              .where(eq(taskDependencies.taskId, request.taskId));
+            if (dependencies.length) {
+              await tx.insert(taskDependencies).values(dependencies.map((row) => ({
+                ...row,
+                id: crypto.randomUUID(),
+                taskId: successor.id,
+                syncStatus: 'local' as const,
+                syncAction: null,
+                syncError: null,
+                lastSyncedAt: null,
+                createdAt: request.now,
+              })));
+            }
+            const attachments = await tx.select().from(taskAttachments)
+              .where(eq(taskAttachments.taskId, request.taskId));
+            if (attachments.length) {
+              await tx.insert(taskAttachments).values(attachments.map((row) => ({
+                ...row,
+                id: crypto.randomUUID(),
+                taskId: successor.id,
+                createdAt: request.now,
+              })));
+            }
+          }
         }
       }
       for (const event of request.events ?? []) await enqueueTaskCoreEvent(tx, event);
@@ -3184,7 +3993,7 @@ class PostgresTaskRemovalRepository implements TaskRemovalRepository {
 
   async getTaskRemovalContext(taskId: string) {
     const [row] = await this.db.select(MOVE_TASK_COLUMNS).from(tasks)
-      .where(eq(tasks.id, taskId)).limit(1);
+      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     return row ? { task: toMoveTaskRow(row) } : null;
   }
 
@@ -3206,7 +4015,21 @@ class PostgresTaskRemovalRepository implements TaskRemovalRepository {
         } as const;
       }
       if (input.mode === 'local-delete') {
-        await deleteTaskWithinTransaction(tx, input.taskId, false);
+        const changed = await tx.update(tasks).set({
+          deletedAt: input.now,
+          updatedAt: input.now,
+        }).where(and(
+          eq(tasks.id, input.taskId),
+          eq(tasks.updatedAt, input.expectedUpdatedAt),
+          isNull(tasks.deletedAt),
+        )).returning({ id: tasks.id });
+        if (changed.length !== 1) {
+          const [latest] = await tx.select({ updatedAt: tasks.updatedAt }).from(tasks)
+            .where(eq(tasks.id, input.taskId)).limit(1);
+          return latest
+            ? { kind: 'revision-conflict', currentUpdatedAt: latest.updatedAt } as const
+            : { kind: 'not-found' } as const;
+        }
       } else {
         const patch = input.mode === 'mirror-dismiss'
           ? { localDisposition: 'dismissed' as const, updatedAt: input.now }
@@ -3242,6 +4065,7 @@ class PostgresTaskRemovalRepository implements TaskRemovalRepository {
         }
       }
       for (const event of input.events ?? []) await enqueueTaskCoreEvent(tx, event);
+      await cancelActiveTaskTimeActivity(tx, input.taskId, input.now);
       return {
         kind: 'committed',
         action: input.mode === 'mirror-dismiss'
@@ -3251,7 +4075,7 @@ class PostgresTaskRemovalRepository implements TaskRemovalRepository {
             : input.mode === 'local-delete'
               ? 'deleted'
               : 'pending-remote',
-        taskVersion: input.mode === 'local-delete' ? null : input.now,
+        taskVersion: input.now,
       } as const;
     });
   }
@@ -3277,6 +4101,47 @@ class PostgresTaskRemovalRepository implements TaskRemovalRepository {
       }
       await deleteTaskWithinTransaction(tx, input.taskId, false);
       return { kind: 'committed', action: 'deleted', taskVersion: null } as const;
+    });
+  }
+
+  async restoreTask(taskId: string, now: string): Promise<TaskRestoreOutcome> {
+    return this.db.transaction(async (tx) => {
+      const [current] = await tx.select({
+        id: tasks.id,
+        title: tasks.title,
+        description: tasks.description,
+        sourceListName: tasks.sourceListName,
+        connectorType: tasks.connectorType,
+        status: tasks.status,
+        deletedAt: tasks.deletedAt,
+      }).from(tasks).where(eq(tasks.id, taskId)).limit(1).for('update');
+      if (!current) return { kind: 'not-found' } as const;
+      if (!current.deletedAt) return { kind: 'not-deleted' } as const;
+      const restored = await tx.update(tasks).set({ deletedAt: null, updatedAt: now })
+        .where(and(eq(tasks.id, taskId), eq(tasks.deletedAt, current.deletedAt)))
+        .returning({ id: tasks.id });
+      if (restored.length !== 1) return { kind: 'not-deleted' } as const;
+      return {
+        kind: 'restored',
+        task: {
+          id: current.id,
+          title: current.title,
+          description: current.description,
+          sourceListName: current.sourceListName,
+          connectorType: current.connectorType,
+          status: current.status,
+        },
+      } as const;
+    });
+  }
+
+  async purgeDeletedBefore(cutoff: string): Promise<readonly string[]> {
+    return this.db.transaction(async (tx) => {
+      const stale = await tx.select({ id: tasks.id }).from(tasks)
+        .where(and(isNotNull(tasks.deletedAt), lte(tasks.deletedAt, cutoff)))
+        .for('update');
+      for (const task of stale) await deleteTaskWithinTransaction(tx, task.id, false);
+      return stale.map((task) => task.id);
     });
   }
 }
@@ -3310,7 +4175,14 @@ class PostgresWriteThroughTaskMoveRepository implements WriteThroughTaskMoveRepo
 
   async listChildTasks(parentTaskId: string, limit: number): Promise<TaskMoveTaskRow[]> {
     const rows = await this.db.select(MOVE_TASK_COLUMNS)
-      .from(tasks).where(eq(tasks.parentId, parentTaskId)).limit(limit);
+      .from(tasks).where(eq(tasks.parentId, parentTaskId))
+      .orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(sql`${tasks.id} COLLATE "C"`),
+      )
+      .limit(limit);
     return rows.map(toMoveTaskRow);
   }
 
@@ -3957,6 +4829,12 @@ class PostgresTaskQuickSortRepository implements TaskQuickSortPersistenceReposit
       .where(eq(tasks.id, taskId));
     const task = rows[0];
     if (!task) return null;
+    const [projectRows, phaseRows] = await Promise.all([
+      this.db.select({ id: taskProjects.projectId }).from(taskProjects)
+        .where(eq(taskProjects.taskId, taskId)),
+      this.db.select({ id: projectPhaseItems.phaseId }).from(projectPhaseItems)
+        .where(eq(projectPhaseItems.taskId, taskId)),
+    ]);
     return {
       updatedAt: task.updatedAt,
       status: task.status,
@@ -3971,6 +4849,8 @@ class PostgresTaskQuickSortRepository implements TaskQuickSortPersistenceReposit
       reminderAt: task.reminderAt,
       effort: task.effort,
       tagIds: rows.flatMap((row) => row.tagId === null ? [] : [row.tagId]).sort(),
+      projectIds: projectRows.map((row) => row.id).sort(),
+      phaseIds: phaseRows.map((row) => row.id).sort(),
     };
   }
 
@@ -5088,7 +5968,9 @@ export function createPostgresTaskCorePersistence(
     collections: new PostgresTaskCollectionReadRepository(db, queries),
     details: new PostgresTaskDetailReadRepository(db),
     creates: new PostgresTaskCreateRepository(db),
+    occurrences: new PostgresTaskOccurrenceMaterializationRepository(db),
     mutations: new PostgresTaskMutationRepository(db),
+    timeActivities: new PostgresTaskTimeActivityRepository(db),
     removals: new PostgresTaskRemovalRepository(db),
     taskReads: new PostgresTaskReadRepository(db, filterInputs),
     filterInputs,

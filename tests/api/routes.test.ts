@@ -3,6 +3,7 @@
  * Tests #111
  */
 import { describe, it, expect, vi } from 'vitest';
+import { DEFAULT_AI_ROUTING_POLICY } from '@/lib/ai/sensitivity-policy';
 
 const connectorManagement = vi.hoisted(() => ({
   createConnector: vi.fn().mockResolvedValue(undefined),
@@ -33,6 +34,12 @@ const connectorManagement = vi.hoisted(() => ({
 
 vi.mock('@/lib/connectors/management-service', () => ({
   getConnectorManagementPersistence: vi.fn().mockResolvedValue(connectorManagement),
+}));
+
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: vi.fn(async () => ({
+    routingPolicy: DEFAULT_AI_ROUTING_POLICY,
+  })),
 }));
 
 // ─── Shared DB mock (chainable) ─────────────────────────────────────────────

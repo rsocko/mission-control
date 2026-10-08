@@ -28,6 +28,7 @@ import {
 
 import { createGitHubClient } from './github-client';
 import type { GitHubClient, GitHubRestIssue, GitHubRestRepository } from './github-client';
+import { getGitHubConnectorToken } from './credentials';
 import {
   isNativeGitHubIssueSourceId,
   mapGraphQLIssueToTask,
@@ -137,6 +138,8 @@ export class GitHubIssuesConnector implements IConnector {
     close: true,
     sync: true,
     subtasks: true,
+    subtaskOrderRead: true,
+    subtaskOrderWrite: true,
     lists: true,
     tags: true,
     tagWriteBack: true,
@@ -173,7 +176,7 @@ export class GitHubIssuesConnector implements IConnector {
     this.config = config;
     (this as { id: string }).id = config.id;
     const settings = config.settings as unknown as GitHubConfig;
-    const token = config.credentials.token || config.credentials.pat || settings.token || '';
+    const token = getGitHubConnectorToken(config.credentials, config.settings) ?? '';
     this.client = createGitHubClient(token, settings.apiOrigin);
     this.repos = settings.repos || [];
     this.notifications.configure({
@@ -451,7 +454,19 @@ export class GitHubIssuesConnector implements IConnector {
       'source_repository',
     );
     const routedRepository = `${owner}/${name}`;
-    const labels = task.tags?.filter(t => t.type === 'source').map(t => t.name) || [];
+    const sourceTags = [...new Map(
+      task.tags
+        ?.filter(t => t.type === 'source')
+        .map(tag => [tag.name.toLowerCase(), tag]) || [],
+    ).values()];
+    const labels = sourceTags.map(t => t.name);
+
+    // Labels are repository-scoped. A cross-repository move can carry labels
+    // that do not exist in the destination, and GitHub rejects issue creation
+    // with 422 unless they are created first.
+    for (const tag of sourceTags) {
+      await createLabelInRepo(this.client!, owner, name, tag.name, tag.color);
+    }
 
     // Include the priority label when creating with a priority set
     if (task.priority && task.priority !== 'none') {
@@ -886,6 +901,43 @@ export class GitHubIssuesConnector implements IConnector {
     return created;
   }
 
+  async reorderSubTasks(
+    parentSourceId: string,
+    orderedSubTaskSourceIds: readonly string[],
+  ): Promise<void> {
+    const authorizedParent = this.resolveSourceRoute(parentSourceId, 'primary_issue');
+    const { repo, issueNumber: parentNumber } = parseSourceId(authorizedParent);
+    const childDatabaseIds = await Promise.all(orderedSubTaskSourceIds.map(async (sourceId) => {
+      const { repo: childRepo, issueNumber } = parseSourceId(sourceId);
+      const response = await this.client!.restFetch(`/repos/${childRepo}/issues/${issueNumber}`);
+      if (!response.ok) {
+        throw new Error(`Failed to resolve GitHub sub-issue: ${response.status}`);
+      }
+      const issue = await response.json() as GitHubRestIssue;
+      if (typeof issue.id !== 'number') {
+        throw new Error('GitHub sub-issue did not include a database ID');
+      }
+      return issue.id;
+    }));
+
+    for (let index = 1; index < childDatabaseIds.length; index++) {
+      const response = await this.client!.restFetch(
+        `/repos/${repo}/issues/${parentNumber}/sub_issues/priority`,
+        {
+          method: 'PATCH',
+          headers: { 'X-GitHub-Api-Version': '2026-03-10' },
+          body: JSON.stringify({
+            sub_issue_id: childDatabaseIds[index],
+            after_id: childDatabaseIds[index - 1],
+          }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to reprioritize GitHub sub-issue: ${response.status}`);
+      }
+    }
+  }
+
   async getLastSyncToken(): Promise<string | null> {
     return null;
   }
@@ -1019,6 +1071,26 @@ export class GitHubIssuesConnector implements IConnector {
         { sourceId: repo, evidence: { entity: sourceRepository } },
         { sourceId: targetSourceListId, evidence: { entity: targetRepository } },
       ],
+    };
+  }
+
+  async resolveTaskIdentity(
+    sourceId: string,
+  ): Promise<{ sourceId: string; stableId: string }> {
+    const issue = await this.fetchIssue(sourceId);
+    const url = new URL(issue.html_url);
+    const segments = url.pathname.split('/').filter(Boolean);
+    if (
+      url.hostname.toLowerCase() !== 'github.com'
+      || segments.length !== 4
+      || segments[2].toLowerCase() !== 'issues'
+      || !issue.node_id
+    ) {
+      throw new Error(`GitHub issue identity evidence is unavailable for ${sourceId}`);
+    }
+    return {
+      sourceId: `${segments[0]}/${segments[1]}:${issue.number}`,
+      stableId: issue.node_id,
     };
   }
 
@@ -1156,6 +1228,7 @@ export class GitHubIssuesConnector implements IConnector {
         }
       }
     `;
+    const subIssueOrderByParent = new Map<string, Promise<Map<string, number>>>();
 
     let stagedPageCount = 0;
     try {
@@ -1279,6 +1352,22 @@ export class GitHubIssuesConnector implements IConnector {
                 )
               : undefined,
           );
+          if (issue.parent) {
+            const parentSourceId =
+              `${issue.parent.repository.nameWithOwner}:${issue.parent.number}`;
+            let orderPromise = subIssueOrderByParent.get(parentSourceId);
+            if (!orderPromise) {
+              orderPromise = this.fetchSubIssueOrder(parentSourceId, options?.signal);
+              subIssueOrderByParent.set(parentSourceId, orderPromise);
+            }
+            const siblingOrder = (await orderPromise).get(issue.id);
+            if (siblingOrder === undefined) {
+              throw new Error(
+                `GitHub sub-issue order did not include ${task.sourceId}`,
+              );
+            }
+            task.siblingOrder = siblingOrder;
+          }
           pageTasks.push(task);
         }
         if (options?.dependencyGeneration) {
@@ -1323,6 +1412,40 @@ export class GitHubIssuesConnector implements IConnector {
       }
       throw error;
     }
+  }
+
+  private async fetchSubIssueOrder(
+    parentSourceId: string,
+    signal?: AbortSignal,
+  ): Promise<Map<string, number>> {
+    const { repo, issueNumber } = parseSourceId(parentSourceId);
+    const order = new Map<string, number>();
+    let page = 1;
+
+    while (true) {
+      const response = await this.client!.restFetch(
+        `/repos/${repo}/issues/${issueNumber}/sub_issues?per_page=100&page=${page}`,
+        {
+          headers: { 'X-GitHub-Api-Version': '2026-03-10' },
+          signal,
+        },
+      );
+      if (!response.ok) {
+        throw new Error(
+          `Failed to read GitHub sub-issue order for ${parentSourceId}: ${response.status}`,
+        );
+      }
+      const subIssues = await response.json() as GitHubRestIssue[];
+      for (const subIssue of subIssues) {
+        if (subIssue.node_id) {
+          order.set(subIssue.node_id, order.size);
+        }
+      }
+      if (subIssues.length < 100) break;
+      page++;
+    }
+
+    return order;
   }
 
   private async fetchAllGraphQLBlockers(

@@ -20,7 +20,7 @@ const toastMocks = vi.hoisted(() => ({
   success: vi.fn(),
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: toastMocks.error,
     success: toastMocks.success,
@@ -272,6 +272,32 @@ describe('useProjectTaskActions field updates', () => {
       priority: 'high',
       status: 'in_progress',
       dueDate: null,
+    });
+  });
+
+  it('updates fields before persistence resolves', async () => {
+    let resolveRequest!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/my-day' && !init?.method) {
+        return Promise.resolve(jsonResponse({ items: [] }));
+      }
+      return new Promise<Response>((resolve) => {
+        resolveRequest = resolve;
+      });
+    });
+    const { result } = renderActions();
+    await waitForMyDayLoad();
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.handleSetTaskPriority('task-1', 'high');
+    });
+
+    expect(result.current.tasks[0].priority).toBe('high');
+
+    await act(async () => {
+      resolveRequest(jsonResponse());
+      await request;
     });
   });
 

@@ -5,6 +5,7 @@ import { ArrowLeftRight, Bell, ChartNetwork, Clock, RotateCcw, Timer } from 'luc
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
+import { SubtaskPill } from '@/components/ui/SubtaskPill';
 import type { LocalDisposition } from '@/types';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type {
@@ -24,6 +25,7 @@ import {
 import { createTaskRowInteractionHandlers } from '@/lib/tasks/task-row-interactions';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import { cn } from '@/lib/utils';
+import { TaskDelegationBadge } from '@/components/task-list/TaskDelegationBadge';
 
 /**
  * Responsive visibility priority for task row attribute badges.
@@ -146,6 +148,7 @@ interface TaskRowProps {
   hideSourceListName?: boolean;
   showDivider?: boolean;
   compact?: boolean;
+  wrapTitle?: boolean;
   bulkMode?: boolean;
   bulkSelected?: boolean;
   onBulkToggle?: () => void;
@@ -182,6 +185,7 @@ export function TaskRow({
   hideSourceListName = false,
   showDivider,
   compact = false,
+  wrapTitle = false,
   bulkMode = false,
   bulkSelected = false,
   onBulkToggle,
@@ -301,20 +305,26 @@ export function TaskRow({
       <TaskRowIdentity
         task={task}
         isDone={isDone}
-        onOpenSubtasks={onOpenSubtasks}
-        afterConnector={(task.linkedSourceCount ?? 0) > 0 ? (
-          <Tooltip content="Also tracked in another source">
-            <span className="flex shrink-0 items-center gap-0.5 rounded border border-cyan-800/30 bg-cyan-900/20 px-1 py-0.5 text-[10px] font-medium text-cyan-400">
-              <ArrowLeftRight size={9} />
-              <span className="hidden @lg:inline">linked</span>
-            </span>
-          </Tooltip>
+        wrapTitle={wrapTitle}
+        showSubtasks={false}
+        afterConnector={(task.linkedSourceCount ?? 0) > 0 || task.delegation ? (
+          <span className="inline-flex min-w-0 items-center gap-1">
+            {(task.linkedSourceCount ?? 0) > 0 && (
+              <Tooltip content="Also tracked in another source">
+                <span className="flex shrink-0 items-center gap-0.5 rounded border border-cyan-800/30 bg-cyan-900/20 px-1 py-0.5 text-xs font-medium text-cyan-400">
+                  <ArrowLeftRight size={9} />
+                  <span className="hidden @lg:inline">linked</span>
+                </span>
+              </Tooltip>
+            )}
+            {task.delegation && <TaskDelegationBadge delegation={task.delegation} />}
+          </span>
         ) : null}
         secondary={!compact ? (
           <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden">
             {secondaryMetadata}
             {task.sourceListName && !hideSourceListName && (
-              <span className="max-w-[120px] min-w-0 truncate text-xs text-[var(--text-muted)]">{task.sourceListName}</span>
+              <span className="min-w-0 truncate text-xs text-[var(--text-muted)]">{task.sourceListName}</span>
             )}
             {task.tags?.filter(tag => !isSyntheticTag(tag.name)).map((tag) => {
               const tagClassName = cn(
@@ -390,6 +400,12 @@ export function TaskRow({
             )}
           </div>
         ) : null}
+      />
+
+      <SubtaskPill
+        done={task.subtaskDone ?? 0}
+        total={task.subtaskTotal ?? 0}
+        onClick={onOpenSubtasks}
       />
 
       <TaskRowActions

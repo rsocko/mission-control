@@ -11,7 +11,7 @@ vi.mock('@/lib/stores/undoStore', () => ({
   pushUndoWithToast: mocks.pushUndoWithToast,
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: mocks.toastError,
     success: vi.fn(),
@@ -128,6 +128,98 @@ describe('useTodayActions completion', () => {
     expect(mocks.toastError).toHaveBeenCalledWith('Failed to complete task');
     expect(mocks.pushUndoWithToast).not.toHaveBeenCalled();
     expect(dispatchEvent).not.toHaveBeenCalled();
+    expect(fetchData).not.toHaveBeenCalled();
+  });
+
+  it('moves a suggestion into My Day before persistence and skips remote reconciliation', async () => {
+    vi.useRealTimers();
+    let resolveRequest!: (response: {
+      ok: boolean;
+      json: () => Promise<Record<string, unknown>>;
+    }) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => {
+      resolveRequest = resolve;
+    })));
+    const fetchData = vi.fn(async () => {});
+    const { result } = renderHook(() => {
+      const [items, setItems] = useState<MyDayItem[]>([]);
+      const [suggestions, setSuggestions] = useState<SuggestionGroups>(
+        suggestionsWithYesterdayTask('suggestion-1'),
+      );
+      const actions = useTodayActions({
+        items,
+        setItems,
+        suggestions,
+        setSuggestions,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { items, suggestions, actions };
+    });
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.actions.addToDay('suggestion-1');
+    });
+
+    expect(result.current.items).toMatchObject([{
+      taskId: 'suggestion-1',
+      title: 'Suggested task',
+    }]);
+    expect(result.current.suggestions.yesterday).toEqual([]);
+    expect(fetchData).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRequest({
+        ok: true,
+        json: async () => ({ id: 'my-day-1', writeBack: { attempted: true, success: true } }),
+      });
+      await request;
+    });
+
+    expect(fetchData).toHaveBeenCalledWith({ skipSync: true });
+  });
+
+  it('restores a suggestion when adding it to My Day fails', async () => {
+    vi.useRealTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ error: 'Add was rejected' }),
+    })));
+    const fetchData = vi.fn(async () => {});
+    const { result } = renderHook(() => {
+      const [items, setItems] = useState<MyDayItem[]>([]);
+      const [suggestions, setSuggestions] = useState<SuggestionGroups>(
+        suggestionsWithYesterdayTask('suggestion-1'),
+      );
+      const actions = useTodayActions({
+        items,
+        setItems,
+        suggestions,
+        setSuggestions,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { items, suggestions, actions };
+    });
+
+    await act(async () => {
+      await result.current.actions.addToDay('suggestion-1');
+    });
+
+    expect(result.current.items).toEqual([]);
+    expect(result.current.suggestions.yesterday).toHaveLength(1);
+    expect(mocks.toastError).toHaveBeenCalledWith('Add was rejected');
     expect(fetchData).not.toHaveBeenCalled();
   });
 
@@ -292,6 +384,52 @@ describe('useTodayActions completion', () => {
     expect(fetchData).not.toHaveBeenCalled();
   });
 
+  it('updates priority before persistence and rolls it back when persistence fails', async () => {
+    vi.useRealTimers();
+    let resolveRequest!: (response: { ok: boolean }) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => {
+      resolveRequest = resolve;
+    })));
+    const fetchData = vi.fn(async () => {});
+    const { result } = renderHook(() => {
+      const [items, setItems] = useState([{
+        ...mirrorTodayItem(),
+        taskId: 'task-1',
+        priority: 'medium',
+        editPolicy: editableTaskPolicy,
+      }]);
+      const actions = useTodayActions({
+        items,
+        setItems,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { items, actions };
+    });
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.actions.setTaskPriority('task-1', 'high');
+    });
+
+    expect(result.current.items[0]?.priority).toBe('high');
+    expect(fetchData).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRequest({ ok: false });
+      await request;
+    });
+
+    expect(result.current.items[0]?.priority).toBe('medium');
+    expect(mocks.toastError).toHaveBeenCalledWith('Failed to update priority');
+    expect(fetchData).not.toHaveBeenCalled();
+  });
+
   it('removes a suggestion-only task from the suggestion groups when completed', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
     const fetchData = vi.fn(async () => {});
@@ -368,5 +506,63 @@ describe('useTodayActions completion', () => {
     });
 
     expect(result.current.suggestions.yesterday).toHaveLength(0);
+    expect(global.fetch).toHaveBeenCalledWith('/api/tasks/suggestion-2', { method: 'DELETE' });
+  });
+
+  it('deletes a My Day task immediately and restores it through undo', async () => {
+    vi.useRealTimers();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => ({
+      ok: true,
+      json: async () => input.toString().endsWith('/restore')
+        ? { success: true }
+        : { success: true, restorable: true },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const fetchData = vi.fn(async () => {});
+    const item = {
+      ...mirrorTodayItem(),
+      taskId: 'task-to-delete',
+      title: 'Delete me',
+      connectorType: 'local',
+      connectorInstanceId: 'local',
+      sourceListName: 'Inbox',
+      taskSourceModel: 'mc-owned' as const,
+      editPolicy: editableTaskPolicy,
+    };
+    const { result } = renderHook(() => {
+      const [items, setItems] = useState([item]);
+      const actions = useTodayActions({
+        items,
+        setItems,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { items, actions };
+    });
+
+    act(() => {
+      void result.current.actions.deleteTask('task-to-delete');
+    });
+    await act(async () => {
+      result.current.actions.confirmDialog.onConfirm();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+
+    expect(result.current.items).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-to-delete', { method: 'DELETE' });
+    expect(mocks.pushUndoWithToast).toHaveBeenCalledWith('Task deleted', expect.any(Function));
+
+    const undo = mocks.pushUndoWithToast.mock.calls[0]?.[1] as (() => Promise<void>) | undefined;
+    await act(async () => {
+      await undo?.();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-to-delete/restore', { method: 'POST' });
+    expect(result.current.items).toEqual([item]);
   });
 });

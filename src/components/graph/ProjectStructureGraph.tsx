@@ -43,7 +43,7 @@ import {
   resolveNodeExpansion,
 } from '@rsocko/generic-graph-canvas-shared-workbench/controllers';
 
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { GRAPH_NODE_DIMENSIONS, type GraphLayoutDirection } from '@/lib/graph/layout';
 import {

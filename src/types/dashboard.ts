@@ -1,4 +1,5 @@
 import type { TaskFilterContext } from '@/lib/task-filter-context';
+import type { ContextAppearance } from '@/types';
 import type {
   HubProjectSummaryDto,
   TaskListItemDto,
@@ -37,6 +38,7 @@ export interface SourceList {
   icon?: string | null;
   iconColor?: string | null;
   selectedForSync?: boolean;
+  appearance?: ContextAppearance | null;
 }
 
 export interface EnabledSource {
@@ -57,6 +59,21 @@ export interface SyncStatusEntry {
 }
 
 export interface SavedView {
+  id: string;
+  name: string;
+  icon: string;
+  iconColor?: string;
+  filters: Record<string, string>;
+  filterContext?: TaskFilterContext;
+  presentation?: {
+    sortBy: string;
+    sortDirection: 'asc' | 'desc';
+    groupBy: string;
+    viewDensity: 'compact' | 'comfortable';
+  };
+}
+
+export interface SavedQuickFilter {
   id: string;
   name: string;
   icon: string;
@@ -87,11 +104,17 @@ export const EMPTY_TASK_RESPONSE: DashboardTaskResponseViewModel = {
     myDay: 0,
     recentlyCreated: 0,
     recentlyClosed: 0,
+    recurring: 0,
     waiting: 0,
     inbox: 0,
+    delegated: 0,
   },
   hasMore: false,
   sourceCounts: {},
+  facetCounts: {
+    priorities: {},
+    statuses: {},
+  },
   availableTags: [],
 };
 

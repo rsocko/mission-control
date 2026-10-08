@@ -5,11 +5,13 @@ import {
   DEFAULT_DOPAMINE_MENU_SETTINGS,
   type PreferenceSettingsRepository,
 } from '@/lib/settings/preference-settings';
+import { DEFAULT_CONTEXT_THEME_PREFERENCES } from '@/lib/context-appearance';
 
 export const PREFERENCE_SETTING_KEYS = [
   'capture.defaultDestination',
   'dopamine-menu',
   'inbox.lists',
+  'appearance.contextThemes',
 ] as const;
 
 export interface PreferenceSettingsRepositoryHarness {
@@ -41,6 +43,8 @@ export function describePreferenceSettingsRepositoryContract(
       await expect(harness.repository.getInboxLists()).resolves.toEqual([]);
       await expect(harness.repository.getDopamineMenu())
         .resolves.toEqual(DEFAULT_DOPAMINE_MENU_SETTINGS);
+      await expect(harness.repository.getContextThemes())
+        .resolves.toEqual(DEFAULT_CONTEXT_THEME_PREFERENCES);
     });
 
     it('round trips capture destination preferences without adding optional fields', async () => {
@@ -86,6 +90,20 @@ export function describePreferenceSettingsRepositoryContract(
         threshold: 12,
         rewards: [{ id: 'custom', emoji: '🎯', label: 'Target hit' }],
       });
+    });
+
+    it('round trips context theme defaults', async () => {
+      const settings = {
+        projectStrength: 'whisper' as const,
+        listStrength: 'canvas' as const,
+        defaultBackdrop: 'nebula' as const,
+        backdropsEnabled: true,
+      };
+
+      await harness.repository.setContextThemes(settings);
+
+      await expect(harness.repository.getContextThemes()).resolves.toEqual(settings);
+      await expect(harness.settings.get('appearance.contextThemes')).resolves.toEqual(settings);
     });
   });
 }

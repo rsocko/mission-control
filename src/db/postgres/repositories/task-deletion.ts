@@ -1,6 +1,9 @@
 import { sql } from 'drizzle-orm';
 import type { Pool, PoolClient } from 'pg';
-import { TASK_ASSOCIATION_TABLES } from '@/db/persistence/task-deletion';
+import {
+  TASK_ASSOCIATION_TABLES,
+  TASK_EXTERNAL_BINDING_TABLE,
+} from '@/db/persistence/task-deletion';
 import type { PostgresTransaction } from '../runtime';
 
 type Client = Pool | PoolClient;
@@ -22,11 +25,19 @@ type Client = Pool | PoolClient;
 export async function cleanupTaskAssociations(
   client: Client,
   taskIds: readonly string[],
+  options: { preserveIdentityBinding?: boolean } = {},
 ): Promise<void> {
   if (taskIds.length === 0) return;
   const ids = [...taskIds];
   for (const table of TASK_ASSOCIATION_TABLES) {
     await client.query(`DELETE FROM ${table} WHERE task_id = ANY($1::text[])`, [ids]);
+  }
+  if (!options.preserveIdentityBinding) {
+    await client.query(
+      `DELETE FROM ${TASK_EXTERNAL_BINDING_TABLE}
+       WHERE binding_type = 'task' AND local_id = ANY($1::text[])`,
+      [ids],
+    );
   }
   await client.query(
     `DELETE FROM task_dependencies
@@ -35,6 +46,10 @@ export async function cleanupTaskAssociations(
   );
   await client.query(
     'UPDATE notifications SET related_task_id = NULL WHERE related_task_id = ANY($1::text[])',
+    [ids],
+  );
+  await client.query(
+    'UPDATE task_recurrence_backfill_decisions SET task_id = NULL WHERE task_id = ANY($1::text[])',
     [ids],
   );
 }
@@ -61,10 +76,17 @@ export async function cleanupTaskAssociationsInTransaction(
     await tx.execute(sql`DELETE FROM ${sql.identifier(table)} WHERE task_id = ${taskId}`);
   }
   await tx.execute(sql`
+    DELETE FROM external_entity_bindings
+    WHERE binding_type = 'task' AND local_id = ${taskId}
+  `);
+  await tx.execute(sql`
     DELETE FROM task_dependencies
     WHERE task_id = ${taskId} OR depends_on_task_id = ${taskId}
   `);
   await tx.execute(sql`
     UPDATE notifications SET related_task_id = NULL WHERE related_task_id = ${taskId}
+  `);
+  await tx.execute(sql`
+    UPDATE task_recurrence_backfill_decisions SET task_id = NULL WHERE task_id = ${taskId}
   `);
 }

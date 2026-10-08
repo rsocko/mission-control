@@ -19,6 +19,7 @@ import type { FlowHistoryEventInput, FlowTaskInput } from '@/lib/stats/flow';
 
 /** A local calendar date, `YYYY-MM-DD`. */
 export type AnalyticsLocalDate = string;
+export type AnalyticsPlanningHorizon = 'next' | 'soon' | 'later' | 'someday';
 /** An absolute instant serialized as an ISO-8601 timestamp. */
 export type AnalyticsInstant = string;
 
@@ -67,6 +68,25 @@ export interface AnalyticsSourceCount {
   count: number;
 }
 
+export interface AnalyticsDimensionCount {
+  value: string;
+  count: number;
+}
+
+export interface AnalyticsWorkActivityItem {
+  key: string;
+  label: string;
+  active: number;
+  closed: number;
+}
+
+export interface AnalyticsWorkActivity {
+  lists: AnalyticsWorkActivityItem[];
+  tags: AnalyticsWorkActivityItem[];
+  projects: AnalyticsWorkActivityItem[];
+  sources: AnalyticsWorkActivityItem[];
+}
+
 export interface AnalyticsProject {
   id: string;
   name: string;
@@ -79,8 +99,27 @@ export interface AnalyticsFilterOptions {
 }
 
 export interface AnalyticsCompletionSpan {
+  id: string;
   createdAt: AnalyticsInstant;
   completedAt: AnalyticsInstant | null;
+}
+
+export interface AnalyticsCompletedTaskTiming {
+  completedAt: AnalyticsInstant | null;
+  dueDate: AnalyticsLocalDate | null;
+}
+
+export interface AnalyticsTaskCompletion {
+  id: string;
+  completedAt: AnalyticsInstant;
+}
+
+export interface AnalyticsMyDayPlanningEvent {
+  id: number;
+  taskId: string;
+  eventType: 'my_day_committed' | 'my_day_withdrawn' | 'my_day_missed';
+  date: AnalyticsLocalDate;
+  occurredAt: AnalyticsInstant;
 }
 
 export interface AnalyticsPlanningFrictionEvent {
@@ -171,7 +210,11 @@ export interface KpiAnalyticsRepository {
   countOpenTasksDueBetween(range: AnalyticsLocalDateRange): Promise<number>;
   countOpenTasksInIds(taskIds: readonly string[]): Promise<number>;
   countOpenTasksWithPriorities(priorities: readonly string[]): Promise<number>;
-  countOpenTasksWithAssignee(): Promise<number>;
+  countOpenTasksAssignedToMe(): Promise<number>;
+  countOpenTasksWithPlanningHorizons(
+    horizons: readonly AnalyticsPlanningHorizon[],
+  ): Promise<number>;
+  countOpenTasksWithoutPlanningHorizon(): Promise<number>;
   countOpenTasksByConnectorType(connectorType: string): Promise<number>;
   /** Uses the shared notification "needs attention" lifecycle predicate. */
   countNotificationsNeedingAttention(): Promise<number>;
@@ -209,15 +252,27 @@ export interface InsightsAnalyticsRepository {
   ): Promise<Array<AnalyticsInstant | null>>;
   listCreatedTimestampsIn(range: AnalyticsInstantRange): Promise<AnalyticsInstant[]>;
   listCompletionSpansIn(range: AnalyticsInstantRange): Promise<AnalyticsCompletionSpan[]>;
+  listCompletedTaskTimingsIn(
+    range: AnalyticsInstantRange,
+  ): Promise<AnalyticsCompletedTaskTiming[]>;
+  listTopLevelTaskCompletionsIn(
+    range: AnalyticsInstantRange,
+  ): Promise<AnalyticsTaskCompletion[]>;
   listCompletedTimestampsSince(
     startInclusive: AnalyticsInstant,
   ): Promise<Array<AnalyticsInstant | null>>;
   sourceBreakdownIn(range: AnalyticsInstantRange): Promise<AnalyticsSourceCount[]>;
+  countCurrentTasksByPriority(): Promise<AnalyticsDimensionCount[]>;
+  countCurrentTasksByStatus(): Promise<AnalyticsDimensionCount[]>;
+  workActivityIn(range: AnalyticsInstantRange): Promise<AnalyticsWorkActivity>;
   listOpenTaskCreatedTimestamps(): Promise<AnalyticsInstant[]>;
   listPlanningFrictionEvents(
     eventTypes: readonly string[],
     range: AnalyticsInstantRange,
   ): Promise<AnalyticsPlanningFrictionEvent[]>;
+  listMyDayPlanningEvents(
+    range: AnalyticsLocalDateRange,
+  ): Promise<AnalyticsMyDayPlanningEvent[]>;
   listTaskTagNames(taskIds: readonly string[]): Promise<AnalyticsTaskTagName[]>;
   listActiveProjects(): Promise<AnalyticsProject[]>;
   countProjectTasksCompletedIn(projectId: string, range: AnalyticsInstantRange): Promise<number>;

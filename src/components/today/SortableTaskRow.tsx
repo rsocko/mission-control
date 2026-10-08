@@ -175,8 +175,8 @@ export function SortableTaskRow({
       </CompletionBurst>
       <span className="flex-shrink-0"><ConnectorIcon type={item.connectorType} size={isMobile ? 16 : 14} /></span>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className={`text-[15px] md:text-sm font-medium truncate transition-[color,text-decoration] duration-200 ${isCompleting ? 'line-through text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}`}>{item.title}</p>
+        <div className="flex min-w-0 items-center gap-2">
+          <p className={`min-w-0 flex-1 truncate text-sm font-medium transition-[color,text-decoration] duration-200 ${isCompleting ? 'line-through text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}`}>{item.title}</p>
           {(() => {
             const displayId = getTaskDisplayId(item.connectorType, item.metadata, item.sourceId);
             return displayId ? (
@@ -184,7 +184,11 @@ export function SortableTaskRow({
             ) : null;
           })()}
           {item.microStatus && isTaskBlocked(item.status, item.microStatus) ? (
-            <TaskBlockedBadge status={item.status} microStatus={item.microStatus} />
+            <TaskBlockedBadge
+              status={item.status}
+              microStatus={item.microStatus}
+              labelClassName="hidden @min-[960px]:inline"
+            />
           ) : item.microStatus && MICRO_STATUS_CONFIG[item.microStatus as MicroStatus] && (
             <span
               className="flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-medium"
@@ -195,14 +199,15 @@ export function SortableTaskRow({
               title={MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].description}
             >
               <MicroStatusIcon status={item.microStatus as MicroStatus} size={11} />
-              {MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].label}
+              <span className="hidden @min-[960px]:inline">
+                {MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].label}
+              </span>
             </span>
           )}
-          <SubtaskPill done={item.subtaskDone ?? 0} total={item.subtaskTotal ?? 0} />
         </div>
         <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden">
           {item.sourceListName && (
-            <span className="max-w-[120px] min-w-0 truncate text-xs text-[var(--text-muted)]">{item.sourceListName}</span>
+            <span className="min-w-0 truncate text-xs text-[var(--text-muted)]">{item.sourceListName}</span>
           )}
           {taskSchedule?.scheduledTime && (
             <span className="text-xs text-purple-400 bg-purple-900/30 px-1.5 py-0.5 rounded flex items-center gap-0.5">
@@ -251,6 +256,7 @@ export function SortableTaskRow({
           )}
         </div>
       </div>
+      <SubtaskPill done={item.subtaskDone ?? 0} total={item.subtaskTotal ?? 0} />
       <TaskRowActions
         smartScore={item.smartScore}
         scoreBreakdown={item.scoreBreakdown ?? undefined}

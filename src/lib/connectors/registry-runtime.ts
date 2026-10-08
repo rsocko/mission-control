@@ -15,10 +15,14 @@ export interface ConnectorRuntimeRegistry {
   getAllConnectors(): IConnector[];
 }
 
+export type NotificationCatalogConnectorConfig = Pick<ConnectorConfig, 'settings'>;
+
 export interface ConnectorFactory {
   create(): IConnector;
   readonly notificationTypes?: readonly ConnectorNotificationTypeDefinition[];
-  getNotificationTypes?(config: ConnectorConfig): readonly ConnectorNotificationTypeDefinition[];
+  getNotificationTypes?(
+    config: NotificationCatalogConnectorConfig,
+  ): readonly ConnectorNotificationTypeDefinition[];
 }
 
 export class ConnectorRegistry implements ConnectorRuntimeRegistry {
@@ -35,7 +39,7 @@ export class ConnectorRegistry implements ConnectorRuntimeRegistry {
 
   getNotificationTypeCatalog(
     type: string,
-    config?: ConnectorConfig,
+    config?: NotificationCatalogConnectorConfig,
   ): readonly ConnectorNotificationTypeDefinition[] {
     const factory = this.factories.get(type);
     if (!factory) return Object.freeze([]);

@@ -3,24 +3,34 @@ import 'server-only';
 import { createHmac } from 'node:crypto';
 import type {
   AgentDispatchResult,
+  AgentDispatchScope,
   AgentDispatchStatus,
   ExternalAgentTransport,
 } from './contracts';
 import type { ExternalAgent } from './registry';
-import { resolveAgentCredential } from './registry';
+import { resolveAgentCredential, resolveExternalAgentCredential } from './registry';
 import { canonicalJson, redactForPersistence } from './policy';
 import { ExternalAgentError } from './errors';
+import { createCopilotCloudTransport } from './copilot-cloud';
+import { dispatchToPaperclip } from './paperclip';
 
 export interface TransportDispatch {
   dispatchId: string;
   attempt: number;
   payload: Record<string, unknown>;
+  scope: AgentDispatchScope;
 }
 
 export interface TransportDispatchResult {
   status: Extract<
     AgentDispatchStatus,
-    'queued' | 'in_progress' | 'waiting_for_user' | 'completed' | 'failed'
+    | 'queued'
+    | 'in_progress'
+    | 'waiting_for_user'
+    | 'completed'
+    | 'failed'
+    | 'timed_out'
+    | 'cancelled'
   >;
   providerTaskId?: string;
   providerState?: string;
@@ -112,13 +122,6 @@ function providerStatus(value: unknown): TransportDispatchResult['status'] {
 }
 
 function assertImplementedAgent(agent: ExternalAgent) {
-  if (agent.type === 'copilot-cloud') {
-    throw new ExternalAgentError(
-      'GitHub-hosted Copilot dispatch is reserved for issue #931 and is not configured',
-      'TRANSPORT_NOT_IMPLEMENTED',
-      501,
-    );
-  }
   if (agent.type === 'copilot-sdk-workspace') {
     throw new ExternalAgentError(
       'Mission Control-hosted Copilot workspace execution is reserved for issue #2123',
@@ -276,5 +279,36 @@ export function createTransportResolver(options: {
     manual: createManualTransport(),
     mcp: createMcpTransport(options.mcpInvoker),
   };
-  return (agent) => adapters[agent.transport];
+  const copilotCloud = createCopilotCloudTransport(options.fetcher);
+  return (agent) => {
+    if (agent.type === 'copilot-cloud') return copilotCloud;
+    if (agent.type === 'paperclip') {
+      return {
+        kind: 'push',
+        async dispatch(paperclipAgent, dispatch) {
+          const config = paperclipAgent.providerConfig.paperclip;
+          if (!paperclipAgent.endpoint || !config) {
+            throw new ExternalAgentError(
+              'Paperclip endpoint and provider configuration are missing',
+              'TRANSPORT_INVALID',
+              500,
+            );
+          }
+          return dispatchToPaperclip(
+            {
+              endpoint: paperclipAgent.endpoint,
+              credential: await resolveExternalAgentCredential(paperclipAgent),
+              config: dispatch.scope.paperclip ?? config,
+              fetcher: options.fetcher,
+            },
+            {
+              dispatchId: dispatch.dispatchId,
+              payload: dispatch.payload,
+            },
+          );
+        },
+      };
+    }
+    return adapters[agent.transport];
+  };
 }

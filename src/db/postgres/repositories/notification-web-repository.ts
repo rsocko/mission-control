@@ -27,6 +27,19 @@ import { wakeNotificationWritebackDispatcher } from '@/lib/notifications/notific
 import { supportsNotificationDismissalWriteback } from '@/lib/connectors/notification-writeback-contract';
 
 const PARTICIPATING_REASONS = ['author', 'comment', 'manual', 'state_change', 'subscribed'];
+const RYMESSAGE_TEMPLATE_KEY = 'rymessage.companion-action';
+const RYMESSAGE_TYPE_SQL = `CASE
+  WHEN connector_type = 'rymessage' AND template_key = '${RYMESSAGE_TEMPLATE_KEY}'
+  THEN COALESCE(
+    'rymessage.' || NULLIF(lower(replace(replace(COALESCE(
+      metadata->>'semanticType',
+      metadata->>'category',
+      metadata->>'actionType'
+    ), '_', '-'), ' ', '-')), ''),
+    template_key
+  )
+  ELSE template_key
+END`;
 
 const NOTIFICATION_SELECT_COLUMNS = `
   id,
@@ -66,6 +79,15 @@ const NOTIFICATION_SELECT_COLUMNS = `
   group_key AS "groupKey",
   dedupe_key AS "dedupeKey",
   related_task_id AS "relatedTaskId",
+  CASE
+    WHEN related_task_id IS NULL THEN NULL
+    WHEN EXISTS (
+      SELECT 1 FROM tasks
+      WHERE tasks.id = notifications.related_task_id
+        AND tasks.deleted_at IS NULL
+    ) THEN 'available'
+    ELSE 'unavailable'
+  END AS "relatedTaskAvailability",
   related_project_id AS "relatedProjectId",
   related_entity_type AS "relatedEntityType",
   related_entity_id AS "relatedEntityId",
@@ -149,7 +171,12 @@ function buildBulkWhereClausesPg(query: NotificationQuery, params: unknown[]): s
     }
   }
   if (query.sourceAccount) { conditions.push(`connector_instance_id = $${params.length + 1}`); params.push(query.sourceAccount); }
-  if (query.notificationType) { conditions.push(`template_key = $${params.length + 1}`); params.push(query.notificationType); }
+  if (query.notificationType) {
+    conditions.push(query.notificationType === RYMESSAGE_TEMPLATE_KEY
+      ? `template_key = $${params.length + 1}`
+      : `${RYMESSAGE_TYPE_SQL} = $${params.length + 1}`);
+    params.push(query.notificationType);
+  }
   if (query.level) { conditions.push(`level = $${params.length + 1}`); params.push(query.level); }
   if (query.category) { conditions.push(`category = $${params.length + 1}`); params.push(query.category); }
   if (query.merchant) {
@@ -189,6 +216,41 @@ function buildBulkWhereClausesPg(query: NotificationQuery, params: unknown[]): s
     conditions.push(`received_at >= $${params.length + 1}`); params.push(since.toISOString());
   }
   return conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+}
+
+type NotificationFacetDimension =
+  | 'level'
+  | 'category'
+  | 'source'
+  | 'sourceAccount'
+  | 'notificationType'
+  | 'state'
+  | 'merchant'
+  | 'dateRange';
+
+function queryWithoutFacet(
+  query: NotificationQuery,
+  facet: NotificationFacetDimension,
+): NotificationQuery {
+  switch (facet) {
+    case 'source':
+      return { ...query, source: null, sourceAccount: null, notificationType: null };
+    case 'sourceAccount':
+      return { ...query, sourceAccount: null, notificationType: null };
+    default:
+      return { ...query, [facet]: null };
+  }
+}
+
+function postgresFacetWhere(
+  query: NotificationQuery,
+  facet: NotificationFacetDimension,
+): { sql: string; params: unknown[] } {
+  const params: unknown[] = [];
+  return {
+    sql: buildBulkWhereClausesPg(queryWithoutFacet(query, facet), params),
+    params,
+  };
 }
 
 /**
@@ -500,7 +562,13 @@ export function createPostgresNotificationWebRepository(
         }
       }
       if (query.sourceAccount) { conditions.push(`connector_instance_id = $${paramIdx}`); params.push(query.sourceAccount); paramIdx += 1; }
-      if (query.notificationType) { conditions.push(`template_key = $${paramIdx}`); params.push(query.notificationType); paramIdx += 1; }
+      if (query.notificationType) {
+        conditions.push(query.notificationType === RYMESSAGE_TEMPLATE_KEY
+          ? `template_key = $${paramIdx}`
+          : `${RYMESSAGE_TYPE_SQL} = $${paramIdx}`);
+        params.push(query.notificationType);
+        paramIdx += 1;
+      }
       if (query.level) { conditions.push(`level = $${paramIdx}`); params.push(query.level); paramIdx += 1; }
       if (query.category) { conditions.push(`category = $${paramIdx}`); params.push(query.category); paramIdx += 1; }
       if (query.merchant) {
@@ -581,31 +649,19 @@ export function createPostgresNotificationWebRepository(
         actions = actionResult.rows as NotificationActionRow[];
       }
 
-      // Stats, facets, matching count in parallel
-      const typeFacetParams: unknown[] = [now];
-      let typeFacetParamIdx = 2;
-      const typeFacetConditions = [
-        inboxConditionPg(1).sql,
-        `connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
-        `template_key IS NOT NULL`,
-      ];
-      if (query.source) {
-        const sourceTypes = financeProviderFilterValues(query.source);
-        const placeholders = sourceTypes.map((_, index) => `$${typeFacetParamIdx + index}`).join(',');
-        typeFacetConditions.push(sourceTypes.length === 1
-          ? `connector_type = $${typeFacetParamIdx}`
-          : `connector_type IN (${placeholders})`);
-        typeFacetParams.push(...sourceTypes);
-        typeFacetParamIdx += sourceTypes.length;
-      }
-      if (query.sourceAccount) {
-        typeFacetConditions.push(`connector_instance_id = $${typeFacetParamIdx}`);
-        typeFacetParams.push(query.sourceAccount);
-      }
+      // Stats, contextual facets, and matching count in parallel.
+      const levelFacetWhere = postgresFacetWhere(query, 'level');
+      const categoryFacetWhere = postgresFacetWhere(query, 'category');
+      const sourceFacetWhere = postgresFacetWhere(query, 'source');
+      const sourceAccountFacetWhere = postgresFacetWhere(query, 'sourceAccount');
+      const typeFacetWhere = postgresFacetWhere(query, 'notificationType');
+      const merchantFacetWhere = postgresFacetWhere(query, 'merchant');
+      const stateBaseQuery = queryWithoutFacet(query, 'state');
+      const dateRangeBaseQuery = queryWithoutFacet(query, 'dateRange');
 
       const [
         statsResult, levelResult, categoryResult, sourceResult, sourceAccountResult,
-        notificationTypeResult, stateResult, merchantResult, matchingResult,
+        notificationTypeResult, stateResult, dateRangeResult, merchantResult, matchingResult,
       ] = await Promise.all([
         pool.query(`
           SELECT COUNT(*) AS total,
@@ -620,9 +676,9 @@ export function createPostgresNotificationWebRepository(
           FROM notifications
           WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
         `, [now, now]),
-        pool.query(`SELECT level AS value, COUNT(*) AS count FROM notifications WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY level`, [now]),
-        pool.query(`SELECT category AS value, COUNT(*) AS count FROM notifications WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY category`, [now]),
-        pool.query(`SELECT connector_type AS value, COUNT(*) AS count FROM notifications WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY connector_type`, [now]),
+        pool.query(`SELECT level AS value, COUNT(*) AS count FROM notifications ${levelFacetWhere.sql} GROUP BY level`, levelFacetWhere.params),
+        pool.query(`SELECT category AS value, COUNT(*) AS count FROM notifications ${categoryFacetWhere.sql} GROUP BY category`, categoryFacetWhere.params),
+        pool.query(`SELECT connector_type AS value, COUNT(*) AS count FROM notifications ${sourceFacetWhere.sql} GROUP BY connector_type`, sourceFacetWhere.params),
         pool.query(`
           SELECT notifications.connector_instance_id AS key,
                  notifications.connector_type AS source,
@@ -630,32 +686,56 @@ export function createPostgresNotificationWebRepository(
                  COUNT(*) AS count
           FROM notifications
           LEFT JOIN connector_configs ON connector_configs.id = notifications.connector_instance_id
-          WHERE ${inboxConditionPg(1).sql}
-            AND notifications.connector_instance_id NOT IN (
-              SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
-            )
+          ${sourceAccountFacetWhere.sql}
           GROUP BY notifications.connector_instance_id, notifications.connector_type, connector_configs.name
-        `, [now]),
+        `, sourceAccountFacetWhere.params),
         pool.query(`
-          SELECT template_key AS key, COUNT(*) AS count
+          SELECT ${RYMESSAGE_TYPE_SQL} AS key, COUNT(*) AS count
           FROM notifications
-          WHERE ${typeFacetConditions.join(' AND ')}
-          GROUP BY template_key
-          ORDER BY COUNT(*) DESC, template_key ASC
-        `, typeFacetParams),
-        pool.query(`SELECT state AS value, COUNT(*) AS count FROM notifications WHERE connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY state`),
+          ${typeFacetWhere.sql}${typeFacetWhere.sql ? ' AND' : ' WHERE'} ${RYMESSAGE_TYPE_SQL} IS NOT NULL
+          GROUP BY ${RYMESSAGE_TYPE_SQL}
+          ORDER BY COUNT(*) DESC, key ASC
+        `, typeFacetWhere.params),
+        Promise.all((['unread', 'read', 'dismissed'] as const).map(async value => {
+          const facetParams: unknown[] = [];
+          const facetWhere = buildBulkWhereClausesPg(
+            { ...stateBaseQuery, state: value },
+            facetParams,
+          );
+          const result = await pool.query(
+            `SELECT COUNT(*) AS count FROM notifications ${facetWhere}`,
+            facetParams,
+          );
+          return { value, count: Number(result.rows[0]?.count ?? 0) };
+        })),
+        Promise.all(([
+          ['any', null],
+          ['today', 'today'],
+          ['week', 'week'],
+          ['month', 'month'],
+        ] as const).map(async ([key, dateRange]) => {
+          const facetParams: unknown[] = [];
+          const facetWhere = buildBulkWhereClausesPg(
+            { ...dateRangeBaseQuery, dateRange },
+            facetParams,
+          );
+          const result = await pool.query(
+            `SELECT COUNT(*) AS count FROM notifications ${facetWhere}`,
+            facetParams,
+          );
+          return [key, Number(result.rows[0]?.count ?? 0)] as const;
+        })),
         pool.query(`
           SELECT presentation->>'financeMerchantKey' AS key,
                  MIN(presentation->>'financeMerchantLabel') AS label,
                  COUNT(*) AS count
           FROM notifications
-          WHERE ${inboxConditionPg(1).sql}
-            AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
-            AND ${merchantMetadataConditionPg(2).sql}
+          ${merchantFacetWhere.sql}${merchantFacetWhere.sql ? ' AND' : ' WHERE'}
+            ${merchantMetadataConditionPg(merchantFacetWhere.params.length + 1).sql}
           GROUP BY presentation->>'financeMerchantKey'
           ORDER BY COUNT(*) DESC, presentation->>'financeMerchantKey' ASC
           LIMIT ${MAX_NOTIFICATION_MERCHANT_FACETS}
-        `, [now]),
+        `, merchantFacetWhere.params),
         pool.query(`SELECT COUNT(*) AS count FROM notifications ${unpaginatedWhere}`, unpaginatedParams),
       ]);
 
@@ -698,8 +778,9 @@ export function createPostgresNotificationWebRepository(
             label: facet.key as string,
             count: Number(facet.count),
           })),
-          state: toRecord(stateResult.rows),
+          state: toRecord(stateResult),
           merchant: normalizedMerchantFacets,
+          dateRange: Object.fromEntries(dateRangeResult),
         },
         matchingCount: Number(matchingResult.rows[0]?.count ?? 0),
       };
@@ -751,6 +832,15 @@ export function createPostgresNotificationWebRepository(
           category, template_key AS "templateKey", state,
           read_state AS "readState", disposition, source_state AS "sourceState",
           navigation_target AS "navigationTarget", related_task_id AS "relatedTaskId",
+          CASE
+            WHEN related_task_id IS NULL THEN NULL
+            WHEN EXISTS (
+              SELECT 1 FROM tasks
+              WHERE tasks.id = notifications.related_task_id
+                AND tasks.deleted_at IS NULL
+            ) THEN 'available'
+            ELSE 'unavailable'
+          END AS "relatedTaskAvailability",
           related_project_id AS "relatedProjectId", group_key AS "groupKey",
           metadata, presentation,
           last_source_activity_at AS "lastSourceActivityAt",
@@ -821,6 +911,13 @@ export function createPostgresNotificationWebRepository(
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        const taskResult = await client.query(`
+          SELECT id, status, reminder_at AS "reminderAt",
+                 reminder_nag_series_id AS "reminderNagSeriesId"
+          FROM tasks
+          WHERE id = $1
+          FOR UPDATE
+        `, [input.taskId]);
         const notificationResult = await client.query(`
           SELECT read_state AS "readState", disposition, source_state AS "sourceState",
                  last_source_activity_at AS "lastSourceActivityAt",
@@ -829,12 +926,6 @@ export function createPostgresNotificationWebRepository(
           WHERE id = $1
           FOR UPDATE
         `, [input.notificationId]);
-        const taskResult = await client.query(`
-          SELECT id, status, reminder_at AS "reminderAt"
-          FROM tasks
-          WHERE id = $1
-          FOR UPDATE
-        `, [input.taskId]);
         const notification = notificationResult.rows[0];
         const task = taskResult.rows[0];
         if (!notification || !task) {
@@ -852,7 +943,29 @@ export function createPostgresNotificationWebRepository(
           await client.query('ROLLBACK');
           return { applied: false, conflict: 'task_terminal' };
         }
-        if (input.actionType === 'remind_later' && task.reminderAt !== null) {
+        const metadata = notification.metadata !== null
+          && typeof notification.metadata === 'object'
+          && !Array.isArray(notification.metadata)
+          ? notification.metadata as Record<string, unknown>
+          : {};
+        const notificationSeriesId = typeof metadata.reminderNagSeriesId === 'string'
+          ? metadata.reminderNagSeriesId
+          : null;
+        const persistentSeriesMatches = notificationSeriesId !== null
+          && notificationSeriesId === task.reminderNagSeriesId;
+        if (
+          input.actionType === 'remind_later'
+          && task.reminderAt !== null
+          && !persistentSeriesMatches
+        ) {
+          await client.query('ROLLBACK');
+          return { applied: false, conflict: 'reminder_changed' };
+        }
+        if (
+          input.actionType === 'dismiss_reminder'
+          && notificationSeriesId !== null
+          && !persistentSeriesMatches
+        ) {
           await client.query('ROLLBACK');
           return { applied: false, conflict: 'reminder_changed' };
         }
@@ -871,8 +984,10 @@ export function createPostgresNotificationWebRepository(
           const scheduled = await client.query(`
             UPDATE tasks
             SET reminder_at = $1, updated_at = $2
-            WHERE id = $3 AND reminder_at IS NULL AND status NOT IN ('done', 'cancelled')
-          `, [input.reminderAt, input.now, input.taskId]);
+            WHERE id = $3
+              AND (reminder_at IS NULL OR reminder_nag_series_id = $4)
+              AND status NOT IN ('done', 'cancelled')
+          `, [input.reminderAt, input.now, input.taskId, notificationSeriesId]);
           if (scheduled.rowCount !== 1) {
             await client.query('ROLLBACK');
             return { applied: false, conflict: 'reminder_changed' };
@@ -881,7 +996,9 @@ export function createPostgresNotificationWebRepository(
           await client.query(`
             UPDATE tasks
             SET reminder_at = NULL, reminder_relative = NULL,
-                reminder_due_time = NULL, updated_at = $1
+                reminder_due_time = NULL, reminder_nag_interval = NULL,
+                reminder_nag_stop_at = NULL, reminder_nag_series_id = NULL,
+                reminder_nag_sequence = 0, updated_at = $1
             WHERE id = $2
           `, [input.now, input.taskId]);
         }
@@ -891,11 +1008,6 @@ export function createPostgresNotificationWebRepository(
           input.actionType === 'dismiss_reminder' ? 'dismissed' : 'archived',
           input.now,
         );
-        const metadata = notification.metadata !== null
-          && typeof notification.metadata === 'object'
-          && !Array.isArray(notification.metadata)
-          ? notification.metadata as Record<string, unknown>
-          : {};
         await client.query(`
           UPDATE notifications
           SET state = $1, read_state = COALESCE($2, read_state),

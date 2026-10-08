@@ -42,15 +42,11 @@ describe('parseTaskInput – backslash escape', () => {
     });
   });
 
-  describe('escaped destination', () => {
-    it('does not extract \\@work as a destination', () => {
-      const result = parseTaskInput('email \\@work address');
-      expect(result.destination).toBeNull();
-    });
-
-    it('strips the backslash from the title when destination is escaped', () => {
-      const result = parseTaskInput('email \\@work address');
-      expect(result.title).toBe('email @work address');
+  describe('escaped My Day marker', () => {
+    it('keeps an escaped standalone asterisk literal', () => {
+      const result = parseTaskInput('review \\* marker');
+      expect(result.addToMyDay).toBe(false);
+      expect(result.title).toBe('review * marker');
     });
   });
 
@@ -103,18 +99,18 @@ describe('parseTaskInput – backslash escape', () => {
 
     it('strips escape markers from every escaped token in one title', () => {
       const result = parseTaskInput(
-        'literal \\#tag \\@work \\!high \\~30m \\^3 \\+API \\/due:tomorrow \\next friday \\aug 15',
+        'literal \\#tag \\@work \\!high \\~30m \\^3 \\+API \\* \\/due:tomorrow \\next friday \\aug 15',
       );
       expect(result.tags).toHaveLength(0);
-      expect(result.destination).toBeNull();
       expect(result.priority).toBeNull();
       expect(result.estimatedDuration).toBeNull();
       expect(result.effort).toBeNull();
       expect(result.project).toBeNull();
+      expect(result.addToMyDay).toBe(false);
       expect(result.dueDate).toBeNull();
       expect(result.dateSuggestion).toBeNull();
       expect(result.title).toBe(
-        'literal #tag @work !high ~30m ^3 +API /due:tomorrow next friday aug 15',
+        'literal #tag @work !high ~30m ^3 +API * /due:tomorrow next friday aug 15',
       );
     });
 
@@ -139,12 +135,6 @@ describe('parseTaskInput – backslash escape', () => {
       const result = parseTaskInput('compare \\!high with !high');
       expect(result.priority).toBe('high');
       expect(result.title).toBe('compare !high with');
-    });
-
-    it('removes the active destination without persisting the escape marker', () => {
-      const result = parseTaskInput('email \\@work before filing @work');
-      expect(result.destination).toBe('work');
-      expect(result.title).toBe('email @work before filing');
     });
 
     it('removes the active duration without persisting the escape marker', () => {

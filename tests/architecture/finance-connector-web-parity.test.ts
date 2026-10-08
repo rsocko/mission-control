@@ -118,8 +118,8 @@ describe('L12b finance connector/operator web parity', () => {
   it('does not relocate the Monarch dynamic import boundary', () => {
     const connector = source('src/lib/connectors/monarch-money/index.ts');
     expect(connector).toContain("await import('./attribution-service')");
-    expect(connector).toContain(
-      "process.env.MC_DATABASE_BACKEND === 'postgres'",
+    expect(connector).not.toContain(
+      'Legacy finance attribution write-back is unavailable on PostgreSQL',
     );
   });
 

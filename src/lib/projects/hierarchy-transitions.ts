@@ -3,7 +3,7 @@ import type {
   ProjectHierarchyCommand,
   ProjectHierarchySnapshot,
 } from './hierarchy-types';
-import type { ProjectPhaseItem, TaskField } from '@/types';
+import type { ProjectPhase, ProjectPhaseItem, TaskField } from '@/types';
 
 /**
  * Pure, in-memory project-hierarchy transition planner (L15).
@@ -47,6 +47,9 @@ export type ProjectHierarchyMutation =
   | { kind: 'insert_phase_item'; item: ProjectPhaseItem }
   | { kind: 'move_phase_item'; itemId: string; phaseId: string; sortOrder: number }
   | { kind: 'update_phase_item_metadata'; itemId: string; updates: PhaseItemUpdates }
+  | { kind: 'insert_phase'; phase: ProjectPhase }
+  | { kind: 'update_phase'; phase: ProjectPhase }
+  | { kind: 'delete_phase'; phaseId: string; updatedAt: string }
   | { kind: 'set_phase_sort_order'; phaseId: string; sortOrder: number; updatedAt: string };
 
 export interface ProjectHierarchyPlanInput {
@@ -99,6 +102,8 @@ export function projectHierarchyCommandTaskIds(
       return command.states.map((state) => state.taskId);
     case 'update_phase_item':
       return [command.taskId];
+    case 'replace_phase_structure':
+      return command.placements.map((placement) => placement.taskId);
   }
 }
 
@@ -134,6 +139,11 @@ export function projectHierarchyMutationRequirements(
       }));
     case 'update_phase_item':
       return [{ taskId: command.taskId, fields: ['phases'] as const }];
+    case 'replace_phase_structure':
+      return command.placements.map((placement) => ({
+        taskId: placement.taskId,
+        fields: ['phases'] as const,
+      }));
   }
 }
 
@@ -362,6 +372,120 @@ function applyCommand(
           updates: inverseUpdates,
         },
         changed: metadataChanged || placementResult.changed,
+      };
+    }
+    case 'replace_phase_structure': {
+      const phaseIds = command.phases.map((phase) => phase.id);
+      if (new Set(phaseIds).size !== phaseIds.length) {
+        throw new ProjectHierarchyServiceError(
+          'Phase IDs must be unique',
+          400,
+          'INVALID_PHASE_STRUCTURE',
+        );
+      }
+      if (command.phases.some((phase) => phase.projectId !== state.snapshot.projectId)) {
+        throw new ProjectHierarchyServiceError(
+          'Every phase must belong to this project',
+          400,
+          'INVALID_PHASE_STRUCTURE',
+        );
+      }
+      const destinationIds = new Set(phaseIds);
+      if (command.phases.some((phase) => (
+        phase.startAfterPhaseId !== null && !destinationIds.has(phase.startAfterPhaseId)
+      ))) {
+        throw new ProjectHierarchyServiceError(
+          'Phase dependencies must reference a phase in the replacement structure',
+          400,
+          'INVALID_PHASE_DEPENDENCY',
+        );
+      }
+      if (command.placements.some((placement) => (
+        placement.phaseId === null || !destinationIds.has(placement.phaseId)
+      ))) {
+        throw new ProjectHierarchyServiceError(
+          'Every task must be assigned to a phase in the replacement structure',
+          400,
+          'INVALID_PHASE_STRUCTURE',
+        );
+      }
+
+      const currentTaskIds = state.phaseIds.flatMap((phaseId) => (
+        (state.itemsByPhase.get(phaseId) ?? []).map((item) => item.taskId)
+      ));
+      const requestedTaskIds = command.placements.map((placement) => placement.taskId);
+      if (
+        currentTaskIds.length !== requestedTaskIds.length
+        || currentTaskIds.some((taskId) => !requestedTaskIds.includes(taskId))
+      ) {
+        throw new ProjectHierarchyServiceError(
+          'Replacement structure must include every currently assigned task exactly once',
+          400,
+          'INCOMPLETE_PHASE_STRUCTURE',
+        );
+      }
+
+      const currentPhases = state.snapshot.phases;
+      const inverseCommand: ProjectHierarchyCommand = {
+        type: 'replace_phase_structure',
+        phases: currentPhases,
+        placements: placementsFromState(state, currentTaskIds),
+      };
+      const currentById = new Map(currentPhases.map((phase) => [phase.id, phase]));
+      const nextById = new Map(command.phases.map((phase) => [phase.id, phase]));
+      const phaseChanged = (
+        currentPhases.length !== command.phases.length
+        || command.phases.some((phase) => (
+          JSON.stringify(currentById.get(phase.id)) !== JSON.stringify(phase)
+        ))
+      );
+
+      for (const phase of command.phases) {
+        if (JSON.stringify(currentById.get(phase.id)) !== JSON.stringify(phase)) {
+          state.mutations.push({
+            kind: currentById.has(phase.id) ? 'update_phase' : 'insert_phase',
+            phase,
+          });
+        }
+        if (!state.itemsByPhase.has(phase.id)) {
+          state.itemsByPhase.set(phase.id, []);
+          state.phaseIds.push(phase.id);
+        }
+      }
+
+      const placementResult = applyTaskPlacements(state, command.placements);
+      for (const phaseId of [...state.phaseIds]) {
+        if (nextById.has(phaseId)) continue;
+        if ((state.itemsByPhase.get(phaseId) ?? []).length > 0) {
+          throw new ProjectHierarchyServiceError(
+            'A removed phase still contains tasks',
+            400,
+            'PHASE_NOT_EMPTY',
+          );
+        }
+        state.mutations.push({ kind: 'delete_phase', phaseId, updatedAt: state.now });
+        state.itemsByPhase.delete(phaseId);
+      }
+
+      command.phases.forEach((phase, index) => {
+        if (phase.sortOrder !== index) {
+          throw new ProjectHierarchyServiceError(
+            'Phase sort order must be dense and match the requested order',
+            400,
+            'INVALID_PHASE_ORDER',
+          );
+        }
+        state.mutations.push({
+          kind: 'set_phase_sort_order',
+          phaseId: phase.id,
+          sortOrder: index,
+          updatedAt: phase.updatedAt,
+        });
+      });
+      state.phaseIds = phaseIds;
+      return {
+        inverseCommand,
+        changed: phaseChanged || placementResult.changed,
       };
     }
   }

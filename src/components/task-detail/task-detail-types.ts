@@ -6,6 +6,7 @@ import type {
   TaskSourceModel,
 } from '@/types';
 import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
+import type { RecurrenceControlState } from '@/lib/recurrence/editor-contract';
 
 /** A tag that can be displayed on, added to, or removed from a task. */
 export interface TaskTag {
@@ -27,6 +28,9 @@ export interface Subtask {
   id: string;
   title: string;
   status: string;
+  sourceId?: string;
+  connectorType?: string;
+  siblingOrder?: number | null;
 }
 
 /** Full task record backing the detail panel. */
@@ -42,6 +46,9 @@ export interface TaskDetail {
   dueDate: string | null;
   connectorType: string;
   connectorInstanceId: string;
+  syncStatus?: string;
+  lastSyncedAt?: string;
+  pushRetryCount?: number;
   sourceListId: string | null;
   sourceListName: string | null;
   sourceId: string | null;
@@ -52,14 +59,20 @@ export interface TaskDetail {
   tagIds: string[];
   projectIds: string[];
   subtasks: Subtask[];
+  subtaskOrderRevision?: number;
   metadata: string | null;
   estimatedDuration?: number | null;
   recurrence?: string | null;
   recurrenceMode?: 'schedule' | 'completion';
+  recurrenceControl?: RecurrenceControlState;
   effort?: number | null;
   reminderAt?: string | null;
   reminderRelative?: ReminderRelativeRule | null;
   reminderDueTime?: string | null;
+  reminderNagInterval?: 1 | 5 | 15 | null;
+  reminderNagStopAt?: string | null;
+  reminderNagSeriesId?: string | null;
+  reminderNagSequence?: number;
   reminderTimezone?: string;
   snoozedUntil?: string | null;
   isInMyDay?: boolean;
@@ -105,6 +118,7 @@ export interface WritableConnector {
 
 /** Surface the panel is rendered in. */
 export type TaskDetailMode = 'panel' | 'dialog' | 'workspace' | 'mobile';
+export type TaskDetailCloseReason = 'dismiss' | 'task-removed';
 
 /** Host request to open the expanded notes dialog for a task. */
 export interface TaskNotesOpenRequest {
@@ -181,7 +195,7 @@ export interface TaskDetailMetadata {
 
 export interface TaskDetailPanelProps {
   taskId: string;
-  onClose: (reason?: 'dismiss' | 'task-removed') => void;
+  onClose: (reason?: TaskDetailCloseReason) => void;
   onUpdate?: (fields?: TaskFieldUpdate) => void;
   onSubtaskCountChange?: (done: number, total: number) => void;
   availableTags?: TaskTag[];

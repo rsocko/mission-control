@@ -6,6 +6,11 @@ import { X } from 'lucide-react';
 import { modalOverlay, modalContent } from '@/lib/motion';
 import { uiLogger } from '@/lib/client-logger';
 import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
+import {
+  isRewardMilestone,
+  notifyCompletionFeedback,
+  TASK_COMPLETED_EVENT,
+} from '@/lib/completion-sounds';
 
 interface DopamineReward {
   id: string;
@@ -56,35 +61,38 @@ export function DopamineMenu() {
   // Initialize watermark and listen for task completions in a single effect
   // to avoid the race where the listener fires before the watermark is set.
   useEffect(() => {
-    if (!settings?.enabled) return;
-
-    const { threshold } = settings;
+    const threshold = settings?.threshold ?? 1;
     initialized.current = false;
 
-    // Set the watermark before registering the listener
-    fetchCount().then((count) => {
-      setTodayCount(count);
-      lastTriggeredAt.current = Math.floor(count / threshold);
-      initialized.current = true;
-    });
+    if (settings?.enabled) {
+      fetchCount().then((count) => {
+        setTodayCount(count);
+        lastTriggeredAt.current = Math.floor(count / threshold);
+        initialized.current = true;
+      });
+    }
 
     async function handleCompletion() {
-      // Don't trigger until the watermark is set
-      if (!initialized.current) return;
+      if (!settings?.enabled || !initialized.current) {
+        notifyCompletionFeedback(false);
+        return;
+      }
 
       const count = await fetchCount();
       setTodayCount(count);
 
       const currentMultiple = Math.floor(count / threshold);
-      if (count > 0 && count % threshold === 0 && currentMultiple > lastTriggeredAt.current) {
+      const reward = isRewardMilestone(count, threshold, lastTriggeredAt.current);
+      if (reward) {
         lastTriggeredAt.current = currentMultiple;
         setPickedReward(null);
         setOpen(true);
       }
+      notifyCompletionFeedback(reward);
     }
 
-    window.addEventListener('mc:task-completed', handleCompletion);
-    return () => window.removeEventListener('mc:task-completed', handleCompletion);
+    window.addEventListener(TASK_COMPLETED_EVENT, handleCompletion);
+    return () => window.removeEventListener(TASK_COMPLETED_EVENT, handleCompletion);
   }, [fetchCount, settings]);
 
   // Clean up close timer on unmount

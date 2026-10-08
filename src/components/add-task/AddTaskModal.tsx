@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Check, CheckSquare, Clock, FileText, Link2, Repeat, ChevronDown, Maximize2, Minimize2, ClipboardList, X } from 'lucide-react';
+import { Check, CheckSquare, Clock, FileText, Link2, Repeat, ChevronDown, Maximize2, Minimize2, ClipboardList, Search, X } from 'lucide-react';
 import Image from 'next/image';
 import {
   Select,
@@ -16,15 +16,26 @@ import { PlanningHorizonFieldLabel, PlanningHorizonOption } from '@/components/P
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import { getTagPillStyle, CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { modalOverlay, modalContent } from '@/lib/motion';
-import { ParsedTask, getDateSuggestions } from '@/lib/parse-task-input';
+import { ParsedTask, getDateSuggestions, parseTaskInputForSubmission } from '@/lib/parse-task-input';
 import RecurrencePicker from '@/components/ui/RecurrencePicker';
 import { taskLogger } from '@/lib/client-logger';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { EFFORT_TO_DURATION, durationToEffort } from '@/lib/constants/task-formatting';
 import { EffortSelect } from '@/components/EffortBadge';
+import {
+  DEFAULT_QUICK_ADD_PREFERENCES,
+  getQuickAddPreferences,
+  type QuickAddPreferences,
+} from '@/lib/quick-add-preferences';
 import type { QuickAddDestination } from './quick-add-types';
 import type { PlanningHorizon } from '@/types';
 import { PLANNING_HORIZONS } from '@/lib/tasks/planning-horizon';
+import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
+import {
+  groupSourceLists,
+  readRecentSourceListIds,
+  recordRecentSourceListId,
+} from '@/lib/source-list-picker';
 
 interface Tag {
   id: string;
@@ -99,6 +110,8 @@ interface AddTaskModalProps {
   prefill?: TaskPrefill;
   /** Durable provenance used to deduplicate task creation from a triage item */
   triageItemId?: string;
+  /** Parse Quick Add tokens entered into the title, used by the mobile capture flow. */
+  enableQuickAddSemantics?: boolean;
 }
 
 function formatDurationLabel(minutes: number): string {
@@ -113,9 +126,9 @@ function formatDurationLabel(minutes: number): string {
 function ConnectorIconImg({ type, size = 14 }: { type: string; size?: number }) {
   const src = CONNECTOR_ICON_PATHS[type];
   if (src) {
-    return <Image src={src} alt={type} width={size} height={size} className="flex-shrink-0" />;
+    return <Image src={src} alt="" aria-hidden="true" width={size} height={size} className="flex-shrink-0" />;
   }
-  return <ClipboardList size={size} className="flex-shrink-0 text-[var(--text-muted)]" />;
+  return <ClipboardList aria-hidden="true" size={size} className="flex-shrink-0 text-[var(--text-muted)]" />;
 }
 
 export function AddTaskModal({
@@ -133,6 +146,7 @@ export function AddTaskModal({
   initialAddToMyDay,
   prefill,
   triageItemId,
+  enableQuickAddSemantics = false,
 }: AddTaskModalProps) {
   const [title, setTitle] = useState(prefill?.title || initialParsed?.title || initialInput);
   const [description, setDescription] = useState(prefill?.description || '');
@@ -143,6 +157,7 @@ export function AddTaskModal({
     prefill?.planningHorizon ?? initialParsed?.planningHorizon ?? null,
   );
   const [destination, setDestination] = useState(initialDestination);
+  const [destinationManuallySelected, setDestinationManuallySelected] = useState(false);
   const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [prefillTagSlugs, setPrefillTagSlugs] = useState<string[]>(prefill?.tags || []);
   const [tagsLoading, setTagsLoading] = useState(true);
@@ -153,6 +168,7 @@ export function AddTaskModal({
   const [addAnother, setAddAnother] = useState(false);
   const [showDateSuggestions, setShowDateSuggestions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [subtasks, setSubtasks] = useState<string[]>([]);
   const [subtaskInput, setSubtaskInput] = useState('');
   const [estimatedDuration, setEstimatedDuration] = useState<number | null>(initialParsed?.estimatedDuration || null);
@@ -160,32 +176,64 @@ export function AddTaskModal({
   const [customDurationInput, setCustomDurationInput] = useState('');
   const [recurrence, setRecurrence] = useState<string>(initialParsed?.recurrence || 'none');
   const [recurrenceMode, setRecurrenceMode] = useState<'schedule' | 'completion'>('schedule');
+  const [recurrenceOptions, setRecurrenceOptions] = useState<RecurrenceEditorOptions>({
+    skipDates: [],
+    catchUp: 'latest',
+  });
   const [availableLists, setAvailableLists] = useState<SourceList[]>([]);
   const [listGroups, setListGroups] = useState<ListGroup[]>([]);
   const [selectedListId, setSelectedListId] = useState<string>(initialListId || initialDestination.listId || '');
   const [listSearchQuery, setListSearchQuery] = useState('');
   const [isListDropdownOpen, setIsListDropdownOpen] = useState(false);
+  const [recentListIds, setRecentListIds] = useState<string[]>(readRecentSourceListIds);
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [tagSearchQuery, setTagSearchQuery] = useState('');
   const [showTagDropdown, setShowTagDropdown] = useState(false);
+  const [quickAddPreferences] = useState<QuickAddPreferences>(
+    enableQuickAddSemantics ? getQuickAddPreferences : () => DEFAULT_QUICK_ADD_PREFERENCES,
+  );
   const titleRef = useRef<HTMLInputElement>(null);
   const descRef = useRef<HTMLTextAreaElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
   const listDropdownRef = useRef<HTMLDivElement>(null);
   const submitInFlightRef = useRef(false);
+  const captureSemantics = useMemo(() => {
+    if (!enableQuickAddSemantics || !title.trim()) return null;
+    return parseTaskInputForSubmission(title, {
+      ...quickAddPreferences,
+      projects,
+    });
+  }, [enableQuickAddSemantics, projects, quickAddPreferences, title]);
+  const activeDestination = destination;
+  const listSections = useMemo(
+    () => groupSourceLists({
+      lists: availableLists,
+      groups: listGroups,
+      search: listSearchQuery,
+      recentIds: recentListIds,
+    }),
+    [availableLists, listGroups, listSearchQuery, recentListIds],
+  );
+
+  function selectList(sourceId: string) {
+    setSelectedListId(sourceId);
+    setRecentListIds(recordRecentSourceListId(sourceId));
+    setIsListDropdownOpen(false);
+    setListSearchQuery('');
+  }
 
   // Load lists for the selected connector
   useEffect(() => {
-    if (destination.connectorType === 'local') {
+    if (activeDestination.connectorType === 'local') {
       setAvailableLists([]);
       setListGroups([]);
       setSelectedListId('');
       return;
     }
     // Find the connector id (use the base connector, not list-level destination)
-    const connectorId = destination.id;
+    const connectorId = activeDestination.id;
     fetch(`/api/connectors/${connectorId}/lists`)
       .then(r => r.ok ? r.json() : { sourceLists: [], groups: [] })
       .then(data => {
@@ -208,7 +256,7 @@ export function AddTaskModal({
         }
       })
       .catch(() => { setAvailableLists([]); setListGroups([]); });
-  }, [destination.id, destination.connectorType]);
+  }, [activeDestination.id, activeDestination.connectorType]);
 
   // Load tags and projects
   useEffect(() => {
@@ -285,86 +333,130 @@ export function AddTaskModal({
   }, [onClose]);
 
   // Whether the current connector requires an explicit list selection
-  const listRequired = destination.listSelectionMode === 'required'
-    && destination.connectorType !== 'local'
+  const listRequired = activeDestination.listSelectionMode === 'required'
+    && activeDestination.connectorType !== 'local'
     && !selectedListId
-    && !destination.listId;
+    && !activeDestination.listId;
   const waitingForPrefillTags = tagsLoading && prefillTagSlugs.length > 0;
+  const captureSemanticLabels = useMemo(() => {
+    if (!captureSemantics) return [];
+    return [
+      captureSemantics.dueDateLabel,
+      captureSemantics.priority ? `!${captureSemantics.priority}` : null,
+      ...captureSemantics.tags.map(tag => `#${tag}`),
+      captureSemantics.project ? `+${captureSemantics.project}` : null,
+      captureSemantics.planningHorizon ? `~${captureSemantics.planningHorizon}` : null,
+      captureSemantics.estimatedDuration ? formatDurationLabel(captureSemantics.estimatedDuration) : null,
+      captureSemantics.effort ? `Effort ${captureSemantics.effort}` : null,
+      captureSemantics.recurrenceLabel,
+    ].filter((label): label is string => Boolean(label));
+  }, [captureSemantics]);
 
   const handleSubmit = async () => {
-    if (!title.trim() || submitInFlightRef.current || isSubmitting || listRequired || waitingForPrefillTags) return;
+    const semanticTitle = captureSemantics?.title.trim();
+    const submittedTitle = semanticTitle || title.trim();
+    if (!submittedTitle || submitInFlightRef.current || isSubmitting || listRequired || waitingForPrefillTags) return;
     submitInFlightRef.current = true;
     setIsSubmitting(true);
+    setSubmitError(null);
 
     try {
+      const semanticTagSlugs = captureSemantics?.tags || [];
+      const semanticTags = availableTags.filter(tag =>
+        semanticTagSlugs.some(slug =>
+          tag.slug === slug || tag.name.toLowerCase() === slug.toLowerCase()
+        )
+      );
+      const tagIds = [...new Set([...selectedTags, ...semanticTags].map(tag => tag.id))];
+      const unmatchedTagSlugs = semanticTagSlugs.filter(slug =>
+        !semanticTags.some(tag => tag.slug === slug || tag.name.toLowerCase() === slug.toLowerCase())
+      );
+      const tagSlugs = [...new Set([...prefillTagSlugs, ...unmatchedTagSlugs])];
+      const semanticProjectName = captureSemantics?.project?.toLowerCase();
+      const semanticProjectId = captureSemantics?.projectId
+        || projects.find(project =>
+          semanticProjectName && project.name.toLowerCase() === semanticProjectName
+        )?.id;
+
       const res = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: title.trim(),
+          title: submittedTitle,
           description: description.trim() || undefined,
-          dueDate: dueDate || undefined,
-          priority,
-          planningHorizon,
-          connectorType: destination.connectorType,
-          connectorInstanceId: destination.connectorType === 'local'
+          dueDate: captureSemantics?.dueDate || dueDate || undefined,
+          priority: captureSemantics?.priority || priority,
+          planningHorizon: captureSemantics?.planningHorizon || planningHorizon,
+          connectorType: activeDestination.connectorType,
+          connectorInstanceId: activeDestination.connectorType === 'local'
             ? undefined
-            : destination.id,
-          sourceListId: selectedListId || destination.listId,
-          sourceListName: (selectedListId ? availableLists.find(l => l.sourceId === selectedListId)?.name : destination.listName) || undefined,
-          tags: selectedTags.map(t => t.id),
-          tagSlugs: prefillTagSlugs,
-          projectIds: selectedProjectId && !deferProjectAssignment ? [selectedProjectId] : [],
+            : activeDestination.id,
+          sourceListId: selectedListId || activeDestination.listId,
+          sourceListName: (selectedListId ? availableLists.find(l => l.sourceId === selectedListId)?.name : activeDestination.listName) || undefined,
+          tags: tagIds,
+          tagSlugs,
+          projectIds: !deferProjectAssignment && (semanticProjectId || selectedProjectId)
+            ? [semanticProjectId || selectedProjectId]
+            : [],
           subtasks: subtasks.length > 0 ? subtasks : undefined,
-          estimatedDuration: estimatedDuration || undefined,
-          effort: effort || undefined,
-          recurrence: recurrence !== 'none' ? recurrence : undefined,
-          recurrenceMode: recurrence !== 'none' ? recurrenceMode : undefined,
+          estimatedDuration: captureSemantics?.estimatedDuration || estimatedDuration || undefined,
+          effort: captureSemantics?.effort || effort || undefined,
+          recurrence: captureSemantics?.recurrence || (recurrence !== 'none' ? recurrence : undefined),
+          recurrenceMode: captureSemantics?.recurrence || recurrence !== 'none' ? recurrenceMode : undefined,
+          recurrenceSkipDates: recurrence !== 'none' ? recurrenceOptions.skipDates : undefined,
+          recurrenceCatchUp: recurrence !== 'none' ? recurrenceOptions.catchUp : undefined,
           triageItemId,
         }),
       });
 
-      if (res.ok) {
-        const { id: newTaskId } = await res.json();
+      if (!res.ok) {
+        const response = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(response?.error || 'Task creation failed. Check your connection and try again.');
+      }
 
-        // Optionally add to My Day
-        if (addToMyDay) {
-          const { getLocalToday } = await import('@/lib/utils/client-date');
-          await fetch('/api/my-day', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId: newTaskId, date: getLocalToday() }),
-          }).catch((err) => { taskLogger.error('Failed to add task to My Day', { err, taskId: newTaskId }); });
-        }
+      const { id: newTaskId } = await res.json();
 
-        // Notify caller of the new task ID
-        onTaskCreated?.(newTaskId);
+      // Optionally add to My Day
+      if (addToMyDay) {
+        const { getLocalToday } = await import('@/lib/utils/client-date');
+        await fetch('/api/my-day', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId: newTaskId, date: getLocalToday() }),
+        }).catch((err) => { taskLogger.error('Failed to add task to My Day', { err, taskId: newTaskId }); });
+      }
 
-        if (addAnother) {
-          // Keep batch-level organization: destination, list, project, and tags.
-          setTitle('');
-          setDescription('');
-          setDueDate('');
-          setDueDateText('');
-          setPriority('none');
-          setPlanningHorizon(null);
-          setSubtasks([]);
-          setSubtaskInput('');
-          setEstimatedDuration(null);
-          setEffort(null);
-          setCustomDurationInput('');
-          setRecurrence('none');
-          setRecurrenceMode('schedule');
-          setAddToMyDay(initialAddToMyDay ?? false);
-          setTagSearchQuery('');
-          setShowTagDropdown(false);
-          titleRef.current?.focus();
-        } else {
-          onSubmit();
-        }
+      // Notify caller of the new task ID
+      onTaskCreated?.(newTaskId);
+
+      if (addAnother) {
+        // Keep batch-level organization: destination, list, project, and tags.
+        setTitle('');
+        setDescription('');
+        setDueDate('');
+        setDueDateText('');
+        setPriority('none');
+        setPlanningHorizon(null);
+        setSubtasks([]);
+        setSubtaskInput('');
+        setEstimatedDuration(null);
+        setEffort(null);
+        setCustomDurationInput('');
+        setRecurrence('none');
+        setRecurrenceMode('schedule');
+        setRecurrenceOptions({ skipDates: [], catchUp: 'latest' });
+        setAddToMyDay(initialAddToMyDay ?? false);
+        setTagSearchQuery('');
+        setShowTagDropdown(false);
+        titleRef.current?.focus();
+      } else {
+        onSubmit();
       }
     } catch (err) {
       taskLogger.error('Failed to create task', { err });
+      setSubmitError(err instanceof Error
+        ? err.message
+        : 'Task creation failed. Check your connection and try again.');
     } finally {
       submitInFlightRef.current = false;
       setIsSubmitting(false);
@@ -394,7 +486,7 @@ export function AddTaskModal({
     }, 0);
   }
 
-  const isGitHub = destination.connectorType === 'github-issues';
+  const isGitHub = activeDestination.connectorType === 'github-issues';
   const dateSuggestions = getDateSuggestions();
 
   return (
@@ -423,7 +515,7 @@ export function AddTaskModal({
         {/* Header */}
         <div className="px-6 pt-5 pb-0 flex items-center justify-between flex-shrink-0">
           <h2 id="add-task-dialog-title" className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
-            Add Task
+            {enableQuickAddSemantics ? 'Quick capture' : 'Add Task'}
           </h2>
           <div className="flex items-center gap-1">
             <button
@@ -493,11 +585,42 @@ export function AddTaskModal({
             ref={titleRef}
             type="text"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="What needs to be done?"
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setDestinationManuallySelected(false);
+            }}
+            placeholder={enableQuickAddSemantics ? 'Task, date, #tag, !priority…' : 'What needs to be done?'}
             aria-label="Task title"
-            className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none"
+            className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-4 py-3 text-base text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none sm:text-sm"
           />
+          {enableQuickAddSemantics && (
+            <div className="space-y-2">
+              <p className="text-xs leading-5 text-[var(--text-tertiary)]">
+                Add metadata as you type: <code className="text-purple-300">#tag</code>,{' '}
+                <code className="text-orange-300">!priority</code>,{' '}
+                <code className="text-pink-300">+project</code>,{' '}
+                <code className="text-emerald-300">~soon</code>,{' '}
+                <code className="text-violet-300">^effort</code>, or a date.
+              </p>
+              {captureSemanticLabels.length > 0 && (
+                <div
+                  className="flex flex-wrap gap-1.5"
+                  aria-label="Detected task metadata"
+                  aria-live="polite"
+                  role="status"
+                >
+                  {captureSemanticLabels.map((label) => (
+                    <span
+                      key={label}
+                      className="rounded-full border border-[var(--border-strong)] bg-[var(--surface-2)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]"
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Subtasks / Steps */}
           <div>
@@ -551,11 +674,12 @@ export function AddTaskModal({
                   key={dest.id}
                   onClick={() => {
                     setDestination(dest);
+                    setDestinationManuallySelected(true);
                     setSelectedListId('');
                     if (dest.connectorType !== 'local') setRecurrenceMode('schedule');
                   }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
-                    destination.id === dest.id && !destination.listId
+                  className={`flex min-h-11 items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                    activeDestination.id === dest.id && !activeDestination.listId
                       ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent-400)]'
                       : 'border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--surface-0)]'
                   }`}
@@ -572,7 +696,7 @@ export function AddTaskModal({
             </div>
 
             {/* List picker — typeahead combobox with grouped lists */}
-            {(availableLists.length > 0 || destination.listSelectionMode === 'required') && (
+            {(availableLists.length > 0 || activeDestination.listSelectionMode === 'required') && (
               <div className="mt-3 relative" ref={listDropdownRef}>
                 <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">
                   {isGitHub ? 'Repository' : 'List'} {listRequired && <span className="text-amber-500 normal-case">*</span>}
@@ -581,79 +705,67 @@ export function AddTaskModal({
                 <div className="relative">
                   <input
                     type="text"
-                    value={isListDropdownOpen ? listSearchQuery : (availableLists.find(l => l.sourceId === selectedListId)?.name || (destination.listSelectionMode === 'required' ? (isGitHub ? 'Pick a repository…' : 'Pick a list…') : 'Default list'))}
+                    value={isListDropdownOpen ? listSearchQuery : (availableLists.find(l => l.sourceId === selectedListId)?.name || (activeDestination.listSelectionMode === 'required' ? (isGitHub ? 'Pick a repository…' : 'Pick a list…') : 'Default list'))}
                     onChange={(e) => { setListSearchQuery(e.target.value); if (!isListDropdownOpen) setIsListDropdownOpen(true); }}
                     onFocus={() => { setIsListDropdownOpen(true); setListSearchQuery(''); }}
                     onBlur={(e) => { if (!listDropdownRef.current?.contains(e.relatedTarget as Node)) { setIsListDropdownOpen(false); setListSearchQuery(''); } }}
                     placeholder="Search lists..."
-                    className={`w-full bg-[var(--surface-0)] border rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none pr-7 ${listRequired ? 'border-amber-400' : 'border-[var(--border)]'}`}
+                    role="combobox"
+                    aria-expanded={isListDropdownOpen}
+                    aria-controls="add-task-list-options"
+                    aria-label={isGitHub ? 'Choose a repository' : 'Choose a list'}
+                    className={`min-h-11 w-full bg-[var(--surface-0)] border rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] outline-none pr-9 sm:text-xs ${listRequired ? 'border-amber-400' : 'border-[var(--border)]'}`}
                   />
-                  <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                  {isListDropdownOpen
+                    ? <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                    : <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />}
                 </div>
-                {isListDropdownOpen && (() => {
-                  const query = listSearchQuery.toLowerCase();
-                  const filteredLists = query
-                    ? availableLists.filter(l => l.name.toLowerCase().includes(query))
-                    : availableLists;
-
-                  // Group lists: groups in sortOrder, then ungrouped at the end
-                  const groupedEntries: { groupName: string | null; lists: SourceList[] }[] = [];
-                  const sortedGroups = [...listGroups].sort((a, b) => a.sortOrder - b.sortOrder);
-
-                  for (const group of sortedGroups) {
-                    const groupLists = filteredLists
-                      .filter(l => l.groupId === group.id)
-                      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-                    if (groupLists.length > 0) {
-                      groupedEntries.push({ groupName: group.name, lists: groupLists });
-                    }
-                  }
-                  const ungrouped = filteredLists
-                    .filter(l => !l.groupId)
-                    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-                  if (ungrouped.length > 0) {
-                    groupedEntries.push({ groupName: null, lists: ungrouped });
-                  }
-
-                  return (
-                    <div className="absolute z-50 mt-1 w-full max-h-52 overflow-y-auto bg-[var(--surface-0)] border border-[var(--border)] rounded-lg shadow-lg py-1">
-                      {/* Default list option — hidden when list selection is required (e.g. GitHub repos) */}
-                      {destination.listSelectionMode !== 'required' && (
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => { setSelectedListId(''); setIsListDropdownOpen(false); setListSearchQuery(''); }}
-                          className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-2)] ${selectedListId === '' ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-primary)]'}`}
-                        >
-                          Default list
-                        </button>
-                      )}
-                      {groupedEntries.map((entry, gi) => (
-                        <div key={entry.groupName || `ungrouped-${gi}`}>
-                          {entry.groupName && (
-                            <div className="px-3 pt-2 pb-0.5 text-[12px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                              {entry.groupName}
-                            </div>
-                          )}
-                          {entry.lists.map(l => (
+                {isListDropdownOpen && (
+                    <div
+                      id="add-task-list-options"
+                      role="listbox"
+                      aria-label={isGitHub ? 'Repositories' : 'Lists'}
+                      className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto bg-[var(--surface-0)] border border-[var(--border)] rounded-lg shadow-lg py-1"
+                    >
+                      {listSections.map((section) => (
+                        <div key={section.id}>
+                          <div className="sticky top-0 flex items-center gap-1.5 bg-[var(--surface-0)] px-3 pt-2.5 pb-1 text-[12px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                            {section.recent && <Clock size={11} aria-hidden="true" />}
+                            {section.label}
+                          </div>
+                          {section.lists.map(l => (
                             <button
                               key={l.sourceId}
                               type="button"
                               onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => { setSelectedListId(l.sourceId); setIsListDropdownOpen(false); setListSearchQuery(''); }}
-                              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-2)] ${entry.groupName ? 'pl-5' : ''} ${selectedListId === l.sourceId ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-primary)]'}`}
+                              onClick={() => selectList(l.sourceId)}
+                              role="option"
+                              aria-selected={selectedListId === l.sourceId}
+                              className={`min-h-11 w-full text-left px-5 py-2.5 text-sm hover:bg-[var(--surface-2)] sm:text-xs ${selectedListId === l.sourceId ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-primary)]'}`}
                             >
                               {l.name}
                             </button>
                           ))}
                         </div>
                       ))}
-                      {filteredLists.length === 0 && (
-                        <div className="px-3 py-2 text-xs text-[var(--text-muted)]">No lists found</div>
+                      {/* Default list option — hidden when list selection is required (e.g. GitHub repos) */}
+                      {activeDestination.listSelectionMode !== 'required' && !listSearchQuery && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => { setSelectedListId(''); setIsListDropdownOpen(false); setListSearchQuery(''); }}
+                          role="option"
+                          aria-selected={selectedListId === ''}
+                          className={`min-h-11 w-full text-left px-3 py-2.5 text-sm hover:bg-[var(--surface-2)] sm:text-xs ${selectedListId === '' ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-primary)]'}`}
+                        >
+                          Default list
+                        </button>
+                      )}
+                      {listSections.length === 0 && (
+                        <div className="px-3 py-4 text-center text-xs text-[var(--text-muted)]">No lists found</div>
                       )}
                     </div>
-                  );
-                })()}
+                )}
                 </>) : (
                 <div className="px-3 py-2 bg-[var(--surface-0)] border border-amber-400/40 rounded-lg text-xs text-[var(--text-muted)]">
                   {isGitHub
@@ -861,15 +973,25 @@ export function AddTaskModal({
               </label>
               <RecurrencePicker
                 value={recurrence}
-                onChange={setRecurrence}
+                onChange={(next) => {
+                  setRecurrence(next);
+                  if (next === 'none') {
+                    setRecurrenceMode('schedule');
+                    setRecurrenceOptions({ skipDates: [], catchUp: 'latest' });
+                  }
+                }}
                 mode={recurrenceMode}
                 onModeChange={setRecurrenceMode}
-                completionModeAvailable={destination.connectorType === 'local'}
+                completionModeAvailable={activeDestination.connectorType === 'local'}
                 variant="full"
+                startDate={dueDate || null}
+                options={recurrenceOptions}
+                onOptionsChange={setRecurrenceOptions}
+                advancedEditingAvailable={activeDestination.connectorType === 'local'}
               />
-              {recurrence !== 'none' && ['ms-todo', 'outlook-calendar'].includes(destination.connectorType) && (
+              {recurrence !== 'none' && activeDestination.connectorType !== 'local' && (
                 <p className="text-xs text-[var(--text-muted)] mt-1">
-                  Synced to {destination.connectorType === 'ms-todo' ? 'Microsoft To Do' : 'Outlook'}
+                  The recurrence will be written to {activeDestination.label}; provider support may simplify the rule.
                 </p>
               )}
             </div>
@@ -1021,6 +1143,15 @@ export function AddTaskModal({
             <span className="text-xs text-[var(--text-secondary)]">Add to My Day</span>
           </label>
         </div>
+
+        {submitError && (
+          <div
+            role="alert"
+            className="border-t border-red-500/30 bg-red-500/10 px-6 py-2 text-xs text-red-300"
+          >
+            {submitError}
+          </div>
+        )}
 
         {/* Footer */}
         <div className="px-6 py-3 bg-[var(--surface-0)] border-t border-[var(--border)] rounded-b-2xl flex items-center justify-between flex-shrink-0">

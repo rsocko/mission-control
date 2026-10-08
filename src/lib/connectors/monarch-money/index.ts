@@ -264,9 +264,6 @@ export class FinanceManagerConnector implements IConnector {
     idempotencyKey: string,
     actorType: 'parent-admin' | 'service',
   ) {
-    if (process.env.MC_DATABASE_BACKEND === 'postgres') {
-      throw new Error('Legacy finance attribution write-back is unavailable on PostgreSQL');
-    }
     const { applyManualAttributionDecision } = await import('./attribution-service');
     return applyManualAttributionDecision({
       connectorId: this.requireConfig().id,

@@ -157,7 +157,11 @@ function KanbanPageInner() {
 
       {bulk.bulkMode && (
         <div className="mb-3">
-          <BulkActionBar selectedCount={bulk.bulkSelected.size} onCancel={bulk.clearSelection}>
+          <BulkActionBar
+            selectedCount={bulk.bulkSelected.size}
+            taskIds={Array.from(bulk.bulkSelected)}
+            onCancel={bulk.clearSelection}
+          >
             {columnsState.columns.length > 0 && (
               <Select
                 value=""
@@ -321,7 +325,7 @@ function KanbanPageInner() {
         onFixMappings={() => columnsState.setEditingColumns(true)}
         onDragStart={setDragging}
         onDrop={handleDrop}
-        onTaskClick={(task) => setSelectedTaskId((current) => current === task.id ? null : task.id)}
+        onTaskClick={(task) => setSelectedTaskId(task.id)}
         onStartRename={(id, name) => {
           columnsState.setRenamingColumn(id);
           columnsState.setRenameValue(name);
@@ -354,7 +358,10 @@ function KanbanPageInner() {
 
       <TaskDetailPanel
         task={selectedTask}
-        onClose={() => setSelectedTaskId(null)}
+        onClose={(reason) => setSelectedTaskId(
+          null,
+          reason === 'task-removed' ? { history: 'replace' } : undefined,
+        )}
         onTaskUpdate={handleTaskUpdate}
         onRefresh={tasksState.fetchData}
       />

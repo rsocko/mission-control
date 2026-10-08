@@ -2,6 +2,10 @@
 import { NextResponse } from 'next/server';
 import type { IConnector } from '@/lib/connectors';
 import { getConnectorRegistry } from '@/lib/connectors/registry-runtime';
+import {
+  graphTodoListPath,
+  graphTodoTasksPath,
+} from '@/lib/connectors/microsoft-todo/resource-paths';
 import { validateNameForGraphApi } from '@/lib/validation/emoji-safety';
 import logger from '@/lib/logger';
 import { getConnectorCapabilities, isConnectorEnabled } from '@/lib/connectors/capabilities';
@@ -489,9 +493,7 @@ async function executeMigration(input: MigrationExecutionInput) {
         }
       ).graphFetch?.bind(connector);
       if (graphFetch) {
-        const verifyRes = await graphFetch(
-          `/me/todo/lists/${encodeURIComponent(newListId)}`,
-        );
+        const verifyRes = await graphFetch(graphTodoListPath(newListId));
         if (verifyRes.ok) {
           const verifyData = await verifyRes.json() as { displayName?: string };
           graphVisible = verifyData.displayName === cleanName;
@@ -566,7 +568,7 @@ async function fetchAllRemoteTasks(
   }
 
   const allTasks: Array<{ id: string; title: string; status: string }> = [];
-  let url: string | null = `/me/todo/lists/${encodeURIComponent(listSourceId)}/tasks?$top=100`;
+  let url: string | null = `${graphTodoTasksPath(listSourceId)}?$top=100`;
 
   while (url) {
     const res: Response = await graphFetch(url);

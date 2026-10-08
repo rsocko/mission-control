@@ -1,4 +1,8 @@
-import { parseTaskInput, parseTaskInputForSubmission } from '@/lib/parse-task-input';
+import {
+  parseTaskInput,
+  parseTaskInputForSubmission,
+  SUBTASK_QUICK_ADD_METADATA,
+} from '@/lib/parse-task-input';
 import type { ParseTaskInputOptions } from '@/lib/parse-task-input';
 import { normalizePendingTaskText, splitCompoundTask } from '@/lib/paste-parser';
 import {
@@ -268,7 +272,7 @@ export async function createQuickAddTask(
     }
   }
 
-  if (input.addToMyDay) {
+  if (input.addToMyDay || taskData.addToMyDay) {
     const myDayResponse = await fetcher('/api/my-day', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -294,7 +298,10 @@ export async function createQuickAddTask(
 }
 
 export async function createQuickAddSubtask(
-  dependencies: Pick<QuickAddSubmissionDependencies, 'fetcher'>,
+  dependencies: Pick<
+    QuickAddSubmissionDependencies,
+    'fetcher' | 'getToday' | 'onMyDayAddFailed'
+  >,
   {
     task,
     parentId,
@@ -306,11 +313,23 @@ export async function createQuickAddSubtask(
   },
 ): Promise<QuickAddCreatedTask> {
   const fetcher = dependencies.fetcher ?? fetch;
-  const taskData = parseTaskInput(task.text, parseOptions);
+  const taskData = parseTaskInputForSubmission(task.text, {
+    ...parseOptions,
+    metadata: {
+      ...parseOptions?.metadata,
+      ...SUBTASK_QUICK_ADD_METADATA,
+    },
+  });
   const response = await fetcher(`/api/tasks/${parentId}/subtasks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: taskData.title }),
+    body: JSON.stringify({
+      title: taskData.title,
+      priority: taskData.priority || 'none',
+      planningHorizon: taskData.planningHorizon,
+      dueDate: taskData.dueDate,
+      effort: taskData.effort,
+    }),
   });
   if (!response.ok) {
     throw new Error(`Failed to create subtask: ${task.text}`);
@@ -338,6 +357,20 @@ export async function createQuickAddSubtask(
     }
   }
 
+  if (taskData.addToMyDay) {
+    const myDayResponse = await fetcher('/api/my-day', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        taskId: subtask.id,
+        date: dependencies.getToday?.() ?? getLocalToday(),
+      }),
+    });
+    if (!myDayResponse.ok) {
+      dependencies.onMyDayAddFailed?.(subtask.id, myDayResponse.status);
+    }
+  }
+
   return { id: subtask.id, editPolicy };
 }
 
@@ -361,6 +394,7 @@ export interface QuickAddSubmissionResult {
     priority: string | null;
     dueDate: string | null;
     dueDateLabel: string | null;
+    addToMyDay: boolean;
   };
 }
 
@@ -452,6 +486,7 @@ export async function submitQuickAdd(
       priority: taskData.priority,
       dueDate: taskData.dueDate,
       dueDateLabel: taskData.dueDateLabel,
+      addToMyDay: taskData.addToMyDay,
     };
   }
 
@@ -581,7 +616,7 @@ export function filterQuickAddSuggestion(
     (tag) => tag.confidence >= SUGGESTION_CONFIDENCE_THRESHOLD,
   );
   if (!priority && !effort && tags.length === 0) return null;
-  return { priority, effort, tags };
+  return { priority, effort, tags, projects: [] };
 }
 
 export function mergeQuickAddSuggestions(
@@ -607,7 +642,7 @@ export function mergeQuickAddSuggestions(
   const priority = override.priority ?? base.priority;
   const effort = override.effort ?? base.effort;
   if (!priority && !effort && tags.length === 0) return null;
-  return { priority, effort, tags };
+  return { priority, effort, tags, projects: [] };
 }
 
 export async function fetchQuickAddSuggestion(

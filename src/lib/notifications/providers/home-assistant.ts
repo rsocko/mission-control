@@ -18,6 +18,11 @@ function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function humanizeIdentifier(value: string): string {
+  const words = value.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : value;
+}
+
 function openAction(url: string | undefined): NotificationActionDraft[] {
   return url ? [{
     actionType: 'open_url',
@@ -118,17 +123,33 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
           requiresConfirmation: true,
           createdBy: 'connector',
         });
-      } else if (source === 'repairs' && metadata.actionsEnabled === true) {
-        actions.push({
-          actionType: 'ignore_repair',
-          label: 'Ignore repair',
-          icon: 'eye-off',
-          variant: 'secondary',
-          requiresConfirmation: true,
-          createdBy: 'connector',
-        });
+      } else if (source === 'repairs') {
+        if (metadata.actionsEnabled === true && metadata.requiresRestart === true) {
+          actions.push({
+            actionType: 'restart_home_assistant',
+            label: 'Restart Home Assistant',
+            icon: 'refresh-cw',
+            variant: 'primary',
+            isPrimary: true,
+            requiresConfirmation: true,
+            createdBy: 'connector',
+          });
+        }
+        actions.push(...openAction(actionUrl));
+        if (metadata.actionsEnabled === true) {
+          actions.push({
+            actionType: 'ignore_repair',
+            label: 'Ignore repair',
+            icon: 'eye-off',
+            variant: 'secondary',
+            requiresConfirmation: true,
+            createdBy: 'connector',
+          });
+        }
       }
-      actions.push(...openAction(actionUrl));
+      if (source !== 'repairs') {
+        actions.push(...openAction(actionUrl));
+      }
       actions.push({
         actionType: 'create_task',
         label: 'Create task',
@@ -147,6 +168,40 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
         ? `/api/notifications/${encodeURIComponent(notification.id)}/subject-icon`
         : undefined;
       const subjectIcon = getHomeAssistantMdiIcon(metadata) ?? undefined;
+      const attributes = record(metadata.attributes);
+      const metadataChips: Array<{ label: string; value: string }> = [];
+      if (source === 'entity_alerts') {
+        for (const [label, value] of [
+          ['Entity', text(metadata.entityId)],
+          ['HA state', text(metadata.state)],
+          ['Device class', text(attributes.device_class)],
+          ['Rule', text(metadata.ruleId)],
+        ] as const) {
+          if (value) metadataChips.push({ label, value });
+        }
+      } else if (source === 'repairs') {
+        const affectedDomain = text(metadata.affectedDomain);
+        const repairDomain = text(metadata.domain);
+        if (affectedDomain) {
+          metadataChips.push({ label: 'Affected integration', value: affectedDomain });
+        }
+        if (repairDomain && affectedDomain && repairDomain !== affectedDomain) {
+          metadataChips.push({
+            label: 'Requested by',
+            value: humanizeIdentifier(repairDomain),
+          });
+        }
+        const breaksInVersion = text(metadata.breaksInHomeAssistantVersion);
+        if (breaksInVersion) {
+          metadataChips.push({
+            label: 'Breaks in Home Assistant',
+            value: breaksInVersion,
+          });
+        }
+      }
+      const learnMoreUrl = source === 'repairs'
+        ? normalizeNotificationUrl(metadata.learnMoreUrl)
+        : undefined;
 
       return {
         presentation: {
@@ -167,6 +222,7 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
                 ? 'Persistent notification'
                 : 'Device alert',
           providerSignature: 'home-assistant-v2',
+          ...(metadataChips.length ? { metadataChips } : {}),
           richContent: {
             ...(installedVersion || latestVersion ? {
               stats: [
@@ -186,6 +242,12 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
               links: [{
                 label: 'Read release announcement',
                 url: releaseUrl,
+              }],
+            } : {}),
+            ...(learnMoreUrl ? {
+              links: [{
+                label: 'Learn more',
+                url: learnMoreUrl,
               }],
             } : {}),
             footerText: notification.templateKey === 'ha_update_critical'

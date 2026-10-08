@@ -16,9 +16,11 @@ import { COMPLETION_ANIMATION_KEY, setCompletionAnimationEnabled } from '@/compo
 import { BadgeSettingsCard } from './BadgeSettingsCard';
 import { NavBadgeSettingsCard } from './NavBadgeSettingsCard';
 import { SyncIconSettingsCard } from './SyncIconSettingsCard';
+import { ToastSettingsCard } from '@/components/settings/ToastSettingsCard';
+import { CompletionSoundSettingsCard } from '@/components/settings/CompletionSoundSettingsCard';
 import { CaptureDestinationSection, InboxListsSection } from './CaptureSettingsSection';
 import { settingsLogger } from '@/lib/client-logger';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   DEFAULT_QUICK_ADD_PREFERENCES,
   getQuickAddPreferences,
@@ -185,6 +187,8 @@ function GeneralSettingsSection() {
       </div>
 
       <SyncIconSettingsCard />
+      <CompletionSoundSettingsCard />
+      <ToastSettingsCard />
 
       <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-5">
         <div className="mb-4 flex items-center gap-2">
@@ -199,15 +203,15 @@ function GeneralSettingsSection() {
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-sm text-[var(--text-primary)]">Natural-language date suggestions</div>
+              <div className="text-sm text-[var(--text-primary)]">Natural-language due dates</div>
               <p className="text-xs text-[var(--text-tertiary)]">
-                Suggest trailing dates such as “next Friday” without applying them automatically.
+                Apply trailing dates such as “next Friday” when creating a task.
               </p>
             </div>
             <button
               type="button"
               role="switch"
-              aria-label="Natural-language date suggestions"
+              aria-label="Natural-language due dates"
               aria-checked={quickAddPreferences.naturalLanguageDates}
               onClick={() => updateQuickAddPreferences({ naturalLanguageDates: !quickAddPreferences.naturalLanguageDates })}
               className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${

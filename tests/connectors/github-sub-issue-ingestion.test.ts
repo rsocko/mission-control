@@ -92,6 +92,117 @@ describe('GitHub sub-issue canonical ingestion', () => {
     });
   });
 
+  describe('GitHub sub-issue ordering', () => {
+    it('writes the complete order through the stable identity fence', async () => {
+      const { GitHubIssuesConnector } = await import('@/lib/connectors/github-issues');
+      const connector = new GitHubIssuesConnector();
+      await connector.initialize(config);
+      const restFetch = vi.fn(async (path: string, init?: RequestInit) => {
+        void init;
+        const childMatch = path.match(/\/issues\/(\d+)$/);
+        if (childMatch) {
+          return new Response(JSON.stringify({ id: Number(childMatch[1]) * 10 }), { status: 200 });
+        }
+        return new Response(null, { status: 204 });
+      });
+      (connector as unknown as { client: GitHubClient }).client = {
+        origin: {
+          hostKey: 'github.com',
+          restBaseUrl: 'https://api.github.com',
+          graphqlUrl: 'https://api.github.com/graphql',
+        },
+        restFetch,
+        graphqlFetch: vi.fn(),
+        graphqlFetchAny: vi.fn(),
+      };
+
+      await connector.runAuthorizedWrite({
+        leaseId: 'lease',
+        token: 'token',
+        connectorInstanceId: config.id,
+        taskId: 'parent',
+        operation: 'sub_issue',
+        sourceId: 'acme/app:1',
+        owner: 'acme',
+        repository: 'app',
+        issueNumber: 1,
+        expiresAt: '2026-08-10T00:00:00.000Z',
+        targets: [{
+          role: 'primary_issue',
+          owner: 'acme',
+          repository: 'app',
+          issueNumber: 1,
+        }],
+      }, () => connector.reorderSubTasks(
+        'acme/app:1',
+        ['acme/app:3', 'other/repo:4', 'acme/app:2'],
+      ));
+
+      const priorityCalls = restFetch.mock.calls.filter(
+        ([path]) => path === '/repos/acme/app/issues/1/sub_issues/priority',
+      );
+      expect(priorityCalls.map(([, init]) =>
+        JSON.parse(String((init as RequestInit).body))
+      )).toEqual([
+        { sub_issue_id: 40, after_id: 30 },
+        { sub_issue_id: 20, after_id: 40 },
+      ]);
+      expect(priorityCalls.every(([, init]) =>
+        (init as RequestInit).method === 'PATCH'
+        && new Headers((init as RequestInit).headers).get('X-GitHub-Api-Version') === '2026-03-10'
+      )).toBe(true);
+    });
+
+    it('stops after GitHub rejects a priority update', async () => {
+      const { GitHubIssuesConnector } = await import('@/lib/connectors/github-issues');
+      const connector = new GitHubIssuesConnector();
+      await connector.initialize(config);
+      const restFetch = vi.fn(async (path: string, init?: RequestInit) => {
+        void init;
+        if (path.endsWith('/sub_issues/priority')) {
+          return new Response(null, { status: 422 });
+        }
+        return new Response(JSON.stringify({ id: 10 }), { status: 200 });
+      });
+      (connector as unknown as { client: GitHubClient }).client = {
+        origin: {
+          hostKey: 'github.com',
+          restBaseUrl: 'https://api.github.com',
+          graphqlUrl: 'https://api.github.com/graphql',
+        },
+        restFetch,
+        graphqlFetch: vi.fn(),
+        graphqlFetchAny: vi.fn(),
+      };
+
+      await expect(connector.runAuthorizedWrite({
+        leaseId: 'lease',
+        token: 'token',
+        connectorInstanceId: config.id,
+        taskId: 'parent',
+        operation: 'sub_issue',
+        sourceId: 'acme/app:1',
+        owner: 'acme',
+        repository: 'app',
+        issueNumber: 1,
+        expiresAt: '2026-08-10T00:00:00.000Z',
+        targets: [{
+          role: 'primary_issue',
+          owner: 'acme',
+          repository: 'app',
+          issueNumber: 1,
+        }],
+      }, () => connector.reorderSubTasks(
+        'acme/app:1',
+        ['acme/app:2', 'acme/app:3', 'acme/app:4'],
+      ))).rejects.toThrow('Failed to reprioritize GitHub sub-issue: 422');
+
+      expect(restFetch.mock.calls.filter(
+        ([path]) => path.endsWith('/sub_issues/priority'),
+      )).toHaveLength(1);
+    });
+  });
+
   it('represents more than 20 children across issue pages without synthetic duplicates', async () => {
     const { GitHubIssuesConnector } = await import('@/lib/connectors/github-issues');
     const connector = new GitHubIssuesConnector();
@@ -113,7 +224,17 @@ describe('GitHub sub-issue canonical ingestion', () => {
         restBaseUrl: 'https://api.github.com',
         graphqlUrl: 'https://api.github.com/graphql',
       },
-      restFetch: vi.fn(),
+      restFetch: vi.fn(async (path: string) => {
+        if (path === '/repos/acme/app/issues/1/sub_issues?per_page=100&page=1') {
+          return new Response(JSON.stringify(
+            Array.from({ length: 55 }, (_, index) => ({
+              number: index + 2,
+              node_id: `I_${index + 2}`,
+            })),
+          ), { status: 200 });
+        }
+        return new Response(null, { status: 404 });
+      }),
       graphqlFetch: vi.fn(async (query, variables) => {
         queries.push(query);
         cursors.push(variables?.cursor);
@@ -154,6 +275,8 @@ describe('GitHub sub-issue canonical ingestion', () => {
     expect(new Set(tasks.map((task) => task.sourceId)).size).toBe(56);
     expect(tasks.filter((task) => task.metadata.githubParent)).toHaveLength(55);
     expect(tasks.filter((task) => task.githubParentIdentity)).toHaveLength(55);
+    expect(tasks.filter((task) => task.metadata.githubParent).map((task) => task.siblingOrder))
+      .toEqual(Array.from({ length: 55 }, (_, index) => index));
     expect(queries[0]).toMatch(/repository\s*\{\s*id\s+nameWithOwner\s+url\s*\}/);
     expect(queries[0]).not.toContain('subIssues(');
     expect(cursors).toEqual([undefined, 'page-2']);

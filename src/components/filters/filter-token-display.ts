@@ -17,6 +17,8 @@ export const FILTER_TOKEN_STYLES: Record<FilterTokenType, { bg: string; text: st
   project: { bg: 'bg-indigo-500/15', text: 'text-indigo-300', border: 'border-indigo-500/30' },
   phase: { bg: 'bg-fuchsia-500/15', text: 'text-fuchsia-300', border: 'border-fuchsia-500/30' },
   disposition: { bg: 'bg-emerald-500/15', text: 'text-emerald-300', border: 'border-emerald-500/30' },
+  delegation: { bg: 'bg-blue-500/15', text: 'text-blue-300', border: 'border-blue-500/30' },
+  delegatee: { bg: 'bg-violet-500/15', text: 'text-violet-300', border: 'border-violet-500/30' },
   text: { bg: '', text: '', border: '' },
 };
 
@@ -31,6 +33,8 @@ export function getFilterTokenDisplayValue(token: FilterToken, projects: HubProj
       horizon: 'No horizon',
       project: 'No project',
       tag: 'No tags',
+      delegation: 'Not delegated',
+      delegatee: 'No agent',
     };
     return noneLabels[token.type] ?? token.value;
   }

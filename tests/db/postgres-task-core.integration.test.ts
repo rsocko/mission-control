@@ -15,6 +15,7 @@ import {
   type SeedTask,
   type TaskCoreContractHarness,
 } from '../contracts/task-core.contract';
+import { describeTaskTimeActivityContract } from '../contracts/task-time-activity.contract';
 
 vi.unmock('drizzle-orm');
 
@@ -77,8 +78,11 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
           triage_items,
           task_ingest_suppressions,
           task_attachments,
+          task_time_activities,
           task_linked_sources,
           task_schedules,
+          task_recurrence_backfill_decisions,
+          task_recurrence_occurrences,
           quick_sort_operations,
           task_triage_log,
           project_phase_items,
@@ -105,11 +109,11 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
           `INSERT INTO tasks (
             id, source_id, connector_type, connector_instance_id, title, description,
             status, local_disposition, priority, planning_horizon, due_date,
-            created_at, updated_at, completed_at, parent_id, depth, is_checklist_item,
+            created_at, updated_at, completed_at, deleted_at, parent_id, depth, is_checklist_item,
             source_list_id, source_list_name, assignee, micro_status, metadata,
             sync_status, last_synced_at, effort, snoozed_until
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
           )`,
           [
             row.id,
@@ -126,6 +130,7 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
             row.createdAt ?? DEFAULT_NOW,
             row.updatedAt ?? DEFAULT_NOW,
             row.completedAt ?? null,
+            row.deletedAt ?? null,
             row.parentId ?? null,
             row.depth ?? 0,
             row.isChecklistItem ?? false,
@@ -527,12 +532,60 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
       );
       return result.rows.map((row) => row.task_id);
     },
+    async listRecurrenceOccurrences() {
+      const result = await client.query(`
+        SELECT occurrence_id, task_id, generated_from_task_id, series_id, rule_revision_id,
+          effective_kind, effective_value, timezone_id, connector_instance_id
+        FROM task_recurrence_occurrences
+        ORDER BY occurrence_id
+      `);
+      return result.rows.map((row) => ({
+        occurrenceId: String(row.occurrence_id),
+        taskId: String(row.task_id),
+        generatedFromTaskId: row.generated_from_task_id === null
+          ? null
+          : String(row.generated_from_task_id),
+        seriesId: String(row.series_id),
+        ruleRevisionId: String(row.rule_revision_id),
+        effectiveKind: String(row.effective_kind),
+        effectiveValue: String(row.effective_value),
+        timezoneId: String(row.timezone_id),
+        connectorInstanceId: row.connector_instance_id === null
+          ? null
+          : String(row.connector_instance_id),
+      }));
+    },
+    async listRecurrenceBackfillDecisions() {
+      const result = await client.query(`
+        SELECT occurrence_id, decision, reason, task_id,
+          superseded_by_occurrence_id, decided_at
+        FROM task_recurrence_backfill_decisions
+        ORDER BY effective_value
+      `);
+      return result.rows.map((row) => ({
+        occurrenceId: String(row.occurrence_id),
+        decision: String(row.decision),
+        reason: String(row.reason),
+        taskId: row.task_id === null ? null : String(row.task_id),
+        supersededByOccurrenceId: row.superseded_by_occurrence_id === null
+          ? null
+          : String(row.superseded_by_occurrence_id),
+        decidedAt: String(row.decided_at),
+      }));
+    },
     async getTaskUpdatedAt(taskId) {
       const result = await client.query<{ updated_at: string }>(
         'SELECT updated_at FROM tasks WHERE id = $1',
         [taskId],
       );
       return result.rows[0]?.updated_at ?? null;
+    },
+    async getTaskDeletedAt(taskId) {
+      const result = await client.query<{ deleted_at: string | null }>(
+        'SELECT deleted_at FROM tasks WHERE id = $1',
+        [taskId],
+      );
+      return result.rows[0]?.deleted_at ?? null;
     },
     async countOutboxEvents(stableKey) {
       const result = await client.query<{ count: string }>(
@@ -579,6 +632,7 @@ async function waitForTaskCoreLockWait(): Promise<void> {
 
 if (connectionString) {
   describeTaskCoreContract('PostgreSQL adapter', createHarness);
+  describeTaskTimeActivityContract('PostgreSQL adapter', createHarness);
 
   describe('PostgreSQL task-core row locking', () => {
     beforeEach(async () => {

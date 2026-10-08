@@ -32,6 +32,7 @@ export const AI_FEATURE_DEFAULTS: Record<AIFeatureId, SensitivityClass> = {
   'project-phase-refinement': 'standard',
   'reset-summary': 'restricted',
   'task-breakdown': 'standard',
+  'delegation-planning': 'standard',
   'document-intake': 'restricted',
   'notification-enrichment': 'restricted',
   'triage-action-extraction': 'restricted',
@@ -59,6 +60,7 @@ export const DEFAULT_AI_ROUTING_POLICY: AIRoutingPolicyConfig = {
     'custom-rest': 'restricted',
     'home-assistant': 'restricted',
     scout: 'restricted',
+    paperclip: 'restricted',
     'microsoft-todo': 'standard',
     'github-issues': 'standard',
   },
@@ -180,7 +182,7 @@ export function resolveSensitivity(
 ): SensitivityClass {
   const featureDefault = policy.featureDefaults[featureId] ?? AI_FEATURE_DEFAULTS[featureId];
   const sourceClasses = (options.sources ?? [])
-    .map((source) => policy.sourceDefaults[source.trim().toLowerCase()] ?? 'restricted');
+    .map((source) => resolveSourceSensitivity(source, policy));
   const base = [featureDefault, ...sourceClasses]
     .reduce<SensitivityClass>(
       (mostRestrictive, candidate) =>
@@ -195,6 +197,20 @@ export function resolveSensitivity(
     throw new AISensitivityOverrideError(base, options.override);
   }
   return options.override;
+}
+
+export function resolveSourceSensitivity(
+  source: string,
+  policy: AIRoutingPolicyConfig,
+  override?: SensitivityClass,
+): SensitivityClass {
+  const normalizedSource = source.trim().toLowerCase();
+  const baseline = policy.sourceDefaults[normalizedSource] ?? 'restricted';
+  if (!override) return baseline;
+  if (SENSITIVITY_RANK[override] < SENSITIVITY_RANK[baseline]) {
+    throw new AISensitivityOverrideError(baseline, override);
+  }
+  return override;
 }
 
 export function createAIRequestContext(

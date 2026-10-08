@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { useRouter } from 'next/navigation';
-import { X, ChevronRight, BarChart3 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, BarChart3, RotateCcw } from 'lucide-react';
 import { staggerContainer } from '@/lib/motion';
 import { KpiCard } from '@/components/kpi/KpiCard';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -29,24 +29,62 @@ interface KpiBarConfig {
 const DEFAULT_CONFIG: KpiBarConfig = {
   cards: DEFAULT_KPI_SLUGS,
   pinned: [],
-  visibleSlots: 5,
+  visibleSlots: 4,
   rotationInterval: KPI_ROTATION_INTERVAL,
   pauseOnHover: true,
   autoSurface: true,
 };
 
+function normalizeConfig(value: unknown): KpiBarConfig {
+  const candidate = value && typeof value === 'object'
+    ? value as Partial<KpiBarConfig>
+    : {};
+  const cards = Array.isArray(candidate.cards)
+    ? [...new Set(candidate.cards.filter((slug): slug is string => (
+      typeof slug === 'string' && slug in KPI_REGISTRY
+    )))]
+    : [];
+  const normalizedCards = cards.length > 0 ? cards : [...DEFAULT_KPI_SLUGS];
+  const pinned = Array.isArray(candidate.pinned)
+    ? [...new Set(candidate.pinned.filter((slug): slug is string => (
+      typeof slug === 'string' && normalizedCards.includes(slug)
+    )))]
+    : [];
+  const visibleSlots = Number.isInteger(candidate.visibleSlots)
+    ? Math.min(MAX_KPI_CARDS, Math.max(3, candidate.visibleSlots as number))
+    : DEFAULT_CONFIG.visibleSlots;
+  const normalizedPinned = pinned.slice(0, visibleSlots);
+  const rotationInterval = typeof candidate.rotationInterval === 'number'
+    && Number.isFinite(candidate.rotationInterval)
+    ? Math.min(60_000, Math.max(5_000, candidate.rotationInterval))
+    : DEFAULT_CONFIG.rotationInterval;
+
+  return {
+    cards: normalizedCards,
+    pinned: normalizedPinned,
+    visibleSlots,
+    rotationInterval,
+    pauseOnHover: typeof candidate.pauseOnHover === 'boolean'
+      ? candidate.pauseOnHover
+      : DEFAULT_CONFIG.pauseOnHover,
+    autoSurface: typeof candidate.autoSurface === 'boolean'
+      ? candidate.autoSurface
+      : DEFAULT_CONFIG.autoSurface,
+  };
+}
+
 function getStoredConfig(): KpiBarConfig {
   if (typeof window === 'undefined') return DEFAULT_CONFIG;
   try {
     const stored = localStorage.getItem('dashboard_kpis');
-    if (stored) return { ...DEFAULT_CONFIG, ...JSON.parse(stored) };
+    if (stored) return normalizeConfig(JSON.parse(stored));
   } catch { /* ignore */ }
   return DEFAULT_CONFIG;
 }
 
 function saveConfig(config: KpiBarConfig) {
   try {
-    localStorage.setItem('dashboard_kpis', JSON.stringify(config));
+    localStorage.setItem('dashboard_kpis', JSON.stringify(normalizeConfig(config)));
   } catch { /* ignore */ }
 }
 
@@ -108,22 +146,19 @@ interface KpiBarProps {
   onToggleCollapse?: () => void;
 }
 
-export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotificationsCount, embedded, collapsed, onToggleCollapse }: KpiBarProps) {
+export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotificationsCount, collapsed, onToggleCollapse }: KpiBarProps) {
   const router = useRouter();
-  const [config, setConfig] = useState<KpiBarConfig>(getStoredConfig);
+  const prefersReducedMotion = useReducedMotion();
+  const [config] = useState<KpiBarConfig>(getStoredConfig);
   const [kpiData, setKpiData] = useState<Record<string, KpiCardData>>({});
   const [autoSurfacedSlugs, setAutoSurfacedSlugs] = useState<string[]>([]);
-  const [dismissedSlugs, setDismissedSlugs] = useState<Set<string>>(new Set());
+  const [dismissedSlugs, setDismissedSlugs] = useState<Set<string>>(getDismissedSlugs);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [rotationIndex, setRotationIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const pauseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const today = getClientToday();
-
-  // Load dismissed slugs on mount
-  useEffect(() => {
-    setDismissedSlugs(getDismissedSlugs());
-  }, []);
 
   // Determine active card slugs
   const activeSlugs = useMemo(() => {
@@ -149,43 +184,53 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
   // Fetch KPI data
   const fetchKpis = useCallback(async () => {
     try {
-      const slugsToFetch = activeSlugs.filter(s => s !== 'unread-notifications');
+      setLoadError(false);
       const autoParam = config.autoSurface ? '&autoSurface=true' : '';
-      const res = await fetch(`/api/dashboard/kpis?slugs=${slugsToFetch.join(',')}&date=${today}${autoParam}`);
-      if (!res.ok) return;
+      const res = await fetch(`/api/dashboard/kpis?slugs=${activeSlugs.join(',')}&date=${today}${autoParam}`);
+      if (!res.ok) throw new Error(`KPI request failed with ${res.status}`);
       const json = await res.json();
       const dataMap: Record<string, KpiCardData> = {};
       for (const card of json.cards) {
         dataMap[card.slug] = card;
       }
       // Process auto-surfaced cards
-      if (json.autoSurfaced && json.autoSurfaced.length > 0) {
-        const surfacedSlugs: string[] = [];
+      const surfacedSlugs: string[] = [];
+      if (json.autoSurfaced) {
         for (const card of json.autoSurfaced) {
           dataMap[card.slug] = card;
           surfacedSlugs.push(card.slug);
         }
-        setAutoSurfacedSlugs(surfacedSlugs);
       }
+      setAutoSurfacedSlugs(surfacedSlugs);
       setKpiData(dataMap);
     } catch {
-      // Silent fail on dashboard
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
   }, [activeSlugs, today, config.autoSurface]);
 
-  useEffect(() => { fetchKpis(); }, [fetchKpis]);
-
-  // Inject unread-notifications from prop (kept out of fetchKpis to avoid refetch loops)
   useEffect(() => {
-    if (unreadNotificationsCount !== undefined && activeSlugs.includes('unread-notifications')) {
-      setKpiData(prev => ({
-        ...prev,
-        'unread-notifications': { slug: 'unread-notifications', value: unreadNotificationsCount },
-      }));
+    // Network-backed state is intentionally synchronized when the selected KPI pool changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchKpis();
+  }, [fetchKpis]);
+
+  const displayedKpiData = useMemo(() => {
+    if (
+      unreadNotificationsCount === undefined
+      || !activeSlugs.includes('unread-notifications')
+    ) {
+      return kpiData;
     }
-  }, [unreadNotificationsCount, activeSlugs]);
+    return {
+      ...kpiData,
+      'unread-notifications': {
+        slug: 'unread-notifications',
+        value: unreadNotificationsCount,
+      },
+    };
+  }, [activeSlugs, kpiData, unreadNotificationsCount]);
 
   // Clean up pause timeout on unmount
   useEffect(() => {
@@ -204,38 +249,36 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
 
   // ── Rotation Logic ──────────────────────────────────────────────────────
 
-  const needsRotation = allVisibleSlugs.length > config.visibleSlots;
-
   // Cards split into pinned (always visible) and rotating pool
-  const { pinnedCards, rotatingPool, visibleCards } = useMemo(() => {
-    const pinned = allVisibleSlugs.filter(s => config.pinned.includes(s) || quickFilter === getFilterKey(s));
-    const pool = allVisibleSlugs.filter(s => !pinned.includes(s));
-    const freeSlots = config.visibleSlots - pinned.length;
-
-    let visible: string[];
-    if (!needsRotation || freeSlots <= 0) {
-      visible = allVisibleSlugs.slice(0, config.visibleSlots);
-    } else {
-      // Round-robin through the pool
-      const rotatingVisible = [];
-      for (let i = 0; i < freeSlots; i++) {
-        const idx = (rotationIndex + i) % pool.length;
-        rotatingVisible.push(pool[idx]);
-      }
-      visible = [...pinned, ...rotatingVisible];
-    }
-
-    return { pinnedCards: pinned, rotatingPool: pool, visibleCards: visible };
-  }, [allVisibleSlugs, config.pinned, config.visibleSlots, quickFilter, needsRotation, rotationIndex]);
+  const { rotatingPool, visibleCards, rotationActive } = useMemo(() => (
+    getKpiRotationState({
+      slugs: allVisibleSlugs,
+      pinnedSlugs: config.pinned,
+      quickFilter,
+      visibleSlots: config.visibleSlots,
+      rotationIndex,
+      data: displayedKpiData,
+    })
+  ), [allVisibleSlugs, config.pinned, config.visibleSlots, quickFilter, rotationIndex, displayedKpiData]);
 
   // Rotation timer
   useEffect(() => {
-    if (!needsRotation || isPaused) return;
+    if (!rotationActive || isPaused || prefersReducedMotion) return;
     const timer = setInterval(() => {
       setRotationIndex(prev => (prev + 1) % rotatingPool.length);
     }, config.rotationInterval);
     return () => clearInterval(timer);
-  }, [needsRotation, isPaused, rotatingPool.length, config.rotationInterval]);
+  }, [rotationActive, isPaused, prefersReducedMotion, rotatingPool.length, config.rotationInterval]);
+
+  const browseRotation = useCallback((direction: -1 | 1, index?: number) => {
+    if (rotatingPool.length === 0) return;
+    setRotationIndex((current) => (
+      index ?? (current + direction + rotatingPool.length) % rotatingPool.length
+    ));
+    setIsPaused(true);
+    if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
+    pauseTimeoutRef.current = setTimeout(() => setIsPaused(false), 30_000);
+  }, [rotatingPool.length]);
 
   // Hover pause
   const handleMouseEnter = useCallback(() => {
@@ -295,6 +338,17 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
       className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] overflow-hidden"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onKeyDown={(event) => {
+        if (!rotationActive) return;
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault();
+          browseRotation(-1);
+        } else if (event.key === 'ArrowRight') {
+          event.preventDefault();
+          browseRotation(1);
+        }
+      }}
+      aria-label="Dashboard KPIs"
     >
       <button
         type="button"
@@ -319,6 +373,20 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
             transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
             className="overflow-hidden"
           >
+      {loadError && Object.keys(displayedKpiData).length === 0 ? (
+        <div className="flex min-h-14 items-center justify-between gap-3 border-t border-[var(--border)] px-4 text-sm text-[var(--text-secondary)]">
+          <span>KPIs are unavailable right now.</span>
+          <button
+            type="button"
+            onClick={fetchKpis}
+            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[var(--accent-400)] hover:bg-[var(--surface-2)]"
+          >
+            <RotateCcw size={13} />
+            Retry
+          </button>
+        </div>
+      ) : (
+        <>
       <div className="overflow-x-auto border-t border-[var(--border)] scrollbar-none">
         <motion.div
           className="flex min-w-[560px] divide-x divide-[var(--border)]"
@@ -329,10 +397,11 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
           <AnimatePresence mode="popLayout">
             {visibleCards.map((slug) => {
               const def = KPI_REGISTRY[slug];
-              const data = kpiData[slug];
+              const data = displayedKpiData[slug];
               if (!def || !data) return null;
 
               const isFilterActive = quickFilter === getFilterKey(slug);
+              const isPinned = config.pinned.includes(slug) || isFilterActive;
               const isAutoSurfaced = autoSurfacedSlugs.includes(slug);
 
               return (
@@ -340,7 +409,7 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
                   key={slug}
                   layout
                   variants={kpiRotationVariants}
-                  initial="enter"
+                  initial={prefersReducedMotion ? false : 'enter'}
                   animate="center"
                   exit="exit"
                   className="group relative flex min-w-0 flex-1"
@@ -350,6 +419,7 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
                     data={data}
                     onClick={def.clickAction ? () => handleCardClick(slug) : undefined}
                     active={isFilterActive}
+                    pinned={isPinned}
                     compact={visibleCards.length >= 6}
                     inline
                   />
@@ -357,8 +427,10 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
                   {isAutoSurfaced && (
                     <Tooltip content="Dismiss">
                       <button
+                        type="button"
                         onClick={(e) => { e.stopPropagation(); handleDismiss(slug); }}
                         className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-[var(--surface-0)] flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 transition-opacity text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                        aria-label={`Dismiss ${def.label}`}
                       >
                         <X size={10} />
                       </button>
@@ -372,27 +444,47 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
       </div>
 
       {/* Rotation dot indicators */}
-      {needsRotation && rotatingPool.length > 0 && (
-        <div className="flex justify-center gap-1 mb-3 -mt-2">
+      {rotationActive && (
+        <div className="flex min-h-8 items-center justify-center gap-1 border-t border-[var(--border)]/60 px-2">
+          {isPaused && (
+            <button
+              type="button"
+              onClick={() => browseRotation(-1)}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]"
+              aria-label="Show previous KPIs"
+            >
+              <ChevronLeft size={14} />
+            </button>
+          )}
           {rotatingPool.map((slug, i) => {
             const isVisible = visibleCards.includes(slug);
             return (
               <button
+                type="button"
                 key={slug}
-                className={`w-1.5 h-1.5 rounded-full transition-colors duration-300 ${
-                  isVisible ? 'bg-[var(--accent-400)]' : 'bg-[var(--surface-0)]'
-                }`}
-                onClick={() => {
-                  setRotationIndex(i);
-                  setIsPaused(true);
-                  if (pauseTimeoutRef.current) clearTimeout(pauseTimeoutRef.current);
-                  pauseTimeoutRef.current = setTimeout(() => setIsPaused(false), 30000);
-                }}
+                className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-[var(--surface-2)]"
+                onClick={() => browseRotation(1, i)}
                 aria-label={`Show ${KPI_REGISTRY[slug]?.label}`}
-              />
+              >
+                <span className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 ${
+                  isVisible ? 'bg-[var(--accent-400)]' : 'bg-[var(--text-muted)]/35'
+                }`} />
+              </button>
             );
           })}
+          {isPaused && (
+            <button
+              type="button"
+              onClick={() => browseRotation(1)}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]"
+              aria-label="Show next KPIs"
+            >
+              <ChevronRight size={14} />
+            </button>
+          )}
         </div>
+      )}
+        </>
       )}
           </motion.div>
         )}
@@ -409,5 +501,89 @@ function getFilterKey(slug: string): string | undefined {
   return undefined;
 }
 
+const ATTENTION_KPIS = new Set([
+  'overdue',
+  'unread-notifications',
+  'high-priority',
+  'needs-horizon',
+  'triage-stale',
+  'doc-statements-missing',
+  'doc-eob-unmatched',
+]);
+
+function getRotationPriority(slug: string, data: KpiCardData | undefined): number {
+  if (data && data.value > 0 && ATTENTION_KPIS.has(slug)) return 0;
+  if (data && data.value > 0) return 1;
+  if (data) return 2;
+  return 3;
+}
+
+interface KpiRotationInput {
+  slugs: string[];
+  pinnedSlugs: string[];
+  quickFilter?: string | null;
+  visibleSlots: number;
+  rotationIndex: number;
+  data: Record<string, KpiCardData>;
+}
+
+function getKpiRotationState({
+  slugs,
+  pinnedSlugs,
+  quickFilter,
+  visibleSlots,
+  rotationIndex,
+  data,
+}: KpiRotationInput) {
+  const activeFilterSlug = quickFilter
+    ? slugs.find(slug => quickFilter === getFilterKey(slug))
+    : undefined;
+  const pinned = [
+    ...(activeFilterSlug ? [activeFilterSlug] : []),
+    ...slugs.filter(slug => (
+      pinnedSlugs.includes(slug) && slug !== activeFilterSlug
+    )),
+  ];
+  const rawPool = slugs.filter(slug => !pinned.includes(slug));
+  const visiblePinned = pinned.slice(0, visibleSlots);
+  const freeSlots = Math.max(0, visibleSlots - visiblePinned.length);
+  const rotationActive = freeSlots > 0 && rawPool.length > freeSlots;
+  const rotatingPool = (rotationActive ? rawPool : [...rawPool])
+    .map((slug, index) => ({ slug, index }))
+    .sort((a, b) => {
+      if (!rotationActive) return a.index - b.index;
+      const priorityDiff = getRotationPriority(a.slug, data[a.slug])
+        - getRotationPriority(b.slug, data[b.slug]);
+      return priorityDiff || a.index - b.index;
+    })
+    .map(({ slug }) => slug);
+
+  if (freeSlots <= 0) {
+    return { rotatingPool, visibleCards: visiblePinned, rotationActive };
+  }
+  if (!rotationActive) {
+    return {
+      rotatingPool,
+      visibleCards: [...visiblePinned, ...rotatingPool].slice(0, visibleSlots),
+      rotationActive,
+    };
+  }
+
+  const rotatingVisible = Array.from({ length: freeSlots }, (_, offset) => (
+    rotatingPool[(rotationIndex + offset) % rotatingPool.length]
+  ));
+  return {
+    rotatingPool,
+    visibleCards: [...visiblePinned, ...rotatingVisible],
+    rotationActive,
+  };
+}
+
 // Export config utilities for Settings UI
-export { getStoredConfig, saveConfig, type KpiBarConfig };
+export {
+  getKpiRotationState,
+  getStoredConfig,
+  normalizeConfig,
+  saveConfig,
+  type KpiBarConfig,
+};

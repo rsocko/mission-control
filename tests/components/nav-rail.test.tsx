@@ -241,6 +241,7 @@ describe('NavRail', () => {
           icon={ChartNetwork}
           open={false}
           pathname="/projects/proj-current"
+          onNavigate={() => {}}
           onOpenChange={() => {}}
         />
       </TooltipProvider>,
@@ -252,6 +253,31 @@ describe('NavRail', () => {
         'proj-older',
       ]);
     });
+  });
+
+  it('collapses after selecting a recent project', async () => {
+    vi.useRealTimers();
+    localStorage.setItem(
+      RECENT_PROJECT_IDS_STORAGE_KEY,
+      JSON.stringify(['proj-recent']),
+    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      projects: [
+        { id: 'proj-recent', name: 'Recent project', color: '#3b82f6', icon: null },
+      ],
+    }), { status: 200 }));
+    renderNavRail();
+
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    fireEvent.focus(screen.getByRole('link', { name: 'Projects' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open recent projects' }), {
+      key: 'Enter',
+    });
+
+    const recentProject = await screen.findByRole('menuitem', { name: 'Recent project' });
+    fireEvent.click(recentProject);
+
+    await waitFor(() => expect(nav).toHaveClass('w-16'));
   });
 
   it('shows an empty recent-project state without fetching', async () => {
@@ -291,7 +317,13 @@ describe('NavRail', () => {
     fireEvent.mouseEnter(screen.getByRole('navigation', { name: 'Main navigation' }));
     act(() => vi.advanceTimersByTime(300));
 
-    expect(pinButton).toHaveClass('opacity-100');
+    expect(pinButton).toHaveClass(
+      'opacity-0',
+      'group-hover:opacity-100',
+      'group-focus-within:opacity-100',
+      'focus:opacity-100',
+      '[@media(hover:none)]:opacity-100',
+    );
   });
 
   it('renders a static brand mark and reveals its name when expanded', () => {
@@ -315,7 +347,13 @@ describe('NavRail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
-    expect(brandName.parentElement).toHaveClass('opacity-100', 'max-w-[108px]');
+    expect(brandName.parentElement).toHaveClass(
+      'opacity-100',
+      'max-w-[132px]',
+      'group-hover:max-w-[108px]',
+      'group-focus-within:max-w-[108px]',
+      '[@media(hover:none)]:max-w-[108px]',
+    );
   });
 
   it('reflects active Houston work in the brand subtitle', () => {

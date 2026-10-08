@@ -180,10 +180,10 @@ export async function POST(request: Request) {
       nativeTransferCandidate
       && !!sourceConnector?.transferTask
       && (!sourceConnector.canTransferTask
-        || await sourceConnector.canTransferTask(task.sourceId, resolvedTargetListId));
+        || await sourceConnector.canTransferTask(task.sourceId, resolvedTargetListId)
+        || !!sourceConnector.refreshTransferIdentity);
 
     // ── Determine available source actions ───────────────────────────────────
-    // GitHub issues can't be deleted — only closed. We treat "move" as close+comment for GH sources.
     const sourceActions: Array<{
       action: 'move' | 'copy';
       label: string;
@@ -192,7 +192,9 @@ export async function POST(request: Request) {
       {
         action: 'move',
         label: 'Move',
-        description: fieldMappingResult.sourceSupportsDelete
+        description: isNativeTransfer
+          ? 'Transfer the GitHub issue to the target repository with its history intact.'
+          : fieldMappingResult.sourceSupportsDelete
           ? 'Create in target, then delete from source.'
           : 'Create in target, then close the source (deletion not supported by this source).',
       },
@@ -205,7 +207,7 @@ export async function POST(request: Request) {
 
     // ── Build suggestion hint ────────────────────────────────────────────────
     let suggestion: string | null = null;
-    if (!fieldMappingResult.sourceSupportsDelete) {
+    if (!fieldMappingResult.sourceSupportsDelete && !isNativeTransfer) {
       const reasons: string[] = [];
       if (!fieldMappingResult.sourceSupportsDelete)
         reasons.push('the source does not support true deletion');

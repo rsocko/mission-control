@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import * as schema from '@/db/schema';
 import { githubIdentityControls, githubIdentityExceptionEvents, tasks } from '@/db/schema';
 import { provenSupersededGitHubTaskIds } from '@/lib/external-identities/task-transfer-reconciliation';
@@ -54,6 +54,7 @@ export function createSqliteGitHubHierarchyRepositories(
         connectorType: tasks.connectorType,
         isChecklistItem: tasks.isChecklistItem,
         parentId: tasks.parentId,
+        siblingOrder: tasks.siblingOrder,
         depth: tasks.depth,
         metadata: tasks.metadata,
       })
@@ -159,16 +160,33 @@ export function createSqliteGitHubHierarchyRepositories(
         if (verdict.fenced) {
           return { applied: false, updated: 0, fenced: true };
         }
+        const existingParentByTaskId = new Map(
+          taskRows.map((task) => [task.id, task.parentId] as const),
+        );
+        const revisedParentIds = new Set<string>();
         let updated = 0;
         for (const update of verdict.updates) {
           const set: Partial<typeof schema.tasks.$inferInsert> = {
             parentId: update.parentId,
             depth: update.depth,
           };
+          if (update.siblingOrder !== undefined) {
+            set.siblingOrder = update.siblingOrder;
+          }
           if (update.metadata !== undefined) {
             set.metadata = JSON.stringify(update.metadata);
           }
           updated += tx.update(tasks).set(set).where(eq(tasks.id, update.taskId)).run().changes;
+          if (update.subtaskOrderChanged) {
+            const previousParentId = existingParentByTaskId.get(update.taskId);
+            if (previousParentId) revisedParentIds.add(previousParentId);
+            if (update.parentId) revisedParentIds.add(update.parentId);
+          }
+        }
+        for (const parentId of revisedParentIds) {
+          tx.update(tasks).set({
+            subtaskOrderRevision: sql`${tasks.subtaskOrderRevision} + 1`,
+          }).where(eq(tasks.id, parentId)).run();
         }
         return { applied: true, updated, fenced: false };
       }, { behavior: 'immediate' });

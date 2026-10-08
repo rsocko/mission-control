@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ConnectorEditPanel,
@@ -220,6 +220,106 @@ describe('GitHub connector settings', () => {
     expect(screen.getAllByText('Removed repository')).toHaveLength(2);
     expect(screen.getAllByText('Not syncing')).toHaveLength(2);
     expect(screen.getByText('All Lists (2)')).toBeInTheDocument();
+  });
+
+  it('searches and sorts source lists consistently', () => {
+    const alphaConnector: ConnectorConfig = {
+      ...connector,
+      id: 'todo-1',
+      type: 'microsoft-todo',
+      name: 'Alpha Connector',
+    };
+    const sourceLists: SourceList[] = [
+      {
+        id: 'github-1:alpha',
+        connectorInstanceId: connector.id,
+        sourceId: 'alpha',
+        name: 'Alpha',
+        type: 'repo',
+        taskCount: 1,
+        lastSyncedAt: null,
+        groupId: null,
+        sortOrder: 2,
+      },
+      {
+        id: 'todo-1:beta',
+        connectorInstanceId: alphaConnector.id,
+        sourceId: 'beta',
+        name: 'Beta',
+        type: 'board',
+        taskCount: 1,
+        lastSyncedAt: null,
+        groupId: null,
+        sortOrder: 0,
+      },
+      {
+        id: 'github-1:gamma',
+        connectorInstanceId: connector.id,
+        sourceId: 'gamma',
+        name: 'Gamma',
+        type: 'account',
+        taskCount: 1,
+        lastSyncedAt: null,
+        groupId: 'group-1',
+        sortOrder: 1,
+      },
+    ];
+
+    render(
+      <ListGroupsSection
+        connectors={[connector, alphaConnector]}
+        sourceLists={sourceLists}
+        listGroups={[{
+          id: 'group-1',
+          name: 'Engineering',
+          icon: null,
+          iconColor: null,
+          sortOrder: 0,
+          createdAt: '2026-08-08T00:00:00.000Z',
+        }]}
+        loading={false}
+        onCreateGroup={vi.fn()}
+        onUpdateGroup={vi.fn()}
+        onDeleteGroup={vi.fn()}
+        onAssignList={vi.fn()}
+        onRefresh={vi.fn()}
+        onRenameList={vi.fn(() => vi.fn().mockResolvedValue(undefined))}
+      />,
+    );
+
+    const allLists = screen.getByRole('region', { name: /All Lists/ });
+    const visibleNames = () => within(allLists)
+      .getAllByText(/^(Alpha|Beta|Gamma)$/)
+      .map((element) => element.textContent);
+
+    expect(visibleNames()).toEqual(['Alpha', 'Beta', 'Gamma']);
+
+    const selectSort = (name: string) => {
+      fireEvent.click(screen.getByRole('combobox', { name: 'Sort lists by' }));
+      fireEvent.click(screen.getByRole('option', { name }));
+    };
+
+    selectSort('Connector');
+    expect(visibleNames()).toEqual(['Beta', 'Alpha', 'Gamma']);
+
+    selectSort('Type');
+    expect(visibleNames()).toEqual(['Gamma', 'Beta', 'Alpha']);
+
+    selectSort('Manual order');
+    expect(visibleNames()).toEqual(['Beta', 'Gamma', 'Alpha']);
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search lists' }), {
+      target: { value: 'Alpha Connector' },
+    });
+    expect(within(allLists).getByText('Beta')).toBeInTheDocument();
+    expect(within(allLists).queryByText('Alpha')).not.toBeInTheDocument();
+    expect(within(allLists).queryByText('Gamma')).not.toBeInTheDocument();
+    expect(screen.getByText('1 of 3 lists')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search lists' }), {
+      target: { value: 'gamma' },
+    });
+    expect(screen.getAllByText('Gamma')).toHaveLength(2);
   });
 
   it('offers an MC-only purge for a retained repository', async () => {

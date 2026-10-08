@@ -2,6 +2,8 @@
  * Home Assistant REST and bounded WebSocket API client.
  */
 
+import { connectorLogger } from '@/lib/logger';
+
 export interface HomeAssistantState {
   entity_id: string;
   state: string;
@@ -19,7 +21,9 @@ export interface HomeAssistantPersistentNotification {
 }
 
 export interface HomeAssistantRepairIssue {
+  breaks_in_ha_version?: string;
   domain: string;
+  issue_domain?: string;
   issue_id: string;
   severity?: string;
   ignored?: boolean;
@@ -27,7 +31,9 @@ export interface HomeAssistantRepairIssue {
   is_persistent?: boolean;
   title?: string;
   description?: string;
+  learn_more_url?: string;
   translation_key?: string;
+  translation_placeholders?: Record<string, string>;
   created?: string;
 }
 
@@ -87,13 +93,29 @@ export interface HAClient {
   fetchWebSocketSources(
     sources: Array<'integrationHealth' | 'persistentNotifications' | 'repairs'>,
   ): Promise<HAWebSocketSourceResult>;
-  callService(domain: string, service: string, data: Record<string, unknown>): Promise<void>;
+  callService(
+    domain: string,
+    service: string,
+    data: Record<string, unknown>,
+    options?: { acceptOnTimeout?: boolean; timeoutMs?: number },
+  ): Promise<void>;
+  waitUntilAvailable(options?: {
+    initialDelayMs?: number;
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+  }): Promise<void>;
   ignoreRepair(domain: string, issueId: string): Promise<void>;
   testConnection(): Promise<HomeAssistantConnectionResult>;
 }
 
 type WebSocketCommand = {
-  key: 'integrationHealth' | 'persistentNotifications' | 'repairs' | 'repairAction' | 'releaseNotes';
+  key:
+    | 'integrationHealth'
+    | 'persistentNotifications'
+    | 'repairs'
+    | 'repairTranslations'
+    | 'repairAction'
+    | 'releaseNotes';
   message: Record<string, unknown>;
 };
 
@@ -213,6 +235,28 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function formatRepairTranslation(
+  template: unknown,
+  placeholders: unknown,
+): string | undefined {
+  const translation = nonEmptyString(template);
+  if (!translation) return undefined;
+  const replacements = asRecord(placeholders);
+  return translation.replace(/\{([^},]+)(?:,[^}]*)?\}/g, (match, key: string) => (
+    nonEmptyString(replacements[key]) ?? match
+  ));
+}
+
 async function responseError(response: Response): Promise<string> {
   const fallback = `Home Assistant request failed: HTTP ${response.status}`;
   const text = (await response.text().catch(() => '')).trim();
@@ -244,8 +288,21 @@ async function responseError(response: Response): Promise<string> {
   return normalized ? `${fallback}: ${normalized}` : fallback;
 }
 
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && (
+    error.name === 'TimeoutError'
+    || error.message.toLowerCase().includes('aborted due to timeout')
+  );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export function createHAClient(options: HAClientOptions): HAClient {
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
+  const repairTranslations = new Map<string, string>();
+  const loadedRepairTranslationDomains = new Set<string>();
 
   function buildHeaders(): HeadersInit {
     return {
@@ -326,9 +383,71 @@ export function createHAClient(options: HAClientOptions): HAClient {
       });
       const result = await runWebSocketCommands(options, commands);
       const repairsPayload = result.repairs;
-      const repairs = repairsPayload && typeof repairsPayload === 'object' && !Array.isArray(repairsPayload)
+      let repairs = repairsPayload && typeof repairsPayload === 'object' && !Array.isArray(repairsPayload)
         ? asArray((repairsPayload as Record<string, unknown>).issues)
         : asArray(repairsPayload);
+
+      if (sources.includes('repairs') && !result.repairsError) {
+        const repairIssues = repairs as HomeAssistantRepairIssue[];
+        const missingDomains = [...new Set(repairIssues.flatMap(issue => (
+          nonEmptyString(issue.translation_key)
+          && nonEmptyString(issue.domain)
+          && !loadedRepairTranslationDomains.has(issue.domain)
+            ? [issue.domain]
+            : []
+        )))];
+
+        if (missingDomains.length > 0) {
+          try {
+            const translationResult = await runWebSocketCommands(options, [{
+              key: 'repairTranslations',
+              message: {
+                type: 'frontend/get_translations',
+                language: 'en',
+                category: 'issues',
+                integration: missingDomains,
+              },
+            }]);
+            const translationError = nonEmptyString(translationResult.repairTranslationsError);
+            if (translationError) throw new Error(translationError);
+
+            const resources = asRecord(asRecord(translationResult.repairTranslations).resources);
+            for (const [key, value] of Object.entries(resources)) {
+              const translation = nonEmptyString(value);
+              if (translation) repairTranslations.set(key, translation);
+            }
+            missingDomains.forEach(domain => loadedRepairTranslationDomains.add(domain));
+          } catch (error) {
+            connectorLogger.warn(
+              {
+                domains: missingDomains,
+                error: error instanceof Error ? error.message : String(error),
+              },
+              'Home Assistant repair translations are unavailable; using readable fallback titles',
+            );
+          }
+        }
+
+        repairs = repairIssues.map((issue) => {
+          const translationKey = nonEmptyString(issue.translation_key);
+          if (!translationKey) return issue;
+          const prefix = `component.${issue.domain}.issues.${translationKey}`;
+          return {
+            ...issue,
+            title: nonEmptyString(issue.title)
+              ?? formatRepairTranslation(
+                repairTranslations.get(`${prefix}.title`),
+                issue.translation_placeholders,
+              ),
+            description: nonEmptyString(issue.description)
+              ?? formatRepairTranslation(
+                repairTranslations.get(`${prefix}.description`),
+                issue.translation_placeholders,
+              ),
+          };
+        });
+      }
+
       return {
         ...(sources.includes('integrationHealth') && !result.integrationHealthError
           ? { integrationHealth: asArray(result.integrationHealth) as HomeAssistantConfigEntry[] }
@@ -351,11 +470,50 @@ export function createHAClient(options: HAClientOptions): HAClient {
       };
     },
 
-    async callService(domain, service, data): Promise<void> {
-      await fetchJson(`/api/services/${encodeURIComponent(domain)}/${encodeURIComponent(service)}`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
+    async callService(domain, service, data, callOptions): Promise<void> {
+      try {
+        await fetchJson(`/api/services/${encodeURIComponent(domain)}/${encodeURIComponent(service)}`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+          signal: callOptions?.timeoutMs
+            ? AbortSignal.timeout(callOptions.timeoutMs)
+            : undefined,
+        });
+      } catch (error) {
+        if (callOptions?.acceptOnTimeout && isTimeoutError(error)) {
+          connectorLogger.info(
+            { domain, service, timeoutMs: callOptions.timeoutMs ?? 15_000 },
+            'Home Assistant service call exceeded the response window; reconciling source state',
+          );
+          return;
+        }
+        throw error;
+      }
+    },
+
+    async waitUntilAvailable(waitOptions): Promise<void> {
+      const initialDelayMs = waitOptions?.initialDelayMs ?? 5_000;
+      const pollIntervalMs = waitOptions?.pollIntervalMs ?? 2_000;
+      const timeoutMs = waitOptions?.timeoutMs ?? 90_000;
+      const startedAt = Date.now();
+      await delay(initialDelayMs);
+
+      while (Date.now() - startedAt < timeoutMs) {
+        try {
+          await fetchJson('/api/');
+          return;
+        } catch (error) {
+          connectorLogger.debug(
+            { err: error },
+            'Waiting for Home Assistant to become available after restart',
+          );
+        }
+        await delay(pollIntervalMs);
+      }
+
+      throw new Error(
+        `Home Assistant did not come back online within ${Math.max(1, Math.round(timeoutMs / 1_000))} seconds`,
+      );
     },
 
     async ignoreRepair(domain, issueId): Promise<void> {

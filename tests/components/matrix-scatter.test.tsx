@@ -115,7 +115,6 @@ describe('MatrixScatter', () => {
     expect(screen.getByText('1 plotted')).toBeInTheDocument();
     expect(screen.getByText('1 missing priority')).toBeInTheDocument();
     expect(screen.getByText('1 missing effort')).toBeInTheDocument();
-    expect(screen.getByText('1 missing date and horizon')).toBeInTheDocument();
     expect(screen.getByText('Expanded marks for this filter')).toBeInTheDocument();
     expect(screen.getByText('Needs data (1)')).toBeInTheDocument();
     expect(screen.getByText('1 task plotted. 1 task has one or more data gaps.')).toBeInTheDocument();
@@ -133,10 +132,9 @@ describe('MatrixScatter', () => {
     expect(screen.getByText('1 plotted')).toBeInTheDocument();
     expect(screen.queryByText('0 missing priority')).not.toBeInTheDocument();
     expect(screen.queryByText('0 missing effort')).not.toBeInTheDocument();
-    expect(screen.queryByText('0 missing date and horizon')).not.toBeInTheDocument();
   });
 
-  it('plots undated tasks from their planning horizon and explains the signal', () => {
+  it('keeps undated tasks at zero urgency instead of deriving pressure from Horizon', () => {
     render(
       <MatrixScatter
         tasks={[matrixTask({
@@ -150,11 +148,10 @@ describe('MatrixScatter', () => {
       />,
     );
 
-    expect(screen.getByText('1 using horizon')).toBeInTheDocument();
     expect(screen.getByRole('button', {
-      name: /Plan next, High priority, Next horizon/,
+      name: /Plan next, High priority, No due date, Effort 3, Horizon Next/,
     })).toBeInTheDocument();
-    expect(screen.queryByText(/missing date and horizon/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/using horizon/)).not.toBeInTheDocument();
   });
 
   it('switches to the effort preset and persists its recommended color default', () => {
@@ -174,6 +171,78 @@ describe('MatrixScatter', () => {
       matrixAxisMode: 'priority-effort',
       matrixColorMode: 'urgency',
     });
+  });
+
+  it('switches to categorical Horizon lanes and flags missing Horizon data', () => {
+    render(
+      <MatrixScatter
+        tasks={[
+          matrixTask({ id: 'next', title: 'Next task', planningHorizon: 'next', dueDate: null }),
+          matrixTask({ id: 'unset', title: 'No horizon', planningHorizon: null }),
+        ]}
+        projects={[]}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Axes'));
+    fireEvent.click(screen.getByRole('option', { name: 'Importance x Horizon' }));
+
+    expect(screen.getByText('Someday')).toBeInTheDocument();
+    expect(screen.getByText('Later')).toBeInTheDocument();
+    expect(screen.getByText('Soon')).toBeInTheDocument();
+    expect(screen.getByText('Next')).toBeInTheDocument();
+    expect(screen.getByText('1 missing Horizon')).toBeInTheDocument();
+    expect(screen.getByText('Missing Horizon (1)')).toBeInTheDocument();
+    expect(useDashboardViewStore.getState()).toMatchObject({
+      matrixAxisMode: 'priority-horizon',
+      matrixColorMode: 'urgency',
+    });
+  });
+
+  it('surfaces actionable timing conflicts without relying on color', () => {
+    const onSelectTask = vi.fn();
+    render(
+      <MatrixScatter
+        tasks={[matrixTask({
+          id: 'conflict',
+          title: 'Deferred deadline',
+          planningHorizon: 'later',
+          dueDate: '2026-07-01',
+        })]}
+        projects={[]}
+        onSelectTask={onSelectTask}
+      />,
+    );
+
+    expect(screen.getByText('Timing conflicts (1)')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Timing conflicts (1)'));
+    expect(screen.getByText(/Later Horizon, but .* overdue/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Review task'));
+    expect(onSelectTask).toHaveBeenCalledWith(expect.objectContaining({ id: 'conflict' }));
+  });
+
+  it('offers tag color encoding without moving task positions', () => {
+    render(
+      <MatrixScatter
+        tasks={[matrixTask({
+          id: 'tagged',
+          title: 'Tagged task',
+          tags: [
+            { id: 'tag-1', name: 'Planning', slug: 'planning', type: 'user', color: null },
+            { id: 'tag-2', name: 'Research', slug: 'research', type: 'user', color: null },
+          ],
+        })]}
+        projects={[]}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Color'));
+    fireEvent.click(screen.getByRole('option', { name: 'Tag' }));
+    expect(screen.getByLabelText('Tag color legend')).toHaveTextContent('Planning');
+    expect(screen.getByLabelText('Tag color legend')).toHaveTextContent('Research');
+    expect(screen.getByRole('button', { name: /Tags Planning, Research/ })).toBeInTheDocument();
   });
 
   it('preserves an explicitly selected color when switching axes', () => {

@@ -14,6 +14,11 @@ export interface ConnectorSettingsStatePatchResult<TState> {
 
 export interface TaskRepository {
   get(id: string): Promise<TaskItem | null>;
+  findByProviderIdentity?(input: {
+    connectorInstanceId: string;
+    providerTaskId: string;
+    providerContainerId?: string;
+  }): Promise<TaskItem | null>;
   upsert(task: TaskItem): Promise<TaskItem>;
   delete(id: string): Promise<boolean>;
 }

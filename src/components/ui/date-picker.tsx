@@ -105,7 +105,7 @@ export function DatePicker({
     : placeholder;
 
   return (
-    <Popover.Root open={open} onOpenChange={(nextOpen) => {
+    <Popover.Root modal open={open} onOpenChange={(nextOpen) => {
       if (!disabled) {
         setOpen(nextOpen);
       }

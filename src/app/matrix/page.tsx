@@ -74,7 +74,12 @@ function MatrixPageInner() {
     state.taskResponse.tasks.length,
   ]);
 
-  const closeTaskDetail = () => actions.setSelectedTaskId(null);
+  const closeTaskDetail: ComponentProps<typeof TaskDetailPanel>['onClose'] = (reason) => {
+    actions.setSelectedTaskId(
+      null,
+      reason === 'task-removed' ? { history: 'replace' } : undefined,
+    );
+  };
   const taskDetailProps: Omit<
     ComponentProps<typeof TaskDetailPanel>,
     'mode' | 'onModeChange' | 'portalDialog' | 'minPanelWidth'
@@ -153,7 +158,7 @@ function MatrixPageInner() {
             <MatrixScatter
               tasks={state.taskResponse.tasks}
               projects={state.projects}
-              onSelectTask={(task) => taskSelection.toggleTask(task.id)}
+              onSelectTask={(task) => taskSelection.selectTask(task.id)}
             />
             {state.loadingMore && (
               <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-xs text-[var(--text-muted)] shadow-lg">

@@ -30,7 +30,11 @@ export interface TaskReminderContractHarness {
     reminderRelative?: string | null;
     reminderDueTime?: string | null;
     recurrence?: string | null;
+    connectorInstanceId?: string;
+    deletedAt?: string | null;
   }): Promise<void>;
+  seedConnector(id: string, deletedAt?: string | null): Promise<void>;
+  setConnectorDeleted(id: string, deletedAt: string): Promise<void>;
   seedOccurrence(input: {
     id: string;
     taskId: string;
@@ -342,6 +346,77 @@ export function describeTaskReminderRepositoryContract(
       maxAttempts: 5,
     });
     await harness.updateTask('race', { reminderAt: '2026-09-01T12:00:00.000Z' });
+    await expect(fire(harness, claim!)).resolves.toEqual({
+      outcome: 'cancelled',
+      pendingDelivery: false,
+    });
+    expect((await harness.getArtifacts()).notifications).toHaveLength(0);
+  });
+
+  it('excludes soft-deleted tasks and connectors and cancels their occurrences', async () => {
+    harness = await createHarness();
+    await harness.reset();
+    const scheduledAt = '2026-08-31T11:55:00.000Z';
+    await harness.seedTask({
+      id: 'soft-deleted-reminder',
+      reminderAt: scheduledAt,
+      deletedAt: TASK_REMINDER_BASE_TIME.toISOString(),
+    });
+    await harness.seedOccurrence({
+      id: 'soft-deleted-reminder-occurrence',
+      taskId: 'soft-deleted-reminder',
+      scheduledAt,
+      state: 'pending',
+    });
+    await harness.seedConnector('deleted-reminder-connector', TASK_REMINDER_BASE_TIME.toISOString());
+    await harness.seedTask({
+      id: 'deleted-connector-reminder',
+      reminderAt: scheduledAt,
+      connectorInstanceId: 'deleted-reminder-connector',
+    });
+    await harness.seedOccurrence({
+      id: 'deleted-connector-reminder-occurrence',
+      taskId: 'deleted-connector-reminder',
+      scheduledAt,
+      state: 'pending',
+    });
+
+    expect(await harness.repository.cancelInvalidated({
+      now: TASK_REMINDER_BASE_TIME,
+      limit: 10,
+    })).toBe(2);
+    expect(await harness.getOccurrence('soft-deleted-reminder', scheduledAt))
+      .toMatchObject({ state: 'cancelled' });
+    expect(await harness.getOccurrence('deleted-connector-reminder', scheduledAt))
+      .toMatchObject({ state: 'cancelled' });
+    expect(await harness.repository.claimNext({
+      now: TASK_REMINDER_BASE_TIME,
+      leaseMs: 60_000,
+      maxAttempts: 5,
+    })).toBeNull();
+  });
+
+  it('cancels a claimed reminder when its connector is deleted before delivery', async () => {
+    harness = await createHarness();
+    await harness.reset();
+    const scheduledAt = '2026-08-31T11:55:00.000Z';
+    await harness.seedConnector('connector-delete-race');
+    await harness.seedTask({
+      id: 'connector-delete-race-task',
+      reminderAt: scheduledAt,
+      connectorInstanceId: 'connector-delete-race',
+    });
+    const claim = await harness.repository.claimNext({
+      now: TASK_REMINDER_BASE_TIME,
+      leaseMs: 60_000,
+      maxAttempts: 5,
+    });
+    expect(claim).not.toBeNull();
+    await harness.setConnectorDeleted(
+      'connector-delete-race',
+      TASK_REMINDER_BASE_TIME.toISOString(),
+    );
+
     await expect(fire(harness, claim!)).resolves.toEqual({
       outcome: 'cancelled',
       pendingDelivery: false,

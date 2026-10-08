@@ -15,6 +15,8 @@ const TASK_PATCH_SCHEMA = z.strictObject({
   tags: z.array(z.string().min(1)),
   recurrence: z.string().nullable(),
   recurrenceMode: z.enum(['schedule', 'completion']),
+  recurrenceSkipDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).max(100),
+  recurrenceCatchUp: z.enum(['latest', 'none']),
   estimatedDuration: z.number().int().nonnegative().nullable(),
   microStatus: z.string().nullable(),
   snoozedUntil: z.string().nullable(),
@@ -25,6 +27,10 @@ const TASK_PATCH_SCHEMA = z.strictObject({
     .nullable(),
   reminderRelative: z.enum(REMINDER_RELATIVE_RULE_VALUES).nullable(),
   reminderDueTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).nullable(),
+  reminderNagInterval: z.union([z.literal(1), z.literal(5), z.literal(15)]).nullable(),
+  reminderNagStopAt: z.string().datetime({ offset: true })
+    .transform(value => new Date(value).toISOString())
+    .nullable(),
   relativeReminderDueDateResolution: z.enum(['remove', 'convert_to_absolute']).optional(),
 }).partial();
 
@@ -43,6 +49,8 @@ const FIELD_BY_INPUT_KEY = {
   tags: 'tags',
   recurrence: 'recurrence',
   recurrenceMode: 'recurrence',
+  recurrenceSkipDates: 'recurrence',
+  recurrenceCatchUp: 'recurrence',
   estimatedDuration: 'estimatedDuration',
   microStatus: 'microStatus',
   snoozedUntil: 'snoozedUntil',
@@ -51,6 +59,8 @@ const FIELD_BY_INPUT_KEY = {
   reminderAt: 'reminderAt',
   reminderRelative: 'reminderAt',
   reminderDueTime: 'reminderAt',
+  reminderNagInterval: 'reminderAt',
+  reminderNagStopAt: 'reminderAt',
   relativeReminderDueDateResolution: 'reminderAt',
 } as const satisfies Record<keyof TaskPatchInput, TaskField>;
 

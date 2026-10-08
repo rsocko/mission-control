@@ -504,6 +504,24 @@ async function pushPendingChangesWithLease(
         }
         pushed++;
         audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Marked complete on remote' });
+      } else if (task.status === 'cancelled' && connector.cancelTask) {
+        if (!canWrite) {
+          audit.push({ action: 'protected', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Write disabled for connector' });
+          continue;
+        }
+        await dispatchGitHubWrite(
+          connectorId, connector, task, pushLeaseToken, 'complete', options, cycleOutcome, [],
+          () => connector.cancelTask!(task.sourceId),
+        );
+        if (pushLeaseToken) {
+          if (!await completeTaskPush(
+            task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
+          )) continue;
+        } else {
+          await persistence.markSynced(task.id, new Date().toISOString());
+        }
+        pushed++;
+        audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Marked complete on remote while retaining local cancellation' });
       } else if (task.status === 'cancelled' && connector.deleteTask) {
         if (!canDelete) {
           audit.push({ action: 'protected', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Delete disabled for connector' });
@@ -810,6 +828,7 @@ function remoteDispatchOperation(
     return capabilities.canWrite && connector.completeTask ? 'complete' : null;
   }
   if (task.status === 'cancelled') {
+    if (capabilities.canWrite && connector.cancelTask) return 'complete';
     return capabilities.canDelete && connector.deleteTask ? 'delete' : null;
   }
   if (task.isChecklistItem && task.parentId) {

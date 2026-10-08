@@ -10,7 +10,7 @@ import type {
 /**
  * One shared behavioural contract for the project-hierarchy command/read
  * boundary, executed against both the SQLite and the PostgreSQL adapter.
- * It covers all seven command types, changed and no-op commands, inverse
+ * It covers all command types, changed and no-op commands, inverse
  * commands, dense ordering, phase-item identity/metadata preservation,
  * membership/exclusion behaviour, every stable domain error, revision and
  * source fencing, durable idempotency (including canonical JSONB replay and
@@ -31,6 +31,8 @@ export interface ProjectHierarchyContractSeed {
   seed(fixture: ProjectHierarchyContractFixture): Promise<void>;
   /** Seeds an empty second project used for cross-project command reuse. */
   seedEmptyProject(projectId: string): Promise<void>;
+  /** Seeds a phase owned by another project to exercise global ID fencing. */
+  seedForeignPhase(projectId: string, phaseId: string): Promise<void>;
   readRevision(projectId: string): Promise<number>;
   isMember(projectId: string, taskId: string): Promise<boolean>;
   readExclusion(projectId: string, taskId: string): Promise<string | null>;
@@ -411,6 +413,83 @@ export function projectHierarchyRepositoryContract(
       expect(taskOrder(snapshot!, PHASE_A)).toEqual([TASK_1, TASK_2]);
       expect(taskOrder(snapshot!, PHASE_B)).toEqual([TASK_3]);
       expect(await repository.findCommittedCommand(commandId('24'))).toBeNull();
+    });
+
+    it('atomically replaces phase structure and restores it with the inverse command', async () => {
+      const before = (await repository.getSnapshot(FIXTURE.projectId))!;
+      const createdAt = '2026-01-02T00:00:00.000Z';
+      const newPhaseId = 'contract-phase-new';
+      const result = await apply('26', {
+        type: 'replace_phase_structure',
+        phases: [
+          { ...before.phases[0], sortOrder: 0 },
+          {
+            id: newPhaseId,
+            projectId: FIXTURE.projectId,
+            name: 'New phase',
+            description: 'Created atomically',
+            status: 'pending',
+            color: '#3b82f6',
+            estimatedDays: 2,
+            targetStart: null,
+            targetEnd: null,
+            startAfterPhaseId: null,
+            sortOrder: 1,
+            completedAt: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+          { ...before.phases[1], sortOrder: 2 },
+        ],
+        placements: [
+          { taskId: TASK_1, phaseId: PHASE_A, index: 0 },
+          { taskId: TASK_2, phaseId: newPhaseId, index: 0 },
+          { taskId: TASK_3, phaseId: PHASE_B, index: 0 },
+        ],
+      });
+
+      expect(result.revision).toBe(1);
+      expect(result.hierarchy.phases.map((phase) => phase.id))
+        .toEqual([PHASE_A, newPhaseId, PHASE_B]);
+      expect(taskOrder(result.hierarchy, PHASE_A)).toEqual([TASK_1]);
+      expect(taskOrder(result.hierarchy, newPhaseId)).toEqual([TASK_2]);
+
+      const restored = await apply('27', result.inverseCommand);
+      expect(restored.revision).toBe(2);
+      expect(restored.hierarchy.phases.map((phase) => phase.id))
+        .toEqual([PHASE_A, PHASE_B]);
+      expect(taskOrder(restored.hierarchy, PHASE_A)).toEqual([TASK_1, TASK_2]);
+      expect(taskOrder(restored.hierarchy, PHASE_B)).toEqual([TASK_3]);
+    });
+
+    it('rejects a replacement phase ID already owned by another project', async () => {
+      await seed.seedEmptyProject(OTHER_PROJECT);
+      const foreignPhaseId = 'contract-phase-foreign';
+      await seed.seedForeignPhase(OTHER_PROJECT, foreignPhaseId);
+      const before = (await repository.getSnapshot(FIXTURE.projectId))!;
+
+      await expectHierarchyError(apply('28', {
+        type: 'replace_phase_structure',
+        phases: [
+          { ...before.phases[0], sortOrder: 0 },
+          {
+            ...before.phases[1],
+            id: foreignPhaseId,
+            projectId: FIXTURE.projectId,
+            name: 'Conflicting phase',
+            sortOrder: 1,
+          },
+        ],
+        placements: [
+          { taskId: TASK_1, phaseId: PHASE_A, index: 0 },
+          { taskId: TASK_2, phaseId: PHASE_A, index: 1 },
+          { taskId: TASK_3, phaseId: foreignPhaseId, index: 0 },
+        ],
+      }), { status: 409, code: 'PHASE_ID_CONFLICT' });
+
+      expect((await repository.getSnapshot(FIXTURE.projectId))!.revision).toBe(0);
+      expect((await repository.getSnapshot(OTHER_PROJECT))!.phases.map((phase) => phase.id))
+        .toEqual([foreignPhaseId]);
     });
 
     it('replays an identical command exactly, including canonical JSON ordering', async () => {

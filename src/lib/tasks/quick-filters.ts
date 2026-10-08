@@ -13,8 +13,10 @@ export type QuickFilterIcon =
   | 'user'
   | 'sparkles'
   | 'completed'
+  | 'repeat'
   | 'waiting'
-  | 'no-date';
+  | 'no-date'
+  | 'delegated';
 
 export interface QuickFilterDefinition {
   id: string;
@@ -100,6 +102,15 @@ export const QUICK_FILTERS: readonly QuickFilterDefinition[] = [
     defaultVisibility: 'when-not-empty',
   },
   {
+    id: 'delegated',
+    label: 'Delegated',
+    description: 'Tasks assigned to an external agent',
+    statKey: 'delegated',
+    icon: 'delegated',
+    iconClassName: 'text-blue-400',
+    defaultVisibility: 'when-not-empty',
+  },
+  {
     id: 'recentlyCreated',
     label: 'Recently Created',
     description: 'Created in the last seven days',
@@ -115,6 +126,15 @@ export const QUICK_FILTERS: readonly QuickFilterDefinition[] = [
     statKey: 'recentlyClosed',
     icon: 'completed',
     iconClassName: 'text-violet-400',
+    defaultVisibility: 'when-not-empty',
+  },
+  {
+    id: 'recurring',
+    label: 'Recurring',
+    description: 'Open tasks that repeat on a schedule or after completion',
+    statKey: 'recurring',
+    icon: 'repeat',
+    iconClassName: 'text-blue-400',
     defaultVisibility: 'when-not-empty',
   },
   {
@@ -161,5 +181,5 @@ export function isQuickFilterVisible(
   if (options.activeFilter === filter.id) return true;
   if (visibility === 'hidden') return false;
   if (visibility === 'always' || options.loading || options.countsAvailable === false) return true;
-  return stats[filter.statKey] > 0;
+  return (stats[filter.statKey] ?? 0) > 0;
 }

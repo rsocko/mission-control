@@ -102,6 +102,26 @@ describe('external-agent API', () => {
     expect(body.agent).not.toHaveProperty('authCredentialRef');
   });
 
+  it('merges partial management policies with secure registry defaults', async () => {
+    const created = await registryRoute.POST(mutationRequest('/api/external-agents', {
+      id: 'api-managed',
+      name: 'Managed destination',
+      type: 'manual',
+      dataPolicy: {
+        allowedClassifications: ['standard', 'restricted'],
+      },
+    }));
+    const body = await created.json();
+
+    expect(created.status).toBe(201);
+    expect(body.agent.dataPolicy).toMatchObject({
+      allowedClassifications: ['standard', 'restricted'],
+      retentionDays: 30,
+      maxRequestsPerMinute: 30,
+    });
+    expect(body.agent.dataPolicy.fieldAllowlist).toContain('instruction');
+  });
+
   it('enforces preview confirmation and scoped pull claim/result authentication', async () => {
     await registryRoute.POST(mutationRequest('/api/external-agents', {
       id: 'api-pull',
@@ -166,9 +186,8 @@ describe('external-agent API', () => {
     expect(claimResponse.status).toBe(200);
     expect(claim).toMatchObject({ dispatchId: preview.dispatchId, attempt: 1 });
 
-    const detailRequest = mutationRequest(
-      `/api/external-agents/dispatches/${preview.dispatchId}`,
-      {},
+    const detailRequest = new Request(
+      `http://localhost/api/external-agents/dispatches/${preview.dispatchId}`,
     );
     const detailResponse = await detailRoute.GET(detailRequest, {
       params: Promise.resolve({ id: preview.dispatchId }),

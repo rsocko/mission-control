@@ -27,6 +27,7 @@ export interface GitHubHierarchyObservation {
   childIdentityEvidence?: ExternalIdentityEvidence;
   parent: GitHubParentMetadata | null;
   parentIdentityEvidence?: ExternalIdentityEvidence;
+  siblingOrder?: number | null;
 }
 
 export type GitHubHierarchyObservationResult =
@@ -91,6 +92,7 @@ export function readGitHubHierarchyObservation(
       childIdentityEvidence: task.externalIdentity,
       parent,
       parentIdentityEvidence: parent ? task.githubParentIdentity : undefined,
+      siblingOrder: parent ? task.siblingOrder ?? null : null,
     },
   };
 }
@@ -322,6 +324,7 @@ export async function reconcileGitHubTaskHierarchy(
       );
       const desiredParentByChildId = new Map<string, string | null>();
       const observationByChildId = new Map<string, GitHubParentMetadata | null>();
+      const siblingOrderByChildId = new Map<string, number | null>();
 
       for (const observation of populationObservations.values()) {
         const { childSourceId, parent } = observation;
@@ -365,6 +368,7 @@ export async function reconcileGitHubTaskHierarchy(
               : knownGoodParentId,
         );
         observationByChildId.set(child.id, parent);
+        siblingOrderByChildId.set(child.id, observation.siblingOrder ?? null);
       }
 
       for (const childId of desiredParentByChildId.keys()) {
@@ -428,15 +432,27 @@ export async function reconcileGitHubTaskHierarchy(
         const existingMetadata = parseMetadata(child.metadata);
         const metadataChanged = observed
           && JSON.stringify(existingMetadata.githubParent) !== JSON.stringify(parent);
+        const siblingOrder = observed
+          ? siblingOrderByChildId.get(childId) ?? null
+          : undefined;
+        const siblingOrderChanged = observed
+          && (child.siblingOrder ?? null) !== siblingOrder;
         const depth = resolveDepth(childId);
         if (
           child.parentId === parentId
           && child.depth === depth
           && !metadataChanged
+          && !siblingOrderChanged
         ) {
           continue;
         }
         const update: GitHubHierarchyTaskUpdate = { taskId: childId, parentId, depth };
+        if (siblingOrderChanged) {
+          update.siblingOrder = siblingOrder;
+        }
+        if (child.parentId !== parentId || siblingOrderChanged) {
+          update.subtaskOrderChanged = true;
+        }
         if (metadataChanged) {
           update.metadata = { ...existingMetadata, githubParent: parent };
         }
@@ -714,6 +730,7 @@ function hierarchyObservationKey(observation: GitHubHierarchyObservation): strin
           observation.parent.nodeId,
         ]
       : null,
+    observation.siblingOrder,
     stableEvidenceIdentityKey(observation.childIdentityEvidence),
     stableEvidenceIdentityKey(observation.parentIdentityEvidence),
   ]);

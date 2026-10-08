@@ -5,9 +5,10 @@ import { getNotificationPushPersistence } from '@/lib/push/notification-push-ser
 /** Get push notification preferences */
 export async function GET() {
   const persistence = await getNotificationPushPersistence();
-  const [prefs, pushDeliveryEnabled] = await Promise.all([
+  const [prefs, pushDeliveryEnabled, persistentRemindersEnabled] = await Promise.all([
     persistence.getPreferences(),
     persistence.getPushDeliveryEnabled(),
+    persistence.getPersistentRemindersEnabled(),
   ]);
   return NextResponse.json({
     morningEnabled: prefs.morningEnabled,
@@ -20,6 +21,7 @@ export async function GET() {
     quietEnd: prefs.quietEnd,
     doNotDisturb: prefs.doNotDisturb,
     pushDeliveryEnabled,
+    persistentRemindersEnabled,
   });
 }
 
@@ -36,6 +38,7 @@ export async function PUT(request: Request) {
     const quietStart = body.quietStart != null ? Number(body.quietStart) : null;
     const quietEnd = body.quietEnd != null ? Number(body.quietEnd) : null;
     const pushDeliveryEnabledInput = body.pushDeliveryEnabled;
+    const persistentRemindersEnabledInput = body.persistentRemindersEnabled;
 
     if (!Number.isInteger(morningHour) || morningHour < 0 || morningHour > 23) {
       return NextResponse.json({ error: 'morningHour must be 0-23' }, { status: 400 });
@@ -57,6 +60,12 @@ export async function PUT(request: Request) {
       && typeof pushDeliveryEnabledInput !== 'boolean'
     ) {
       return NextResponse.json({ error: 'pushDeliveryEnabled must be a boolean' }, { status: 400 });
+    }
+    if (
+      persistentRemindersEnabledInput !== undefined
+      && typeof persistentRemindersEnabledInput !== 'boolean'
+    ) {
+      return NextResponse.json({ error: 'persistentRemindersEnabled must be a boolean' }, { status: 400 });
     }
     for (const field of [
       'morningEnabled',
@@ -97,6 +106,7 @@ export async function PUT(request: Request) {
         doNotDisturb: values.doNotDisturb,
       },
       pushDeliveryEnabled: pushDeliveryEnabledInput,
+      persistentRemindersEnabled: persistentRemindersEnabledInput,
       updatedAt: now,
     });
 

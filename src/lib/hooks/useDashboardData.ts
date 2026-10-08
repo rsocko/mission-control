@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
@@ -11,6 +11,7 @@ import { useDashboardFilterState } from '@/lib/hooks/useDashboardFilterState';
 import { useDashboardUiState } from '@/lib/hooks/useDashboardUiState';
 import { useDashboardSavedViews } from '@/lib/hooks/useDashboardSavedViews';
 import { useDashboardTaskActions } from '@/lib/hooks/useDashboardTaskActions';
+import { useDashboardUrlFilters } from '@/lib/hooks/useDashboardUrlFilters';
 import { MAX_TASK_PAGE_SIZE } from '@/app/api/tasks/pagination';
 import {
   DASHBOARD_TASK_ENTITY_LIMIT,
@@ -38,15 +39,18 @@ import type {
   SourceList,
   EnabledSource,
   SyncStatusEntry,
+  SavedQuickFilter,
   SavedView,
 } from '@/types/dashboard';
 import type { QuickFilterVisibility } from '@/lib/tasks/quick-filters';
 import { PAGE_SIZE } from '@/types/dashboard';
 import type { LocalDisposition } from '@/types';
+import type { HistoryParamSelectionSetter } from '@/lib/hooks/useHistoryParamSelection';
 import {
   resolveGroupLoadOffset,
   updateGroupCountsForTaskChange,
 } from '@/lib/tasks/task-grouping';
+import { TASKS_REFRESH_REQUESTED_EVENT } from '@/lib/tasks/task-refresh-events';
 
 function isRecentQuickFilter(quickFilter: string | null): boolean {
   return quickFilter === 'recentlyCreated' || quickFilter === 'recentlyClosed';
@@ -92,6 +96,7 @@ export interface DashboardState {
   syncStatus: SyncStatusEntry[];
   myDayTaskIds: Set<string>;
   savedViews: SavedView[];
+  savedQuickFilters: SavedQuickFilter[];
   addTaskDestinations: TaskDestination[];
 
   // Loading states
@@ -145,12 +150,13 @@ export interface DashboardState {
   tagsExpanded: boolean;
   allSourceCounts: Record<string, number>;
 
-  // View saving
-  savingView: boolean;
-  editingViewId: string | null;
-  viewName: string;
-  viewIcon: string;
-  viewIconColor: string;
+  // Saved item editor
+  savedItemEditorKind: 'view' | 'quick-filter' | null;
+  editingSavedItemId: string | null;
+  savedItemName: string;
+  savedItemIcon: string;
+  savedItemIconColor: string;
+  activeSavedQuickFilterId: string | null;
 }
 
 export interface DashboardActions {
@@ -193,7 +199,7 @@ export interface DashboardActions {
   removeFromMyDay: (taskId: string) => Promise<void>;
 
   // UI actions
-  setSelectedTaskId: (id: string | null) => void;
+  setSelectedTaskId: HistoryParamSelectionSetter;
   setBulkMode: (v: boolean) => void;
   setBulkSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
   setCollapsedGroups: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -216,14 +222,19 @@ export interface DashboardActions {
 
   // View save actions
   startNewView: () => void;
+  startNewQuickFilter: () => void;
   cancelViewEditor: () => void;
   editView: (view: SavedView) => void;
-  setViewName: (v: string) => void;
-  setViewIcon: (v: string) => void;
-  setViewIconColor: (v: string) => void;
-  saveCurrentView: () => void;
+  editQuickFilter: (filter: SavedQuickFilter) => void;
+  setSavedItemName: (v: string) => void;
+  setSavedItemIcon: (v: string) => void;
+  setSavedItemIconColor: (v: string) => void;
+  saveCurrentSavedItem: () => void;
   applyView: (view: SavedView) => void;
+  applyQuickFilter: (filter: SavedQuickFilter) => void;
+  clearSavedQuickFilter: () => void;
   deleteView: (id: string) => void;
+  deleteQuickFilter: (id: string) => void;
 
   // Subtask optimistic update
   updateSubtaskCount: (taskId: string, done: number, total: number) => void;
@@ -308,7 +319,6 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   const [listGroups, setListGroups] = useState<ListGroup[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatusEntry[]>([]);
   const { listRef, lastClickedIndexRef } = dashboardUi;
-  const hasHydratedUrlFiltersRef = useRef(false);
   const [allSourceCounts, setAllSourceCounts] = useState<Record<string, number>>({});
   const { completingIds, runTaskCompletion } = useTaskCompletion();
   const [exitingTasks, setExitingTasks] = useState<Array<{ id: string; title: string; yOffset: number; reason: 'complete' | 'remove' }>>([]);
@@ -359,20 +369,11 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     router.replace(next.size ? `${pathname}?${next.toString()}` : pathname, { scroll: false });
   }, [pathname, router, searchParams]);
 
-  // Initialize filters from URL search params (e.g. from Insights clickable charts)
-  useEffect(() => {
-    if (hasHydratedUrlFiltersRef.current) return;
-    hasHydratedUrlFiltersRef.current = true;
-    if (searchParams.has(TASK_FILTER_CONTEXT_PARAM)) return;
-    const urlSource = searchParams.get('source');
-    const urlListId = searchParams.get('listId');
-    const urlTag = searchParams.get('tag');
-    if (urlSource || urlListId || urlTag) {
-      setSourceFilter(urlSource);
-      setListFilter(urlListId);
-      setTagFilter(urlTag ? [urlTag] : []);
-    }
-  }, [searchParams, setListFilter, setSourceFilter, setTagFilter]);
+  useDashboardUrlFilters(searchParams, {
+    setSourceFilter,
+    setListFilter,
+    setTagFilter,
+  });
 
   // Load available destinations for the Add Task modal
   useEffect(() => {
@@ -467,17 +468,20 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
         setRefreshTrigger((n) => n + 1);
       }, 3000);
     };
+    const handleTasksRefresh = () => setRefreshTrigger((n) => n + 1);
     let writeThroughRefetchTimer: number | undefined;
 
     window.addEventListener('mission-control:sort-change', handleSortChange);
     window.addEventListener('mission-control:group-change', handleGroupChange);
     window.addEventListener('mission-control:density-change', handleDensityChange);
     window.addEventListener('mission-control:task-added', handleTaskAdded);
+    window.addEventListener(TASKS_REFRESH_REQUESTED_EVENT, handleTasksRefresh);
     return () => {
       window.removeEventListener('mission-control:sort-change', handleSortChange);
       window.removeEventListener('mission-control:group-change', handleGroupChange);
       window.removeEventListener('mission-control:density-change', handleDensityChange);
       window.removeEventListener('mission-control:task-added', handleTaskAdded);
+      window.removeEventListener(TASKS_REFRESH_REQUESTED_EVENT, handleTasksRefresh);
       if (writeThroughRefetchTimer) window.clearTimeout(writeThroughRefetchTimer);
     };
   }, []);
@@ -523,18 +527,35 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   }, [router]);
   const savedViewsState = useDashboardSavedViews({
     taskFilterContext,
+    presentationState: {
+      sortBy,
+      sortDirection,
+      groupBy,
+      viewDensity,
+    },
     filterActions,
     searchParams: searchParams.toString(),
     pathname,
     replaceUrl: replaceDashboardUrl,
   });
   const {
-    savedViews, savingView, editingViewId, viewName, viewIcon, viewIconColor,
+    savedViews,
+    savedQuickFilters,
+    activeQuickFilterId: activeSavedQuickFilterId,
+    editorKind: savedItemEditorKind,
+    editingItemId: editingSavedItemId,
+    itemName: savedItemName,
+    itemIcon: savedItemIcon,
+    itemIconColor: savedItemIconColor,
   } = savedViewsState.state;
   const {
-    startNewView, cancelViewEditor, editView,
-    setViewName, setViewIcon, setViewIconColor,
-    saveCurrentView, applyView, deleteView,
+    startNewView, startNewQuickFilter, cancelViewEditor, editView, editQuickFilter,
+    setItemName: setSavedItemName,
+    setItemIcon: setSavedItemIcon,
+    setItemIconColor: setSavedItemIconColor,
+    saveCurrentItem: saveCurrentSavedItem,
+    applyView, applyQuickFilter, clearQuickFilter: clearSavedQuickFilter,
+    deleteView, deleteQuickFilter,
   } = savedViewsState.actions;
   const completionScopeKey = JSON.stringify({
     taskFilterContext,
@@ -999,7 +1020,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   return {
     state: {
       taskResponse, projects, allTags, allAssignees, enabledSources, sourceLists, listGroups,
-      syncStatus, myDayTaskIds, savedViews, addTaskDestinations,
+      syncStatus, myDayTaskIds, savedViews, savedQuickFilters, addTaskDestinations,
       loading, loadingMore, loadingMoreGroups, refreshing, isSyncing,
       sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
       priorityFilter, statusFilter,
@@ -1010,7 +1031,8 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       showAddTaskModal, addTaskInitialDest, addTaskInitialListId, groupTotalCounts,
       collapsedSections, expandedSourceLists, collapsedListGroups, listSearch,
       tagSearch, tagsExpanded, allSourceCounts,
-      savingView, editingViewId, viewName, viewIcon, viewIconColor,
+      savedItemEditorKind, editingSavedItemId, savedItemName, savedItemIcon,
+      savedItemIconColor, activeSavedQuickFilterId,
     },
     actions: {
       fetchData, loadMoreForGroup, setRefreshTrigger, patchTaskInList, updateSubtaskCount,
@@ -1026,9 +1048,10 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       setShowAddTaskModal, setAddTaskInitialDest, setAddTaskInitialListId,
       toggleSection, setExpandedSourceLists, setCollapsedListGroups, setListSearch,
       setTagSearch, setTagsExpanded,
-      startNewView, cancelViewEditor, editView,
-      setViewName, setViewIcon, setViewIconColor,
-      saveCurrentView, applyView, deleteView,
+      startNewView, startNewQuickFilter, cancelViewEditor, editView, editQuickFilter,
+      setSavedItemName, setSavedItemIcon, setSavedItemIconColor,
+      saveCurrentSavedItem, applyView, applyQuickFilter, clearSavedQuickFilter,
+      deleteView, deleteQuickFilter,
       animateTaskExit,
     },
     computed: {

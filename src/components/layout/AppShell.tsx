@@ -13,6 +13,8 @@ import {
 import { QuickAddBar } from '@/components/add-task';
 import { SyncButton } from '@/components/toolbar';
 import { KeyboardShortcuts } from '@/components/KeyboardShortcuts';
+import { CompletionSoundButton } from '@/components/CompletionSoundButton';
+import { CompletionSoundController } from '@/components/CompletionSoundController';
 import { DemoModeBanner } from '@/components/DemoModeBanner';
 import { DailyCompletionCounter } from '@/components/DailyCompletionCounter';
 import { SearchCommand } from '@/components/search/SearchCommand';
@@ -87,10 +89,12 @@ export function ConnectorHealthIssue({
 }
 
 function ToolbarRow({
+  features,
   health,
   showHealthTooltip,
   setShowHealthTooltip,
 }: {
+  features: FeatureFlags | null;
   health: HealthData | null;
   showHealthTooltip: boolean;
   setShowHealthTooltip: (v: boolean) => void;
@@ -113,12 +117,12 @@ function ToolbarRow({
       <div className={`${widthClass} flex flex-shrink-0 items-center gap-2 pl-4 transition-[width] duration-200`}>
         <AppHistoryControls />
         <div className="min-w-0 flex-1">
-          <SearchCommand />
+          <SearchCommand features={features} />
         </div>
       </div>
       {/* Center: QuickAddBar */}
       <div className="flex-1 min-w-0 flex justify-center px-4">
-        <div className="w-full max-w-2xl -translate-y-0.5">
+        <div className="w-full max-w-4xl -translate-y-0.5">
           <QuickAddBar />
         </div>
       </div>
@@ -137,6 +141,7 @@ function ToolbarRow({
 
         <ViewModeButtons />
         <DailyCompletionCounter />
+        <CompletionSoundButton />
 
         {/* Health Indicator */}
         <div
@@ -345,6 +350,7 @@ function AppShellInner({
     <div className="app-viewport flex bg-[var(--background)]">
       <PriorityWizardGate />
       <KeyboardShortcuts />
+      <CompletionSoundController />
       <DopamineMenu />
 
       {/* Left Nav Rail (desktop only) */}
@@ -369,6 +375,7 @@ function AppShellInner({
           menuButtonRef={mobileMenuButtonRef}
           isDrawerOpen={isDrawerOpen}
           navigationCounts={navigationCounts}
+          contextAction={<CompletionSoundButton mobile />}
         />
 
         <DemoModeBanner />
@@ -377,6 +384,7 @@ function AppShellInner({
         {features?.taskCreation !== false && (
           <div className="relative z-40 hidden sm:block">
             <ToolbarRow
+              features={features}
               health={health}
               showHealthTooltip={showHealthTooltip}
               setShowHealthTooltip={setShowHealthTooltip}

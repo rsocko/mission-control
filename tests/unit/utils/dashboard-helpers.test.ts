@@ -35,6 +35,10 @@ const response = (tasks: Task[]): TaskResponse => ({
   total: tasks.length,
   hasMore: false,
   sourceCounts: { local: tasks.length },
+  facetCounts: {
+    priorities: { high: tasks.length },
+    statuses: { todo: tasks.length },
+  },
   availableTags: [],
   stats: {
     totalOpen: tasks.length,
@@ -47,6 +51,7 @@ const response = (tasks: Task[]): TaskResponse => ({
     myDay: 0,
     recentlyCreated: 0,
     recentlyClosed: 0,
+    recurring: 0,
     waiting: 0,
     inbox: tasks.length,
   },

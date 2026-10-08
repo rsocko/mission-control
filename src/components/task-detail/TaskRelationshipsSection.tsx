@@ -12,7 +12,7 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Tooltip, TooltipProvider } from '@/components/ui/Tooltip';
 import type {
@@ -368,10 +368,10 @@ export function TaskRelationshipsSection({
       >
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Link2 size={13} className="text-[var(--text-muted)]" aria-hidden="true" />
+            <Link2 size={14} className="text-[var(--text-tertiary)]" aria-hidden="true" />
             <h3
               id={`task-relationships-${taskId}`}
-              className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]"
+              className="text-sm font-semibold text-[var(--text-heading)]"
             >
               Relationships
             </h3>

@@ -14,6 +14,14 @@
  */
 
 import type { LocalDisposition, TaskPriority, TaskStatus } from '@/types';
+import type { TaskMetadata } from '@/lib/recurrence/canonical';
+import type { RecurrenceOccurrenceDescriptor } from '@/lib/recurrence/occurrence-persistence';
+import type {
+  ProjectedRecurrenceOccurrence,
+  RecurrenceCompletionAnchor,
+  RecurrenceProjectionInput,
+  RecurrenceProjectionRange,
+} from '@/lib/recurrence/projection';
 import type {
   QuickSortBeforeSnapshot,
   QuickSortTaskSnapshot,
@@ -32,9 +40,11 @@ export const TASK_QUICK_FILTERS = [
   'myDay',
   'recentlyCreated',
   'recentlyClosed',
+  'recurring',
   'waiting',
   'assigned',
   'inbox',
+  'delegated',
 ] as const;
 
 export type TaskQuickFilter = typeof TASK_QUICK_FILTERS[number];
@@ -155,11 +165,18 @@ export interface TaskStatsResult {
   readonly myDay: number;
   readonly recentlyCreated: number;
   readonly recentlyClosed: number;
+  readonly recurring: number;
   readonly waiting: number;
   readonly inbox: number;
+  readonly delegated?: number;
 }
 
 export type TaskSourceCounts = Record<string, number>;
+
+export interface TaskFacetCounts {
+  readonly priorities: Record<string, number>;
+  readonly statuses: Record<string, number>;
+}
 
 export interface AvailableTaskTag {
   readonly id: string;
@@ -172,9 +189,10 @@ export interface AvailableTaskTag {
   readonly count: number;
 }
 
-/** A user-configured "inbox list" entry from the `inbox.lists` app setting. */
+/** A configured or connector-discovered list whose unorganized tasks belong in Inbox. */
 export interface InboxListEntry {
   readonly connectorType: string;
+  readonly connectorInstanceId?: string;
   readonly sourceListId?: string;
   readonly sourceListName?: string;
 }
@@ -261,6 +279,7 @@ export const TASK_QUICK_SORT_QUEUE_MODES = [
   'no_effort',
   'no_tags',
   'no_planning_horizon',
+  'no_project',
 ] as const;
 
 export type TaskQuickSortQueueMode = typeof TASK_QUICK_SORT_QUEUE_MODES[number];
@@ -272,6 +291,7 @@ export function parseTaskQuickSortQueueMode(value: string): TaskQuickSortQueueMo
     case 'no_effort':
     case 'no_tags':
     case 'no_planning_horizon':
+    case 'no_project':
       return value;
     default:
       throw new Error(`Invalid persisted Quick Sort mode: ${value}`);
@@ -314,6 +334,7 @@ export interface TaskQuickSortCounts {
   readonly no_effort: number;
   readonly no_tags: number;
   readonly no_planning_horizon: number;
+  readonly no_project: number;
 }
 
 export interface TaskQuickSortQueueRow {
@@ -360,6 +381,7 @@ export interface TaskQuickSortSuggestionTask {
   readonly updatedAt: string;
   readonly connectorType: string;
   readonly connectorInstanceId: string;
+  readonly sourceListId: string | null;
   readonly sourceListName: string | null;
   readonly assignee: string | null;
   readonly snoozedUntil: string | null;
@@ -382,6 +404,14 @@ export interface TaskQuickSortSuggestionInputs {
   readonly taskTags: Array<{
     readonly taskId: string;
     readonly tagId: string;
+  }>;
+  readonly projectAffinities: Array<{
+    readonly taskId: string;
+    readonly connectorInstanceId: string;
+    readonly sourceListId: string | null;
+    readonly projectId: string | null;
+    readonly projectName: string | null;
+    readonly projectColor: string | null;
   }>;
 }
 
@@ -490,6 +520,8 @@ export interface TaskCoreTaskRow {
   readonly completedAt: string | null;
   readonly recurrenceGeneratedFromTaskId: string | null;
   readonly parentId: string | null;
+  readonly siblingOrder?: number | null;
+  readonly subtaskOrderRevision?: number;
   readonly depth: number;
   readonly isChecklistItem: boolean;
   readonly sourceListId: string | null;
@@ -497,7 +529,7 @@ export interface TaskCoreTaskRow {
   readonly assignee: string | null;
   readonly microStatus: string | null;
   readonly statusReason: string | null;
-  readonly metadata: Record<string, unknown>;
+  readonly metadata: TaskMetadata;
   readonly syncStatus: string;
   readonly lastSyncedAt: string;
   readonly pushRetryCount: number;
@@ -507,6 +539,10 @@ export interface TaskCoreTaskRow {
   readonly reminderAt: string | null;
   readonly reminderRelative: string | null;
   readonly reminderDueTime: string | null;
+  readonly reminderNagInterval?: number | null;
+  readonly reminderNagStopAt?: string | null;
+  readonly reminderNagSeriesId?: string | null;
+  readonly reminderNagSequence?: number;
   readonly effort: number | null;
   readonly isBulkImport: boolean;
 }
@@ -566,6 +602,7 @@ export interface TaskCollectionResult {
   readonly total: number;
   readonly stats: TaskStatsResult;
   readonly sourceCounts: TaskSourceCounts;
+  readonly facetCounts: TaskFacetCounts;
   readonly availableTags: AvailableTaskTag[];
   readonly connectorContexts: TaskCollectionConnectorContext[];
   /**
@@ -593,6 +630,7 @@ export interface TaskDetailSubtask {
   readonly sourceId: string;
   readonly connectorType: string;
   readonly effort: number | null;
+  readonly siblingOrder?: number | null;
 }
 
 export interface TaskDetailResult {
@@ -600,6 +638,7 @@ export interface TaskDetailResult {
   readonly tagIds: string[];
   readonly projectIds: string[];
   readonly subtasks: TaskDetailSubtask[];
+  readonly subtaskOrderRevision: number;
   readonly schedule: Pick<
     TaskScheduleRow,
     'estimatedDuration' | 'recurrence' | 'recurrenceMode'
@@ -720,6 +759,10 @@ export interface TaskCoreTaskPatch {
   readonly reminderAt?: string | null;
   readonly reminderRelative?: string | null;
   readonly reminderDueTime?: string | null;
+  readonly reminderNagInterval?: number | null;
+  readonly reminderNagStopAt?: string | null;
+  readonly reminderNagSeriesId?: string | null;
+  readonly reminderNagSequence?: number;
   readonly effort?: number | null;
   readonly metadata?: Record<string, unknown>;
   readonly syncStatus?: string;
@@ -732,7 +775,288 @@ export interface TaskRecurrenceSuccessorMutation {
   readonly scheduledDate: string;
   readonly scheduledTime: string | null;
   readonly reminderAt: string | null;
+  readonly reminderNagInterval: number | null;
+  readonly reminderNagStopAt: string | null;
+  readonly reminderNagSeriesId: string | null;
   readonly metadata: Record<string, unknown>;
+  readonly rule: unknown;
+  readonly occurrence: RecurrenceOccurrenceDescriptor;
+}
+
+export interface TaskOccurrenceMaterializationInput {
+  readonly task: TaskCoreTaskRow;
+  readonly tagIds: readonly string[];
+  readonly projectIds: readonly string[];
+  readonly schedule: TaskScheduleRow | null;
+  readonly event: TaskCoreEvent;
+  readonly rule: unknown;
+  readonly occurrence: RecurrenceOccurrenceDescriptor;
+  readonly generatedFromTaskId?: string | null;
+}
+
+export interface TaskOccurrenceMaterializationOutcome {
+  readonly kind: 'created' | 'existing';
+  readonly occurrenceId: string;
+  readonly taskId: string;
+}
+
+export type RecurrenceBackfillDecision =
+  | 'materialized'
+  | 'preserved'
+  | 'collapsed'
+  | 'superseded'
+  | 'connector-owned-missing';
+
+export type RecurrenceBackfillTouchReason =
+  | 'attachment'
+  | 'description'
+  | 'field-edit'
+  | 'history'
+  | 'planning-membership'
+  | 'time-activity';
+
+export interface RecurrenceBackfillExistingOccurrence {
+  readonly taskId: string | null;
+  readonly status: string | null;
+  readonly deletedAt: string | null;
+  readonly touchReasons: readonly RecurrenceBackfillTouchReason[];
+}
+
+interface RecurrenceBackfillPolicyOccurrence {
+  readonly occurrenceId: string;
+  readonly occurrence: ProjectedRecurrenceOccurrence;
+  readonly sourceOwner: 'mission-control' | 'connector';
+  readonly existing: RecurrenceBackfillExistingOccurrence | null;
+}
+
+interface PlannedRecurrenceBackfillDecision {
+  readonly occurrenceId: string;
+  readonly decision: RecurrenceBackfillDecision;
+  readonly reason: string;
+  readonly taskId: string | null;
+  readonly supersededByOccurrenceId: string | null;
+}
+
+export type RecurrenceBackfillAsOf =
+  | { readonly kind: 'local-date'; readonly value: string }
+  | { readonly kind: 'instant'; readonly value: string };
+
+const RECURRENCE_BACKFILL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const RECURRENCE_BACKFILL_INSTANT_PATTERN = /(?:Z|[+-]\d{2}:\d{2})$/;
+
+function recurrenceBackfillCalendarDateValue(value: string): number | null {
+  if (!RECURRENCE_BACKFILL_DATE_PATTERN.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = Date.UTC(year, month - 1, day);
+  const date = new Date(parsed);
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day
+    ? parsed
+    : null;
+}
+
+function recurrenceBackfillInstantValue(value: string): number | null {
+  if (!RECURRENCE_BACKFILL_INSTANT_PATTERN.test(value)) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function normalizeRecurrenceBackfillInstant(value: string): string | null {
+  const parsed = recurrenceBackfillInstantValue(value);
+  return parsed === null ? null : new Date(parsed).toISOString();
+}
+
+function recurrenceBackfillOccurrenceValue(
+  occurrence: ProjectedRecurrenceOccurrence,
+  kind: RecurrenceBackfillAsOf['kind'],
+): number {
+  if (kind === 'local-date') return recurrenceBackfillCalendarDateValue(occurrence.localDate)!;
+  return recurrenceBackfillInstantValue(occurrence.instant!)!;
+}
+
+export function validateRecurrenceBackfillAsOf(
+  range: RecurrenceProjectionRange,
+  asOf: RecurrenceBackfillAsOf,
+): readonly string[] {
+  if (range.kind !== asOf.kind) return ['asOf.kind must match range.kind'];
+  const valid = asOf.kind === 'local-date'
+    ? recurrenceBackfillCalendarDateValue(asOf.value) !== null
+    : recurrenceBackfillInstantValue(asOf.value) !== null;
+  return valid
+    ? []
+    : [asOf.kind === 'local-date'
+        ? 'asOf.value must be a calendar date'
+        : 'asOf.value must include a UTC offset or Z suffix'];
+}
+
+export function planRecurrenceBackfill(input: {
+  readonly range: RecurrenceProjectionRange;
+  readonly asOf: RecurrenceBackfillAsOf;
+  readonly occurrences: readonly RecurrenceBackfillPolicyOccurrence[];
+}): readonly PlannedRecurrenceBackfillDecision[] {
+  const issues = validateRecurrenceBackfillAsOf(input.range, input.asOf);
+  if (issues.length > 0) throw new Error(issues[0]);
+
+  const asOfValue = input.asOf.kind === 'local-date'
+    ? recurrenceBackfillCalendarDateValue(input.asOf.value)!
+    : recurrenceBackfillInstantValue(input.asOf.value)!;
+  const missed = input.occurrences.filter(({ occurrence, existing }) => (
+    recurrenceBackfillOccurrenceValue(occurrence, input.asOf.kind) < asOfValue
+    && (
+      existing === null
+      || (
+        existing.deletedAt === null
+        && (existing.status === 'todo' || existing.status === 'in_progress')
+      )
+    )
+  ));
+  const exactCurrent = input.occurrences.find(({ occurrence, existing }) => (
+    recurrenceBackfillOccurrenceValue(occurrence, input.asOf.kind) === asOfValue
+    && (
+      existing === null
+      || (
+        existing.deletedAt === null
+        && (existing.status === 'todo' || existing.status === 'in_progress')
+      )
+    )
+  ));
+  const currentActionable = exactCurrent?.occurrenceId ?? missed.at(-1)?.occurrenceId ?? null;
+
+  return input.occurrences.map((candidate): PlannedRecurrenceBackfillDecision => {
+    const { existing, occurrenceId, sourceOwner } = candidate;
+    const isMissed = recurrenceBackfillOccurrenceValue(
+      candidate.occurrence,
+      input.asOf.kind,
+    ) < asOfValue;
+    if (existing) {
+      if (sourceOwner === 'connector') {
+        return {
+          occurrenceId,
+          decision: 'preserved',
+          reason: 'connector-owned-existing',
+          taskId: existing.taskId,
+          supersededByOccurrenceId: null,
+        };
+      }
+      if (existing.taskId === null || existing.deletedAt !== null) {
+        return {
+          occurrenceId,
+          decision: 'preserved',
+          reason: 'durable-occurrence-claim',
+          taskId: existing.taskId,
+          supersededByOccurrenceId: null,
+        };
+      }
+      if (existing.status !== 'todo') {
+        return {
+          occurrenceId,
+          decision: 'preserved',
+          reason: `protected-status:${existing.status}`,
+          taskId: existing.taskId,
+          supersededByOccurrenceId: null,
+        };
+      }
+      if (existing.touchReasons.length > 0) {
+        return {
+          occurrenceId,
+          decision: 'preserved',
+          reason: `touched:${[...existing.touchReasons].sort().join(',')}`,
+          taskId: existing.taskId,
+          supersededByOccurrenceId: null,
+        };
+      }
+      if (isMissed && occurrenceId !== currentActionable) {
+        return {
+          occurrenceId,
+          decision: 'superseded',
+          reason: 'untouched-missed-pileup',
+          taskId: existing.taskId,
+          supersededByOccurrenceId: currentActionable,
+        };
+      }
+      return {
+        occurrenceId,
+        decision: 'preserved',
+        reason: occurrenceId === currentActionable ? 'current-actionable' : 'existing-future',
+        taskId: existing.taskId,
+        supersededByOccurrenceId: null,
+      };
+    }
+    if (sourceOwner === 'connector') {
+      return {
+        occurrenceId,
+        decision: 'connector-owned-missing',
+        reason: 'provider-occurrence-ownership',
+        taskId: null,
+        supersededByOccurrenceId: null,
+      };
+    }
+    if (isMissed && occurrenceId !== currentActionable) {
+      return {
+        occurrenceId,
+        decision: 'collapsed',
+        reason: 'untouched-missed-pileup',
+        taskId: null,
+        supersededByOccurrenceId: currentActionable,
+      };
+    }
+    return {
+      occurrenceId,
+      decision: 'materialized',
+      reason: occurrenceId === currentActionable ? 'current-actionable' : 'scheduled-in-range',
+      taskId: null,
+      supersededByOccurrenceId: null,
+    };
+  });
+}
+
+export interface TaskRecurrenceBackfillInput {
+  readonly rule: unknown;
+  readonly range: RecurrenceProjectionRange;
+  readonly asOf: RecurrenceBackfillAsOf;
+  readonly completionAnchors?: readonly RecurrenceCompletionAnchor[];
+  readonly limits?: RecurrenceProjectionInput['limits'];
+  readonly decidedAt: string;
+  readonly materializationFor: (
+    occurrence: ProjectedRecurrenceOccurrence,
+  ) => Omit<TaskOccurrenceMaterializationInput, 'rule' | 'occurrence'>;
+}
+
+export interface TaskRecurrenceBackfillDecision {
+  readonly occurrenceId: string;
+  readonly decision: RecurrenceBackfillDecision;
+  readonly reason: string;
+  readonly taskId: string | null;
+  readonly supersededByOccurrenceId: string | null;
+  readonly decidedAt: string;
+}
+
+export type TaskRecurrenceBackfillOutcome =
+  | {
+      readonly status: 'success';
+      readonly iterations: number;
+      readonly decisions: readonly TaskRecurrenceBackfillDecision[];
+    }
+  | {
+      readonly status: 'invalid';
+      readonly issues: readonly string[];
+    }
+  | {
+      readonly status: 'unsupported';
+      readonly reasons: readonly string[];
+    }
+  | {
+      readonly status: 'bounds-exceeded';
+      readonly bound: 'range' | 'iterations' | 'occurrences' | 'completion-anchors';
+      readonly maximum: number;
+    };
+
+export interface TaskOccurrenceMaterializationRepository {
+  materializeOccurrence(
+    input: TaskOccurrenceMaterializationInput,
+  ): Promise<TaskOccurrenceMaterializationOutcome>;
+  backfillRange(input: TaskRecurrenceBackfillInput): Promise<TaskRecurrenceBackfillOutcome>;
 }
 
 export interface TaskWriteContext {
@@ -778,6 +1102,48 @@ export interface TaskMutationRepository {
   mutateTask(request: TaskMutationRequest): Promise<TaskMutationOutcome>;
 }
 
+export type TaskTimeActivityMode = 'focus' | 'deadline';
+export type TaskTimeActivityState = 'running' | 'paused' | 'completed' | 'cancelled';
+export type TaskTimeActivityAction = 'pause' | 'resume' | 'complete' | 'cancel';
+export interface TaskTimeActivity {
+  readonly id: string; readonly taskId: string;
+  readonly mode: TaskTimeActivityMode; readonly state: TaskTimeActivityState;
+  readonly targetSeconds: number; readonly elapsedSeconds: number;
+  readonly activeStartedAt: string | null;
+  readonly startedAt: string; readonly updatedAt: string; readonly version: number;
+}
+export type TaskTimeActivityMutationOutcome =
+  | { readonly kind: 'committed' | 'replayed'; readonly activity: TaskTimeActivity }
+  | { readonly kind: 'task-not-found' | 'activity-not-found' }
+  | {
+      readonly kind: 'conflict';
+      readonly reason: 'active-timer' | 'command' | 'state' | 'version';
+      readonly activeTaskId?: string;
+    };
+export interface TaskTimeActivityStartInput {
+  readonly taskId: string; readonly commandId: string; readonly serverNow: string;
+  readonly mode: TaskTimeActivityMode; readonly targetSeconds: number;
+}
+export interface TaskTimeActivityTransitionInput {
+  readonly taskId: string; readonly activityId: string; readonly commandId: string;
+  readonly action: TaskTimeActivityAction; readonly expectedVersion: number; readonly serverNow: string;
+}
+export interface TaskTimeActivityRepository {
+  getTaskActivity(taskId: string, serverNow: string):
+    Promise<{ readonly taskExists: boolean; readonly activity: TaskTimeActivity | null }>;
+  start(input: TaskTimeActivityStartInput): Promise<TaskTimeActivityMutationOutcome>;
+  transition(input: TaskTimeActivityTransitionInput): Promise<TaskTimeActivityMutationOutcome>;
+  hasDurableTimeActivity(taskId: string): Promise<boolean>;
+}
+export function elapsedTaskTimeAt(
+  activity: Pick<TaskTimeActivity, 'activeStartedAt' | 'elapsedSeconds' | 'state' | 'targetSeconds'>,
+  serverNow: string,
+): number {
+  if (activity.state !== 'running' || !activity.activeStartedAt) return activity.elapsedSeconds;
+  const activeSeconds = Math.max(0,
+    Math.floor((Date.parse(serverNow) - Date.parse(activity.activeStartedAt)) / 1000));
+  return Math.min(activity.targetSeconds, activity.elapsedSeconds + activeSeconds);
+}
 export type TaskRemovalMode =
   | 'mirror-dismiss'
   | 'ingested-cancel'
@@ -795,6 +1161,21 @@ export type TaskRemovalOutcome =
       readonly kind: 'committed';
       readonly action: 'dismissed' | 'cancelled' | 'deleted' | 'pending-remote';
       readonly taskVersion: string | null;
+    };
+
+export type TaskRestoreOutcome =
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'not-deleted' }
+  | {
+      readonly kind: 'restored';
+      readonly task: {
+        readonly id: string;
+        readonly title: string;
+        readonly description: string | null;
+        readonly sourceListName: string | null;
+        readonly connectorType: string;
+        readonly status: string;
+      };
     };
 
 export interface TaskRemovalRepository {
@@ -815,6 +1196,8 @@ export interface TaskRemovalRepository {
     readonly leaseToken: string;
     readonly expectedUpdatedAt: string;
   }): Promise<TaskRemovalOutcome>;
+  restoreTask(taskId: string, now: string): Promise<TaskRestoreOutcome>;
+  purgeDeletedBefore(cutoff: string): Promise<readonly string[]>;
 }
 
 /**
@@ -890,6 +1273,7 @@ export interface TaskQueryRepository {
   listTaskIds(spec: TaskFilterSpec, page: TaskListPage): Promise<string[]>;
   getStats(spec: TaskFilterSpec): Promise<TaskStatsResult>;
   getSourceCounts(spec: TaskFilterSpec): Promise<TaskSourceCounts>;
+  getFacetCounts(spec: TaskFilterSpec): Promise<TaskFacetCounts>;
   getAvailableTags(spec: TaskFilterSpec): Promise<AvailableTaskTag[]>;
 }
 
@@ -1369,7 +1753,19 @@ export interface TaskAncillarySubtask {
   readonly priority: string;
   readonly effort: number | null;
   readonly parentId: string | null;
+  readonly siblingOrder?: number | null;
 }
+
+export interface TaskSubtaskOrderState {
+  readonly revision: number;
+  readonly subtasks: TaskAncillarySubtask[];
+}
+
+export type TaskSubtaskReorderOutcome =
+  | { readonly kind: 'reordered'; readonly revision: number }
+  | { readonly kind: 'parent-not-found' }
+  | { readonly kind: 'invalid-children' }
+  | { readonly kind: 'revision-conflict'; readonly currentRevision: number };
 
 export interface TaskSubtaskProposalSnapshot {
   readonly parentUpdatedAt: string;
@@ -1445,6 +1841,12 @@ export interface TaskAncillaryRepository {
     readonly now: string;
   }): Promise<TaskPromoteOutcome>;
   listSubtasks(parentTaskId: string): Promise<TaskAncillarySubtask[]>;
+  getSubtaskOrderState(parentTaskId: string): Promise<TaskSubtaskOrderState | null>;
+  reorderSubtasks(input: {
+    readonly parentTaskId: string;
+    readonly orderedChildIds: readonly string[];
+    readonly expectedRevision: number;
+  }): Promise<TaskSubtaskReorderOutcome>;
   getSubtaskProposalSnapshot(
     parentTaskId: string,
   ): Promise<TaskSubtaskProposalSnapshot | null>;
@@ -2073,7 +2475,9 @@ export interface TaskCorePersistence {
   readonly collections: TaskCollectionReadRepository;
   readonly details: TaskDetailReadRepository;
   readonly creates: TaskCreateRepository;
+  readonly occurrences: TaskOccurrenceMaterializationRepository;
   readonly mutations: TaskMutationRepository;
+  readonly timeActivities: TaskTimeActivityRepository;
   readonly removals: TaskRemovalRepository;
   readonly taskReads: TaskReadRepository;
   readonly filterInputs: TaskFilterInputRepository;

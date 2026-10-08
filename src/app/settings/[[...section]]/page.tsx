@@ -7,6 +7,7 @@ import {
   Plug, RefreshCw, Tag, FlaskConical, Inbox, Layers,
   FolderTree, Settings2, Brain, Activity, Database, Star, Puzzle, HardDrive, Smartphone, Search, X,
   Info,
+  Palette,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
@@ -43,6 +44,7 @@ import { ShortcutsSection } from '../components/ShortcutsSection';
 import { NotificationEnrichmentSection } from '../components/NotificationEnrichmentSection';
 import { RuntimeTelemetrySection } from '../components/RuntimeTelemetrySection';
 import { AboutSection } from '../components/AboutSection';
+import { ContextThemesSection } from '../components/ContextThemesSection';
 import { PushNotificationSettings } from '@/components/settings/PushNotificationSettings';
 import { PriorityEntitiesPanel } from '@/components/smart-score';
 import { SETTINGS_SECTION_NAMES, type SettingsSection } from '../settings-search';
@@ -62,6 +64,7 @@ const SLUG_TO_SECTION: Record<string, ActiveSection> = {
   'triage-sources': 'triageSources',
   'priority-entities': 'priorityEntities',
   'dashboard': 'dashboard',
+  'context-themes': 'contextThemes',
   'shortcuts': 'shortcuts',
   'ai-provider': 'ai',
   'storage': 'storage',
@@ -102,6 +105,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Appearance',
     items: [
+      { id: 'contextThemes', icon: Palette, label: 'Context Themes' },
       { id: 'dashboard', icon: Activity, label: 'Dashboard' },
       { id: 'shortcuts', icon: Smartphone, label: 'Taskbar Shortcuts' },
     ],
@@ -109,7 +113,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'System',
     items: [
-      { id: 'ai', icon: Brain, label: 'AI Provider' },
+      { id: 'ai', icon: Brain, label: 'AI & Agents' },
       { id: 'storage', icon: HardDrive, label: 'Storage & Cache' },
       { id: 'runtime', icon: Activity, label: 'Runtime Telemetry' },
       { id: 'mode', icon: FlaskConical, label: 'App Mode' },
@@ -131,13 +135,14 @@ export default function SettingsPage() {
     router.push(`/settings/${SECTION_TO_SLUG[id]}`);
   }, [router]);
   const {
-    connectors, sourceLists, listGroups, loading,
+    connectors, sourceLists, classificationDefaults, listGroups, loading,
     showAddModal, setShowAddModal,
     selectedConnector, setSelectedConnector, syncing,
     fetchData, toggleConnector, deleteConnector, restoreConnector,
     permanentlyDeleteConnector, updateConnector, purgeRetainedSourceList,
     handleRenameList, triggerSync, createListGroup, updateListGroup,
     deleteListGroup, assignSourceListToGroup,
+    updateSourceListAppearance,
   } = useSettingsAdministration();
 
   const navigateToSearchResult = useCallback((section: SettingsSection, target: string) => {
@@ -157,6 +162,10 @@ export default function SettingsPage() {
     {activeSection === 'about' ? (
       <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-28 pt-4 sm:hidden">
         <AboutSection />
+      </div>
+    ) : activeSection === 'ai' ? (
+      <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-28 pt-4 sm:hidden">
+        <AIProviderSection />
       </div>
     ) : (
       <MobileSettings onAddConnector={() => setShowAddModal(true)} />
@@ -284,6 +293,11 @@ export default function SettingsPage() {
                 <DashboardKpiSettings />
               </motion.div>
             )}
+            {activeSection === 'contextThemes' && (
+              <motion.div key="context-themes" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                <ContextThemesSection />
+              </motion.div>
+            )}
             {activeSection === 'general' && (
               <motion.div key="general" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
                 <GeneralSettingsSection />
@@ -334,6 +348,7 @@ export default function SettingsPage() {
                   onAssignList={assignSourceListToGroup}
                   onRefresh={fetchData}
                   onRenameList={handleRenameList}
+                  onUpdateAppearance={updateSourceListAppearance}
                 />
               </motion.div>
             )}
@@ -407,6 +422,8 @@ export default function SettingsPage() {
         <AddConnectorModal
           onClose={() => setShowAddModal(false)}
           onAdded={() => { setShowAddModal(false); fetchData(); }}
+          classificationDefaults={classificationDefaults}
+          connectors={connectors}
         />
       )}
     </AnimatePresence>

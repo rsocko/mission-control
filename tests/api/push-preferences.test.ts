@@ -4,6 +4,7 @@ import { DEFAULT_NOTIFICATION_PUSH_PREFERENCES } from '@/db/persistence/notifica
 const mocks = vi.hoisted(() => ({
   getPreferences: vi.fn(),
   getPushDeliveryEnabled: vi.fn(),
+  getPersistentRemindersEnabled: vi.fn(),
   savePreferences: vi.fn(),
   restart: vi.fn(),
 }));
@@ -12,6 +13,7 @@ vi.mock('@/lib/push/notification-push-service', () => ({
   getNotificationPushPersistence: async () => ({
     getPreferences: mocks.getPreferences,
     getPushDeliveryEnabled: mocks.getPushDeliveryEnabled,
+    getPersistentRemindersEnabled: mocks.getPersistentRemindersEnabled,
     savePreferences: mocks.savePreferences,
   }),
 }));
@@ -35,6 +37,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getPreferences.mockResolvedValue({ ...DEFAULT_NOTIFICATION_PUSH_PREFERENCES });
   mocks.getPushDeliveryEnabled.mockResolvedValue(true);
+  mocks.getPersistentRemindersEnabled.mockResolvedValue(true);
   mocks.savePreferences.mockResolvedValue(undefined);
   mocks.restart.mockResolvedValue(undefined);
 });
@@ -47,6 +50,7 @@ describe('push preferences route', () => {
     await expect(response.json()).resolves.toEqual({
       ...DEFAULT_NOTIFICATION_PUSH_PREFERENCES,
       pushDeliveryEnabled: false,
+      persistentRemindersEnabled: true,
     });
   });
 
@@ -68,6 +72,7 @@ describe('push preferences route', () => {
         quietEnd: 7,
       },
       pushDeliveryEnabled: undefined,
+      persistentRemindersEnabled: undefined,
       updatedAt: expect.any(String),
     });
     expect(mocks.restart).toHaveBeenCalledOnce();
@@ -87,6 +92,7 @@ describe('push preferences route', () => {
     [{ quietStart: 24 }, 'quietStart must be 0-23'],
     [{ quietEnd: 1.5 }, 'quietEnd must be 0-23'],
     [{ pushDeliveryEnabled: 'false' }, 'pushDeliveryEnabled must be a boolean'],
+    [{ persistentRemindersEnabled: 'false' }, 'persistentRemindersEnabled must be a boolean'],
     [{ morningEnabled: 'false' }, 'morningEnabled must be a boolean'],
     [{ triageNudgeEnabled: 1 }, 'triageNudgeEnabled must be a boolean'],
     [{ carryForwardEnabled: null }, 'carryForwardEnabled must be a boolean'],
@@ -96,6 +102,15 @@ describe('push preferences route', () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error });
     expect(mocks.savePreferences).not.toHaveBeenCalled();
+  });
+
+  it('saves the persistent reminder emergency switch', async () => {
+    const response = await PUT(request({ persistentRemindersEnabled: false }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.savePreferences).toHaveBeenCalledWith(expect.objectContaining({
+      persistentRemindersEnabled: false,
+    }));
   });
 
   it('redacts persistence failures and does not restart', async () => {

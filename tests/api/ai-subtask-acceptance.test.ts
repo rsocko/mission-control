@@ -1,21 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
-type ChainableProxy = Record<PropertyKey, unknown>;
-
-function chainable<T>(terminal: T) {
-  const chain: ChainableProxy = new Proxy({}, {
-    get(_, prop: string | symbol) {
-      if (prop === 'then') return (resolve: (value: T) => unknown) => resolve(terminal);
-      if (prop === 'get') return () => Array.isArray(terminal) ? terminal[0] : terminal;
-      if (prop === 'all') return () => terminal;
-      if (prop === 'run') return () => terminal;
-      return vi.fn(() => chain);
-    },
-  });
-  return chain;
-}
-
 const mockDb = {
   select: vi.fn(),
   insert: vi.fn(),
@@ -23,15 +8,23 @@ const mockDb = {
 const mockGetCapabilities = vi.fn();
 const mockIsConnectorEnabled = vi.fn();
 const mockInsertValues = vi.fn();
-const mockGetConnector = vi.fn(() => ({ createSubTask: vi.fn() }));
+const mockGetConnector = vi.fn((): {
+  type?: string;
+  createSubTask?: (...args: unknown[]) => unknown;
+  reorderSubTasks?: (...args: unknown[]) => unknown;
+} => ({ createSubTask: vi.fn() }));
 const mockInitializeConnector = vi.fn();
 const mockLogWriteThrough = vi.fn();
 const mockGetTask = vi.fn();
 const mockGetSubtaskProposalSnapshot = vi.fn();
 const mockListSubtasks = vi.fn();
+const mockGetSubtaskOrderState = vi.fn();
+const mockReorderSubtasks = vi.fn();
 const mockCreateSubtask = vi.fn();
 const mockAcceptSubtaskProposal = vi.fn();
 const mockCompleteSubtaskWriteThrough = vi.fn();
+const mockPersistCreatedTaskIdentity = vi.fn();
+const mockLoggerError = vi.fn();
 
 vi.mock('crypto', () => {
   const createHash = () => {
@@ -94,17 +87,26 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
 vi.mock('@/lib/sync/write-through-log', () => ({
   logWriteThrough: mockLogWriteThrough,
 }));
+vi.mock('@/lib/connectors/transfer-identity', () => ({
+  persistCreatedTaskIdentity: mockPersistCreatedTaskIdentity,
+}));
+vi.mock('@/lib/external-identities', () => ({
+  executeFencedGitHubTaskMutation: vi.fn(
+    async ({ write }: { write: () => Promise<unknown> }) => write(),
+  ),
+  GitHubUnknownWriteOutcomeError: class GitHubUnknownWriteOutcomeError extends Error {},
+}));
 vi.mock('@/lib/logger', () => ({
-  default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+  default: { error: mockLoggerError, warn: vi.fn(), info: vi.fn() },
 }));
 
 const taskVersion = '2026-07-30T12:00:00.000Z';
 const contextVersion = 'a'.repeat(64);
 const proposalId = '3d188f4c-7eca-4d17-8cbe-601cc9d6a898';
 
-function request(body: Record<string, unknown>) {
+function request(body: Record<string, unknown>, method = 'POST') {
   return new Request('https://mc.example/api/tasks/parent/subtasks', {
-    method: 'POST',
+    method,
     headers: {
       'Content-Type': 'application/json',
       authorization: 'Bearer acceptance-test-token',
@@ -177,8 +179,11 @@ beforeEach(() => {
     subtaskTitles: [],
   });
   mockListSubtasks.mockResolvedValue([]);
+  mockGetSubtaskOrderState.mockResolvedValue({ revision: 0, subtasks: [] });
+  mockReorderSubtasks.mockResolvedValue({ kind: 'reordered', revision: 1 });
   mockGetConnector.mockReturnValue({ createSubTask: vi.fn() });
   mockCreateSubtask.mockResolvedValue({ kind: 'created' });
+  mockPersistCreatedTaskIdentity.mockResolvedValue(undefined);
   mockAcceptSubtaskProposal.mockResolvedValue({
     kind: 'created',
     snapshot: {
@@ -193,12 +198,173 @@ beforeEach(() => {
       getTask: mockGetTask,
       getSubtaskProposalSnapshot: mockGetSubtaskProposalSnapshot,
       listSubtasks: mockListSubtasks,
+      getSubtaskOrderState: mockGetSubtaskOrderState,
+      reorderSubtasks: mockReorderSubtasks,
       createSubtask: mockCreateSubtask,
       acceptSubtaskProposal: mockAcceptSubtaskProposal,
       completeSubtaskWriteThrough: mockCompleteSubtaskWriteThrough,
     },
   });
 });
+
+describe('subtask reorder route', () => {
+    it('persists a complete local order with revision fencing', async () => {
+      const subtasks = [
+        {
+          id: 'child-a',
+          title: 'A',
+          status: 'todo',
+          sourceId: 'local:child-a',
+          connectorType: 'local',
+          priority: 'none',
+          effort: null,
+          parentId: 'parent',
+          siblingOrder: 0,
+        },
+        {
+          id: 'child-b',
+          title: 'B',
+          status: 'todo',
+          sourceId: 'local:child-b',
+          connectorType: 'local',
+          priority: 'none',
+          effort: null,
+          parentId: 'parent',
+          siblingOrder: 1,
+        },
+      ];
+      mockGetSubtaskOrderState.mockResolvedValue({ revision: 3, subtasks });
+      mockReorderSubtasks.mockResolvedValue({ kind: 'reordered', revision: 4 });
+
+      const { PATCH } = await import('@/app/api/tasks/[id]/subtasks/route');
+      const response = await PATCH(request({
+        orderedChildIds: ['child-b', 'child-a'],
+        expectedRevision: 3,
+      }, 'PATCH'), { params: Promise.resolve({ id: 'parent' }) });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        revision: 4,
+        writeBack: 'local-only',
+      });
+      expect(mockReorderSubtasks).toHaveBeenCalledWith({
+        parentTaskId: 'parent',
+        orderedChildIds: ['child-b', 'child-a'],
+        expectedRevision: 3,
+      });
+    });
+
+    it('returns the current order after a stale request', async () => {
+      mockGetSubtaskOrderState.mockResolvedValue({ revision: 5, subtasks: [] });
+      mockReorderSubtasks.mockResolvedValue({
+        kind: 'revision-conflict',
+        currentRevision: 5,
+      });
+
+      const { PATCH } = await import('@/app/api/tasks/[id]/subtasks/route');
+      const response = await PATCH(request({
+        orderedChildIds: [],
+        expectedRevision: 4,
+      }, 'PATCH'), { params: Promise.resolve({ id: 'parent' }) });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        revision: 5,
+        subtasks: [],
+      });
+    });
+
+    it('returns the current sibling set when membership changed', async () => {
+      const currentSubtasks = [{
+        id: 'new-child',
+        title: 'New',
+        status: 'todo',
+        sourceId: 'local:new-child',
+        connectorType: 'local',
+        priority: 'none',
+        effort: null,
+        parentId: 'parent',
+        siblingOrder: 0,
+      }];
+      mockGetSubtaskOrderState
+        .mockResolvedValueOnce({ revision: 3, subtasks: [] })
+        .mockResolvedValueOnce({ revision: 3, subtasks: currentSubtasks });
+      mockReorderSubtasks.mockResolvedValue({ kind: 'invalid-children' });
+
+      const { PATCH } = await import('@/app/api/tasks/[id]/subtasks/route');
+      const response = await PATCH(request({
+        orderedChildIds: [],
+        expectedRevision: 3,
+      }, 'PATCH'), { params: Promise.resolve({ id: 'parent' }) });
+
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        revision: 3,
+        subtasks: currentSubtasks,
+      });
+    });
+
+    it('restores local order when source write-through fails', async () => {
+      const subtasks = [
+        {
+          id: 'child-a',
+          title: 'A',
+          status: 'todo',
+          sourceId: 'remote:a',
+          connectorType: 'test-remote',
+          priority: 'none',
+          effort: null,
+          parentId: 'parent',
+          siblingOrder: 0,
+        },
+        {
+          id: 'child-b',
+          title: 'B',
+          status: 'todo',
+          sourceId: 'remote:b',
+          connectorType: 'test-remote',
+          priority: 'none',
+          effort: null,
+          parentId: 'parent',
+          siblingOrder: 1,
+        },
+      ];
+      mockParentTask({
+        sourceId: 'remote:parent',
+        connectorType: 'test-remote',
+        connectorInstanceId: 'test-remote',
+      });
+      mockGetCapabilities.mockResolvedValue({
+        write: true,
+        subtaskOrderWrite: true,
+      });
+      mockGetSubtaskOrderState.mockResolvedValue({ revision: 3, subtasks });
+      mockReorderSubtasks
+        .mockResolvedValueOnce({ kind: 'reordered', revision: 4 })
+        .mockResolvedValueOnce({ kind: 'reordered', revision: 5 });
+      mockGetConnector.mockReturnValue({
+        type: 'test-remote',
+        reorderSubTasks: vi.fn().mockRejectedValue(new Error('source unavailable')),
+      });
+
+      const { PATCH } = await import('@/app/api/tasks/[id]/subtasks/route');
+      const response = await PATCH(request({
+        orderedChildIds: ['child-b', 'child-a'],
+        expectedRevision: 3,
+      }, 'PATCH'), { params: Promise.resolve({ id: 'parent' }) });
+
+      expect(response.status).toBe(502);
+      await expect(response.json()).resolves.toMatchObject({
+        revision: 5,
+        subtasks,
+      });
+      expect(mockReorderSubtasks).toHaveBeenNthCalledWith(2, {
+        parentTaskId: 'parent',
+        orderedChildIds: ['child-a', 'child-b'],
+        expectedRevision: 4,
+      });
+    });
+  });
 
 describe('AI proposal acceptance through the subtask route', () => {
   it('rejects a proposal when the parent task changed', async () => {
@@ -341,6 +507,28 @@ describe('AI proposal acceptance through the subtask route', () => {
     });
   });
 
+  it('persists Quick Add metadata on a local subtask', async () => {
+    const { POST } = await import('@/app/api/tasks/[id]/subtasks/route');
+    const response = await POST(request({
+      title: 'Scheduled child',
+      priority: 'high',
+      planningHorizon: 'soon',
+      dueDate: '2026-10-03',
+      effort: 3,
+    }), { params: Promise.resolve({ id: 'parent' }) });
+
+    expect(response.status).toBe(200);
+    expect(mockCreateSubtask).toHaveBeenCalledWith({
+      task: expect.objectContaining({
+        title: 'Scheduled child',
+        priority: 'high',
+        planningHorizon: 'soon',
+        dueDate: '2026-10-03',
+        effort: 3,
+      }),
+    });
+  });
+
   it('creates remote-shaped subtasks locally without connector access in public demo mode', async () => {
     process.env.MC_PUBLIC_DEMO = 'true';
     mockParentTask({
@@ -451,5 +639,119 @@ describe('AI proposal acceptance through the subtask route', () => {
       );
     });
     expect(order).toEqual(['local', 'source', 'complete']);
+  });
+
+  it('persists GitHub subtask identity before marking the local row synchronized', async () => {
+    const order: string[] = [];
+    const externalIdentity = {
+      entity: {
+        identity: { stableId: 'I_child' },
+        locator: {
+          owner: 'acme',
+          repository: 'repo',
+          issueNumber: 42,
+        },
+      },
+    };
+    const createRemoteSubtask = vi.fn(async () => {
+      order.push('source');
+      return {
+        sourceId: 'acme/repo:42',
+        sourceListId: 'acme/repo',
+        metadata: { nodeId: 'I_child', issueNumber: 42 },
+        externalIdentity,
+      };
+    });
+    mockGetCapabilities.mockResolvedValue({
+      write: true,
+      subtasks: true,
+      taskFieldProfile: {
+        dependencies: { authority: 'source', writeBack: 'direct' },
+      },
+    });
+    mockParentTask({
+      sourceId: 'acme/repo:41',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-1',
+      sourceListId: 'acme/repo',
+      sourceListName: 'acme/repo',
+    });
+    mockGetConnector.mockReturnValue({
+      type: 'github-issues',
+      createSubTask: createRemoteSubtask,
+    });
+    mockCreateSubtask.mockImplementationOnce(async () => {
+      order.push('local');
+      return { kind: 'created' };
+    });
+    mockPersistCreatedTaskIdentity.mockImplementationOnce(async () => {
+      order.push('identity');
+    });
+    mockCompleteSubtaskWriteThrough.mockImplementationOnce(async () => {
+      order.push('complete');
+      return true;
+    });
+
+    const { POST } = await import('@/app/api/tasks/[id]/subtasks/route');
+    const response = await POST(request({ title: 'GitHub child' }), {
+      params: Promise.resolve({ id: 'parent' }),
+    });
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(mockCompleteSubtaskWriteThrough).toHaveBeenCalled();
+    });
+    expect(mockPersistCreatedTaskIdentity).toHaveBeenCalledWith({
+      taskId: 'f1176433-0535-4914-aac5-1f79dca24971',
+      connectorInstanceId: 'github-1',
+      sourceId: 'acme/repo:42',
+      sourceListId: 'acme/repo',
+      evidence: externalIdentity,
+    });
+    expect(order).toEqual(['local', 'source', 'identity', 'complete']);
+  });
+
+  it('does not mark a GitHub subtask synchronized without stable identity evidence', async () => {
+    mockGetCapabilities.mockResolvedValue({
+      write: true,
+      subtasks: true,
+      taskFieldProfile: {
+        dependencies: { authority: 'source', writeBack: 'direct' },
+      },
+    });
+    mockParentTask({
+      sourceId: 'acme/repo:41',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-1',
+      sourceListId: 'acme/repo',
+      sourceListName: 'acme/repo',
+    });
+    mockGetConnector.mockReturnValue({
+      type: 'github-issues',
+      createSubTask: vi.fn(async () => ({
+        sourceId: 'acme/repo:42',
+        sourceListId: 'acme/repo',
+        metadata: { nodeId: 'I_child', issueNumber: 42 },
+      })),
+    });
+
+    const { POST } = await import('@/app/api/tasks/[id]/subtasks/route');
+    const response = await POST(request({ title: 'GitHub child' }), {
+      params: Promise.resolve({ id: 'parent' }),
+    });
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(mockLoggerError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: expect.objectContaining({
+            message: 'GitHub subtask creation returned without stable identity evidence',
+          }),
+        }),
+        'Write-through subtask request failed',
+      );
+    });
+    expect(mockPersistCreatedTaskIdentity).not.toHaveBeenCalled();
+    expect(mockCompleteSubtaskWriteThrough).not.toHaveBeenCalled();
   });
 });

@@ -17,8 +17,10 @@ const stats: TaskListStatsDto = {
   myDay: 0,
   recentlyCreated: 0,
   recentlyClosed: 0,
+  recurring: 1,
   waiting: 0,
   inbox: 1,
+  delegated: 1,
 };
 
 describe('quick filter visibility', () => {
@@ -27,6 +29,25 @@ describe('quick filter visibility', () => {
       label: 'Next 7 Days',
       description: 'Due today through seven days from now',
     });
+  });
+
+  it('offers recurring tasks as a conditional Quick View', () => {
+    expect(getQuickFilterDefinition('recurring')).toMatchObject({
+      label: 'Recurring',
+      statKey: 'recurring',
+      defaultVisibility: 'when-not-empty',
+    });
+  });
+
+  it('offers delegated work as a conditional Quick View', () => {
+    const delegated = getQuickFilterDefinition('delegated')!;
+
+    expect(delegated).toMatchObject({
+      label: 'Delegated',
+      statKey: 'delegated',
+      defaultVisibility: 'when-not-empty',
+    });
+    expect(isQuickFilterVisible(delegated, stats, {})).toBe(true);
   });
 
   it('uses catalog defaults and preserves legacy hidden preferences', () => {

@@ -1,8 +1,14 @@
 import db, { sqlite } from '@/db';
-import { notifications, tasks } from '@/db/schema';
+import { notifications } from '@/db/schema';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
+import {
+  mergeSearchFacetRows,
+} from '@/lib/search/repository';
+import { compareKeywordResults } from '@/lib/search/keyword-ranking';
 import type {
   KeywordSearchRepository,
+  SearchFacet,
+  SearchFacets,
   SearchFilters,
   SearchResult,
   SearchScope,
@@ -170,7 +176,21 @@ export async function rebuildSearchIndex() {
   sqlite.exec(CREATE_TASKS_FTS);
   sqlite.exec(CREATE_ALERTS_FTS);
 
-  const taskRows = await db.select().from(tasks);
+  const taskRows = sqlite.prepare(`
+    SELECT
+      id,
+      title,
+      description,
+      source_list_name AS sourceListName,
+      connector_type AS connectorType
+    FROM tasks
+    WHERE deleted_at IS NULL
+      AND local_disposition = 'active'
+      AND connector_instance_id NOT IN (
+        SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+      )
+      AND connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
+  `).all(...NOTIFICATION_ONLY_CONNECTOR_TYPES) as SearchableTaskRecord[];
   const notificationRows = await db.select().from(notifications);
 
   const taskTx = sqlite.transaction((rows: SearchableTaskRecord[]) => {
@@ -215,7 +235,12 @@ export async function warmUpFTS() {
   await ensureFTSReady();
 }
 
-function searchTasks(query: string, limit: number, filters: SearchFilters): SearchResult[] {
+function searchTasks(
+  query: string,
+  queryText: string,
+  limit: number,
+  filters: SearchFilters,
+): SearchResult[] {
   const source = filters.source ?? null;
   const status = filters.status ?? null;
   const rows = sqlite
@@ -228,37 +253,59 @@ function searchTasks(query: string, limit: number, filters: SearchFilters): Sear
           COALESCE(highlight(tasks_fts, 0, '<mark>', '</mark>'), t.title) AS title_hl,
           COALESCE(NULLIF(snippet(tasks_fts, 1, '<mark>', '</mark>', '...', 24), ''), '') AS desc_snippet,
           bm25(tasks_fts, 10.0, 4.0, 2.0, 1.0) AS rank,
+          CASE
+            WHEN LOWER(TRIM(t.title)) = LOWER(TRIM(?)) THEN 0
+            WHEN INSTR(LOWER(TRIM(t.title)), LOWER(TRIM(?))) = 1 THEN 1
+            ELSE 2
+          END AS title_match_rank,
           t.status,
           t.priority,
+          t.due_date AS dueDate,
           t.source_list_name AS sourceListName,
           t.connector_type AS connectorType,
           t.updated_at AS updatedAt
         FROM tasks_fts
         INNER JOIN tasks t ON t.id = tasks_fts.entityId
         WHERE tasks_fts MATCH ?
+          AND t.deleted_at IS NULL
+          AND t.local_disposition = 'active'
+          AND t.connector_instance_id NOT IN (
+            SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+          )
+          AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
           AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
           AND (? IS NULL OR t.status = ?)
+          AND (? IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= ?)
+          AND (? IS NULL OR (
+            t.due_date IS NOT NULL
+            AND t.due_date <> ''
+            AND t.due_date < ?
+          ))
           AND (? = 0 OR LOWER(t.status) <> 'done')
           AND (? = 0 OR (
             t.parent_id IS NULL
-            AND t.local_disposition = 'active'
-            AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
             AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
           ))
-        ORDER BY rank
+        ORDER BY title_match_rank, rank, LOWER(t.title), t.id
         LIMIT ?
       `
     )
     .all(
+      queryText,
+      queryText,
       query,
+      ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
       source,
       source,
       source,
       status,
       status,
+      filters.dateFrom ?? null,
+      filters.dateFrom ?? null,
+      filters.dueBefore ?? null,
+      filters.dueBefore ?? null,
       filters.excludeDone ? 1 : 0,
       filters.universeEligible ? 1 : 0,
-      ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
       JSON.stringify(filters.excludeConnectorInstanceIds ?? []),
       limit,
     ) as Array<{
@@ -268,8 +315,10 @@ function searchTasks(query: string, limit: number, filters: SearchFilters): Sear
       title_hl: string;
       desc_snippet: string;
       rank: number;
+      title_match_rank: number;
       status: string;
       priority: string;
+      dueDate: string | null;
       sourceListName: string | null;
       connectorType: string;
       updatedAt: string;
@@ -290,10 +339,12 @@ function searchTasks(query: string, limit: number, filters: SearchFilters): Sear
     metadata: {
       status: row.status,
       priority: row.priority,
+      ...(row.dueDate ? { dueDate: row.dueDate } : {}),
       sourceListName: row.sourceListName,
       connectorType: row.connectorType,
       updatedAt: row.updatedAt,
       rank: row.rank,
+      titleMatchRank: row.title_match_rank,
       rowid: row.rowid,
     },
   }));
@@ -316,19 +367,29 @@ function searchTasksByIssueNumber(
           t.description,
           t.status,
           t.priority,
+          t.due_date AS dueDate,
           t.source_list_name AS sourceListName,
           t.connector_type AS connectorType,
           t.updated_at AS updatedAt
         FROM tasks t
         WHERE t.connector_type = 'github-issues'
           AND t.source_id LIKE ?
+          AND t.deleted_at IS NULL
+          AND t.local_disposition = 'active'
+          AND t.connector_instance_id NOT IN (
+            SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+          )
           AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
           AND (? IS NULL OR t.status = ?)
+          AND (? IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= ?)
+          AND (? IS NULL OR (
+            t.due_date IS NOT NULL
+            AND t.due_date <> ''
+            AND t.due_date < ?
+          ))
           AND (? = 0 OR LOWER(t.status) <> 'done')
           AND (? = 0 OR (
             t.parent_id IS NULL
-            AND t.local_disposition = 'active'
-            AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
             AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
           ))
         ORDER BY t.updated_at DESC
@@ -342,9 +403,12 @@ function searchTasksByIssueNumber(
       source,
       status,
       status,
+      filters.dateFrom ?? null,
+      filters.dateFrom ?? null,
+      filters.dueBefore ?? null,
+      filters.dueBefore ?? null,
       filters.excludeDone ? 1 : 0,
       filters.universeEligible ? 1 : 0,
-      ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
       JSON.stringify(filters.excludeConnectorInstanceIds ?? []),
       limit,
     ) as Array<{
@@ -353,6 +417,7 @@ function searchTasksByIssueNumber(
       description: string | null;
       status: string;
       priority: string;
+      dueDate: string | null;
       sourceListName: string | null;
       connectorType: string;
       updatedAt: string;
@@ -370,17 +435,37 @@ function searchTasksByIssueNumber(
     metadata: {
       status: row.status,
       priority: row.priority,
+      ...(row.dueDate ? { dueDate: row.dueDate } : {}),
       sourceListName: row.sourceListName,
       connectorType: row.connectorType,
       updatedAt: row.updatedAt,
       issueNumber,
+      titleMatchRank: 0,
     },
   }));
 }
 
-function searchNotifications(query: string, limit: number, filters: SearchFilters): SearchResult[] {
+function searchNotifications(
+  query: string,
+  queryText: string,
+  limit: number,
+  filters: SearchFilters,
+): SearchResult[] {
   const source = filters.source ?? null;
   const status = filters.status ?? null;
+  const notificationKind = filters.notificationKind ?? null;
+  const noteHint = `LOWER(
+    COALESCE(a.category, '') || ' ' ||
+    COALESCE(a.connector_type, '') || ' ' ||
+    a.title || ' ' || COALESCE(a.body, '')
+  )`;
+  const noteMatch = `(
+    INSTR(${noteHint}, 'capture') > 0
+    OR INSTR(${noteHint}, 'note') > 0
+    OR INSTR(${noteHint}, 'memo') > 0
+    OR INSTR(${noteHint}, 'idea') > 0
+    OR INSTR(${noteHint}, 'journal') > 0
+  )`;
   const rows = sqlite
     .prepare(
       `
@@ -391,28 +476,45 @@ function searchNotifications(query: string, limit: number, filters: SearchFilter
           COALESCE(highlight(alerts_fts, 0, '<mark>', '</mark>'), a.title) AS title_hl,
           COALESCE(NULLIF(snippet(alerts_fts, 1, '<mark>', '</mark>', '...', 24), ''), '') AS body_snippet,
           bm25(alerts_fts, 10.0, 4.0, 2.0) AS rank,
+          CASE
+            WHEN LOWER(TRIM(a.title)) = LOWER(TRIM(?)) THEN 0
+            WHEN INSTR(LOWER(TRIM(a.title)), LOWER(TRIM(?))) = 1 THEN 1
+            ELSE 2
+          END AS title_match_rank,
           a.level AS severity,
           a.category,
           CASE WHEN a.state = 'read' THEN 1 ELSE 0 END AS isRead,
           1 AS isActionable,
           a.connector_type AS connectorType,
-          a.received_at AS receivedAt
+          a.received_at AS receivedAt,
+          CASE WHEN ${noteMatch} THEN 1 ELSE 0 END AS isNote
         FROM alerts_fts
         INNER JOIN notifications a ON a.id = alerts_fts.entityId
         WHERE alerts_fts MATCH ?
           AND (? IS NULL OR a.connector_type = ?)
           AND (? IS NULL OR a.category = ?)
+          AND (? IS NULL OR (? = 'notes' AND ${noteMatch}) OR (? = 'triage' AND NOT ${noteMatch}))
+          AND (? IS NULL OR a.received_at >= ?)
+          AND (? IS NULL)
           AND (? = 0 OR LOWER(a.category) <> 'done')
-        ORDER BY rank
+        ORDER BY title_match_rank, rank, LOWER(a.title), a.id
         LIMIT ?
       `
     )
     .all(
+      queryText,
+      queryText,
       query,
       source,
       source,
       status,
       status,
+      notificationKind,
+      notificationKind,
+      notificationKind,
+      filters.dateFrom ?? null,
+      filters.dateFrom ?? null,
+      filters.dueBefore ?? null,
       filters.excludeDone ? 1 : 0,
       limit,
     ) as Array<{
@@ -422,12 +524,14 @@ function searchNotifications(query: string, limit: number, filters: SearchFilter
       title_hl: string;
       body_snippet: string;
       rank: number;
+      title_match_rank: number;
       severity: string;
       category: string;
       isRead: number;
       isActionable: number;
       connectorType: string;
       receivedAt: string;
+      isNote: number;
     }>;
 
   return rows.map((row) => ({
@@ -449,10 +553,192 @@ function searchNotifications(query: string, limit: number, filters: SearchFilter
       isActionable: Boolean(row.isActionable),
       connectorType: row.connectorType,
       receivedAt: row.receivedAt,
+      notificationKind: row.isNote ? 'notes' : 'triage',
       rank: row.rank,
+      titleMatchRank: row.title_match_rank,
       rowid: row.rowid,
     },
   }));
+}
+
+function taskFacetRows(
+  matchQuery: string,
+  issueNumber: number | null,
+  facet: 'source' | 'status',
+  filters: SearchFilters,
+): SearchFacet[] {
+  const source = filters.source ?? null;
+  const status = filters.status ?? null;
+  const valueExpression = facet === 'source'
+    ? "COALESCE(NULLIF(t.source_list_name, ''), NULLIF(t.connector_type, ''))"
+    : "NULLIF(t.status, '')";
+  const exactIssueUnion = issueNumber === null
+    ? ''
+    : `
+      UNION
+      SELECT t.id, ${valueExpression} AS value
+      FROM tasks t
+      WHERE t.connector_type = 'github-issues'
+        AND t.source_id LIKE ?
+        AND t.deleted_at IS NULL
+        AND t.local_disposition = 'active'
+        AND t.connector_instance_id NOT IN (
+          SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+        )
+        AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
+        AND (? IS NULL OR t.status = ?)
+        AND (? IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= ?)
+        AND (? IS NULL OR (
+          t.due_date IS NOT NULL
+          AND t.due_date <> ''
+          AND t.due_date < ?
+        ))
+        AND (? = 0 OR LOWER(t.status) <> 'done')
+        AND (? = 0 OR (
+          t.parent_id IS NULL
+          AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
+        ))
+    `;
+  const commonParameters = [
+    source,
+    source,
+    source,
+    status,
+    status,
+    filters.dateFrom ?? null,
+    filters.dateFrom ?? null,
+    filters.dueBefore ?? null,
+    filters.dueBefore ?? null,
+    filters.excludeDone ? 1 : 0,
+    filters.universeEligible ? 1 : 0,
+    JSON.stringify(filters.excludeConnectorInstanceIds ?? []),
+  ];
+  const rows = sqlite.prepare(`
+    WITH task_matches AS (
+      SELECT t.id, ${valueExpression} AS value
+      FROM tasks_fts
+      INNER JOIN tasks t ON t.id = tasks_fts.entityId
+      WHERE tasks_fts MATCH ?
+        AND t.deleted_at IS NULL
+        AND t.local_disposition = 'active'
+        AND t.connector_instance_id NOT IN (
+          SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+        )
+        AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
+        AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
+        AND (? IS NULL OR t.status = ?)
+        AND (? IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= ?)
+        AND (? IS NULL OR (
+          t.due_date IS NOT NULL
+          AND t.due_date <> ''
+          AND t.due_date < ?
+        ))
+        AND (? = 0 OR LOWER(t.status) <> 'done')
+        AND (? = 0 OR (
+          t.parent_id IS NULL
+          AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
+        ))
+      ${exactIssueUnion}
+    )
+    SELECT value, COUNT(*) AS count
+    FROM task_matches
+    WHERE value IS NOT NULL
+    GROUP BY value
+    ORDER BY count DESC, value COLLATE NOCASE
+  `).all(
+    matchQuery,
+    ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
+    ...commonParameters,
+    ...(issueNumber === null
+      ? []
+      : [`%:${issueNumber}`, ...commonParameters]),
+  ) as SearchFacet[];
+  return rows;
+}
+
+function notificationFacetRows(
+  matchQuery: string,
+  facet: 'source' | 'status',
+  filters: SearchFilters,
+): SearchFacet[] {
+  const source = filters.source ?? null;
+  const status = filters.status ?? null;
+  const notificationKind = filters.notificationKind ?? null;
+  const noteHint = `LOWER(
+    COALESCE(a.category, '') || ' ' ||
+    COALESCE(a.connector_type, '') || ' ' ||
+    a.title || ' ' || COALESCE(a.body, '')
+  )`;
+  const noteMatch = `(
+    INSTR(${noteHint}, 'capture') > 0
+    OR INSTR(${noteHint}, 'note') > 0
+    OR INSTR(${noteHint}, 'memo') > 0
+    OR INSTR(${noteHint}, 'idea') > 0
+    OR INSTR(${noteHint}, 'journal') > 0
+  )`;
+  const valueExpression = facet === 'source'
+    ? "NULLIF(a.connector_type, '')"
+    : "NULLIF(a.category, '')";
+  return sqlite.prepare(`
+    SELECT ${valueExpression} AS value, COUNT(*) AS count
+    FROM alerts_fts
+    INNER JOIN notifications a ON a.id = alerts_fts.entityId
+    WHERE alerts_fts MATCH ?
+      AND (? IS NULL OR a.connector_type = ?)
+      AND (? IS NULL OR a.category = ?)
+      AND (? IS NULL OR (? = 'notes' AND ${noteMatch}) OR (? = 'triage' AND NOT ${noteMatch}))
+      AND (? IS NULL OR a.received_at >= ?)
+      AND (? IS NULL)
+      AND (? = 0 OR LOWER(a.category) <> 'done')
+      AND ${valueExpression} IS NOT NULL
+    GROUP BY value
+    ORDER BY count DESC, value COLLATE NOCASE
+  `).all(
+    matchQuery,
+    source,
+    source,
+    status,
+    status,
+    notificationKind,
+    notificationKind,
+    notificationKind,
+    filters.dateFrom ?? null,
+    filters.dateFrom ?? null,
+    filters.dueBefore ?? null,
+    filters.excludeDone ? 1 : 0,
+  ) as SearchFacet[];
+}
+
+export async function searchFTSFacets(
+  query: string,
+  options: { type?: SearchScope; limit?: number } & SearchFilters = {},
+): Promise<SearchFacets> {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) return { sources: [], statuses: [] };
+
+  await ensureFTSReady();
+  const type = options.type ?? 'all';
+  const matchQuery = toMatchQuery(normalizedQuery);
+  const issueNumber = parseIssueNumberQuery(normalizedQuery);
+  const rowsFor = (facet: 'source' | 'status') => {
+    const facetFilters = {
+      ...options,
+      ...(facet === 'source' ? { source: undefined } : { status: undefined }),
+    };
+    return [
+    ...(type === 'all' || type === 'tasks'
+      ? taskFacetRows(matchQuery, issueNumber, facet, facetFilters)
+      : []),
+    ...(type === 'all' || type === 'notifications'
+      ? notificationFacetRows(matchQuery, facet, facetFilters)
+      : []),
+    ];
+  };
+
+  return {
+    sources: mergeSearchFacetRows(rowsFor('source')),
+    statuses: mergeSearchFacetRows(rowsFor('status')),
+  };
 }
 
 export async function searchFTS(
@@ -476,8 +762,12 @@ export async function searchFTS(
 
   const results = [
     ...exactIssueResults,
-    ...(type === 'all' || type === 'tasks' ? searchTasks(matchQuery, limit, options) : []),
-    ...(type === 'all' || type === 'notifications' ? searchNotifications(matchQuery, limit, options) : []),
+    ...(type === 'all' || type === 'tasks'
+      ? searchTasks(matchQuery, normalizedQuery, limit, options)
+      : []),
+    ...(type === 'all' || type === 'notifications'
+      ? searchNotifications(matchQuery, normalizedQuery, limit, options)
+      : []),
   ];
   const seen = new Set<string>();
 
@@ -488,7 +778,7 @@ export async function searchFTS(
       seen.add(key);
       return true;
     })
-    .sort((left, right) => right.score - left.score)
+    .sort(compareKeywordResults)
     .slice(0, limit);
 }
 
@@ -500,4 +790,5 @@ export const sqliteKeywordSearchRepository: KeywordSearchRepository = {
   removeNotification: removeAlertFromIndex,
   warmUp: warmUpFTS,
   search: searchFTS,
+  facets: searchFTSFacets,
 };

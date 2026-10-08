@@ -12,9 +12,9 @@ import type { GitHubIdentityOperatorPersistence } from '@/db/persistence/github-
  * throws `UnsupportedGitHubWorkerOperationError` before any SQLite
  * import/evaluation, transaction acquisition, remote network effect, or
  * durable mutation is attempted — it merely returns a Promise rejected with
- * that error so it satisfies the port's async signature. Cross-backend
- * behavioral parity is neither claimed nor required for this port; production
- * remains SQLite for these five operator-only surfaces.
+ * that error so it satisfies the port's async signature. This remains an
+ * explicit PostgreSQL operational gap for the operator CLI; normal application
+ * request paths do not call this adapter.
  */
 export function createPostgresGitHubIdentityOperatorRepositories(): GitHubIdentityOperatorPersistence {
   function unsupported(reason: string): never {

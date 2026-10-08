@@ -30,8 +30,10 @@ type EmptyResponse = {
     myDay: number;
     recentlyCreated: number;
     recentlyClosed: number;
+    recurring: number;
     waiting: number;
     inbox: number;
+    delegated: number;
   };
   hasMore: boolean;
   sourceCounts: Record<string, number>;
@@ -49,8 +51,10 @@ const EMPTY_STATS = {
   myDay: 0,
   recentlyCreated: 0,
   recentlyClosed: 0,
+  recurring: 0,
   waiting: 0,
   inbox: 0,
+  delegated: 0,
 };
 
 export function createEmptyResponse(): EmptyResponse {

@@ -1,4 +1,5 @@
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
+import type { TaskMetadata } from '@/lib/recurrence/canonical';
 
 // ─── CORE TYPES ─────────────────────────────────────────────────────────────
 
@@ -119,6 +120,7 @@ export interface TaskItem {
 
   // Hierarchy
   parentId?: string;
+  siblingOrder?: number | null;
   childIds: string[];
   depth: number;
   isChecklistItem: boolean;
@@ -135,7 +137,7 @@ export interface TaskItem {
 
   assignee?: string;
 
-  metadata: Record<string, unknown>;
+  metadata: TaskMetadata;
   /** Non-public connector evidence consumed after legacy source identity resolution. */
   externalIdentity?: ExternalIdentityEvidence;
   /** Non-public parent endpoint evidence used only for relationship identity comparison. */
@@ -209,6 +211,62 @@ export interface Tag {
 
 export type ProjectStatus = 'not_started' | 'active' | 'on_hold' | 'completed' | 'cancelled';
 export type ProjectHealth = 'on_track' | 'at_risk' | 'behind';
+export type ProjectPulseState = 'on_track' | 'watch' | 'off_track' | 'unknown';
+export type ProjectPulseFreshness = 'fresh' | 'aging' | 'stale' | 'unknown';
+export type ProjectPulseTrend = 'improving' | 'stable' | 'worsening' | 'unknown';
+export type ProjectPulseConfidence = 'high' | 'medium' | 'low';
+export type ProjectPulseReasonCode =
+  | 'target_missed'
+  | 'late_phase'
+  | 'overdue_work'
+  | 'deadline_pressure'
+  | 'phase_deadline'
+  | 'stale_activity'
+  | 'no_tasks'
+  | 'limited_schedule'
+  | 'lifecycle_inactive';
+
+export interface ProjectPulseReason {
+  code: ProjectPulseReasonCode;
+  detail: string;
+}
+
+export interface ProjectPulse {
+  state: ProjectPulseState;
+  legacyHealth: ProjectHealth;
+  summary: string;
+  reasons: ProjectPulseReason[];
+  freshness: {
+    state: ProjectPulseFreshness;
+    label: string;
+    daysSinceActivity: number | null;
+  };
+  trend: {
+    state: ProjectPulseTrend;
+    label: string;
+  };
+  confidence: {
+    level: ProjectPulseConfidence;
+    label: string;
+  };
+  suggestion: string | null;
+}
+
+export type ContextThemeStrength = 'whisper' | 'frame' | 'atmosphere' | 'canvas';
+export type ContextThemeBackdrop = 'none' | 'aurora' | 'ridge' | 'nebula';
+
+export interface ContextAppearance {
+  strength: ContextThemeStrength;
+  backdrop: ContextThemeBackdrop;
+  accentColor?: string;
+}
+
+export interface ContextThemePreferences {
+  projectStrength: ContextThemeStrength;
+  listStrength: ContextThemeStrength;
+  defaultBackdrop: ContextThemeBackdrop;
+  backdropsEnabled: boolean;
+}
 
 export interface ProjectProgress {
   totalTasks: number;
@@ -217,6 +275,7 @@ export interface ProjectProgress {
   percentComplete: number;
   health: ProjectHealth;
   lastActivity?: string;
+  pulse?: ProjectPulse;
 }
 
 // ─── PROJECT PHASES ─────────────────────────────────────────────────────────
@@ -260,6 +319,7 @@ export interface HubProject {
   color: string;
   icon?: string;
   iconColor?: string;
+  appearance?: ContextAppearance | null;
 
   sourceBindings: SourceBinding[];
   autoIncludeRules: AutoIncludeRule[];
@@ -448,6 +508,7 @@ export interface NotificationItem {
   dedupeKey?: string | null;
 
   relatedTaskId?: string | null;
+  relatedTaskAvailability?: 'available' | 'unavailable' | null;
   relatedProjectId?: string | null;
   relatedEntityType?: string | null;
   relatedEntityId?: string | null;
@@ -605,6 +666,10 @@ export interface ConnectorCapabilities {
   close?: boolean;         // Source supports closing/cancelling without hard deletion
   sync: boolean;
   subtasks: boolean;
+  /** Whether the source exposes a stable native subtask order during reads. */
+  subtaskOrderRead?: boolean;
+  /** Whether reordered subtasks can be written back to the source. */
+  subtaskOrderWrite?: boolean;
   lists: boolean;
   tags: boolean;          // Source supports tags/labels/categories
   tagWriteBack: boolean;  // Can write tags back to source

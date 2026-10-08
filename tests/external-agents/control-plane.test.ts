@@ -14,9 +14,24 @@ let db: typeof import('@/db').default;
 let sqlite: typeof import('@/db').sqlite;
 let schema: typeof import('@/db/schema');
 let registry: typeof import('@/lib/external-agents/registry');
+let policy: typeof import('@/lib/external-agents/policy');
 let service: typeof import('@/lib/external-agents/service');
 let transports: typeof import('@/lib/external-agents/transports');
+let ExternalAgentDispatchWorker: typeof import(
+  '@/lib/external-agents/worker'
+)['ExternalAgentDispatchWorker'];
 let receiveInboundResult: typeof import('@/app/api/inbound-webhooks/[id]/receive/route').POST;
+
+async function asWorker<T>(work: () => Promise<T>): Promise<T> {
+  const previous = process.env.MC_PROCESS_ROLE;
+  process.env.MC_PROCESS_ROLE = 'worker';
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete process.env.MC_PROCESS_ROLE;
+    else process.env.MC_PROCESS_ROLE = previous;
+  }
+}
 
 const requiredFields = [
   'instruction',
@@ -33,19 +48,23 @@ beforeAll(async () => {
   const modules = await Promise.all([
     import('@/db/schema'),
     import('@/lib/external-agents/registry'),
+    import('@/lib/external-agents/policy'),
     import('@/lib/external-agents/service'),
     import('@/lib/external-agents/transports'),
+    import('@/lib/external-agents/worker'),
     import('@/app/api/inbound-webhooks/[id]/receive/route'),
   ]);
   db = databaseModule.default;
   sqlite = databaseModule.sqlite;
   schema = modules[0];
   registry = modules[1];
-  service = modules[2];
-  transports = modules[3];
-  receiveInboundResult = modules[4].POST;
+  policy = modules[2];
+  service = modules[3];
+  transports = modules[4];
+  ExternalAgentDispatchWorker = modules[5].ExternalAgentDispatchWorker;
+  receiveInboundResult = modules[6].POST;
   sqlite.prepare('SELECT 1').get();
-});
+}, 30_000);
 
 beforeEach(() => {
   sqlite.exec(`
@@ -149,6 +168,148 @@ async function seedTask(connectorType = 'github-issues') {
 }
 
 describe('external-agent registry boundaries', () => {
+  it('submits confirmed push work only after the packaged worker claims its durable intent', async () => {
+    const agent = await registry.createExternalAgent({
+      id: 'worker-owned-push',
+      name: 'Worker-owned push',
+      type: 'webhook-roundtrip',
+      endpoint: 'https://agent.example.test/run',
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+        fieldAllowlist: requiredFields,
+        retentionDays: 30,
+        maxRequestsPerMinute: 30,
+      },
+    });
+    const transport = vi.fn(async () => ({
+      status: 'in_progress' as const,
+      providerTaskId: 'provider-worker-1',
+    }));
+    const preview = await service.createDispatchPreview({
+      agentId: agent.id,
+      instruction: 'Run in the worker',
+      idempotencyKey: 'worker-owned-confirmation',
+    });
+
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({ kind: 'push', dispatch: transport }),
+    });
+    expect(transport).not.toHaveBeenCalled();
+    expect((sqlite.prepare(
+      'SELECT action, status FROM agent_dispatch_actions WHERE dispatch_id = ?',
+    ).get(preview.id) as { action: string; status: string })).toEqual({
+      action: 'submit',
+      status: 'pending',
+    });
+
+    await asWorker(async () => {
+      const worker = new ExternalAgentDispatchWorker({
+        transportResolver: () => ({ kind: 'push', dispatch: transport }),
+      });
+      expect(await worker.drainOne()).toBe(true);
+      expect(await worker.drainOne()).toBe(false);
+    });
+    expect(transport).toHaveBeenCalledOnce();
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'in_progress',
+      providerTaskId: 'provider-worker-1',
+    });
+  });
+
+  it('bounds server-owned always instructions', () => {
+    expect(() => registry.validateExternalAgentInput({
+      name: 'Oversized configuration',
+      type: 'manual',
+      providerConfig: {
+        alwaysInstructions: 'x'.repeat(16_001),
+      },
+    })).toThrow(expect.objectContaining({
+      code: 'VALIDATION_ERROR',
+      message: expect.stringContaining('16000 characters'),
+    }));
+  });
+
+  it('persists deterministic rich-context upgrades for legacy destinations', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'legacy-hosted',
+      name: 'Legacy hosted coding',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+    });
+    const legacyFields = [
+      'instruction',
+      'execution.locality',
+      'dispatchId',
+      'dataClassification',
+      'allowedActions',
+      'project.description',
+    ];
+    sqlite.prepare('UPDATE external_agents SET provider_config = ?, data_policy = ? WHERE id = ?')
+      .run(
+        JSON.stringify({}),
+        JSON.stringify({
+          allowedClassifications: ['standard', 'restricted'],
+          fieldAllowlist: legacyFields,
+          retentionDays: 91,
+          maxRequestsPerMinute: 7,
+        }),
+        hosted.id,
+      );
+
+    const upgraded = await registry.getExternalAgent(hosted.id);
+    expect(upgraded).toMatchObject({
+      providerConfig: {},
+      dataPolicy: {
+        allowedClassifications: ['standard', 'restricted'],
+        retentionDays: 91,
+        maxRequestsPerMinute: 7,
+      },
+    });
+    expect(upgraded?.dataPolicy.fieldAllowlist).toEqual([
+      ...legacyFields,
+      ...policy.REQUIRED_RICH_TASK_FIELDS.filter((field) => !legacyFields.includes(field)),
+    ]);
+    const persisted = JSON.parse((sqlite.prepare(
+      'SELECT data_policy AS dataPolicy FROM external_agents WHERE id = ?',
+    ).get(hosted.id) as { dataPolicy: string }).dataPolicy);
+    expect(persisted).toEqual(upgraded?.dataPolicy);
+
+    const paperclip = registry.validateExternalAgentInput({
+      name: 'Legacy Paperclip',
+      type: 'paperclip',
+      endpoint: 'http://localhost:3100',
+      providerConfig: {
+        paperclip: {
+          companyId: '11111111-1111-4111-8111-111111111111',
+          assigneeAgentId: '22222222-2222-4222-8222-222222222222',
+        },
+      },
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+        fieldAllowlist: legacyFields,
+        retentionDays: 12,
+        maxRequestsPerMinute: 4,
+      },
+    });
+    expect(paperclip.providerConfig).toEqual({
+      paperclip: {
+        companyId: '11111111-1111-4111-8111-111111111111',
+        assigneeAgentId: '22222222-2222-4222-8222-222222222222',
+      },
+    });
+    expect(paperclip.dataPolicy).toMatchObject({
+      allowedClassifications: ['standard'],
+      retentionDays: 12,
+      maxRequestsPerMinute: 4,
+    });
+    expect(paperclip.dataPolicy.fieldAllowlist).toEqual([
+      ...legacyFields,
+      ...policy.REQUIRED_RICH_TASK_FIELDS.filter((field) => !legacyFields.includes(field)),
+    ]);
+  });
+
   it('keeps inference, MC-hosted, and GitHub-hosted execution explicit', async () => {
     await expect(registry.createExternalAgent({
       name: 'Unsafe inference',
@@ -164,13 +325,20 @@ describe('external-agent registry boundaries', () => {
       authCredentialRef: 'push-agent-key',
       endpoint: 'https://api.github.com/agents',
     })).rejects.toMatchObject({ code: 'EXECUTION_BOUNDARY_MISMATCH' });
+    await expect(registry.createExternalAgent({
+      name: 'Untrusted cloud endpoint',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://example.test',
+    })).rejects.toMatchObject({ code: 'EXECUTION_BOUNDARY_MISMATCH' });
 
     const hosted = await registry.createExternalAgent({
       name: 'Hosted coding',
       type: 'copilot-cloud',
       authType: 'github-user',
       authCredentialRef: 'push-agent-key',
-      endpoint: 'https://api.github.com/agents',
+      endpoint: 'https://api.github.com',
     });
     expect(hosted).toMatchObject({
       transport: 'push',
@@ -182,11 +350,6 @@ describe('external-agent registry boundaries', () => {
       scope: { repository: 'owner/repo' },
       idempotencyKey: 'cloud-preview',
     })).resolves.toMatchObject({ status: 'needs_confirmation' });
-    await expect(service.confirmDispatch(
-      (await service.listDispatches())[0].id,
-      (await service.listDispatches())[0].previewHash,
-    )).rejects.toMatchObject({ code: 'TRANSPORT_NOT_IMPLEMENTED' });
-    expect((await service.listDispatches())[0].status).toBe('failed');
   });
 
   it('never returns credential references to registry clients', async () => {
@@ -197,12 +360,452 @@ describe('external-agent registry boundaries', () => {
     expect(registry.publicExternalAgent(agent)).not.toHaveProperty('authCredentialRef');
   });
 
+  it('validates and stores a GitHub Copilot Cloud token without returning it to clients', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({ login: 'octocat' }),
+    );
+    try {
+      const hosted = await registry.createExternalAgent({
+        id: 'managed-github-token',
+        name: 'Managed GitHub credential',
+        type: 'copilot-cloud',
+        authType: 'github-user',
+        credential: 'github_pat_managed-test',
+        endpoint: 'https://api.github.com',
+      });
+
+      expect(fetcher).toHaveBeenCalledWith(
+        new URL('https://api.github.com/user'),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: expect.stringMatching(/^Bearer /),
+          }),
+        }),
+      );
+      await expect(registry.resolveGitHubAgentCredential(hosted))
+        .resolves.toBe('github_pat_managed-test');
+      expect(registry.publicExternalAgent(hosted)).toMatchObject({
+        hasCredentialReference: true,
+        credentialSource: 'mission-control',
+      });
+      expect(JSON.stringify(registry.publicExternalAgent(hosted)))
+        .not.toContain('github_pat_managed-test');
+
+      const previousCredentialStore = process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON;
+      try {
+        sqlite.prepare(
+          'UPDATE external_agents SET auth_credential = NULL WHERE id = ?',
+        ).run(hosted.id);
+        process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+          'mission-control:github-user': 'must-not-fallback',
+        });
+        await expect(registry.resolveGitHubAgentCredential(hosted)).rejects.toMatchObject({
+          code: 'CREDENTIAL_UNAVAILABLE',
+        });
+      } finally {
+        process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = previousCredentialStore;
+      }
+
+      await registry.updateExternalAgent(hosted.id, {
+        authCredentialRef: 'push-agent-key',
+      });
+      expect(sqlite.prepare(
+        'SELECT auth_credential FROM external_agents WHERE id = ?',
+      ).pluck().get(hosted.id)).toBeNull();
+    } finally {
+      fetcher.mockRestore();
+    }
+  });
+
+  it('rejects an invalid GitHub Copilot Cloud token before storing the destination', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({ message: 'Bad credentials' }, { status: 401 }),
+    );
+    try {
+      await expect(registry.createExternalAgent({
+        id: 'invalid-managed-github-token',
+        name: 'Invalid managed GitHub credential',
+        type: 'copilot-cloud',
+        authType: 'github-user',
+        credential: 'invalid-token',
+        endpoint: 'https://api.github.com',
+      })).rejects.toMatchObject({
+        code: 'CREDENTIAL_INVALID',
+        status: 401,
+      });
+      await expect(registry.getExternalAgent('invalid-managed-github-token'))
+        .resolves.toBeNull();
+    } finally {
+      fetcher.mockRestore();
+    }
+  });
+
   it('rejects endpoints with embedded credentials', async () => {
     await expect(registry.createExternalAgent({
       name: 'Embedded secret',
       type: 'manual',
       endpoint: 'https://user:password@example.test/agent',
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('reconciles a persisted Copilot task after restart', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'hosted-reconcile',
+      name: 'Hosted reconciliation',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+      capabilities: { canWriteCode: true, canCreatePullRequest: true },
+    });
+    const preview = await service.createDispatchPreview({
+      agentId: hosted.id,
+      instruction: 'Fix the parser',
+      scope: {
+        repository: 'octo/example',
+        baseRef: 'main',
+        createPullRequest: true,
+      },
+      allowedActions: ['write_code', 'create_pull_request'],
+      idempotencyKey: 'restart-reconciliation',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({
+        kind: 'push',
+        async dispatch() {
+          return {
+            status: 'queued',
+            providerTaskId: 'provider-task-1',
+            providerState: 'queued',
+          };
+        },
+      }),
+    });
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      {
+        transportResolver: () => ({
+          kind: 'push',
+          async dispatch() {
+            return {
+              status: 'queued',
+              providerTaskId: 'provider-task-1',
+              providerState: 'queued',
+            };
+          },
+        }),
+      },
+    ));
+
+    let providerState: 'completed' | 'in_progress' = 'completed';
+    let pullRequestAvailable = false;
+    const fetcherMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/provider-task-1')) {
+        return Response.json({
+          id: 'provider-task-1',
+          name: 'Fix parser',
+          state: providerState,
+          sessions: pullRequestAvailable
+            ? [{ base_ref: 'main', head_ref: 'copilot/fix-parser' }]
+            : [],
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 42, global_id: '' },
+            },
+            ...(pullRequestAvailable
+              ? [{
+                provider: 'github',
+                type: 'branch',
+                data: { base_ref: 'main', head_ref: 'copilot/fix-parser' },
+              }]
+              : []),
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        return Response.json({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [{
+                  __typename: 'PullRequest',
+                  url: 'https://github.com/octo/example/pull/42',
+                  headRefName: 'copilot/fix-parser',
+                  headRefOid: '0123456789abcdef',
+                  headRepository: { nameWithOwner: 'octo/example' },
+                  baseRefName: 'main',
+                  baseRepository: { nameWithOwner: 'octo/example' },
+                }],
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+    const fetcher = fetcherMock as typeof fetch;
+
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
+      .resolves.toEqual({ reconciled: 1, failures: [] });
+    const initiallyCompleted = await service.getDispatch(preview.id);
+    expect(initiallyCompleted?.completedAt).toEqual(expect.any(String));
+    expect(initiallyCompleted).toMatchObject({
+      status: 'completed',
+      resultStatus: 'pending_review',
+      providerTaskId: 'provider-task-1',
+      repository: 'octo/example',
+      baseRef: 'main',
+      providerDetail: {
+        outputWarning: 'GitHub reported a pull request output without a resolvable global ID.',
+      },
+    });
+
+    pullRequestAvailable = true;
+    const refreshedCompleted = await asWorker(
+      () => service.reconcileDispatch(preview.id, { fetcher }),
+    );
+    expect(refreshedCompleted).toMatchObject({
+      status: 'completed',
+      providerTaskId: 'provider-task-1',
+      repository: 'octo/example',
+      baseRef: 'main',
+      branchRef: 'copilot/fix-parser',
+      commitSha: '0123456789abcdef',
+      githubPullRequestUrl: 'https://github.com/octo/example/pull/42',
+      completedAt: initiallyCompleted?.completedAt,
+      resultStatus: 'pending_review',
+      providerDetail: expect.not.objectContaining({
+        outputWarning: expect.anything(),
+      }),
+    });
+
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'completed',
+      branchRef: 'copilot/fix-parser',
+      commitSha: '0123456789abcdef',
+      githubPullRequestUrl: 'https://github.com/octo/example/pull/42',
+      completedAt: initiallyCompleted?.completedAt,
+      resultStatus: 'pending_review',
+    });
+    await expect(asWorker(() => service.reconcileDispatch(preview.id, { fetcher })))
+      .resolves.toMatchObject({
+        events: refreshedCompleted.events,
+      });
+
+    sqlite.prepare(`
+      UPDATE agent_dispatches
+      SET deadline_at = '2000-01-01T00:00:00.000Z'
+      WHERE id = ?
+    `).run(preview.id);
+    providerState = 'in_progress';
+    await expect(asWorker(() => service.reconcileDispatch(preview.id, { fetcher })))
+      .resolves.toMatchObject({
+        status: 'in_progress',
+        providerTaskId: 'provider-task-1',
+        completedAt: null,
+        resultStatus: null,
+      });
+    expect((await service.getDispatch(preview.id))?.events).toContainEqual(
+      expect.objectContaining({
+        eventType: 'result_received',
+        fromStatus: 'completed',
+        toStatus: 'in_progress',
+      }),
+    );
+  });
+
+  it('continues reconciling a completed create-PR dispatch until the PR is merged', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'hosted-pr-lifecycle',
+      name: 'Hosted PR lifecycle',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+      capabilities: { canWriteCode: true, canCreatePullRequest: true },
+    });
+    const preview = await service.createDispatchPreview({
+      agentId: hosted.id,
+      instruction: 'Create a reviewed change',
+      scope: {
+        repository: 'octo/example',
+        baseRef: 'main',
+        createPullRequest: true,
+      },
+      allowedActions: ['write_code', 'create_pull_request'],
+      idempotencyKey: 'completed-pr-reconciliation',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({
+        kind: 'push',
+        async dispatch() {
+          return {
+            status: 'queued',
+            providerTaskId: 'provider-task-pr',
+            providerState: 'queued',
+          };
+        },
+      }),
+    });
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      {
+        transportResolver: () => ({
+          kind: 'push',
+          async dispatch() {
+            return {
+              status: 'queued',
+              providerTaskId: 'provider-task-pr',
+              providerState: 'queued',
+            };
+          },
+        }),
+      },
+    ));
+
+    let pullRequestState: 'OPEN' | 'MERGED' = 'OPEN';
+    const lifecycleFetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/provider-task-pr')) {
+        return Response.json({
+          id: 'provider-task-pr',
+          name: 'Create a reviewed change',
+          state: 'completed',
+          sessions: [{ base_ref: 'main', head_ref: 'copilot/reviewed-change' }],
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 7654321, global_id: 'PR_lifecycle' },
+            },
+            {
+              provider: 'github',
+              type: 'branch',
+              data: { base_ref: 'main', head_ref: 'copilot/reviewed-change' },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        return Response.json({
+          data: {
+            node: {
+              __typename: 'PullRequest',
+              number: 42,
+              url: 'https://github.com/octo/example/pull/42',
+              state: pullRequestState,
+              isDraft: false,
+              mergedAt: pullRequestState === 'MERGED'
+                ? '2026-10-05T17:25:45Z'
+                : null,
+              closedAt: pullRequestState === 'MERGED'
+                ? '2026-10-05T17:25:45Z'
+                : null,
+              headRefName: 'copilot/reviewed-change',
+              headRefOid: '0123456789abcdef',
+              headRepository: { nameWithOwner: 'octo/example' },
+              baseRefName: 'main',
+              baseRepository: { nameWithOwner: 'octo/example' },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    });
+    const fetcher = lifecycleFetcher as typeof fetch;
+
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
+      .resolves.toEqual({ reconciled: 1, failures: [] });
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'completed',
+      githubPullRequestUrl: 'https://github.com/octo/example/pull/42',
+      providerDetail: {
+        pullRequest: { number: 42, state: 'open' },
+      },
+    });
+    const completed = (await service.getDispatch(preview.id))!;
+    expect(service.shouldReconcileDispatch(completed)).toBe(true);
+    expect(service.shouldReconcileDispatch({
+      ...completed,
+      scope: { ...completed.scope, createPullRequest: false },
+    })).toBe(true);
+
+    pullRequestState = 'MERGED';
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
+      .resolves.toEqual({ reconciled: 1, failures: [] });
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'completed',
+      providerDetail: {
+        pullRequest: {
+          number: 42,
+          state: 'merged',
+          mergedAt: '2026-10-05T17:25:45Z',
+        },
+      },
+    });
+
+    lifecycleFetcher.mockClear();
+    await expect(asWorker(() => service.reconcileActiveCopilotCloudDispatches({ fetcher })))
+      .resolves.toEqual({ reconciled: 0, failures: [] });
+    expect(lifecycleFetcher).not.toHaveBeenCalled();
+  });
+
+  it('does not pretend a submitted Copilot task was cancelled locally', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'hosted-cancel',
+      name: 'Hosted cancellation',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+    });
+    const preview = await service.createDispatchPreview({
+      agentId: hosted.id,
+      instruction: 'Keep provider state truthful',
+      scope: { repository: 'octo/example', baseRef: 'main' },
+      idempotencyKey: 'unsupported-cancel',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({
+        kind: 'push',
+        async dispatch() {
+          return {
+            status: 'in_progress',
+            providerTaskId: 'provider-task-2',
+            providerState: 'in_progress',
+          };
+        },
+      }),
+    });
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      {
+        transportResolver: () => ({
+          kind: 'push',
+          async dispatch() {
+            return {
+              status: 'in_progress',
+              providerTaskId: 'provider-task-2',
+              providerState: 'in_progress',
+            };
+          },
+        }),
+      },
+    ));
+
+    await expect(service.cancelDispatch(preview.id)).rejects.toMatchObject({
+      code: 'CANCELLATION_UNSUPPORTED',
+      status: 409,
+    });
+    expect((await service.getDispatch(preview.id))?.status).toBe('in_progress');
+    await expect(service.stopTrackingDispatch(preview.id)).resolves.toBe(true);
+    expect((await service.getDispatch(preview.id))?.status).toBe('cancelled');
   });
 });
 
@@ -277,9 +880,13 @@ describe('disclosure preview and manual result review', () => {
     })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
 
     const confirmed = await service.confirmDispatch(first.id, first.previewHash);
-    expect(confirmed.dispatch.status).toBe('waiting_for_user');
-    expect(confirmed.manualUrl).toBe('https://example.test/agent');
-    expect(confirmed.dispatch.attempts).toHaveLength(1);
+    expect(confirmed.dispatch.status).toBe('queued');
+    expect(confirmed.manualUrl).toBeUndefined();
+    await asWorker(() => service.executeExternalAgentWorkerAction(first.id, 'submit'));
+    expect(await service.getDispatch(first.id)).toMatchObject({
+      status: 'waiting_for_user',
+      attempts: [expect.objectContaining({ attemptNumber: 1 })],
+    });
   });
 
   it('rejects confirmation when the reviewed destination changes', async () => {
@@ -386,16 +993,6 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
       { status: 'queued', providerState: 'requeue' },
       { claimToken: claim.claimToken },
     )).rejects.toThrow(/cannot return an active claim to the queue/);
-    await expect(service.submitDispatchResult(
-      preview.id,
-      { status: 'waiting_for_user', providerState: 'waiting_for_user' },
-      { claimToken: claim.claimToken },
-    )).resolves.toMatchObject({ status: 'waiting_for_user' });
-    await expect(service.submitDispatchResult(
-      preview.id,
-      { status: 'in_progress', providerState: 'resumed' },
-      { claimToken: claim.claimToken },
-    )).resolves.toMatchObject({ status: 'in_progress' });
     const completion = {
       status: 'completed' as const,
       summary: 'Proposed one task',
@@ -416,6 +1013,123 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
       completion,
       { claimToken: claim.claimToken },
     )).resolves.toEqual({ duplicate: true, status: 'completed' });
+  });
+
+  it('releases durable interaction claims and resumes only the scoped dispatch', async () => {
+    await pullAgent({
+      capabilities: {
+        canProposeTasks: true,
+        canPerformM365Actions: true,
+        scout: {
+          sourceTypes: ['email'],
+          actions: ['create_draft'],
+          triggerTypes: ['schedule'],
+          protectedCredentialStorage: true,
+        },
+      },
+    });
+    await pullAgent({ id: 'other-pull-agent', name: 'Other pull worker' });
+    const preview = await service.createDispatchPreview({
+      agentId: 'pull-agent',
+      instruction: 'Draft a response after approval',
+      allowedActions: ['create_draft'],
+      idempotencyKey: 'durable-interaction',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+
+    await expect(service.claimNextDispatch('other-pull-agent', {
+      dispatchId: preview.id,
+    })).resolves.toBeNull();
+    const claim = (await service.claimNextDispatch('pull-agent', {
+      dispatchId: preview.id,
+    }))!;
+    const interaction = await service.requestDispatchInteraction(
+      preview.id,
+      claim.claimToken,
+      {
+        kind: 'approval',
+        prompt: 'Approve sending this draft?',
+        continuationPolicy: 'resume_same_dispatch',
+      },
+    );
+    expect(interaction).toMatchObject({
+      kind: 'approval',
+      status: 'pending',
+      continuationPolicy: 'resume_same_dispatch',
+    });
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'waiting_for_user',
+      claimTokenHash: null,
+      leaseExpiresAt: null,
+    });
+    await expect(service.submitDispatchResult(
+      preview.id,
+      { status: 'in_progress', providerState: 'stale-resume' },
+      { claimToken: claim.claimToken },
+    )).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(service.resolveDispatchInteraction(preview.id, {
+      interactionId: interaction.id,
+      outcome: 'answered',
+      answer: 'yes',
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+    await service.resolveDispatchInteraction(preview.id, {
+      interactionId: interaction.id,
+      outcome: 'approved',
+    });
+    const resumed = await service.claimNextDispatch('pull-agent', {
+      dispatchId: preview.id,
+    });
+    expect(resumed).toMatchObject({
+      dispatchId: preview.id,
+      attempt: 2,
+      payload: {
+        resumeContext: {
+          reason: 'interaction_resolved',
+          interactionId: interaction.id,
+          outcome: 'approved',
+        },
+      },
+    });
+  });
+
+  it('closes an interaction that requires a new dispatch instead of requeueing it', async () => {
+    await pullAgent();
+    const preview = await service.createDispatchPreview({
+      agentId: 'pull-agent',
+      instruction: 'Ask for requirements before new work is delegated',
+      idempotencyKey: 'new-dispatch-interaction',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    const claim = (await service.claimNextDispatch('pull-agent'))!;
+    const interaction = await service.requestDispatchInteraction(
+      preview.id,
+      claim.claimToken,
+      {
+        kind: 'question',
+        prompt: 'Which tenant should the next dispatch target?',
+        choices: ['Contoso', 'Fabrikam'],
+        continuationPolicy: 'require_new_dispatch',
+      },
+    );
+    await expect(service.resolveDispatchInteraction(preview.id, {
+      interactionId: interaction.id,
+      outcome: 'answered',
+      answer: 'Unknown',
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    await service.resolveDispatchInteraction(preview.id, {
+      interactionId: interaction.id,
+      outcome: 'answered',
+      answer: 'Contoso',
+    });
+
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'cancelled',
+      errorMessage: 'Interaction resolved; a new dispatch is required',
+    });
+    await expect(service.claimNextDispatch('pull-agent', {
+      dispatchId: preview.id,
+    })).resolves.toBeNull();
   });
 
   it('dead-letters an expired final lease and permits only an explicit retry', async () => {
@@ -446,6 +1160,7 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
     });
     await service.confirmDispatch(cancelled.id, cancelled.previewHash);
     await expect(service.cancelDispatch(cancelled.id)).resolves.toBe(true);
+    await asWorker(() => service.executeExternalAgentWorkerAction(cancelled.id, 'cancel'));
     await expect(service.cancelDispatch(cancelled.id)).resolves.toBe(false);
     expect((await service.getDispatch(cancelled.id))?.status).toBe('cancelled');
 
@@ -525,9 +1240,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       idempotencyKey: 'late-synchronous-push',
     });
 
-    await expect(service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: transports.createTransportResolver({ fetcher }),
-    })).rejects.toMatchObject({ code: 'DEADLINE_EXPIRED' });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: transports.createTransportResolver({ fetcher }) },
+    ))).rejects.toMatchObject({ code: 'DEADLINE_EXPIRED' });
 
     const dispatch = await service.getDispatch(preview.id);
     expect(dispatch).toMatchObject({
@@ -578,9 +1296,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       idempotencyKey: 'push-once',
     });
 
-    await service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ));
     expect(sentHeaders?.get('authorization')).toBe('Bearer push-secret-value');
     expect(sentHeaders?.get('idempotency-key')).toBe(`${preview.id}:1`);
     expect(sentBody).not.toContain('push-secret-value');
@@ -596,9 +1317,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
     });
     expect(JSON.stringify(dispatch)).not.toContain('provider-response-secret');
     expect(JSON.stringify(dispatch)).not.toContain('push-secret-value');
-    await service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ));
     expect(fetcher).toHaveBeenCalledTimes(1);
 
     const second = await service.createDispatchPreview({
@@ -611,6 +1335,7 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
     })).rejects.toMatchObject({ code: 'RATE_LIMITED' });
 
     await service.cancelDispatch(preview.id);
+    await asWorker(() => service.executeExternalAgentWorkerAction(preview.id, 'cancel'));
     await expect(service.retryDispatch(preview.id, {
       transportResolver: resolver,
     })).rejects.toMatchObject({ code: 'RATE_LIMITED' });
@@ -643,9 +1368,12 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       instruction: 'Recover this delivery',
       idempotencyKey: 'recover-push',
     });
-    await expect(service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    })).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
+    await service.confirmDispatch(preview.id, preview.previewHash);
+    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ))).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
 
     sqlite.prepare(`
       UPDATE agent_dispatches
@@ -653,9 +1381,11 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
           lease_expires_at = '2000-01-01T00:00:00.000Z'
       WHERE id = ?
     `).run(preview.id);
-    await expect(service.confirmDispatch(preview.id, preview.previewHash, {
-      transportResolver: resolver,
-    })).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
+    await expect(asWorker(() => service.executeExternalAgentWorkerAction(
+      preview.id,
+      'submit',
+      { transportResolver: resolver },
+    ))).rejects.toMatchObject({ code: 'TRANSPORT_ERROR' });
     expect(keys).toEqual([`${preview.id}:1`, `${preview.id}:1`]);
     expect((await service.getDispatch(preview.id))?.events)
       .toEqual(expect.arrayContaining([

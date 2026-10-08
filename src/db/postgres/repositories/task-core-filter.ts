@@ -22,6 +22,7 @@ import {
   sourceLists,
   tags,
   taskProjects,
+  taskSchedules,
   taskTags,
   tasks,
 } from '../schema';
@@ -72,6 +73,7 @@ const METADATA_TEXT = sql`${tasks.metadata}::text`;
 
 export function getTaskSourceVisibilityConditions(): SQL[] {
   return [
+    isNull(tasks.deletedAt),
     sql`${tasks.connectorInstanceId} NOT IN (
       SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
       WHERE ${connectorConfigs.deletedAt} IS NOT NULL
@@ -293,6 +295,19 @@ export function getQuickFilterCondition(
       gte(tasks.completedAt, recentCutoff),
     );
   }
+  if (quickFilter === 'recurring') {
+    return or(
+      sql`EXISTS (
+        SELECT 1 FROM ${taskSchedules}
+        WHERE ${taskSchedules.taskId} = ${tasks.id}
+          AND ${taskSchedules.recurrence} IS NOT NULL
+          AND ${taskSchedules.recurrence} <> ''
+          AND ${taskSchedules.recurrence} <> 'none'
+      )`,
+      sql`COALESCE(${tasks.metadata}->>'recurrence', 'none') <> 'none'`,
+      sql`jsonb_typeof(${tasks.metadata}->'canonicalRecurrence') = 'object'`,
+    );
+  }
   if (quickFilter === 'waiting') {
     return inArray(tasks.microStatus, [...WAITING_MICRO_STATUSES]);
   }
@@ -343,6 +358,9 @@ export function getInboxFilterCondition(
     if (entry.sourceListId) {
       conditions.push(and(
         eq(tasks.connectorType, entry.connectorType),
+        ...(entry.connectorInstanceId
+          ? [eq(tasks.connectorInstanceId, entry.connectorInstanceId)]
+          : []),
         eq(tasks.sourceListId, entry.sourceListId),
         isNull(tasks.planningHorizon),
         sql`NOT EXISTS (
@@ -353,6 +371,9 @@ export function getInboxFilterCondition(
     } else if (entry.sourceListName) {
       conditions.push(and(
         eq(tasks.connectorType, entry.connectorType),
+        ...(entry.connectorInstanceId
+          ? [eq(tasks.connectorInstanceId, entry.connectorInstanceId)]
+          : []),
         eq(tasks.sourceListName, entry.sourceListName),
         isNull(tasks.planningHorizon),
         sql`NOT EXISTS (
@@ -509,6 +530,70 @@ function getDueTokenCondition(value: string, today: string, weekFromNow: string)
   return eq(tasks.dueDate, value);
 }
 
+const LATEST_DELEGATION_STATUS = sql`(
+  SELECT ad.status
+  FROM agent_dispatches ad
+  WHERE ad.scope->'taskIds' ? ${tasks.id}
+  ORDER BY ad.created_at DESC, ad.id DESC
+  LIMIT 1
+)`;
+
+const LATEST_DELEGATEE = sql`(
+  SELECT ad.external_agent_id
+  FROM agent_dispatches ad
+  WHERE ad.scope->'taskIds' ? ${tasks.id}
+  ORDER BY ad.created_at DESC, ad.id DESC
+  LIMIT 1
+)`;
+
+const HAS_DELEGATION = sql`EXISTS (
+  SELECT 1
+  FROM agent_dispatches ad
+  WHERE ad.scope->'taskIds' ? ${tasks.id}
+)`;
+
+function delegationStatuses(values: readonly string[]): string[] {
+  const statuses = new Set<string>();
+  for (const value of values) {
+    if (value === 'active') {
+      statuses.add('queued');
+      statuses.add('claimed');
+      statuses.add('in_progress');
+    } else if (value === 'waiting') {
+      statuses.add('waiting_for_user');
+    } else if (value === 'preview') {
+      statuses.add('needs_confirmation');
+    } else if (value === 'failed') {
+      statuses.add('failed');
+      statuses.add('timed_out');
+      statuses.add('dead_letter');
+    } else if (value === 'completed' || value === 'cancelled') {
+      statuses.add(value);
+    }
+  }
+  return [...statuses];
+}
+
+function getDelegationStatusCondition(values: readonly string[]): SQL {
+  const statuses = delegationStatuses(values);
+  return or(
+    ...(statuses.length > 0
+      ? [sql`${LATEST_DELEGATION_STATUS} IN (${sql.join(statuses.map((value) => sql`${value}`), sql`, `)})`]
+      : []),
+    ...(values.includes('none') ? [sql`${LATEST_DELEGATION_STATUS} IS NULL`] : []),
+  ) ?? sql`1 = 0`;
+}
+
+function getDelegateeCondition(values: readonly string[]): SQL {
+  const delegateeIds = values.filter((value) => value !== 'none');
+  return or(
+    ...(delegateeIds.length > 0
+      ? [sql`${LATEST_DELEGATEE} IN (${sql.join(delegateeIds.map((value) => sql`${value}`), sql`, `)})`]
+      : []),
+    ...(values.includes('none') ? [sql`${LATEST_DELEGATEE} IS NULL`] : []),
+  ) ?? sql`1 = 0`;
+}
+
 function groupNegatedTokens(tokensToGroup: FilterToken[]) {
   const grouped = {
     title: [] as string[],
@@ -524,6 +609,8 @@ function groupNegatedTokens(tokensToGroup: FilterToken[]) {
     project: [] as string[],
     phase: [] as string[],
     disposition: [] as string[],
+    delegation: [] as string[],
+    delegatee: [] as string[],
   };
 
   for (const token of tokensToGroup) {
@@ -556,6 +643,8 @@ export function compileFilterQueryConditions(
   const assigneeTokens = unique(parsed.assigneeTokens);
   const dueTokens = unique(parsed.dueTokens);
   const dispositionTokens = unique(parsed.dispositionTokens);
+  const delegationTokens = unique(parsed.delegationTokens);
+  const delegateeTokens = unique(parsed.delegateeTokens);
   const tagTokens = unique(parsed.tagTokens);
   const projectTokens = unique(parsed.projectTokens);
   const phaseTokens = unique(parsed.phaseTokens);
@@ -602,6 +691,12 @@ export function compileFilterQueryConditions(
   if (tagTokens.length > 0) conditions.push(getTagTokenCondition(tagTokens));
   if (projectTokens.length > 0) conditions.push(getProjectTokenCondition(projectTokens));
   if (phaseTokens.length > 0) conditions.push(getPhaseTokenCondition(phaseTokens));
+  if (delegationTokens.length > 0) {
+    conditions.push(getDelegationStatusCondition(delegationTokens));
+  }
+  if (delegateeTokens.length > 0) {
+    conditions.push(getDelegateeCondition(delegateeTokens));
+  }
 
   for (const term of textTerms) {
     conditions.push(or(
@@ -681,6 +776,18 @@ export function compileFilterQueryConditions(
   if (excludedDispositions.length > 0) {
     conditions.push(notInArray(tasks.localDisposition, excludedDispositions));
   }
+  if (negatedByType.delegation.length > 0) {
+    conditions.push(or(
+      sql`${LATEST_DELEGATION_STATUS} IS NULL`,
+      not(getDelegationStatusCondition(negatedByType.delegation)),
+    )!);
+  }
+  if (negatedByType.delegatee.length > 0) {
+    conditions.push(or(
+      sql`${LATEST_DELEGATEE} IS NULL`,
+      not(getDelegateeCondition(negatedByType.delegatee)),
+    )!);
+  }
 
   return conditions;
 }
@@ -702,6 +809,9 @@ export function compileQuickFilterCondition(
   }
   if (quickFilter === 'inbox') {
     return getInboxFilterCondition(inputs.inboxListEntries);
+  }
+  if (quickFilter === 'delegated') {
+    return HAS_DELEGATION;
   }
   return getQuickFilterCondition(
     quickFilter,

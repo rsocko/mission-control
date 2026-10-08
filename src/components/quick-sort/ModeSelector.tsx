@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, Grid2X2, Loader2, Sigma, Tag, Telescope, Zap } from 'lucide-react';
+import { AlertCircle, ChartNetwork, Grid2X2, Loader2, Sigma, Tag, Telescope, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import type { QuickSortModeCounts, QuickSortQueueMode } from '@/lib/hooks/useQuickSortData';
@@ -44,6 +44,14 @@ const MODES: Array<{
     icon: Tag,
     accentClass: 'border-violet-700/60 bg-violet-950/40 hover:bg-violet-950/70',
     badgeClass: 'bg-violet-900/60 text-violet-300',
+  },
+  {
+    id: 'no_project',
+    label: 'Add to Project',
+    description: 'Assign tasks to a project and, optionally, a phase',
+    icon: ChartNetwork,
+    accentClass: 'border-cyan-700/60 bg-cyan-950/40 hover:bg-cyan-950/70',
+    badgeClass: 'bg-cyan-900/60 text-cyan-300',
   },
   {
     id: 'no_planning_horizon',

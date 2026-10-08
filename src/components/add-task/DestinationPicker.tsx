@@ -34,7 +34,10 @@ export function groupQuickAddDestinations(
           .includes(query)
       )
     : destinations;
-  const sources = filtered.filter((destination) => !destination.listId);
+  const sources = filtered.filter(
+    (destination) =>
+      !destination.listId && destination.listSelectionMode !== 'required',
+  );
   const lists = filtered.filter((destination) => destination.listId);
   const groups: QuickAddDestinationGroup[] = [];
 
@@ -268,7 +271,7 @@ export function DestinationPicker({
           </div>
 
           <div className="border-t border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-muted)]">
-            💡 Type <code className="text-blue-400">@work</code> or <code className="text-green-400">@github</code> to auto-select · <code className="text-purple-400">/list</code> to pick a list
+            Type <code className="text-[var(--accent-soft)]">/</code> in Quick Add to select a source or list.
           </div>
         </motion.div>
       )}

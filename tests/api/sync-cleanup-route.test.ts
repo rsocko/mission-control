@@ -22,6 +22,11 @@ process.env.MC_DB_PATH = ':memory:';
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
 
+const resolveTaskIdentity = vi.fn();
+vi.mock('@/lib/connectors/runtime', () => ({
+  getOrInitializeConnector: vi.fn(async () => ({ resolveTaskIdentity })),
+}));
+
 let sqlite: Database.Database;
 let harness: OperationalUtilityContractHarness;
 let cleanup: typeof import('@/app/api/sync/cleanup/route').POST;
@@ -168,6 +173,8 @@ describeOperationalUtilityPersistenceContract('SQLite', async () => harness);
 describe('POST /api/sync/cleanup', () => {
   beforeEach(async () => {
     await harness.reset();
+    vi.restoreAllMocks();
+    resolveTaskIdentity.mockReset();
   });
 
   it('reports exact counts and performs no schema DDL', async () => {
@@ -232,5 +239,65 @@ describe('POST /api/sync/cleanup', () => {
       duplicateGroupsFound: 0,
       tasksRemoved: 0,
     });
+  });
+
+  it('removes a legacy GitHub route only after GitHub resolves it to the canonical row', async () => {
+    await harness.seedTask({
+      id: 'legacy-source',
+      sourceId: 'acme/source:17',
+      connectorInstanceId: 'connector-1',
+      title: 'Transferred issue',
+      metadata: {
+        url: 'https://github.com/acme/source/issues/17',
+        nodeId: 'I_legacy',
+      },
+    });
+    await harness.seedTask({
+      id: 'canonical-destination',
+      sourceId: 'acme/target:42',
+      connectorInstanceId: 'connector-1',
+      title: 'Transferred issue',
+      metadata: {
+        url: 'https://github.com/acme/target/issues/42',
+        nodeId: 'I_canonical',
+      },
+    });
+    resolveTaskIdentity.mockResolvedValue({
+      sourceId: 'acme/target:42',
+      stableId: 'I_canonical',
+    });
+
+    const response = await cleanup();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ tasksRemoved: 1 });
+    expect(await harness.listTaskIds()).toEqual(['canonical-destination']);
+  });
+
+  it('keeps same-title tasks when GitHub identity does not match the destination row', async () => {
+    await harness.seedTask({
+      id: 'source',
+      sourceId: 'acme/source:17',
+      connectorInstanceId: 'connector-1',
+      title: 'Same title',
+      metadata: { nodeId: 'I_source' },
+    });
+    await harness.seedTask({
+      id: 'destination',
+      sourceId: 'acme/target:42',
+      connectorInstanceId: 'connector-1',
+      title: 'Same title',
+      metadata: { nodeId: 'I_destination' },
+    });
+    resolveTaskIdentity.mockResolvedValue({
+      sourceId: 'acme/target:42',
+      stableId: 'I_different',
+    });
+
+    const response = await cleanup();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ tasksRemoved: 0 });
+    expect(await harness.listTaskIds()).toEqual(['destination', 'source']);
   });
 });

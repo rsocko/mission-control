@@ -9,6 +9,11 @@ import { parseTaskInput, parseTaskInputForSubmission, parseDateFromText } from '
 const FIXED_NOW = new Date('2026-07-15T12:00:00'); // Wednesday
 
 describe('parseNLPDate', () => {
+  it('rejects vague article phrases used as ordinary title text', () => {
+    expect(parseNLPDate('Plan the day', FIXED_NOW)).toBeNull();
+    expect(findAllNLPDates('Review the month', FIXED_NOW)).toEqual([]);
+  });
+
   it('parses "tomorrow"', () => {
     const r = parseNLPDate('tomorrow', FIXED_NOW);
     expect(r).not.toBeNull();
@@ -139,42 +144,46 @@ describe('parseTaskInput – chrono-node integration', () => {
     expect(r.title).toBe('meeting tomorrow and report friday');
   });
 
-  it('removes only the trailing date on submission when the title contains multiple dates', () => {
+  it('applies only the trailing date on submission', () => {
     const r = parseTaskInputForSubmission('meeting tomorrow and report friday');
     expect(r.dueDate).toBe('2026-07-17');
+    expect(r.dueDateLabel).toBe('Friday');
     expect(r.dateSuggestion).toBeNull();
     expect(r.title).toBe('meeting tomorrow and report');
   });
 
   it.each([
-    ['buy milk today', '2026-07-15', 'buy milk'],
-    ['buy milk tomorrow', '2026-07-16', 'buy milk'],
-    ['submit report next friday', '2026-07-24', 'submit report'],
-    ['plan party aug 15', '2026-08-15', 'plan party'],
-  ])('applies a trailing date when submitting "%s"', (input, dueDate, title) => {
+    ['buy milk today', '2026-07-15'],
+    ['buy milk tomorrow', '2026-07-16'],
+    ['submit report next friday', '2026-07-24'],
+    ['plan party aug 15', '2026-08-15'],
+  ])('applies and removes a trailing date when submitting "%s"', (input, dueDate) => {
     const r = parseTaskInputForSubmission(input);
     expect(r.dueDate).toBe(dueDate);
-    expect(r.title).toBe(title);
+    expect(r.title).toBe(input.replace(/\s+(today|tomorrow|next friday|aug 15)$/i, ''));
     expect(r.dateSuggestion).toBeNull();
   });
 
-  it('applies a trailing date after other parsed tokens are removed', () => {
+  it('parses metadata and applies a trailing date', () => {
     const r = parseTaskInputForSubmission('fix bug today !high #urgent');
     expect(r.dueDate).toBe('2026-07-15');
+    expect(r.dateSuggestion).toBeNull();
     expect(r.priority).toBe('high');
     expect(r.tags).toEqual(['urgent']);
     expect(r.title).toBe('fix bug');
   });
 
-  it('keeps a trailing date in the submitted title when token preservation is enabled', () => {
+  it('applies a trailing date but keeps it in the title when token preservation is enabled', () => {
     const r = parseTaskInputForSubmission('buy milk today', { preserveText: true });
     expect(r.dueDate).toBe('2026-07-15');
+    expect(r.dateSuggestion).toBeNull();
     expect(r.title).toBe('buy milk today');
   });
 
-  it('retains date-only input as the title', () => {
+  it('applies date-only input without leaving an empty title', () => {
     const r = parseTaskInputForSubmission('today');
     expect(r.dueDate).toBe('2026-07-15');
+    expect(r.dateSuggestion).toBeNull();
     expect(r.title).toBe('today');
   });
 

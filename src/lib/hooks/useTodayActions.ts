@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, type Dispatch, type SetStateAction } from 'react';
-import { toast } from 'sonner';
+import { useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { toast } from '@/lib/toast';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import { getLocalToday as getClientToday, getLocalTomorrow as getClientTomorrow } from '@/lib/utils/client-date';
@@ -18,8 +18,10 @@ import {
   type ScheduledTask,
   type SourceList,
   type SuggestionGroups,
+  type SuggestionTask,
 } from '@/components/today/types';
 import type { LocalDisposition, TaskEditPolicy, TaskField } from '@/types';
+import { createOptimisticMyDayItem } from '@/lib/utils/my-day-view';
 import {
   canEditTaskField,
   canRemoveTask,
@@ -57,6 +59,47 @@ function removeTaskFromSuggestions(suggestions: SuggestionGroups, taskId: string
   return next;
 }
 
+function findSuggestedTask(suggestions: SuggestionGroups, taskId: string): SuggestionTask | undefined {
+  return Object.values(suggestions).flat().find((task) => task.id === taskId);
+}
+
+function restoreTaskToSuggestions(
+  current: SuggestionGroups,
+  previous: SuggestionGroups,
+  taskId: string,
+): SuggestionGroups {
+  const next = { ...current };
+  for (const key of Object.keys(next) as (keyof SuggestionGroups)[]) {
+    const previousTask = previous[key].find((task) => task.id === taskId);
+    if (previousTask && !next[key].some((task) => task.id === taskId)) {
+      next[key] = [...next[key], previousTask];
+    }
+  }
+  return next;
+}
+
+type VisibleTaskUpdate = Partial<Pick<SuggestionTask, 'dueDate' | 'priority' | 'status'>>;
+
+function updateVisibleSuggestion(
+  task: SuggestionTask,
+  taskId: string,
+  updates: VisibleTaskUpdate,
+  expected?: VisibleTaskUpdate,
+): SuggestionTask {
+  if (task.id !== taskId) return task;
+  if (
+    expected
+    && (
+      (expected.dueDate !== undefined && task.dueDate !== expected.dueDate)
+      || (expected.priority !== undefined && task.priority !== expected.priority)
+      || (expected.status !== undefined && task.status !== expected.status)
+    )
+  ) {
+    return task;
+  }
+  return { ...task, ...updates };
+}
+
 const DEFAULT_CONFIRM_DIALOG: ConfirmDialogState = {
   open: false,
   title: '',
@@ -91,6 +134,42 @@ export function useTodayActions({
   const [planningDay, setPlanningDay] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(DEFAULT_CONFIRM_DIALOG);
   const [saveTemplateTask, setSaveTemplateTask] = useState<SaveTemplateTask | null>(null);
+  const visibleTaskMutationVersionsRef = useRef<Record<string, number>>({});
+  const beginVisibleTaskMutation = (taskId: string, field: keyof VisibleTaskUpdate) => {
+    const key = `${taskId}:${field}`;
+    const version = (visibleTaskMutationVersionsRef.current[key] ?? 0) + 1;
+    visibleTaskMutationVersionsRef.current[key] = version;
+    return { key, version };
+  };
+  const updateVisibleTask = (
+    taskId: string,
+    updates: VisibleTaskUpdate,
+    expected?: VisibleTaskUpdate,
+  ) => {
+    setItems((current) => current.map((item) => {
+      if (item.taskId !== taskId) return item;
+      if (
+        expected
+        && (
+          (expected.dueDate !== undefined && item.dueDate !== expected.dueDate)
+          || (expected.priority !== undefined && item.priority !== expected.priority)
+          || (expected.status !== undefined && item.status !== expected.status)
+        )
+      ) {
+        return item;
+      }
+      return { ...item, ...updates };
+    }));
+    setSuggestions((current) => {
+      const next = { ...current };
+      for (const key of Object.keys(next) as (keyof SuggestionGroups)[]) {
+        next[key] = next[key].map((task) => (
+          updateVisibleSuggestion(task, taskId, updates, expected)
+        ));
+      }
+      return next;
+    });
+  };
   const taskPolicy = (taskId: string, context?: { editPolicy?: TaskEditPolicy }) => (
     items.find((item) => item.taskId === taskId)?.editPolicy ?? context?.editPolicy
   );
@@ -106,6 +185,32 @@ export function useTodayActions({
   };
 
   async function addToDay(taskId: string) {
+    const previousSuggestions = suggestions;
+    const suggestedTask = findSuggestedTask(suggestions, taskId);
+    const optimisticItem = suggestedTask
+      ? createOptimisticMyDayItem({
+          taskId,
+          title: suggestedTask.title,
+          status: suggestedTask.status,
+          priority: suggestedTask.priority,
+          dueDate: suggestedTask.dueDate,
+          connectorType: suggestedTask.connectorType,
+          connectorInstanceId: suggestedTask.connectorInstanceId,
+          sourceId: suggestedTask.sourceId,
+          sourceListName: suggestedTask.sourceListName,
+          localDisposition: suggestedTask.localDisposition,
+          taskSourceModel: suggestedTask.taskSourceModel,
+          editPolicy: suggestedTask.editPolicy,
+        }, items.length + 1)
+      : null;
+
+    if (optimisticItem) {
+      setItems((current) => current.some((item) => item.taskId === taskId)
+        ? current
+        : [...current, optimisticItem]);
+      setSuggestions((current) => removeTaskFromSuggestions(current, taskId));
+    }
+
     try {
       const res = await fetch('/api/my-day', {
         method: 'POST',
@@ -119,8 +224,16 @@ export function useTodayActions({
       if (data.writeBack?.attempted && !data.writeBack?.success) {
         toast.warning('Added to My Day locally, but failed to sync to Microsoft To Do');
       }
-      fetchData();
+      void fetchData({ skipSync: true });
     } catch (error) {
+      if (optimisticItem) {
+        setItems((current) => current.filter((item) => item.id !== optimisticItem.id));
+        setSuggestions((current) => restoreTaskToSuggestions(
+          current,
+          previousSuggestions,
+          taskId,
+        ));
+      }
       toast.error(error instanceof Error ? error.message : 'Failed to add task to My Day');
     }
   }
@@ -251,9 +364,7 @@ export function useTodayActions({
         });
         notifyTaskChanged(taskId);
         fetchData();
-        window.dispatchEvent(new CustomEvent('mc:task-completed'));
       });
-      window.dispatchEvent(new CustomEvent('mc:task-completed'));
       fetchData();
       return true;
     }
@@ -264,6 +375,11 @@ export function useTodayActions({
 
   async function setTaskDueDate(taskId: string, date: string | null, taskContext?: { editPolicy?: TaskEditPolicy }) {
     if (!ensureFieldEditable(taskId, 'dueDate', taskContext)) return;
+    const currentTask = items.find((item) => item.taskId === taskId)
+      ?? findSuggestedTask(suggestions, taskId);
+    const previousDate = currentTask?.dueDate ?? null;
+    const mutation = beginVisibleTaskMutation(taskId, 'dueDate');
+    updateVisibleTask(taskId, { dueDate: date });
     try {
       const res = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -273,15 +389,24 @@ export function useTodayActions({
       if (!res.ok) throw new Error('Failed');
       notifyTaskChanged(taskId);
       toast.success('Due date updated');
-      fetchData();
+      if (visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version) {
+        void fetchData({ skipSync: true });
+      }
     } catch {
-      toast.error('Failed to update due date');
+      if (visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version) {
+        updateVisibleTask(taskId, { dueDate: previousDate }, { dueDate: date });
+        toast.error('Failed to update due date');
+      }
     }
 
   }
 
   async function setTaskPriority(taskId: string, priority: string, taskContext?: { editPolicy?: TaskEditPolicy }) {
     if (!ensureFieldEditable(taskId, 'priority', taskContext)) return;
+    const previousPriority = items.find((item) => item.taskId === taskId)?.priority
+      ?? findSuggestedTask(suggestions, taskId)?.priority;
+    const mutation = beginVisibleTaskMutation(taskId, 'priority');
+    updateVisibleTask(taskId, { priority });
     try {
       const res = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -291,9 +416,17 @@ export function useTodayActions({
       if (!res.ok) throw new Error('Failed');
       notifyTaskChanged(taskId);
       toast.success('Priority updated');
-      fetchData();
+      if (visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version) {
+        void fetchData({ skipSync: true });
+      }
     } catch {
-      toast.error('Failed to update priority');
+      if (
+        visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version
+        && previousPriority !== undefined
+      ) {
+        updateVisibleTask(taskId, { priority: previousPriority }, { priority });
+        toast.error('Failed to update priority');
+      }
     }
   }
 
@@ -330,6 +463,10 @@ export function useTodayActions({
 
   async function setTaskStatus(taskId: string, status: string, taskContext?: { editPolicy?: TaskEditPolicy }) {
     if (!ensureFieldEditable(taskId, 'status', taskContext)) return;
+    const previousStatus = items.find((item) => item.taskId === taskId)?.status
+      ?? findSuggestedTask(suggestions, taskId)?.status;
+    const mutation = beginVisibleTaskMutation(taskId, 'status');
+    updateVisibleTask(taskId, { status });
     try {
       const res = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -339,9 +476,17 @@ export function useTodayActions({
       if (!res.ok) throw new Error('Failed');
       notifyTaskChanged(taskId);
       toast.success('Status updated');
-      fetchData();
+      if (visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version) {
+        void fetchData({ skipSync: true });
+      }
     } catch {
-      toast.error('Failed to update status');
+      if (
+        visibleTaskMutationVersionsRef.current[mutation.key] === mutation.version
+        && previousStatus !== undefined
+      ) {
+        updateVisibleTask(taskId, { status: previousStatus }, { status });
+        toast.error('Failed to update status');
+      }
     }
   }
 
@@ -361,42 +506,42 @@ export function useTodayActions({
       variant: 'danger',
       onConfirm: () => {
         setConfirmDialog((dialog) => ({ ...dialog, open: false }));
-        // Defer heavy state updates to the next frame so Radix can finish its
-        // close sequence (removing pointer-events:none from <body>) before React
-        // re-renders the task list.
         requestAnimationFrame(() => {
           const previousItems = items;
           const previousSuggestions = suggestions;
           setItems((prev) => prev.filter((current) => current.taskId !== taskId));
-          // The task may only exist as a suggestion (never added to My Day),
-          // so remove it from every suggestion group too -- otherwise it
-          // lingers there until the next full refetch.
           setSuggestions((current) => removeTaskFromSuggestions(current, taskId));
-          let undone = false;
-          toast.success('Task deleted', {
-            action: {
-              label: 'Undo',
-              onClick: () => {
-                undone = true;
-                setItems(previousItems);
-                setSuggestions(previousSuggestions);
-              },
-            },
-            duration: 5000,
-          });
-          setTimeout(async () => {
-            if (!undone) {
-              try {
-                const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
-                if (!res.ok) throw new Error('Failed');
-                fetchData({ skipSync: true });
-              } catch {
-                setItems(previousItems);
-                setSuggestions(previousSuggestions);
-                toast.error('Failed to delete task');
+
+          void (async () => {
+            try {
+              const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
+              if (!res.ok) throw new Error('Failed');
+              const body = typeof res.json === 'function'
+                ? await res.json().catch(() => ({})) as { restorable?: boolean }
+                : {};
+
+              notifyTaskChanged(taskId);
+              if (body.restorable) {
+                pushUndoWithToast('Task deleted', async () => {
+                  const restoreResponse = await fetch(`/api/tasks/${taskId}/restore`, {
+                    method: 'POST',
+                  });
+                  if (!restoreResponse.ok) throw new Error('Failed to restore task');
+                  setItems(previousItems);
+                  setSuggestions(previousSuggestions);
+                  notifyTaskChanged(taskId);
+                  await fetchData({ skipSync: true });
+                });
+              } else {
+                toast.success('Task deleted');
               }
+              await fetchData({ skipSync: true });
+            } catch {
+              setItems(previousItems);
+              setSuggestions(previousSuggestions);
+              toast.error('Failed to delete task');
             }
-          }, 5500);
+          })();
         });
       },
     });

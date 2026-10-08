@@ -57,12 +57,14 @@ export async function runPackagedSyncWorker(
       { publicRuntimeRelease },
       { WorkerHealthSnapshotScheduler },
       { taskReminderScheduler },
+      { taskDeletionRetentionScheduler },
       { financeConnectionRecoveryScheduler },
       { houstonMemoryRetentionScheduler },
       { getWorkerPersistenceRepositories },
       { EventOutboxDispatcher },
       { NotificationEnrichmentWorker },
       { createPackagedNotificationEnrichmentExecutor },
+      { ExternalAgentDispatchWorker },
       { getDurableAiRunRepository, DurableAiRunWorker },
       { createPackagedDurableAiRuntime },
       semanticRuntime,
@@ -87,12 +89,14 @@ export async function runPackagedSyncWorker(
       import('@/lib/runtime/release'),
       import('@/lib/telemetry/health-snapshot'),
       import('@/lib/push/task-reminder-scheduler'),
+      import('@/lib/tasks/deletion-retention'),
       import('@/lib/connectors/monarch-money/recovery-scheduler'),
       import('@/lib/houston-memory/retention'),
       import('@/lib/persistence/worker-runtime'),
       import('@/lib/events/dispatcher'),
       import('@/lib/notifications/enrichment/worker'),
       import('@/lib/notifications/enrichment/packaged-executor'),
+      import('@/lib/external-agents/worker'),
       import('@/lib/ai/durable-runs'),
       import('@/lib/ai/durable-runs/packaged-worker'),
       process.env.MC_DATABASE_BACKEND === 'postgres'
@@ -155,6 +159,7 @@ export async function runPackagedSyncWorker(
         ? await createPackagedNotificationEnrichmentExecutor()
         : undefined,
     });
+    const externalAgentDispatchWorker = new ExternalAgentDispatchWorker();
 
     let aiRunWorker: { start(): void; stop(): Promise<void>; wake(): void };
     let stopAiRunRuntime: () => Promise<void>;
@@ -276,6 +281,11 @@ export async function runPackagedSyncWorker(
         stop: () => taskReminderScheduler.stop(),
       },
       {
+        name: 'task-deletion-retention',
+        start: () => taskDeletionRetentionScheduler.start(),
+        stop: () => taskDeletionRetentionScheduler.stop(),
+      },
+      {
         name: 'event-outbox',
         start: async () => {
           await eventOutboxDispatcher.start();
@@ -292,6 +302,11 @@ export async function runPackagedSyncWorker(
           );
         },
         stop: () => notificationEnrichmentWorker.stop(),
+      },
+      {
+        name: 'external-agent-dispatch',
+        start: () => externalAgentDispatchWorker.start(),
+        stop: () => externalAgentDispatchWorker.stop(),
       },
       {
         name: 'sync-schedulers',
@@ -319,6 +334,7 @@ export async function runPackagedSyncWorker(
             );
           }
           syncScheduler.startWatchdog();
+          syncScheduler.startExternalAgentReconciliation();
         },
         stop: () => syncScheduler.stopAll(),
       },

@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { taskLogger } from '@/lib/client-logger';
 import { getLocalToday } from '@/lib/utils/client-date';
+import type { MyDayItemAddedEventDetail } from '@/components/today/types';
 import { formatShortDate } from '@/lib/utils/task-detail-date';
 import { EFFORT_TO_DURATION, durationToEffort } from '@/lib/constants/task-formatting';
 import {
@@ -21,6 +22,7 @@ import {
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import type { LocalDisposition, PlanningHorizon, TaskField } from '@/types';
 import { notifyNavigationCountsChanged } from '@/lib/navigation/badges';
+import { notifyTaskCompleted } from '@/lib/completion-sounds';
 import { removeMicrosoftTodoTitleTag } from '@/lib/connectors/microsoft-todo/title-tags';
 import type { DuplicateCandidate } from './DuplicateTaskPreview';
 import {
@@ -40,9 +42,11 @@ import type {
   MicroStatusSuggestion,
   TagConnectorCaps,
   TaskDetail,
+  TaskDetailCloseReason,
   TaskFieldUpdate,
   TaskTag,
 } from './task-detail-types';
+import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 
 /** Confirmation the panel must show before a destructive mutation runs. */
 export interface TaskConfirmRequest {
@@ -72,7 +76,7 @@ export interface UseTaskDetailMutationsOptions {
   setPotentialDuplicates: React.Dispatch<React.SetStateAction<DuplicateCandidate[]>>;
   /** Effective My Day membership, host override included. */
   isInMyDay: boolean;
-  onClose: () => void;
+  onClose: (reason?: TaskDetailCloseReason) => void;
   onComplete?: () => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
   onToggleMyDay?: () => void | Promise<void>;
@@ -110,6 +114,8 @@ export function useTaskDetailMutations({
   const [updatingProjectPhaseIds, setUpdatingProjectPhaseIds] = useState<Set<string>>(new Set());
   const [skippingToCurrent, setSkippingToCurrent] = useState(false);
   const [reminderSaving, setReminderSaving] = useState(false);
+  const [recurrenceOptionsSaving, setRecurrenceOptionsSaving] = useState(false);
+  const recurrenceOptionsSavingRef = useRef(false);
   const [microStatusSuggestion, setMicroStatusSuggestion] = useState<MicroStatusSuggestion | null>(null);
   const [showMicroStatusPicker, setShowMicroStatusPicker] = useState(false);
   const [showCloseReasonPicker, setShowCloseReasonPicker] = useState(false);
@@ -120,6 +126,7 @@ export function useTaskDetailMutations({
   const [tagInput, setTagInput] = useState('');
   const skipToCurrentInFlightRef = useRef(false);
   const highlightTimeoutsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const fieldMutationVersionsRef = useRef<Record<string, number>>({});
 
   useEffect(() => () => {
     highlightTimeoutsRef.current.forEach(clearTimeout);
@@ -148,24 +155,38 @@ export function useTaskDetailMutations({
   }, []);
 
   const saveField = useCallback(async (
-    field: TaskField,
+    field: 'title' | 'description' | 'priority' | 'planningHorizon' | 'recurrence',
     value: string | number | null | undefined,
     reportError = true,
   ) => {
     if (!ensureFieldsEditable(field)) return false;
+    const previousValue = task?.[field];
+    const mutationVersion = (fieldMutationVersionsRef.current[field] ?? 0) + 1;
+    fieldMutationVersionsRef.current[field] = mutationVersion;
+    setTask((prev) => prev ? { ...prev, [field]: value } : prev);
+    onUpdate?.({ [field]: value });
     try {
       const result = await patchTask(taskId, { [field]: value });
       if (!result.ok) throw new Error(`Failed to save ${field}`);
-      onUpdate?.({ [field]: value });
-      notifyNavigationCountsChanged();
+      if (fieldMutationVersionsRef.current[field] === mutationVersion) {
+        notifyNavigationCountsChanged();
+        onUpdate?.();
+      }
       return true;
     } catch {
-      if (reportError) {
-        toast.error(`Failed to save ${field === 'description' ? 'notes' : field}`);
+      const isLatestMutation = fieldMutationVersionsRef.current[field] === mutationVersion;
+      if (isLatestMutation) {
+        setTask((prev) => (
+          prev && prev[field] === value ? { ...prev, [field]: previousValue } : prev
+        ));
+        onUpdate?.({ [field]: previousValue });
+        if (reportError) {
+          toast.error(`Failed to save ${field === 'description' ? 'notes' : field}`);
+        }
       }
       return false;
     }
-  }, [ensureFieldsEditable, taskId, onUpdate]);
+  }, [ensureFieldsEditable, onUpdate, setTask, task, taskId]);
 
   const openTagPicker = useCallback(async () => {
     setShowTagPicker(true);
@@ -305,19 +326,46 @@ export function useTaskDetailMutations({
       setShowCloseReasonPicker(true);
       return;
     }
+    const previousStatus = task?.status;
+    const previousStatusReason = task?.statusReason;
+    const mutationVersion = (fieldMutationVersionsRef.current.status ?? 0) + 1;
+    fieldMutationVersionsRef.current.status = mutationVersion;
+    setTask((prev) => prev ? { ...prev, status, statusReason: null } : prev);
+    onUpdate?.({ status, statusReason: null });
     const result = await patchTask(taskId, { status });
     if (!result.ok) {
-      toast.error('Failed to update task status');
+      if (fieldMutationVersionsRef.current.status === mutationVersion) {
+        setTask((prev) => prev && prev.status === status
+          ? {
+              ...prev,
+              status: previousStatus ?? prev.status,
+              statusReason: previousStatusReason ?? prev.statusReason,
+            }
+          : prev);
+        onUpdate?.({ status: previousStatus, statusReason: previousStatusReason });
+        toast.error('Failed to update task status');
+      }
       return;
     }
     const reminder = result.data.reminder as Pick<
       TaskDetail,
       'reminderAt' | 'reminderRelative' | 'reminderDueTime'
     > | undefined;
-    setTask((prev) => prev ? { ...prev, status, statusReason: null, ...(reminder ?? {}) } : prev);
-    onUpdate?.({ status });
-    notifyNavigationCountsChanged();
-  }, [ensureFieldsEditable, onUpdate, setTask, task?.connectorType, taskId]);
+    if (fieldMutationVersionsRef.current.status === mutationVersion) {
+      setTask((prev) => prev ? { ...prev, ...(reminder ?? {}) } : prev);
+      onUpdate?.();
+      notifyNavigationCountsChanged();
+      if (status === 'done') notifyTaskCompleted();
+    }
+  }, [
+    ensureFieldsEditable,
+    onUpdate,
+    setTask,
+    task?.connectorType,
+    task?.status,
+    task?.statusReason,
+    taskId,
+  ]);
 
   const handleComplete = useCallback(() => {
     if (onComplete) {
@@ -380,9 +428,23 @@ export function useTaskDetailMutations({
       ));
       onUpdate?.();
       notifyNavigationCountsChanged();
-      if (nextIsInMyDay) {
+      if (nextIsInMyDay && task) {
+        const detail = {
+          taskId,
+          title: task.title,
+          status: task.status,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          connectorType: task.connectorType,
+          connectorInstanceId: task.connectorInstanceId,
+          sourceId: task.sourceId,
+          sourceListName: task.sourceListName,
+          localDisposition: task.localDisposition,
+          taskSourceModel: task.taskSourceModel,
+          editPolicy: task.editPolicy,
+        } satisfies MyDayItemAddedEventDetail;
         window.dispatchEvent(new CustomEvent('mission-control:my-day-item-added', {
-          detail: { taskId, title: task?.title },
+          detail,
         }));
       }
       if (result.writeBackAttempted && !result.writeBackSucceeded) {
@@ -395,7 +457,7 @@ export function useTaskDetailMutations({
     } finally {
       setUpdatingMyDay(false);
     }
-  }, [isInMyDay, onToggleMyDay, onUpdate, setTask, task?.title, taskId, updatingMyDay]);
+  }, [isInMyDay, onToggleMyDay, onUpdate, setTask, task, taskId, updatingMyDay]);
 
   const handleDelete = useCallback(() => {
     if (!task || !canRemoveTask(task.editPolicy)) return;
@@ -414,7 +476,7 @@ export function useTaskDetailMutations({
             toast.success('Task deleted');
             onUpdate?.();
             notifyNavigationCountsChanged();
-            onClose();
+            onClose('task-removed');
           } catch {
             toast.error('Failed to delete task');
           }
@@ -424,16 +486,14 @@ export function useTaskDetailMutations({
   }, [onClose, onDelete, onUpdate, requestConfirm, task]);
 
   const handlePriorityChange = useCallback(async (priority: string) => {
-    if (!(await saveField('priority', priority))) return;
-    setTask((prev) => prev ? { ...prev, priority } : prev);
-  }, [saveField, setTask]);
+    await saveField('priority', priority);
+  }, [saveField]);
 
   const handlePlanningHorizonChange = useCallback(async (
     planningHorizon: PlanningHorizon | null,
   ) => {
-    if (!(await saveField('planningHorizon', planningHorizon))) return;
-    setTask((prev) => prev ? { ...prev, planningHorizon } : prev);
-  }, [saveField, setTask]);
+    await saveField('planningHorizon', planningHorizon);
+  }, [saveField]);
 
   const handleLocalDispositionChange = useCallback(async (localDisposition: LocalDisposition) => {
     if (!task || !canSetTaskLocalDisposition(
@@ -481,15 +541,37 @@ export function useTaskDetailMutations({
       : { effort };
     const fields: TaskField[] = suggestedDuration ? ['effort', 'estimatedDuration'] : ['effort'];
     if (!ensureFieldsEditable(...fields)) return;
-    const result = await patchTask(taskId, updates);
-    if (!result.ok) {
-      toast.error('Failed to update effort');
-      return;
-    }
-    if (suggestedDuration) flashHighlight(setDurationHighlight);
+    const previousEffort = task?.effort ?? null;
+    const previousDuration = task?.estimatedDuration ?? null;
+    const mutationVersion = (fieldMutationVersionsRef.current.effort ?? 0) + 1;
+    fieldMutationVersionsRef.current.effort = mutationVersion;
     setTask((prev) => prev ? { ...prev, ...updates } : prev);
     onUpdate?.(updates);
-  }, [ensureFieldsEditable, flashHighlight, onUpdate, setTask, taskId]);
+    const result = await patchTask(taskId, updates);
+    if (!result.ok) {
+      if (fieldMutationVersionsRef.current.effort === mutationVersion) {
+        setTask((prev) => (
+          prev
+          && (updates.effort === undefined || prev.effort === updates.effort)
+          && (updates.estimatedDuration === undefined
+            || prev.estimatedDuration === updates.estimatedDuration)
+            ? {
+                ...prev,
+                effort: previousEffort,
+                estimatedDuration: previousDuration,
+              }
+            : prev
+        ));
+        onUpdate?.({ effort: previousEffort, estimatedDuration: previousDuration });
+        toast.error('Failed to update effort');
+      }
+      return;
+    }
+    if (fieldMutationVersionsRef.current.effort === mutationVersion) {
+      if (suggestedDuration) flashHighlight(setDurationHighlight);
+      onUpdate?.();
+    }
+  }, [ensureFieldsEditable, flashHighlight, onUpdate, setTask, task, taskId]);
 
   const handleDurationChange = useCallback(async (minutes: number | null) => {
     const suggestedEffort = minutes ? durationToEffort(minutes) : undefined;
@@ -498,15 +580,37 @@ export function useTaskDetailMutations({
       : { estimatedDuration: minutes };
     const fields: TaskField[] = suggestedEffort ? ['estimatedDuration', 'effort'] : ['estimatedDuration'];
     if (!ensureFieldsEditable(...fields)) return;
-    const result = await patchTask(taskId, updates);
-    if (!result.ok) {
-      toast.error('Failed to update duration');
-      return;
-    }
-    if (suggestedEffort) flashHighlight(setEffortHighlight);
+    const previousEffort = task?.effort ?? null;
+    const previousDuration = task?.estimatedDuration ?? null;
+    const mutationVersion = (fieldMutationVersionsRef.current.effort ?? 0) + 1;
+    fieldMutationVersionsRef.current.effort = mutationVersion;
     setTask((prev) => prev ? { ...prev, ...updates } : prev);
     onUpdate?.(updates);
-  }, [ensureFieldsEditable, flashHighlight, onUpdate, setTask, taskId]);
+    const result = await patchTask(taskId, updates);
+    if (!result.ok) {
+      if (fieldMutationVersionsRef.current.effort === mutationVersion) {
+        setTask((prev) => (
+          prev
+          && (updates.effort === undefined || prev.effort === updates.effort)
+          && (updates.estimatedDuration === undefined
+            || prev.estimatedDuration === updates.estimatedDuration)
+            ? {
+                ...prev,
+                effort: previousEffort,
+                estimatedDuration: previousDuration,
+              }
+            : prev
+        ));
+        onUpdate?.({ effort: previousEffort, estimatedDuration: previousDuration });
+        toast.error('Failed to update duration');
+      }
+      return;
+    }
+    if (fieldMutationVersionsRef.current.effort === mutationVersion) {
+      if (suggestedEffort) flashHighlight(setEffortHighlight);
+      onUpdate?.();
+    }
+  }, [ensureFieldsEditable, flashHighlight, onUpdate, setTask, task, taskId]);
 
   const applyDueDateChange = useCallback(async (
     dueDate: string,
@@ -515,25 +619,46 @@ export function useTaskDetailMutations({
     if (!ensureFieldsEditable('dueDate', ...(task?.reminderRelative ? ['reminderAt'] as const : []))) {
       return false;
     }
+    const nextDueDate = dueDate || null;
+    const previousDueDate = task?.dueDate ?? null;
+    const mutationVersion = (fieldMutationVersionsRef.current.dueDate ?? 0) + 1;
+    fieldMutationVersionsRef.current.dueDate = mutationVersion;
+    setTask((prev) => prev?.id === taskId ? { ...prev, dueDate: nextDueDate } : prev);
+    onUpdate?.({ dueDate: nextDueDate });
     const result = await patchTask(taskId, {
-      dueDate: dueDate || null,
+      dueDate: nextDueDate,
       ...(relativeReminderDueDateResolution ? { relativeReminderDueDateResolution } : {}),
     });
     if (!result.ok) {
-      toast.error(typeof result.data.error === 'string' ? result.data.error : 'Failed to save due date');
+      if (fieldMutationVersionsRef.current.dueDate === mutationVersion) {
+        setTask((prev) => prev?.id === taskId && prev.dueDate === nextDueDate
+          ? { ...prev, dueDate: previousDueDate }
+          : prev);
+        onUpdate?.({ dueDate: previousDueDate });
+        toast.error(typeof result.data.error === 'string' ? result.data.error : 'Failed to save due date');
+      }
       return false;
     }
     const reminder = result.data.reminder as Pick<
       TaskDetail,
       'reminderAt' | 'reminderRelative' | 'reminderDueTime'
     > | undefined;
-    setTask((prev) => prev?.id === taskId
-      ? { ...prev, dueDate: dueDate || null, ...(reminder ?? {}) }
-      : prev);
-    onUpdate?.({ dueDate: dueDate || null });
-    notifyNavigationCountsChanged();
+    if (fieldMutationVersionsRef.current.dueDate === mutationVersion) {
+      setTask((prev) => prev?.id === taskId
+        ? { ...prev, ...(reminder ?? {}) }
+        : prev);
+      onUpdate?.();
+      notifyNavigationCountsChanged();
+    }
     return true;
-  }, [ensureFieldsEditable, onUpdate, setTask, task?.reminderRelative, taskId]);
+  }, [
+    ensureFieldsEditable,
+    onUpdate,
+    setTask,
+    task?.dueDate,
+    task?.reminderRelative,
+    taskId,
+  ]);
 
   const handleDueDateChange = useCallback(async (dueDate: string) => {
     if (!dueDate && task?.reminderRelative) {
@@ -569,6 +694,8 @@ export function useTaskDetailMutations({
     reminderAt?: string | null;
     reminderRelative?: TaskDetail['reminderRelative'];
     reminderDueTime?: string | null;
+    reminderNagInterval?: TaskDetail['reminderNagInterval'];
+    reminderNagStopAt?: string | null;
   }) => {
     if (!ensureFieldsEditable('reminderAt') || reminderSaving) return false;
     setReminderSaving(true);
@@ -583,6 +710,8 @@ export function useTaskDetailMutations({
       const reminder = result.data.reminder as Pick<
         TaskDetail,
         'reminderAt' | 'reminderRelative' | 'reminderDueTime'
+        | 'reminderNagInterval' | 'reminderNagStopAt'
+        | 'reminderNagSeriesId' | 'reminderNagSequence'
       > | undefined;
       if (reminder) {
         setTask((prev) => prev ? { ...prev, ...reminder } : prev);
@@ -600,7 +729,12 @@ export function useTaskDetailMutations({
     setTask((prev) => prev ? {
       ...prev,
       recurrence: value,
-      ...(value === null ? { recurrenceMode: 'schedule' as const } : {}),
+      ...(value === null
+        ? {
+            recurrenceMode: 'schedule' as const,
+            recurrenceControl: undefined,
+          }
+        : {}),
     } : prev);
   }, [saveField, setTask]);
 
@@ -615,18 +749,77 @@ export function useTaskDetailMutations({
     onUpdate?.({ recurrenceMode });
   }, [ensureFieldsEditable, onUpdate, setTask, taskId]);
 
+  const handleRecurrenceOptionsChange = useCallback(async (options: RecurrenceEditorOptions) => {
+    if (recurrenceOptionsSavingRef.current || !ensureFieldsEditable('recurrence')) return;
+    recurrenceOptionsSavingRef.current = true;
+    setRecurrenceOptionsSaving(true);
+    try {
+      const result = await patchTask(taskId, {
+        recurrenceSkipDates: options.skipDates,
+        recurrenceCatchUp: options.catchUp,
+      });
+      if (!result.ok) {
+        toast.error(typeof result.data.error === 'string'
+          ? result.data.error
+          : 'Failed to save recurrence options');
+        return;
+      }
+      setTask((prev) => {
+        const control = prev?.recurrenceControl;
+        const rule = control?.rule;
+        if (!prev || !control || !rule) return prev;
+        return {
+          ...prev,
+          recurrenceControl: {
+            ...control,
+            rule: {
+              ...rule,
+              semantics: {
+                ...rule.semantics,
+                exceptions: { skipDates: options.skipDates },
+                materialization: {
+                  ...rule.semantics.materialization,
+                  catchUp: rule.semantics.mode === 'completion' ? 'none' : options.catchUp,
+                },
+              },
+            },
+          },
+        };
+      });
+      onUpdate?.({
+        recurrenceSkipDates: options.skipDates,
+        recurrenceCatchUp: options.catchUp,
+      });
+    } finally {
+      recurrenceOptionsSavingRef.current = false;
+      setRecurrenceOptionsSaving(false);
+    }
+  }, [ensureFieldsEditable, onUpdate, setTask, taskId]);
+
   const handleMicroStatusChange = useCallback(async (microStatus: string | null) => {
     if (!ensureFieldsEditable('microStatus')) return;
-    const result = await patchTask(taskId, { microStatus });
-    if (!result.ok) {
-      toast.error('Failed to update micro-status');
-      return;
-    }
+    const previousMicroStatus = task?.microStatus ?? null;
+    const mutationVersion = (fieldMutationVersionsRef.current.microStatus ?? 0) + 1;
+    fieldMutationVersionsRef.current.microStatus = mutationVersion;
     setTask((prev) => prev ? { ...prev, microStatus } : prev);
     setShowMicroStatusPicker(false);
     setMicroStatusSuggestion(null);
     onUpdate?.({ microStatus });
-  }, [ensureFieldsEditable, onUpdate, setTask, taskId]);
+    const result = await patchTask(taskId, { microStatus });
+    if (!result.ok) {
+      if (fieldMutationVersionsRef.current.microStatus === mutationVersion) {
+        setTask((prev) => prev && prev.microStatus === microStatus
+          ? { ...prev, microStatus: previousMicroStatus }
+          : prev);
+        onUpdate?.({ microStatus: previousMicroStatus });
+        toast.error('Failed to update micro-status');
+      }
+      return;
+    }
+    if (fieldMutationVersionsRef.current.microStatus === mutationVersion) {
+      onUpdate?.();
+    }
+  }, [ensureFieldsEditable, onUpdate, setTask, task?.microStatus, taskId]);
 
   const requestMicroStatusSuggestion = useCallback(async () => {
     try {
@@ -745,6 +938,8 @@ export function useTaskDetailMutations({
     reminderSaving,
     handleRecurrenceChange,
     handleRecurrenceModeChange,
+    handleRecurrenceOptionsChange,
+    recurrenceOptionsSaving,
     handleMicroStatusChange,
     requestMicroStatusSuggestion,
     dismissMicroStatusSuggestion,

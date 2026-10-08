@@ -52,6 +52,7 @@ export const AI_FEATURE_IDS = [
   'project-phase-refinement',
   'reset-summary',
   'task-breakdown',
+  'delegation-planning',
   'document-intake',
   'notification-enrichment',
   'triage-action-extraction',

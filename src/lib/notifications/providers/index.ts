@@ -29,6 +29,8 @@ import { documentIntelligenceNotificationProvider } from './document-intelligenc
 import { financeNotificationProvider } from './finance';
 import { homelabNotificationProvider } from './homelab';
 import { homeAssistantNotificationProvider } from './home-assistant';
+import { paperclipNotificationProvider } from './paperclip';
+import { rymessageNotificationProvider } from './rymessage';
 import { getNotificationProvider, registerNotificationProvider } from './registry';
 
 export function registerDefaultNotificationProviders(): void {
@@ -38,6 +40,8 @@ export function registerDefaultNotificationProviders(): void {
     financeNotificationProvider,
     homelabNotificationProvider,
     homeAssistantNotificationProvider,
+    paperclipNotificationProvider,
+    rymessageNotificationProvider,
   ];
   for (const provider of defaultProviders) {
     if (!getNotificationProvider(provider.sourceType)) {

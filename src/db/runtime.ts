@@ -84,6 +84,7 @@ import type { DemoSeedCommandService } from '@/lib/settings/mode-route-services'
 import type { RelativeReminderTimezoneRepository } from './persistence/relative-reminder-timezone';
 import {
   registerDemoSeedCommandService,
+  registerModeRouteCapabilities,
   registerRelativeReminderTimezoneRepository,
 } from '@/lib/settings/mode-route-services';
 import { executeCrossAccountTaskMove } from '@/lib/tasks/task-move-service';
@@ -289,6 +290,7 @@ const modeRouteTimezoneRepository: RelativeReminderTimezoneRepository = {
 function registerModeRouteServices(
   demoSeedCommandService: DemoSeedCommandService,
   timezoneRepository: RelativeReminderTimezoneRepository,
+  databaseBackend: 'sqlite' | 'postgres',
 ): void {
   const runtime = databaseRuntimeRegistry();
   runtime.modeRouteDemoSeedCommandDelegate = demoSeedCommandService;
@@ -297,6 +299,10 @@ function registerModeRouteServices(
   runtime.modeRouteTimezoneRepository ??= modeRouteTimezoneRepository;
   registerDemoSeedCommandService(runtime.modeRouteDemoSeedCommandService);
   registerRelativeReminderTimezoneRepository(runtime.modeRouteTimezoneRepository);
+  registerModeRouteCapabilities({
+    databaseBackend,
+    demoOperationsSupported: databaseBackend === 'sqlite',
+  });
 }
 
 function clearModeRouteServiceDelegates(): void {
@@ -438,6 +444,9 @@ function requirePostgresDailyPlanningPersistence(): NonNullable<
 const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
   tasks: {
     get: (id) => requirePostgresRepositories().tasks.get(id),
+    findByProviderIdentity: (input) => (
+      requirePostgresRepositories().tasks.findByProviderIdentity!(input)
+    ),
     upsert: (task) => requirePostgresRepositories().tasks.upsert(task),
     delete: (id) => requirePostgresRepositories().tasks.delete(id),
   },
@@ -850,6 +859,7 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
     registerModeRouteServices(
       createSqliteDemoSeedCommandService(),
       createSqliteRelativeReminderTimezoneRepository(sqliteRuntime.default),
+      'sqlite',
     );
     return;
   }
@@ -896,10 +906,13 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
           repository,
           source,
           embeddings: getSemanticEmbeddingProvider(),
-          resolveSensitivity: ({ connectorType }) => resolveSensitivity(
+          resolveSensitivity: ({ connectorType, dataClassificationOverride }) => resolveSensitivity(
             'semantic-embedding',
             routingPolicy,
-            { sources: connectorType ? [connectorType.trim().toLowerCase()] : [] },
+            {
+              sources: connectorType ? [connectorType.trim().toLowerCase()] : [],
+              override: dataClassificationOverride ?? undefined,
+            },
           ),
           embeddingTimeoutMs: config.embeddingTimeoutMs,
         });
@@ -1007,6 +1020,7 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
   registerModeRouteServices(
     postgresDemoSeedCommandService,
     createPostgresRelativeReminderTimezoneRepository(db),
+    'postgres',
   );
 }
 

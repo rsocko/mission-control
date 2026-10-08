@@ -42,4 +42,39 @@ describe('ReminderPicker', () => {
 
     expect(screen.getByRole('button', { name: /1 hour before/i })).toBeDisabled();
   });
+
+  it('enables repeat-until-done with a five minute default', () => {
+    const onChange = vi.fn(() => true);
+    render(
+      <ReminderPicker
+        value="2099-08-21T15:00:00.000Z"
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set reminder' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Repeat until done' }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      reminderNagInterval: 5,
+      reminderNagStopAt: null,
+    });
+  });
+
+  it('summarizes and edits an active persistent reminder', () => {
+    const onChange = vi.fn(() => true);
+    render(
+      <ReminderPicker
+        value="2099-08-21T15:00:00.000Z"
+        nagInterval={5}
+        onChange={onChange}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Set reminder' })).toHaveTextContent('every 5m');
+    fireEvent.click(screen.getByRole('button', { name: 'Set reminder' }));
+    fireEvent.click(screen.getByRole('button', { name: '15 min' }));
+
+    expect(onChange).toHaveBeenCalledWith({ reminderNagInterval: 15 });
+  });
 });

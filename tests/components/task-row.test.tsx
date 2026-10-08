@@ -186,6 +186,33 @@ const actionProps = {
 };
 
 describe('TaskRow', () => {
+  it('wraps the title only when the wrapped layout is selected', () => {
+    const { rerender } = render(
+      <TaskRow task={baseTask} {...actionProps} />,
+    );
+
+    expect(screen.getByText('Test task')).toHaveClass('truncate');
+
+    rerender(
+      <TaskRow task={baseTask} {...actionProps} wrapTitle />,
+    );
+
+    expect(screen.getByText('Test task')).toHaveClass('line-clamp-2', 'whitespace-normal');
+    expect(screen.getByText('Test task')).not.toHaveClass('truncate');
+  });
+
+  it('lets the source list use available metadata-row space', () => {
+    render(
+      <TaskRow
+        task={{ ...baseTask, sourceListName: 'Home Assistant (Natick)' }}
+        {...actionProps}
+      />,
+    );
+
+    expect(screen.getByText('Home Assistant (Natick)')).toHaveClass('min-w-0', 'truncate');
+    expect(screen.getByText('Home Assistant (Natick)')).not.toHaveClass('max-w-[120px]');
+  });
+
   describe('ProjectBadge', () => {
     it('renders project badge when task has hubProjectIds', () => {
       const projects = [
@@ -253,9 +280,9 @@ describe('TaskRow', () => {
   });
 
   describe('subtask navigation', () => {
-    it('opens subtasks directly from the subtask badge', () => {
+    it('aligns the subtask badge on the row rail and opens subtasks directly', () => {
       const onOpenSubtasks = vi.fn();
-      render(
+      const { container } = render(
         <TaskRow
           task={{ ...baseTask, subtaskDone: 1, subtaskTotal: 2 }}
           onComplete={noop}
@@ -266,7 +293,14 @@ describe('TaskRow', () => {
         />
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Subtasks' }));
+      const row = container.firstElementChild;
+      const badge = screen.getByRole('button', { name: 'Subtasks' });
+      const titleIdentity = screen.getByText('Test task').closest('.flex-1');
+
+      expect(badge.parentElement).toBe(row);
+      expect(titleIdentity).not.toContainElement(badge);
+
+      fireEvent.click(badge);
 
       expect(onOpenSubtasks).toHaveBeenCalledOnce();
     });

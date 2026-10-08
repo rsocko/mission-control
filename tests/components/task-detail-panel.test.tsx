@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { formatTaskDetailUpdatedAt } from '@/lib/utils/task-detail-date';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -311,6 +311,44 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(screen.queryByRole('button', { name: /Jump to subtasks/ })).not.toBeInTheDocument();
   });
 
+  it('uses an info tooltip instead of persistent copy for local-only subtask ordering', async () => {
+    const remoteTask = {
+      ...task,
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-1',
+      sourceId: 'todo:task-1',
+      subtasks: [
+        { id: 'subtask-1', title: 'First', status: 'todo' },
+        { id: 'subtask-2', title: 'Second', status: 'todo' },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task: remoteTask });
+      if (url === '/api/features') {
+        return json({
+          taskDestinations: [{
+            id: 'todo-1',
+            capabilities: { subtasks: true, subtaskOrderWrite: false },
+          }],
+        });
+      }
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+
+    const infoButton = await screen.findByRole('button', {
+      name: 'Subtask order is saved in Mission Control only',
+    });
+    expect(screen.queryByText('Subtask order is saved in Mission Control only.')).not.toBeInTheDocument();
+
+    fireEvent.pointerMove(infoButton, { pointerType: 'mouse' });
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Subtask order is saved in Mission Control only.',
+    );
+  });
+
   it('scrolls only the panel to subtasks and focuses its heading', async () => {
     const taskWithSubtasks = {
       ...task,
@@ -588,7 +626,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
     fireEvent.click(skipButton);
     fireEvent.click(skipButton);
 
-    expect(skipButton).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Skip to current/ })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
 
     await act(async () => {
@@ -837,7 +875,8 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
     expect(screen.queryByRole('textbox', { name: 'Edit notes' })).not.toBeInTheDocument();
     expect(await screen.findByText('notes')).toBeInTheDocument();
-    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalledOnce();
+    expect(onUpdate).toHaveBeenCalledWith({ description: 'Optimistic **notes**' });
 
     await act(async () => {
       resolvePatch({ ok: true, json: async () => ({}) });
@@ -1854,12 +1893,15 @@ describe('TaskDetailPanel redesigned presentations', () => {
         body: JSON.stringify({ status: 'done' }),
       }),
     ));
-    expect(onUpdate).toHaveBeenCalledWith({ status: 'done' });
+    expect(onUpdate).toHaveBeenNthCalledWith(1, { status: 'done', statusReason: null });
+    expect(onUpdate).toHaveBeenNthCalledWith(2);
     expect(screen.getByRole('combobox', { name: 'Task status' })).toHaveTextContent('Done');
   });
 
   it('adds a task to My Day from an unhosted detail panel', async () => {
     const onUpdate = vi.fn();
+    const myDayItemAdded = vi.fn();
+    window.addEventListener('mission-control:my-day-item-added', myDayItemAdded, { once: true });
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url === '/api/tasks/task-1') return json({ task });
@@ -1883,6 +1925,13 @@ describe('TaskDetailPanel redesigned presentations', () => {
     }));
     expect(await screen.findByRole('button', { name: 'On My Day' })).toBeInTheDocument();
     expect(onUpdate).toHaveBeenCalledWith();
+    expect(myDayItemAdded).toHaveBeenCalledWith(expect.objectContaining({
+      detail: expect.objectContaining({
+        taskId: 'task-1',
+        connectorInstanceId: 'local',
+        editPolicy: editableTaskPolicy,
+      }),
+    }));
     expect(toast.success).toHaveBeenCalledWith('Added to My Day');
   });
 
@@ -1935,7 +1984,9 @@ describe('TaskDetailPanel redesigned presentations', () => {
       '/api/tasks/task-1',
       expect.objectContaining({ method: 'PATCH' }),
     ));
-    expect(onUpdate).not.toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenNthCalledWith(1, { status: 'done', statusReason: null });
+    expect(onUpdate).toHaveBeenNthCalledWith(2, { status: 'todo', statusReason: null });
+    expect(onUpdate).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('combobox', { name: 'Task status' })).toHaveTextContent('To Do');
   });
 
@@ -2076,13 +2127,16 @@ describe('TaskDetailPanel redesigned presentations', () => {
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
 
     const image = await screen.findByRole('img', { name: 'Image' });
-    expect(image).toHaveAttribute('src', imageUrl);
+    expect(image).toHaveAttribute(
+      'src',
+      `/api/tasks/task-1/github-attachment?url=${encodeURIComponent(imageUrl)}`,
+    );
     expect(image).toHaveAttribute('width', '572');
     expect(image).toHaveAttribute('height', '738');
   });
 
   it('replaces a failed GitHub image with a link to the source task', async () => {
-    const imageUrl = 'https://github.com/user-attachments/assets/private-image';
+    const imageUrl = 'https://github.com/user-attachments/assets/61668656-37e6-4245-b2a3-92a4a0daac2a';
     const sourceUrl = 'https://github.com/octo-org/mission-control/issues/2149';
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const url = String(input);

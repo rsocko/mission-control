@@ -1,4 +1,5 @@
 export { CompletionTrendChart } from './CompletionTrendChart';
+export { PlanAlignmentChart } from './PlanAlignmentChart';
 export { SourceBreakdownChart } from './SourceBreakdownChart';
 export { TaskAgeChart } from './TaskAgeChart';
 export { RoutineHeatmap } from './RoutineHeatmap';

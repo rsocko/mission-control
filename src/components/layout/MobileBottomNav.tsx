@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Sun, Layers, PlusCircle, Zap, Mic, Square } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
 import { useVoiceCapture } from '@/lib/hooks/useVoiceCapture';
 import { cn } from '@/lib/utils';
@@ -176,7 +176,7 @@ function CaptureFab({ href, isActive }: { href: string; isActive: boolean }) {
 
       {/* Voice dictation sheet */}
       {showVoiceSheet && (
-        <div className="fixed inset-x-0 bottom-[calc(3.5rem+var(--safe-area-inset-bottom)+1px)] z-50 flex justify-center px-4 pb-2">
+        <div className="fixed inset-x-0 bottom-[calc(3rem+var(--safe-area-inset-bottom)+1px)] z-50 flex justify-center px-4 pb-2">
           <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-xl">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-medium text-[var(--text-secondary)]">
@@ -230,7 +230,7 @@ export function MobileBottomNav({
       aria-label="Mobile navigation"
       data-mobile-shell-nav
     >
-      <div className="flex items-center justify-around h-14">
+      <div className="flex h-12 items-center justify-around">
         {tabs.map((tab) => {
           const isActive = pathname.startsWith(tab.href);
           const Icon = tab.icon;

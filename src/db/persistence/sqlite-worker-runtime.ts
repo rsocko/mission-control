@@ -42,6 +42,7 @@ import { createSqliteGitHubHierarchyRepositories } from './sqlite-github-hierarc
 import { createSqliteGitHubProjectRepositories } from './sqlite-github-project-repositories';
 import { createSqliteGitHubRecoveryRepositories } from './sqlite-github-recovery-repositories';
 import { createSqliteWorkTodoRepositories } from './sqlite-work-todo-repositories';
+import { createSqliteRyMessageActionRepository } from './sqlite-rymessage-action-repository';
 import { createSqliteNotificationDeliveryRepository } from './sqlite-notification-delivery-repository';
 import { createSqliteTaskReminderRepository } from './sqlite-task-reminder-repository';
 import { createSqliteTriagePersistenceRepositories } from './sqlite-triage-repositories';
@@ -194,6 +195,7 @@ export function createSqliteWorkerPersistenceRepositories(
     },
     connectorState: {
       workTodo: createSqliteWorkTodoRepositories(sqlite, db),
+      rymessageActions: createSqliteRyMessageActionRepository(sqlite),
     },
     notificationDelivery: createSqliteNotificationDeliveryRepository(sqlite),
     reminders: createSqliteTaskReminderRepository(sqlite),

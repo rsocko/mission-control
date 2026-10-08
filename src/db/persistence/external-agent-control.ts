@@ -1,10 +1,11 @@
 import type {
-  AgentDataClassification,
   AgentDispatchDetail,
   AgentDispatchRecord,
   AgentDispatchResult,
   AgentDispatchScope,
   AgentDispatchStatus,
+  AgentDispatchActionRecord,
+  AgentDispatchActionType,
   AgentPayloadSnapshot,
   AgentResultReference,
   AgentResultStatus,
@@ -28,7 +29,13 @@ export interface DispatchFinalizeInput {
   leaseExpiresAt: string;
   status: Extract<
     AgentDispatchStatus,
-    'queued' | 'in_progress' | 'waiting_for_user' | 'completed' | 'failed'
+    | 'queued'
+    | 'in_progress'
+    | 'waiting_for_user'
+    | 'completed'
+    | 'failed'
+    | 'timed_out'
+    | 'cancelled'
   >;
   providerTaskId?: string;
   providerDetail?: Record<string, unknown>;
@@ -52,16 +59,38 @@ export interface DispatchResultPersistenceInput extends Omit<
   'attempt' | 'resultDigest' | 'resultStatus'
 > {
   digest: string;
-  authorization: { claimTokenHash?: string; agentAuthenticated?: boolean };
+  authorization: {
+    claimTokenHash?: string;
+    agentAuthenticated?: boolean;
+    allowCompletedProviderTaskUpdate?: boolean;
+  };
   leaseExpiresAt: string;
+}
+
+export interface DispatchOutputRefreshInput {
+  id: string;
+  providerDetail: Record<string, unknown>;
+  pullRequestUrl?: string;
+  branchRef?: string;
+  commitSha?: string;
+  now: string;
 }
 
 export interface ExternalAgentControlPersistence {
   registry: {
     list(options?: { includeDeleted?: boolean }): Promise<ExternalAgentRecord[]>;
     get(id: string, includeDeleted?: boolean): Promise<ExternalAgentRecord | null>;
-    create(record: ExternalAgentCreateRecord): Promise<ExternalAgentRecord>;
-    update(id: string, record: ExternalAgentUpdateRecord): Promise<ExternalAgentRecord | null>;
+    getCredential(id: string): Promise<string | null>;
+    create(
+      record: ExternalAgentCreateRecord,
+      credential?: string | null,
+    ): Promise<ExternalAgentRecord>;
+    update(
+      id: string,
+      record: ExternalAgentUpdateRecord,
+      credential?: string | null,
+      expectedScoutOnboardingStatus?: string,
+    ): Promise<ExternalAgentRecord | null>;
     softDelete(id: string, now: string): Promise<boolean>;
   };
   payloads: {
@@ -72,8 +101,10 @@ export interface ExternalAgentControlPersistence {
     list(options?: {
       status?: AgentDispatchStatus;
       agentId?: string;
+      taskIds?: string[];
       limit?: number;
     }): Promise<AgentDispatchRecord[]>;
+    listLatestByTaskIds(taskIds: string[]): Promise<AgentDispatchRecord[]>;
     findPreview(agentId: string, idempotencyKey: string): Promise<{
       id: string;
       previewHash: string;
@@ -93,6 +124,7 @@ export interface ExternalAgentControlPersistence {
         | 'endpoint'
         | 'authType'
         | 'authCredentialRef'
+        | 'providerConfig'
         | 'inboundWebhookId'
         | 'capabilities'
         | 'dataPolicy'
@@ -126,6 +158,7 @@ export interface ExternalAgentControlPersistence {
     finalizeAttempt(input: DispatchFinalizeInput): Promise<'updated' | 'stale' | 'expired'>;
     claimNext(input: {
       agentId: string;
+      dispatchId?: string;
       attemptId: string;
       claimTokenHash: string;
       now: string;
@@ -141,6 +174,7 @@ export interface ExternalAgentControlPersistence {
       status: AgentDispatchStatus;
       expired?: boolean;
     }>;
+    refreshOutput(input: DispatchOutputRefreshInput): Promise<boolean>;
     cancel(id: string, now: string): Promise<boolean>;
     retry(input: {
       id: string;
@@ -150,6 +184,13 @@ export interface ExternalAgentControlPersistence {
       executionLocality: string;
     }): Promise<void>;
     markWaiting(id: string, detail: Record<string, unknown>, now: string): Promise<void>;
+    resolveInteraction(input: {
+      id: string;
+      interactionId: string;
+      outcome: 'answered' | 'approved' | 'rejected';
+      answer?: string;
+      now: string;
+    }): Promise<void>;
     expire(now: string): Promise<number>;
     review(
       id: string,
@@ -157,5 +198,30 @@ export interface ExternalAgentControlPersistence {
       now: string,
     ): Promise<void>;
     cleanup(now: string): Promise<number>;
+  };
+  actions: {
+    enqueue(input: {
+      dispatchId: string;
+      action: AgentDispatchActionType;
+      priority: number;
+      now: string;
+    }): Promise<boolean>;
+    claimNext(input: {
+      owner: string;
+      now: string;
+      leaseExpiresAt: string;
+    }): Promise<AgentDispatchActionRecord | null>;
+    complete(input: {
+      id: string;
+      owner: string;
+      now: string;
+    }): Promise<boolean>;
+    fail(input: {
+      id: string;
+      owner: string;
+      error: string;
+      availableAt: string;
+      now: string;
+    }): Promise<boolean>;
   };
 }

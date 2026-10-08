@@ -177,7 +177,7 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }));
+vi.mock('@/lib/toast', () => ({ toast: { error: toastError, success: vi.fn() } }));
 vi.mock('@/components/ideation/IdeationWorkspaceBar', () => ({
   IdeationWorkspaceBar: () => null,
 }));
@@ -258,6 +258,47 @@ describe('IdeationCanvas AI expansion', () => {
     expect(useIdeationStore.getState().nodes).toHaveLength(1);
     useIdeationStore.getState().redo();
     expect(useIdeationStore.getState().nodes).toHaveLength(4);
+  });
+
+  it('edits a ghost proposal from the outline and accepts the synchronized title', async () => {
+    mockExpansionResponse();
+    render(<IdeationCanvas />);
+    fireEvent.click(screen.getByRole('button', { name: 'AI Expand' }));
+
+    const outlineTitle = await screen.findByRole('textbox', {
+      name: 'Edit suggestion Research users in outline',
+    });
+    fireEvent.change(outlineTitle, { target: { value: 'Interview target users' } });
+
+    expect(screen.getByRole('textbox', {
+      name: 'Edit suggestion Interview target users in mind map',
+    })).toHaveValue('Interview target users');
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Accept suggestion Interview target users in mind map',
+    }));
+
+    expect(useIdeationStore.getState().nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Interview target users' }),
+    ]));
+    expect(screen.queryByLabelText('AI suggestion: Interview target users')).not.toBeInTheDocument();
+  });
+
+  it('keeps blank edited proposals visible and disables acceptance until titled', async () => {
+    mockExpansionResponse();
+    render(<IdeationCanvas />);
+    fireEvent.click(screen.getByRole('button', { name: 'AI Expand' }));
+
+    const outlineTitle = await screen.findByRole('textbox', {
+      name: 'Edit suggestion Research users in outline',
+    });
+    fireEvent.change(outlineTitle, { target: { value: '' } });
+
+    expect(screen.getByRole('button', {
+      name: 'Accept suggestion untitled in outline',
+    })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Accept all (3)' })).toBeDisabled();
+    expect(outlineTitle).toHaveAttribute('maxlength', '120');
+    expect(outlineTitle).toHaveAttribute('aria-invalid', 'true');
   });
 
   it('shows leaf-safe disclosure controls with continuous curved depth guides', () => {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { CheckCircle2, ChevronRight, Eye, EyeOff, Layers, Loader2, Plus } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MobileSheet } from '@/components/ui/MobileSheet';
@@ -62,6 +62,12 @@ function isSyncManaged(project: { metadata?: Record<string, unknown> }): boolean
 
 function getHealthLabel(progress: ProjectProgress): string {
   if (progress.totalTasks === 0) return 'no tasks';
+  if (progress.pulse) {
+    if (progress.pulse.state === 'off_track') return 'off track';
+    if (progress.pulse.state === 'watch') return progress.pulse.freshness.state === 'stale' ? 'watch · stale' : 'watch';
+    if (progress.pulse.state === 'unknown') return 'pulse unknown';
+    return 'on track';
+  }
   const overdue = progress.health === 'behind' || progress.health === 'at_risk';
   if (overdue) return `${progress.totalTasks - progress.completedTasks} remaining`;
   return 'on track';

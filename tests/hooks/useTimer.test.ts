@@ -13,6 +13,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 // ─── Focus Mode ─────────────────────────────────────────────────────────────
@@ -156,76 +157,216 @@ describe('useTimer — deadline mode', () => {
 
 // ─── Persistence ────────────────────────────────────────────────────────────
 
-describe('useTimer — localStorage persistence', () => {
+describe('useTimer — durable persistence', () => {
   const KEY = 'test-timer';
 
-  it('saves state to localStorage on start', () => {
+  it('restores server activity and retires legacy state only after the load succeeds', async () => {
+    localStorage.setItem(KEY, '{"state":"running"}');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      activity: {
+        id: '00000000-0000-4000-8000-000000000001',
+        taskId: 'task-a',
+        mode: 'focus',
+        state: 'running',
+        targetSeconds: 60,
+        elapsedSeconds: 10,
+        activeStartedAt: new Date(Date.now()).toISOString(),
+        version: 2,
+      },
+      serverNow: new Date(Date.now()).toISOString(),
+    }), { status: 200 })));
+
     const { result } = renderHook(() =>
-      useTimer({ mode: 'focus', duration: 60, persistKey: KEY })
+      useTimer({ mode: 'focus', duration: 60, taskId: 'task-a', persistKey: KEY })
     );
-    act(() => result.current.start());
-
-    const stored = JSON.parse(localStorage.getItem(KEY)!);
-    expect(stored).toBeTruthy();
-    expect(stored.state).toBe('running');
-    expect(stored.mode).toBe('focus');
-    expect(stored.endsAt).toBeGreaterThan(0);
-  });
-
-  it('does not write to localStorage on every tick', () => {
-    const { result } = renderHook(() =>
-      useTimer({ mode: 'focus', duration: 60, persistKey: KEY })
-    );
-    act(() => result.current.start());
-
-    const afterStart = localStorage.getItem(KEY);
-    act(() => { vi.advanceTimersByTime(3000); });
-    const afterTicks = localStorage.getItem(KEY);
-
-    // Persisted value should not change during ticking — only on state transitions
-    expect(afterStart).toBe(afterTicks);
-  });
-
-  it('clears localStorage on reset', () => {
-    const { result } = renderHook(() =>
-      useTimer({ mode: 'focus', duration: 60, persistKey: KEY })
-    );
-    act(() => result.current.start());
-    expect(localStorage.getItem(KEY)).toBeTruthy();
-
-    act(() => result.current.reset());
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.state).toBe('running');
+    expect(result.current.remaining).toBe(50);
     expect(localStorage.getItem(KEY)).toBeNull();
   });
 
-  it('persists pause with pausedRemaining', () => {
+  it('keeps legacy state when the durable load fails', async () => {
+    localStorage.setItem(KEY, '{"state":"running"}');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: 'Database unavailable',
+    }), { status: 503 })));
+
+    const { result } = renderHook(() =>
+      useTimer({ mode: 'focus', duration: 60, taskId: 'task-a', persistKey: KEY })
+    );
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBe('Database unavailable');
+    expect(localStorage.getItem(KEY)).not.toBeNull();
+  });
+
+  it('clears a stale durable timer when the server confirms its task is gone', async () => {
+    localStorage.setItem(`${KEY}:task-id`, 'task-a');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: 'Task not found',
+    }), { status: 404 })));
     const { result } = renderHook(() =>
       useTimer({ mode: 'focus', duration: 60, persistKey: KEY })
     );
-    act(() => result.current.start());
-    act(() => { vi.advanceTimersByTime(10_000); });
-    act(() => result.current.pause());
-
-    const stored = JSON.parse(localStorage.getItem(KEY)!);
-    expect(stored.state).toBe('paused');
-    expect(stored.pausedRemaining).toBe(50);
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.state).toBe('idle');
+    expect(localStorage.getItem(`${KEY}:task-id`)).toBeNull();
   });
 
-  it('rejects persisted data with mismatched mode', () => {
-    // Seed localStorage with a deadline timer
-    localStorage.setItem(KEY, JSON.stringify({
-      mode: 'deadline',
-      state: 'running',
-      endsAt: Date.now() + 30_000,
-      total: 60,
-      deadline: new Date(Date.now() + 60_000).toISOString(),
-    }));
-
-    // Mount as focus mode — should NOT restore
+  it('surfaces a competing timer instead of starting locally', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        activity: null,
+        serverNow: new Date(Date.now()).toISOString(),
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: 'Another task already has an active timer',
+      }), { status: 409 }));
+    vi.stubGlobal('fetch', fetchMock);
     const { result } = renderHook(() =>
-      useTimer({ mode: 'focus', duration: 25, persistKey: KEY })
+      useTimer({ mode: 'focus', duration: 60, taskId: 'task-a' })
     );
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => result.current.start());
+    await vi.waitFor(() => expect(result.current.pending).toBe(false));
     expect(result.current.state).toBe('idle');
-    expect(result.current.remaining).toBe(25);
+    expect(result.current.error).toBe('Another task already has an active timer');
+  });
+
+  it('does not race a start against the durable reload', async () => {
+    let resolveLoad!: (response: Response) => void;
+    const fetchMock = vi.fn().mockReturnValue(new Promise<Response>((resolve) => {
+      resolveLoad = resolve;
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() =>
+      useTimer({ mode: 'focus', duration: 60, taskId: 'task-a' })
+    );
+    expect(result.current.loading).toBe(true);
+    act(() => result.current.start());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    resolveLoad(new Response(JSON.stringify({
+      activity: null, serverNow: new Date(Date.now()).toISOString(),
+    }), { status: 200 }));
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  it('restores a durable timer from its server-verified task locator', async () => {
+    localStorage.setItem(`${KEY}:task-id`, 'task-a');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      activity: {
+        id: '00000000-0000-4000-8000-000000000001',
+        taskId: 'task-a',
+        mode: 'focus',
+        state: 'paused',
+        targetSeconds: 60,
+        elapsedSeconds: 12,
+        activeStartedAt: null,
+        version: 1,
+      },
+      serverNow: new Date(Date.now()).toISOString(),
+    }), { status: 200 })));
+    const { result } = renderHook(() =>
+      useTimer({ mode: 'focus', duration: 60, persistKey: KEY })
+    );
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.state).toBe('paused');
+    expect(result.current.remaining).toBe(48);
+  });
+
+  it('rotates start commands after success and retains activity after failed reset', async () => {
+    const running = (id: string) => ({
+      id,
+      taskId: 'task-a',
+      mode: 'focus',
+      state: 'running',
+      targetSeconds: 60,
+      elapsedSeconds: 0,
+      activeStartedAt: new Date(Date.now()).toISOString(),
+      version: 0,
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        activity: null, serverNow: new Date(Date.now()).toISOString(),
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        activity: running('00000000-0000-4000-8000-000000000001'),
+        serverNow: new Date(Date.now()).toISOString(),
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Database unavailable' }), {
+        status: 503,
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() =>
+      useTimer({ mode: 'focus', duration: 60, taskId: 'task-a', persistKey: KEY })
+    );
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => result.current.start());
+    await vi.waitFor(() => expect(result.current.state).toBe('running'));
+    const firstCommand = JSON.parse(fetchMock.mock.calls[1][1].body as string).commandId;
+    act(() => result.current.reset());
+    await vi.waitFor(() => expect(result.current.pending).toBe(false));
+    expect(result.current.state).toBe('running');
+    expect(result.current.error).toBe('Database unavailable');
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      activity: {
+        ...running('00000000-0000-4000-8000-000000000001'),
+        state: 'cancelled',
+        activeStartedAt: null,
+        version: 1,
+      },
+      serverNow: new Date(Date.now()).toISOString(),
+    }), { status: 200 }));
+    act(() => result.current.reset());
+    await vi.waitFor(() => expect(result.current.state).toBe('idle'));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      activity: running('00000000-0000-4000-8000-000000000002'),
+      serverNow: new Date(Date.now()).toISOString(),
+    }), { status: 200 }));
+    act(() => result.current.start());
+    await vi.waitFor(() => expect(result.current.state).toBe('running'));
+    const secondCommand = JSON.parse(fetchMock.mock.calls[4][1].body as string).commandId;
+    expect(secondCommand).not.toBe(firstCommand);
+  });
+
+  it('retries automatic completion with the same command after a lost response', async () => {
+    const onComplete = vi.fn();
+    const started = {
+      id: '00000000-0000-4000-8000-000000000001',
+      taskId: 'task-a',
+      mode: 'focus',
+      state: 'running',
+      targetSeconds: 1,
+      elapsedSeconds: 0,
+      activeStartedAt: new Date(Date.now()).toISOString(),
+      version: 0,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        activity: null, serverNow: new Date(Date.now()).toISOString(),
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        activity: started, serverNow: new Date(Date.now()).toISOString(),
+      }), { status: 200 }))
+      .mockRejectedValueOnce(new TypeError('network lost'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        activity: { ...started, state: 'completed', elapsedSeconds: 1, version: 1 },
+        serverNow: new Date(Date.now()).toISOString(),
+      }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() =>
+      useTimer({ mode: 'focus', duration: 1, taskId: 'task-a', onComplete })
+    );
+    await vi.waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => result.current.start());
+    await vi.waitFor(() => expect(result.current.state).toBe('running'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await vi.waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    const first = JSON.parse(fetchMock.mock.calls[2][1].body as string);
+    const retry = JSON.parse(fetchMock.mock.calls[3][1].body as string);
+    expect(retry.commandId).toBe(first.commandId);
   });
 });
 

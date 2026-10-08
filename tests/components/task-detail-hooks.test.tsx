@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useTaskDetailData } from '@/components/task-detail/useTaskDetailData';
 import {
   useTaskDetailMutations,
@@ -13,8 +13,10 @@ import type { TaskDetail, TaskTag } from '@/components/task-detail/task-detail-t
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { notifyTaskChanged } from '@/lib/task-change-events';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
+import { canonicalizeLegacyRecurrence } from '@/lib/recurrence/canonical';
+import { TASK_COMPLETED_EVENT } from '@/lib/completion-sounds';
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -235,6 +237,85 @@ describe('useTaskDetailData', () => {
 });
 
 describe('useTaskDetailMutations', () => {
+  it('persists recurrence exceptions and catch-up policy through the recurrence field policy', async () => {
+    const rule = canonicalizeLegacyRecurrence({
+      recurrence: 'weekly',
+      mode: 'schedule',
+      startDate: '2026-08-01',
+      timezone: 'UTC',
+      seriesIdentity: { kind: 'mission-control', stableId: 'task-1' },
+    });
+    const fetchMock = stubFetch(() => jsonResponse({}));
+    const onUpdate = vi.fn();
+    const { result } = renderMutations({
+      task: {
+        ...baseTask,
+        recurrence: 'weekly',
+        recurrenceControl: {
+          rule,
+          owner: 'mission-control',
+          support: 'supported',
+          reasons: [],
+          timezone: 'UTC',
+          localTime: null,
+        },
+      },
+      onUpdate,
+    });
+
+    await act(async () => {
+      await result.current.mutations.handleRecurrenceOptionsChange({
+        skipDates: ['2026-08-08'],
+        catchUp: 'none',
+      });
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      recurrenceSkipDates: ['2026-08-08'],
+      recurrenceCatchUp: 'none',
+    });
+    expect(result.current.task?.recurrenceControl?.rule?.semantics).toMatchObject({
+      exceptions: { skipDates: ['2026-08-08'] },
+      materialization: { catchUp: 'none' },
+    });
+    expect(onUpdate).toHaveBeenCalledWith({
+      recurrenceSkipDates: ['2026-08-08'],
+      recurrenceCatchUp: 'none',
+    });
+  });
+
+  it('ignores concurrent recurrence option saves that would use stale options', async () => {
+    let resolveRequest: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderMutations();
+
+    let firstSave: Promise<void>;
+    act(() => {
+      firstSave = result.current.mutations.handleRecurrenceOptionsChange({
+        skipDates: ['2026-08-08'],
+        catchUp: 'latest',
+      });
+    });
+    expect(result.current.mutations.recurrenceOptionsSaving).toBe(true);
+
+    await act(async () => {
+      await result.current.mutations.handleRecurrenceOptionsChange({
+        skipDates: ['2026-08-15'],
+        catchUp: 'latest',
+      });
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveRequest?.(jsonResponse({}));
+    await act(async () => {
+      await firstSave!;
+    });
+    expect(result.current.mutations.recurrenceOptionsSaving).toBe(false);
+  });
+
   it('saves the canonical relative reminder returned by the server', async () => {
     const reminder = {
       reminderAt: '2026-08-02T13:00:00.000Z',
@@ -299,6 +380,67 @@ describe('useTaskDetailMutations', () => {
     expect(result.current.task?.priority).toBe('low');
     expect(onUpdate).toHaveBeenCalledWith({ priority: 'low' });
     expect(onNavigationCountsRefresh).toHaveBeenCalledOnce();
+  });
+
+  it('updates priority before the request resolves and rolls it back on failure', async () => {
+    let resolveRequest!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    })));
+    const onUpdate = vi.fn();
+    const { result } = renderMutations({ onUpdate });
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.mutations.handlePriorityChange('low');
+    });
+
+    expect(result.current.task?.priority).toBe('low');
+    expect(onUpdate).toHaveBeenCalledWith({ priority: 'low' });
+
+    await act(async () => {
+      resolveRequest(jsonResponse({}, false));
+      await request;
+    });
+
+    expect(result.current.task?.priority).toBe('high');
+    expect(onUpdate).toHaveBeenLastCalledWith({ priority: 'high' });
+    expect(toast.error).toHaveBeenCalledWith('Failed to save priority');
+  });
+
+  it('does not reconcile an older field mutation over a newer optimistic value', async () => {
+    const requests: Array<(response: Response) => void> = [];
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+      requests.push(resolve);
+    })));
+    const onUpdate = vi.fn();
+    const { result } = renderMutations({ onUpdate });
+
+    let olderRequest!: Promise<void>;
+    let newerRequest!: Promise<void>;
+    act(() => {
+      olderRequest = result.current.mutations.handlePriorityChange('low');
+      newerRequest = result.current.mutations.handlePriorityChange('none');
+    });
+
+    expect(result.current.task?.priority).toBe('none');
+    expect(onUpdate).toHaveBeenNthCalledWith(1, { priority: 'low' });
+    expect(onUpdate).toHaveBeenNthCalledWith(2, { priority: 'none' });
+
+    await act(async () => {
+      requests[0](jsonResponse({}));
+      await olderRequest;
+    });
+
+    expect(result.current.task?.priority).toBe('none');
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      requests[1](jsonResponse({}));
+      await newerRequest;
+    });
+
+    expect(onUpdate).toHaveBeenLastCalledWith();
   });
 
   it('refuses blocked fields with the policy reason', async () => {
@@ -441,6 +583,21 @@ describe('useTaskDetailMutations', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('announces a successful standalone completion', async () => {
+    stubFetch(() => jsonResponse({}));
+    const completed = vi.fn();
+    window.addEventListener(TASK_COMPLETED_EVENT, completed);
+    const { result } = renderMutations();
+
+    await act(async () => {
+      await result.current.mutations.handleStatusChange('done');
+    });
+
+    expect(result.current.task?.status).toBe('done');
+    expect(completed).toHaveBeenCalledOnce();
+    window.removeEventListener(TASK_COMPLETED_EVENT, completed);
+  });
+
   it('adds the task to My Day and warns when write-back fails', async () => {
     const fetchMock = stubFetch(() => jsonResponse({ writeBack: { attempted: true, success: false } }));
     const { result } = renderMutations();
@@ -484,7 +641,7 @@ describe('useTaskDetailMutations', () => {
       await Promise.resolve();
     });
 
-    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onClose).toHaveBeenCalledWith('task-removed'));
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', { method: 'DELETE' });
     expect(toast.success).toHaveBeenCalledWith('Task deleted');
     expect(onUpdate).toHaveBeenCalled();

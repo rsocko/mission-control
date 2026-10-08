@@ -2,6 +2,12 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SearchResult } from '@/lib/search/fts';
 import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
+import {
+  DESKTOP_SEARCH_DEBOUNCE_MS,
+  KEYWORD_RESULTS_VISIBILITY_BUDGET_MS,
+  MOBILE_SEARCH_DEBOUNCE_MS,
+  useDebouncedSearchQuery,
+} from '@/lib/hooks/useDebouncedSearchQuery';
 
 function searchResult(id: string, source: SearchResult['source']): SearchResult {
   return {
@@ -25,6 +31,7 @@ function response(payload: object) {
 
 describe('useProgressiveSearch', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -37,7 +44,14 @@ describe('useProgressiveSearch', () => {
       const url = String(input);
       if (url.includes('__status_check__')) return pendingStatus;
       if (url.includes('mode=keyword')) {
-        return response({ results: [searchResult('exact', 'fts')], durationMs: 12 });
+        return response({
+          results: [searchResult('exact', 'fts')],
+          durationMs: 12,
+          facets: {
+            sources: [{ value: 'Lower-ranked project', count: 2 }],
+            statuses: [{ value: 'todo', count: 12 }],
+          },
+        });
       }
       if (url.includes('mode=semantic')) {
         return response({ results: [searchResult('related', 'semantic')], durationMs: 80 });
@@ -51,6 +65,9 @@ describe('useProgressiveSearch', () => {
     }));
 
     await waitFor(() => expect(result.current.results.map((item) => item.id)).toEqual(['exact']));
+    expect(result.current.facets.sources).toEqual([
+      { value: 'Lower-ranked project', count: 2 },
+    ]);
     expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('mode=semantic'))).toBe(false);
 
     await act(async () => {
@@ -122,4 +139,97 @@ describe('useProgressiveSearch', () => {
     });
     expect(result.current.results[0]?.id).toBe('beta');
   });
+
+  it('sends server-side scope, source, status, and date filters', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('__status_check__')) {
+        return response({ semanticEnabled: false, semanticAvailable: false, results: [] });
+      }
+      return response({ results: [], durationMs: 5 });
+    });
+
+    renderHook(() => useProgressiveSearch({
+      query: 'alpha',
+      enabled: true,
+      type: 'notifications',
+      notificationKind: 'notes',
+      source: 'Project Alpha',
+      status: 'open',
+      date: '7d',
+    }));
+
+    await waitFor(() => {
+      const keywordUrl = fetchSpy.mock.calls
+        .map(([url]) => String(url))
+        .find((url) => url.includes('mode=keyword'));
+      expect(keywordUrl).toContain('type=notifications');
+      expect(keywordUrl).toContain('notificationKind=notes');
+      expect(keywordUrl).toContain('source=Project+Alpha');
+      expect(keywordUrl).toContain('status=open');
+      expect(keywordUrl).toContain('date=7d');
+    });
+  });
+
+  it.each([
+    ['desktop', DESKTOP_SEARCH_DEBOUNCE_MS],
+    ['mobile', MOBILE_SEARCH_DEBOUNCE_MS],
+  ])(
+    'publishes %s keyword results within the post-debounce visibility budget',
+    async (_surface, debounceMs) => {
+      vi.useFakeTimers();
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+        const url = String(input);
+        if (url.includes('__status_check__')) {
+          return new Promise<Response>(() => undefined);
+        }
+        if (url.includes('mode=keyword')) {
+          return new Promise<Response>((resolve) => {
+            setTimeout(() => {
+              void response({
+                results: [searchResult('visible', 'fts')],
+                durationMs: KEYWORD_RESULTS_VISIBILITY_BUDGET_MS,
+              }).then(resolve);
+            }, KEYWORD_RESULTS_VISIBILITY_BUDGET_MS);
+          });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      });
+
+      const { result, rerender } = renderHook(
+        ({ query }) => {
+          const debouncedQuery = useDebouncedSearchQuery(query, {
+            enabled: true,
+            debounceMs,
+          });
+          return useProgressiveSearch({ query: debouncedQuery, enabled: true });
+        },
+        { initialProps: { query: '' } },
+      );
+
+      rerender({ query: 'alpha' });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(debounceMs);
+      });
+      expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('mode=keyword'))).toBe(true);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(KEYWORD_RESULTS_VISIBILITY_BUDGET_MS - 1);
+      });
+      expect(result.current.results).toEqual([]);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(
+        result.current.results.map((item) => item.id),
+        `Visible-results latency gate failed: ${JSON.stringify({
+          surface: _surface,
+          configuredDebounceMs: debounceMs,
+          breachedBudget: `keyword results visible <= ${KEYWORD_RESULTS_VISIBILITY_BUDGET_MS} ms after debounce`,
+          deterministicElapsedMs: debounceMs + KEYWORD_RESULTS_VISIBILITY_BUDGET_MS,
+        })}`,
+      ).toEqual(['visible']);
+    },
+  );
 });

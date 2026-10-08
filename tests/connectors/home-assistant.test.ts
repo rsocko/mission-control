@@ -15,6 +15,9 @@ import {
   buildRepairNotifications,
   buildUpdateNotifications,
 } from '@/lib/connectors/home-assistant/source-transformers';
+import {
+  evaluateCondition,
+} from '@/lib/connectors/home-assistant/entity-transformer';
 import { homeAssistantNotificationProvider } from '@/lib/notifications/providers/home-assistant';
 
 const nativeWebSocket = globalThis.WebSocket;
@@ -26,7 +29,7 @@ afterEach(() => {
 });
 
 describe('Home Assistant settings', () => {
-  it('migrates legacy settings into the v2 source and delivery model', () => {
+  it('migrates legacy settings into the current source and delivery model', () => {
     const settings = normalizeHomeAssistantSettings({
       baseUrl: 'https://ha.example.test///',
       entityPatterns: ['binary_sensor.*'],
@@ -44,6 +47,51 @@ describe('Home Assistant settings', () => {
       dailySummaryTime: '07:30',
     });
     expect(settings.actions.enabled).toBe(true);
+  });
+
+  it('restricts the legacy default door rule to opening device classes', () => {
+    const settings = normalizeHomeAssistantSettings({
+      settingsVersion: 2,
+      alertRules: [{
+        id: 'door-open',
+        entityPattern: 'binary_sensor.*_door*',
+        condition: 'equals',
+        value: 'on',
+        level: 'action_needed',
+        category: 'security',
+        title: '{{friendly_name}} left open',
+        cooldownMinutes: 30,
+      }],
+    });
+
+    expect(settings.settingsVersion).toBe(3);
+    expect(settings.alertRules[0].deviceClasses).toEqual([
+      'door',
+      'garage_door',
+      'opening',
+      'window',
+    ]);
+  });
+
+  it('does not classify an active doorbell diagnostic as an open door', () => {
+    const doorRule = DEFAULT_HOME_ASSISTANT_SETTINGS.alertRules[0];
+
+    expect(evaluateCondition({
+      entity_id: 'binary_sensor.cape_front_doorbell_debug_device',
+      state: 'on',
+      attributes: {
+        friendly_name: 'Cape Front Doorbell Debug (device)',
+      },
+    }, doorRule)).toBe(false);
+
+    expect(evaluateCondition({
+      entity_id: 'binary_sensor.cape_front_door_contact',
+      state: 'on',
+      attributes: {
+        friendly_name: 'Cape Front Door',
+        device_class: 'door',
+      },
+    }, doorRule)).toBe(true);
   });
 
   it('rejects unsafe or malformed Home Assistant URLs', () => {
@@ -218,6 +266,33 @@ describe('Home Assistant source transformers', () => {
       });
   });
 
+  it('does not show installation progress when Home Assistant reports no percentage', () => {
+    const [notification] = buildUpdateNotifications({
+      ...common,
+      states: [{
+        entity_id: 'update.influxdb_update',
+        state: 'on',
+        attributes: {
+          friendly_name: 'InfluxDB',
+          installed_version: '5.0.2',
+          latest_version: '6.0.0',
+          update_percentage: null,
+          supported_features: 1,
+        },
+      }],
+      criticalEntityPatterns: [],
+      updatePush: 'daily_summary',
+      immediateCriticalUpdates: true,
+    });
+
+    expect(notification.metadata).toMatchObject({
+      inProgress: false,
+      updatePercentage: null,
+    });
+    expect(homeAssistantNotificationProvider.signatures[0].present(notification)
+      .presentation?.richContent?.progress).toBeUndefined();
+  });
+
   it('identifies Supervisor add-on updates as app updates', () => {
     const notifications = buildUpdateNotifications({
       ...common,
@@ -286,7 +361,90 @@ describe('Home Assistant source transformers', () => {
     expect(repairs[0].metadata).toMatchObject({
       domain: 'mqtt',
       issueId: 'broker_unavailable',
+      requiresRestart: false,
       pushDelivery: 'immediate',
+    });
+  });
+
+  it('marks Home Assistant host restart repairs as restartable', () => {
+    const repairs = buildRepairNotifications({
+      ...common,
+      issues: [
+        {
+          domain: 'homeassistant',
+          issue_id: 'restart_required',
+          translation_key: 'restart_required',
+          severity: 'warning',
+        },
+        {
+          domain: 'hacs',
+          issue_id: 'restart_required_ntk_hass_v1.2.3',
+          translation_key: 'restart_required',
+          severity: 'warning',
+        },
+        {
+          domain: 'marketplace',
+          issue_domain: 'ntk_hass',
+          issue_id: 'restart_required_123_v1.2.3',
+          translation_key: 'restart_required',
+          translation_placeholders: { name: 'NTK-HASS' },
+          severity: 'warning',
+        },
+        {
+          domain: 'marketplace',
+          issue_domain: 'ntk_hass',
+          issue_id: 'restart_required_123_uninstall',
+          translation_key: 'restart_required_uninstall',
+          translation_placeholders: { name: 'NTK-HASS' },
+          severity: 'warning',
+        },
+        {
+          domain: 'shelly',
+          issue_id: 'restart_required',
+          translation_key: 'restart_required',
+          severity: 'warning',
+        },
+      ],
+      immediateActionNeeded: true,
+    });
+
+    expect(repairs.map(item => item.metadata.requiresRestart)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
+    expect(repairs[2]).toMatchObject({
+      title: 'Restart to finish installing or updating NTK-HASS',
+      metadata: {
+        affectedDomain: 'ntk_hass',
+        affectedName: 'NTK-HASS',
+      },
+    });
+    expect(repairs[3].title).toBe('Restart to finish uninstalling NTK-HASS');
+    for (const repair of repairs.slice(1, 4)) {
+      const presented = homeAssistantNotificationProvider.signatures[0].present(repair);
+      expect(presented.actions?.map(action => action.actionType))
+        .toContain('restart_home_assistant');
+    }
+  });
+
+  it('uses the repair translation key instead of an opaque issue id as its fallback title', () => {
+    const repairs = buildRepairNotifications({
+      ...common,
+      issues: [{
+        domain: 'phyn',
+        issue_id: '01J8X62M1G1VRHMY2NWRB9B4T374205e8c5dcc48cf9931f7bbe20c72e18090b1f471c6011',
+        translation_key: 'energy_coverage',
+        severity: 'warning',
+      }],
+      immediateActionNeeded: true,
+    });
+
+    expect(repairs[0]).toMatchObject({
+      title: 'Phyn: Energy coverage',
+      body: undefined,
     });
   });
 
@@ -336,6 +494,7 @@ describe('Home Assistant notification presentation', () => {
         attributes: { icon: 'mdi:motion-sensor' },
       },
     });
+
     const lock = present({
       ...notification,
       metadata: {
@@ -353,6 +512,27 @@ describe('Home Assistant notification presentation', () => {
     expect(lock.presentation).toMatchObject({
       subjectIcon: 'mdi:lock-open-alert',
     });
+  });
+
+  it('shows the source entity, raw state, device class, and rule for entity alerts', () => {
+    const presented = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'entity_alerts',
+        entityId: 'binary_sensor.front_door_contact',
+        state: 'on',
+        ruleId: 'door-open',
+        attributes: { device_class: 'door' },
+      },
+    });
+
+    expect(presented.presentation?.metadataChips).toEqual([
+      { label: 'Entity', value: 'binary_sensor.front_door_contact' },
+      { label: 'HA state', value: 'on' },
+      { label: 'Device class', value: 'door' },
+      { label: 'Rule', value: 'door-open' },
+    ]);
   });
 
   it('uses Home Assistant generic update artwork when an update has no brand image', () => {
@@ -474,6 +654,73 @@ describe('Home Assistant notification presentation', () => {
     });
   });
 
+  it('makes restart primary only for restart-required repairs', () => {
+    const restartRepair = present({
+      ...notification,
+      title: 'Restart required',
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'repairs',
+        actionsEnabled: true,
+        requiresRestart: true,
+        baseUrl: 'https://ha.example.test',
+      },
+    });
+    const otherRepair = present({
+      ...notification,
+      title: 'MQTT broker unavailable',
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'repairs',
+        actionsEnabled: true,
+        requiresRestart: false,
+        baseUrl: 'https://ha.example.test',
+      },
+    });
+
+    expect(restartRepair.actions?.map(action => action.actionType)).toEqual([
+      'restart_home_assistant',
+      'open_url',
+      'ignore_repair',
+      'create_task',
+    ]);
+    expect(restartRepair.actions?.find(action => action.isPrimary)?.actionType)
+      .toBe('restart_home_assistant');
+    expect(otherRepair.actions?.map(action => action.actionType)).toEqual([
+      'open_url',
+      'ignore_repair',
+      'create_task',
+    ]);
+  });
+
+  it('shows affected integration and repair details supplied by Home Assistant', () => {
+    const repair = present({
+      ...notification,
+      title: 'Restart to finish installing or updating NTK-HASS',
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'repairs',
+        domain: 'marketplace',
+        affectedDomain: 'ntk_hass',
+        breaksInHomeAssistantVersion: '2026.11.0',
+        learnMoreUrl: 'https://www.home-assistant.io/more-info',
+        actionsEnabled: true,
+        requiresRestart: true,
+        baseUrl: 'https://ha.example.test',
+      },
+    });
+
+    expect(repair.presentation?.metadataChips).toEqual([
+      { label: 'Affected integration', value: 'ntk_hass' },
+      { label: 'Requested by', value: 'Marketplace' },
+      { label: 'Breaks in Home Assistant', value: '2026.11.0' },
+    ]);
+    expect(repair.presentation?.richContent?.links).toEqual([{
+      label: 'Learn more',
+      url: 'https://www.home-assistant.io/more-info',
+    }]);
+  });
+
   it('upgrades a persisted root action URL for an update notification', () => {
     const result = present({
       ...notification,
@@ -585,6 +832,77 @@ describe('Home Assistant WebSocket client', () => {
     expect(result.repairs?.[0]).toMatchObject({ domain: 'mqtt', issue_id: 'offline' });
   });
 
+  it('resolves repair titles and descriptions from Home Assistant translations', async () => {
+    class FakeWebSocket {
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+
+      constructor() {
+        queueMicrotask(() => this.emit({ type: 'auth_required' }));
+      }
+
+      send(data: string) {
+        const message = JSON.parse(data) as Record<string, unknown>;
+        if (message.type === 'auth') {
+          queueMicrotask(() => this.emit({ type: 'auth_ok' }));
+        } else if (message.type === 'repairs/list_issues') {
+          queueMicrotask(() => this.emit({
+            id: message.id,
+            type: 'result',
+            success: true,
+            result: {
+              issues: [{
+                domain: 'phyn',
+                issue_id: 'opaque-id',
+                translation_key: 'energy_coverage',
+                translation_placeholders: { config_entry_name: 'Natick' },
+              }],
+            },
+          }));
+        } else if (message.type === 'frontend/get_translations') {
+          expect(message).toMatchObject({
+            language: 'en',
+            category: 'issues',
+            integration: ['phyn'],
+          });
+          queueMicrotask(() => this.emit({
+            id: message.id,
+            type: 'result',
+            success: true,
+            result: {
+              resources: {
+                'component.phyn.issues.energy_coverage.title':
+                  'Phyn usage missing from Energy: {config_entry_name}',
+                'component.phyn.issues.energy_coverage.description':
+                  'Select the missing water statistics for {config_entry_name}.',
+              },
+            },
+          }));
+        }
+      }
+
+      close() {}
+
+      private emit(message: Record<string, unknown>) {
+        this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent);
+      }
+    }
+
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const result = await createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    }).fetchWebSocketSources(['repairs']);
+
+    expect(result.errors).toEqual({});
+    expect(result.repairs?.[0]).toMatchObject({
+      title: 'Phyn usage missing from Energy: Natick',
+      description: 'Select the missing water statistics for Natick.',
+    });
+  });
+
   it('fetches Markdown release notes for a supported update entity', async () => {
     const sent: Record<string, unknown>[] = [];
     class FakeWebSocket {
@@ -674,6 +992,60 @@ describe('Home Assistant REST client', () => {
     })).rejects.toThrow(
       'Home Assistant request failed: HTTP 400: Entity update.router does not support installation',
     );
+  });
+
+  it('accepts an update install timeout after Home Assistant starts the service call', async () => {
+    const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    globalThis.fetch = vi.fn(async () => {
+      throw timeout;
+    });
+    const client = createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    });
+
+    await expect(client.callService(
+      'update',
+      'install',
+      { entity_id: 'update.router' },
+      { acceptOnTimeout: true },
+    )).resolves.toBeUndefined();
+    await expect(client.callService(
+      'update',
+      'skip',
+      { entity_id: 'update.router' },
+    )).rejects.toBe(timeout);
+  });
+
+  it('waits for Home Assistant to become available after a restart', async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('Unavailable', { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ message: 'API running.' }));
+    const client = createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    });
+
+    await expect(client.waitUntilAvailable({
+      initialDelayMs: 0,
+      pollIntervalMs: 1,
+      timeoutMs: 100,
+    })).resolves.toBeUndefined();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails explicitly when Home Assistant does not recover in time', async () => {
+    globalThis.fetch = vi.fn(async () => new Response('Unavailable', { status: 503 }));
+    const client = createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    });
+
+    await expect(client.waitUntilAvailable({
+      initialDelayMs: 0,
+      pollIntervalMs: 1,
+      timeoutMs: 5,
+    })).rejects.toThrow('Home Assistant did not come back online within 1 seconds');
   });
 });
 
@@ -906,6 +1278,11 @@ describe('HomeAssistantConnector', () => {
 
   it('uses only stored notification metadata for an update action target', async () => {
     const calls: Array<{ domain: string; service: string; data: Record<string, unknown> }> = [];
+    const callService = vi.fn(
+      async (domain: string, service: string, data: Record<string, unknown>) => {
+        calls.push({ domain, service, data });
+      },
+    );
     const connector = new HomeAssistantConnector();
     await connector.initialize(config);
     Object.assign(connector, {
@@ -918,9 +1295,7 @@ describe('HomeAssistantConnector', () => {
             supported_features: 9,
           },
         }],
-        callService: async (domain: string, service: string, data: Record<string, unknown>) => {
-          calls.push({ domain, service, data });
-        },
+        callService,
       },
     });
 
@@ -934,6 +1309,12 @@ describe('HomeAssistantConnector', () => {
       service: 'install',
       data: { entity_id: 'update.router', backup: true },
     }]);
+    expect(callService).toHaveBeenCalledWith(
+      'update',
+      'install',
+      { entity_id: 'update.router', backup: true },
+      { acceptOnTimeout: true, timeoutMs: 5_000 },
+    );
   });
 
   it('skips an available update through the update service', async () => {
@@ -1022,6 +1403,73 @@ describe('HomeAssistantConnector', () => {
     );
 
     expect(calls).toEqual([{ domain: 'mqtt', issueId: 'broker_unavailable' }]);
+  });
+
+  it('restarts Home Assistant for an active restart-required repair', async () => {
+    const calls: unknown[][] = [];
+    const waitUntilAvailable = vi.fn(async () => undefined);
+    const connector = new HomeAssistantConnector();
+    await connector.initialize(config);
+    Object.assign(connector, {
+      client: {
+        fetchWebSocketSources: async () => ({
+          repairs: [{ domain: 'homeassistant', issue_id: 'restart_required', ignored: false }],
+          errors: {},
+        }),
+        callService: async (...args: unknown[]) => {
+          calls.push(args);
+        },
+        waitUntilAvailable,
+      },
+    });
+
+    await connector.executeNotificationAction(
+      'restart_home_assistant',
+      {
+        domain: 'homeassistant',
+        issueId: 'restart_required',
+        requiresRestart: true,
+      },
+      {},
+    );
+
+    expect(calls).toEqual([[
+      'homeassistant',
+      'restart',
+      {},
+      { acceptOnTimeout: true, timeoutMs: 5_000 },
+    ]]);
+    expect(waitUntilAvailable).toHaveBeenCalledOnce();
+  });
+
+  it('explains when restart requires an administrator connection', async () => {
+    const connector = new HomeAssistantConnector();
+    await connector.initialize(config);
+    Object.assign(connector, {
+      client: {
+        fetchWebSocketSources: async () => ({
+          repairs: [{ domain: 'homeassistant', issue_id: 'restart_required', ignored: false }],
+          errors: {},
+        }),
+        callService: async () => {
+          throw new Error('Home Assistant request failed: HTTP 403');
+        },
+        waitUntilAvailable: async () => undefined,
+      },
+    });
+
+    await expect(connector.executeNotificationAction(
+      'restart_home_assistant',
+      {
+        domain: 'homeassistant',
+        issueId: 'restart_required',
+        requiresRestart: true,
+      },
+      {},
+    )).rejects.toMatchObject({
+      status: 403,
+      message: expect.stringContaining('administrator-authorized'),
+    });
   });
 
   it('rejects a stale update version before calling Home Assistant', async () => {

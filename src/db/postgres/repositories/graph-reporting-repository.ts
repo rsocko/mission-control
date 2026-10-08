@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   inArray,
+  isNull,
   notInArray,
   or,
   sql,
@@ -77,6 +78,7 @@ function byteOrder(column: SQLWrapper) {
 
 function visibleTaskCondition() {
   return and(
+    isNull(tasks.deletedAt),
     sql`${tasks.connectorInstanceId} NOT IN (
       SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
       WHERE ${connectorConfigs.deletedAt} IS NOT NULL
@@ -341,6 +343,7 @@ export function createPostgresGraphReportingRepository(
               eq(neighbor.id, taskDependencies.taskId),
             ),
           )).where(and(
+            sql`${neighbor.deletedAt} IS NULL`,
             sql`${neighbor.connectorInstanceId} NOT IN (
               SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
               WHERE ${connectorConfigs.deletedAt} IS NOT NULL
@@ -410,7 +413,10 @@ export function createPostgresGraphReportingRepository(
             connectorType: tasks.connectorType,
             sourceId: tasks.sourceId,
             metadata: tasks.metadata,
-          }).from(tasks).where(inArray(tasks.id, ids))
+          }).from(tasks).where(and(
+            inArray(tasks.id, ids),
+            visibleTaskCondition(),
+          ))
             .orderBy(asc(byteOrder(tasks.id))),
           db.select({
             taskId: taskProjects.taskId,
@@ -462,14 +468,22 @@ export function createPostgresGraphReportingRepository(
           status: tasks.status,
           microStatus: tasks.microStatus,
         }).from(taskProjects).innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
-          .where(eq(taskProjects.projectId, projectId))
+          .where(and(
+            eq(taskProjects.projectId, projectId),
+            isNull(tasks.deletedAt),
+          ))
           .orderBy(asc(byteOrder(tasks.id)));
         const phaseIds = phases.map(({ id }) => id);
         const phaseItems = phaseIds.length
           ? await db.select({
               phaseId: projectPhaseItems.phaseId,
               taskId: projectPhaseItems.taskId,
-            }).from(projectPhaseItems).where(inArray(projectPhaseItems.phaseId, phaseIds))
+            }).from(projectPhaseItems)
+              .innerJoin(tasks, eq(projectPhaseItems.taskId, tasks.id))
+              .where(and(
+                inArray(projectPhaseItems.phaseId, phaseIds),
+                isNull(tasks.deletedAt),
+              ))
               .orderBy(
                 asc(byteOrder(projectPhaseItems.phaseId)),
                 asc(projectPhaseItems.sortOrder),
@@ -618,12 +632,17 @@ export function createPostgresGraphReportingRepository(
         const projects = await db.select().from(hubProjects)
           .where(eq(hubProjects.hidden, false))
           .orderBy(asc(byteOrder(hubProjects.name)), asc(byteOrder(hubProjects.id)));
-        if (!projects.length) return { projects: [], memberships: [], tasks: [], tags: [] };
+        if (!projects.length) return { projects: [], memberships: [], tasks: [], phases: [], phaseItems: [], tags: [] };
         const projectIds = projects.map(({ id }) => id);
         const memberships = await db.select({
           projectId: taskProjects.projectId,
           taskId: taskProjects.taskId,
-        }).from(taskProjects).where(inArray(taskProjects.projectId, projectIds))
+        }).from(taskProjects)
+          .innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
+          .where(and(
+            inArray(taskProjects.projectId, projectIds),
+            isNull(tasks.deletedAt),
+          ))
           .orderBy(
             asc(byteOrder(taskProjects.projectId)),
             asc(byteOrder(taskProjects.taskId)),
@@ -640,6 +659,34 @@ export function createPostgresGraphReportingRepository(
               completedAt: tasks.completedAt,
             }).from(tasks).where(inArray(tasks.id, taskIds))
               .orderBy(asc(byteOrder(tasks.id)))
+          : [];
+        const phaseRows = await db.select({
+          id: projectPhases.id,
+          projectId: projectPhases.projectId,
+          name: projectPhases.name,
+          status: projectPhases.status,
+          color: projectPhases.color,
+          sortOrder: projectPhases.sortOrder,
+        }).from(projectPhases)
+          .where(inArray(projectPhases.projectId, projectIds))
+          .orderBy(asc(byteOrder(projectPhases.projectId)), asc(projectPhases.sortOrder), asc(byteOrder(projectPhases.id)));
+        const phaseIds = phaseRows.map(({ id }) => id);
+        const phaseItemRows = phaseIds.length
+          ? await db.select({
+              phaseId: projectPhaseItems.phaseId,
+              taskId: projectPhaseItems.taskId,
+            }).from(projectPhaseItems)
+              .innerJoin(tasks, eq(projectPhaseItems.taskId, tasks.id))
+              .where(and(
+                inArray(projectPhaseItems.phaseId, phaseIds),
+                eq(projectPhaseItems.isProposed, false),
+                isNull(tasks.deletedAt),
+              ))
+              .orderBy(
+                asc(byteOrder(projectPhaseItems.phaseId)),
+                asc(projectPhaseItems.sortOrder),
+                asc(byteOrder(projectPhaseItems.id)),
+              )
           : [];
         const tagRows = await db.select({
           projectId: projectTags.projectId,
@@ -668,6 +715,8 @@ export function createPostgresGraphReportingRepository(
           })),
           memberships,
           tasks: taskRows,
+          phases: phaseRows.map(phase => ({ ...phase, projectId: phase.projectId! })),
+          phaseItems: phaseItemRows,
           tags: tagRows,
         };
       },
@@ -677,7 +726,10 @@ export function createPostgresGraphReportingRepository(
           updatedAt: tasks.updatedAt,
           parentId: tasks.parentId,
         }).from(taskProjects).innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
-          .where(eq(taskProjects.projectId, projectId))
+          .where(and(
+            eq(taskProjects.projectId, projectId),
+            isNull(tasks.deletedAt),
+          ))
           .orderBy(asc(byteOrder(tasks.id)));
       },
     },
@@ -689,7 +741,9 @@ export function createPostgresGraphReportingRepository(
           startedAt: hubProjects.startedAt,
           targetDate: hubProjects.targetDate,
         }).from(hubProjects).where(eq(hubProjects.id, input.projectId)).limit(1);
-        if (!project) return { scope: null, candidateEvents: [], tasks: [] };
+        if (!project) {
+          return { scope: null, candidateEvents: [], currentScopeTaskIds: [], tasks: [] };
+        }
         let scope: 'project' | 'phase' = 'project';
         let scopeId = project.id;
         let scopeName = project.name;
@@ -705,7 +759,9 @@ export function createPostgresGraphReportingRepository(
             eq(projectPhases.id, input.phaseId),
             eq(projectPhases.projectId, input.projectId),
           )).limit(1);
-          if (!phase) return { scope: null, candidateEvents: [], tasks: [] };
+          if (!phase) {
+            return { scope: null, candidateEvents: [], currentScopeTaskIds: [], tasks: [] };
+          }
           scope = 'phase';
           scopeId = phase.id;
           scopeName = phase.name;
@@ -727,11 +783,21 @@ export function createPostgresGraphReportingRepository(
         const scopedCandidates = candidateRows.filter((row) => (
           row.eventType !== 'baseline' || baselineHasScope(row.newValue, scope, scopeId)
         ));
-        const taskIds = [...new Set(scopedCandidates.map(({ taskId }) => taskId))];
+        const currentScopeRows = scope === 'project'
+          ? await db.select({ taskId: taskProjects.taskId }).from(taskProjects)
+              .where(eq(taskProjects.projectId, scopeId))
+          : await db.select({ taskId: projectPhaseItems.taskId }).from(projectPhaseItems)
+              .where(eq(projectPhaseItems.phaseId, scopeId));
+        const currentScopeTaskIds = currentScopeRows.map(({ taskId }) => taskId);
+        const taskIds = [...new Set([
+          ...scopedCandidates.map(({ taskId }) => taskId),
+          ...currentScopeTaskIds,
+        ])];
         if (!taskIds.length) {
           return {
             scope: { projectId: project.id, scope, scopeId, scopeName, scheduleStart, scheduleEnd },
             candidateEvents: [],
+            currentScopeTaskIds: [],
             tasks: [],
           };
         }
@@ -757,14 +823,19 @@ export function createPostgresGraphReportingRepository(
           db.select({
             id: tasks.id,
             title: tasks.title,
+            status: tasks.status,
+            effort: tasks.effort,
+            localDisposition: tasks.localDisposition,
             createdAt: tasks.createdAt,
             completedAt: tasks.completedAt,
+            deletedAt: tasks.deletedAt,
           }).from(tasks).where(inArray(tasks.id, taskIds))
             .orderBy(asc(byteOrder(tasks.id))),
         ]);
         return {
           scope: { projectId: project.id, scope, scopeId, scopeName, scheduleStart, scheduleEnd },
           candidateEvents: eventRows.map(normalizeHistoryEvent),
+          currentScopeTaskIds,
           tasks: taskRows,
         };
       },

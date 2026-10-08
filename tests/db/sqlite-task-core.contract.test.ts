@@ -2,6 +2,7 @@ import { afterAll, beforeAll, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type * as SchemaModule from '@/db/schema';
+import type { LocalDisposition, TaskPriority, TaskStatus } from '@/types';
 import {
   describeTaskCoreContract,
   type SeedAttachment,
@@ -16,6 +17,7 @@ import {
   type SeedTask,
   type TaskCoreContractHarness,
 } from '../contracts/task-core.contract';
+import { describeTaskTimeActivityContract } from '../contracts/task-time-activity.contract';
 
 /**
  * Runs the shared task-core contract suite against the real SQLite adapter
@@ -57,8 +59,11 @@ beforeAll(async () => {
         schema.triageItems,
         schema.taskIngestSuppressions,
         schema.taskAttachments,
+        schema.taskTimeActivities,
         schema.taskLinkedSources,
         schema.taskSchedules,
+        schema.taskRecurrenceBackfillDecisions,
+        schema.taskRecurrenceOccurrences,
         schema.projectPhaseItems,
         schema.projectPhases,
         schema.taskProjects,
@@ -88,14 +93,15 @@ beforeAll(async () => {
         connectorInstanceId: row.connectorInstanceId ?? 'local',
         title: row.title ?? row.id,
         description: row.description ?? null,
-        status: row.status ?? 'todo',
-        localDisposition: row.localDisposition ?? 'active',
-        priority: row.priority ?? 'none',
+        status: (row.status ?? 'todo') as TaskStatus,
+        localDisposition: (row.localDisposition ?? 'active') as LocalDisposition,
+        priority: (row.priority ?? 'none') as TaskPriority,
         planningHorizon: (row.planningHorizon ?? null) as 'next' | null,
         dueDate: row.dueDate ?? null,
         createdAt: row.createdAt ?? DEFAULT_NOW,
         updatedAt: row.updatedAt ?? DEFAULT_NOW,
         completedAt: row.completedAt ?? null,
+        deletedAt: row.deletedAt ?? null,
         parentId: row.parentId ?? null,
         depth: row.depth ?? 0,
         isChecklistItem: row.isChecklistItem ?? false,
@@ -105,7 +111,7 @@ beforeAll(async () => {
         microStatus: row.microStatus ?? null,
         snoozedUntil: row.snoozedUntil ?? null,
         metadata: row.metadata ?? {},
-        syncStatus: row.syncStatus ?? 'synced',
+        syncStatus: (row.syncStatus ?? 'synced') as 'synced' | 'pending' | 'failed' | 'local',
         lastSyncedAt: row.lastSyncedAt ?? DEFAULT_NOW,
         effort: row.effort ?? null,
       })));
@@ -214,8 +220,8 @@ beforeAll(async () => {
       if (rows.length === 0) return;
       await db.insert(schema.taskDependencies).values(rows.map((row) => ({
         ...row,
-        type: 'blocks',
-        syncStatus: 'local',
+        type: 'blocks' as const,
+        syncStatus: 'local' as const,
         createdAt: DEFAULT_NOW,
       })));
     },
@@ -396,11 +402,43 @@ beforeAll(async () => {
         .all() as Array<{ taskId: string }>;
       return rows.map((row) => row.taskId).sort();
     },
+    async listRecurrenceOccurrences() {
+      return sqlite.prepare(`
+        SELECT
+          occurrence_id AS occurrenceId,
+          task_id AS taskId,
+          generated_from_task_id AS generatedFromTaskId,
+          series_id AS seriesId,
+          rule_revision_id AS ruleRevisionId,
+          effective_kind AS effectiveKind,
+          effective_value AS effectiveValue,
+          timezone_id AS timezoneId,
+          connector_instance_id AS connectorInstanceId
+        FROM task_recurrence_occurrences
+        ORDER BY occurrence_id
+      `).all() as Awaited<ReturnType<TaskCoreContractHarness['listRecurrenceOccurrences']>>;
+    },
+    async listRecurrenceBackfillDecisions() {
+      return sqlite.prepare(`
+        SELECT occurrence_id AS occurrenceId, decision, reason, task_id AS taskId,
+          superseded_by_occurrence_id AS supersededByOccurrenceId, decided_at AS decidedAt
+        FROM task_recurrence_backfill_decisions
+        ORDER BY effective_value
+      `).all() as Awaited<
+        ReturnType<TaskCoreContractHarness['listRecurrenceBackfillDecisions']>
+      >;
+    },
     async getTaskUpdatedAt(taskId) {
       const row = sqlite
         .prepare('SELECT updated_at AS updatedAt FROM tasks WHERE id = ?')
         .get(taskId) as { updatedAt: string } | undefined;
       return row?.updatedAt ?? null;
+    },
+    async getTaskDeletedAt(taskId) {
+      const row = sqlite
+        .prepare('SELECT deleted_at AS deletedAt FROM tasks WHERE id = ?')
+        .get(taskId) as { deletedAt: string | null } | undefined;
+      return row?.deletedAt ?? null;
     },
     async countOutboxEvents(stableKey) {
       const row = sqlite
@@ -436,3 +474,4 @@ afterAll(() => {
 });
 
 describeTaskCoreContract('SQLite adapter', async () => harness);
+describeTaskTimeActivityContract('SQLite adapter', async () => harness);

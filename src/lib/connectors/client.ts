@@ -1,10 +1,10 @@
 import type { ConnectorConfig, SourceList } from '@/app/settings/components/types';
-
-export type ConnectorWithSync = ConnectorConfig & { lastSyncAt?: string | null };
+import type { SensitivityClass } from '@/lib/ai/types';
 
 export interface ConnectorData {
-  connectors: ConnectorWithSync[];
+  connectors: ConnectorConfig[];
   sourceLists: SourceList[];
+  classificationDefaults: Record<string, SensitivityClass>;
 }
 
 type Fetcher = typeof fetch;
@@ -45,6 +45,9 @@ export async function loadConnectorData({
   return {
     connectors: includeDeleted ? connectors : getActiveConnectors(connectors),
     sourceLists: Array.isArray(data.sourceLists) ? data.sourceLists : [],
+    classificationDefaults: data.classificationDefaults && typeof data.classificationDefaults === 'object'
+      ? data.classificationDefaults
+      : {},
   };
 }
 

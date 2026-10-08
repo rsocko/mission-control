@@ -21,6 +21,10 @@ export function removeTaskFromResponse(response: TaskResponse, taskId: string, t
     tasks: nextTasks,
     total: Math.max(0, response.total - 1),
     sourceCounts: nextSourceCounts,
+    facetCounts: {
+      priorities: decrementCount(response.facetCounts.priorities, task.priority),
+      statuses: decrementCount(response.facetCounts.statuses, task.status),
+    },
     stats: {
       ...response.stats,
       totalOpen: Math.max(0, response.stats.totalOpen - 1),
@@ -42,6 +46,9 @@ export function removeTaskFromResponse(response: TaskResponse, taskId: string, t
       assignedToMe: isAssignedToMe(task)
         ? Math.max(0, response.stats.assignedToMe - 1)
         : response.stats.assignedToMe,
+      delegated: task.delegation
+        ? Math.max(0, (response.stats.delegated ?? 0) - 1)
+        : response.stats.delegated ?? 0,
     },
   };
 }
@@ -59,6 +66,10 @@ export function restoreTaskToResponse(response: TaskResponse, task: Task, index:
     sourceCounts: {
       ...response.sourceCounts,
       [task.connectorType]: (response.sourceCounts[task.connectorType] || 0) + 1,
+    },
+    facetCounts: {
+      priorities: incrementCount(response.facetCounts.priorities, task.priority),
+      statuses: incrementCount(response.facetCounts.statuses, task.status),
     },
     stats: {
       ...response.stats,
@@ -81,7 +92,24 @@ export function restoreTaskToResponse(response: TaskResponse, task: Task, index:
       assignedToMe: isAssignedToMe(task)
         ? response.stats.assignedToMe + 1
         : response.stats.assignedToMe,
+      delegated: task.delegation
+        ? (response.stats.delegated ?? 0) + 1
+        : response.stats.delegated ?? 0,
     },
+  };
+}
+
+function decrementCount(counts: Record<string, number>, key: string): Record<string, number> {
+  return {
+    ...counts,
+    [key]: Math.max(0, (counts[key] ?? 0) - 1),
+  };
+}
+
+function incrementCount(counts: Record<string, number>, key: string): Record<string, number> {
+  return {
+    ...counts,
+    [key]: (counts[key] ?? 0) + 1,
   };
 }
 

@@ -2,7 +2,7 @@
  * Bulk Actions Component Tests
  * Tests for shared bulk action components (issue #127)
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 
@@ -15,6 +15,7 @@ vi.mock('lucide-react', () => ({
   FolderKanban: () => <span data-testid="icon-folder-kanban">P</span>,
   Layers3: () => <span data-testid="icon-layers">L</span>,
   Loader2: () => <span data-testid="icon-loader">...</span>,
+  Plus: () => <span data-testid="icon-plus">+</span>,
   Tag: () => <span data-testid="icon-tag">T</span>,
   X: () => <span data-testid="icon-x">×</span>,
 }));
@@ -235,7 +236,7 @@ describe('BulkDueDateDropdown', () => {
 describe('BulkTagDropdown', () => {
   let BulkTagDropdown: React.ComponentType<{
     availableTags: Array<{ id: string; name: string; slug: string; color: string | null }>;
-    onAddTag: (tagId: string) => Promise<void>;
+    onAddTag: (tag: { id: string; name: string; slug: string; color: string | null }) => Promise<void>;
   }>;
 
   const tags = [
@@ -247,6 +248,10 @@ describe('BulkTagDropdown', () => {
   beforeEach(async () => {
     const mod = await import('@/components/bulk-actions/BulkTagDropdown');
     BulkTagDropdown = mod.BulkTagDropdown;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('renders button with label', () => {
@@ -265,7 +270,7 @@ describe('BulkTagDropdown', () => {
   it('filters tags by search input', () => {
     render(<BulkTagDropdown availableTags={tags} onAddTag={vi.fn()} />);
     fireEvent.click(screen.getByText('Tag'));
-    const searchInput = screen.getByPlaceholderText('Search tags…');
+    const searchInput = screen.getByPlaceholderText('Search or create tag…');
     fireEvent.change(searchInput, { target: { value: 'bug' } });
     expect(screen.getByText('Bug')).toBeDefined();
     expect(screen.queryByText('Feature')).toBeNull();
@@ -278,15 +283,53 @@ describe('BulkTagDropdown', () => {
     await act(async () => {
       fireEvent.click(screen.getByText('Feature'));
     });
-    expect(onAddTag).toHaveBeenCalledWith('t2');
+    expect(onAddTag).toHaveBeenCalledWith(tags[1]);
   });
 
-  it('shows empty state when search yields no results', () => {
+  it('offers to create a tag when search yields no exact match', () => {
     render(<BulkTagDropdown availableTags={tags} onAddTag={vi.fn()} />);
     fireEvent.click(screen.getByText('Tag'));
-    const searchInput = screen.getByPlaceholderText('Search tags…');
+    const searchInput = screen.getByPlaceholderText('Search or create tag…');
     fireEvent.change(searchInput, { target: { value: 'zzz' } });
-    expect(screen.getByText('No tags found')).toBeDefined();
+    expect(screen.getByText('Create "zzz"')).toBeDefined();
+  });
+
+  it('creates a new hub tag before adding it to the selected tasks', async () => {
+    const createdTag = { id: 'tag-urgent', name: 'Urgent', slug: 'urgent', color: '#6b7280' };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => createdTag,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onAddTag = vi.fn().mockResolvedValue(undefined);
+
+    render(<BulkTagDropdown availableTags={tags} onAddTag={onAddTag} />);
+    fireEvent.click(screen.getByText('Tag'));
+    fireEvent.change(screen.getByPlaceholderText('Search or create tag…'), {
+      target: { value: '  Urgent  ' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText('Create "Urgent"'));
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Urgent' }),
+    });
+    expect(onAddTag).toHaveBeenCalledWith(createdTag);
+  });
+
+  it('uses an exact existing tag when Enter is pressed', async () => {
+    const onAddTag = vi.fn().mockResolvedValue(undefined);
+    render(<BulkTagDropdown availableTags={tags} onAddTag={onAddTag} />);
+    fireEvent.click(screen.getByText('Tag'));
+    const searchInput = screen.getByPlaceholderText('Search or create tag…');
+    fireEvent.change(searchInput, { target: { value: 'bug' } });
+    await act(async () => {
+      fireEvent.keyDown(searchInput, { key: 'Enter' });
+    });
+    expect(onAddTag).toHaveBeenCalledWith(tags[0]);
   });
 });
 
@@ -496,7 +539,7 @@ describe('useBulkSelection', () => {
 
 // ─── executeBulkOperation ─────────────────────────────────────────────
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -507,7 +550,7 @@ const pushUndoWithToast = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/stores/undoStore', () => ({ pushUndoWithToast }));
 
 import { executeBulkOperation } from '@/components/bulk-actions/executeBulkOperation';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 describe('executeBulkOperation', () => {
   beforeEach(() => {

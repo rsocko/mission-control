@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Pencil, Trash2 } from 'lucide-react';
+import { Bot, Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Filter, Pencil, Plus, Repeat, Trash2 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { ConnectorIcon, SourceListIcon } from '@/components/sources/SourceIcons';
@@ -11,7 +11,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type {
@@ -20,6 +19,7 @@ import type {
   DashboardTaskTagViewModel as TaskTag,
   EnabledSource,
   ListGroup,
+  SavedQuickFilter,
   SavedView,
   SourceList,
 } from '@/types/dashboard';
@@ -39,6 +39,18 @@ import { SidebarNavItem } from './SidebarNavItem';
 
 const TAG_DEFAULT_COUNT = 10;
 
+const QUICK_FILTER_VISIBILITY_LABELS: Record<QuickFilterVisibility, string> = {
+  always: 'Always',
+  'when-not-empty': 'When not empty',
+  hidden: 'Hidden',
+};
+
+function QuickFilterVisibilityIcon({ visibility }: { visibility: QuickFilterVisibility }) {
+  if (visibility === 'always') return <Eye size={14} />;
+  if (visibility === 'when-not-empty') return <Hourglass size={14} />;
+  return <EyeOff size={14} />;
+}
+
 function matchesSourceListFilter(sourceList: SourceList, listFilter: string | null): boolean {
   return listFilter === sourceList.sourceId
     || listFilter === `${sourceList.connectorInstanceId}:${sourceList.sourceId}`;
@@ -53,6 +65,7 @@ interface SidebarFiltersProps {
     allTags: TaskTag[];
     projects: HubProject[];
     savedViews: SavedView[];
+    savedQuickFilters?: SavedQuickFilter[];
     allSourceCounts: Record<string, number>;
     loading: boolean;
     quickFilterCountsAvailable?: boolean;
@@ -68,6 +81,7 @@ interface SidebarFiltersProps {
     statusFilter: string[];
     hiddenQuickFilters: string[];
     quickFilterVisibility: Record<string, QuickFilterVisibility>;
+    activeSavedQuickFilterId?: string | null;
   };
   sidebar: {
     sidebarExpanded: boolean;
@@ -99,6 +113,11 @@ interface SidebarFiltersProps {
     applyView: (view: SavedView) => void;
     editView?: (view: SavedView) => void;
     deleteView?: (id: string) => void;
+    startNewQuickFilter?: () => void;
+    applyQuickFilter?: (filter: SavedQuickFilter) => void;
+    clearSavedQuickFilter?: () => void;
+    editQuickFilter?: (filter: SavedQuickFilter) => void;
+    deleteQuickFilter?: (id: string) => void;
     setQuickFilterVisibility: (filterId: string, visibility: QuickFilterVisibility) => void;
   };
   computed: {
@@ -111,13 +130,13 @@ interface SidebarFiltersProps {
 export function SidebarFilters({ data, filters, sidebar, actions, computed }: SidebarFiltersProps) {
   const {
     taskResponse, enabledSources, sourceLists, listGroups, allTags,
-    projects, savedViews, allSourceCounts, loading,
+    projects, savedViews, savedQuickFilters = [], allSourceCounts, loading,
     quickFilterCountsAvailable = true,
   } = data;
   const {
     sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
     priorityFilter, statusFilter,
-    hiddenQuickFilters, quickFilterVisibility,
+    hiddenQuickFilters, quickFilterVisibility, activeSavedQuickFilterId,
   } = filters;
   const {
     sidebarExpanded, sidebarMode, collapsedSections, expandedSourceLists, collapsedListGroups,
@@ -128,6 +147,8 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
     setPriorityFilter, setStatusFilter,
     setSidebarExpanded, setSidebarMode, toggleSection, setExpandedSourceLists, setCollapsedListGroups,
     setListSearch, setTagSearch, setTagsExpanded, applyView, editView, deleteView,
+    startNewQuickFilter, applyQuickFilter, clearSavedQuickFilter,
+    editQuickFilter, deleteQuickFilter,
     setQuickFilterVisibility,
   } = actions;
   const {
@@ -265,7 +286,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
   }
 
   return (
-    <aside aria-label="Task filters" className={`hidden sm:flex flex-col ${sidebarExpanded ? 'w-80' : 'w-56'} bg-[var(--surface-1)] border-r border-[var(--border)] p-4 overflow-y-auto overflow-x-hidden flex-shrink-0 transition-[width] duration-200`}>
+    <aside aria-label="Task filters" className={`hidden sm:flex flex-col ${showFilterSettings ? 'w-96' : sidebarExpanded ? 'w-80' : 'w-56'} bg-[var(--surface-1)] border-r border-[var(--border)] p-4 overflow-y-auto overflow-x-hidden flex-shrink-0 transition-[width] duration-200`}>
       {/* Sources Section */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
@@ -395,35 +416,59 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
           >
             <Settings2 size={11} />
           </button>
+          {startNewQuickFilter ? (
+            <button
+              type="button"
+              onClick={startNewQuickFilter}
+              className="rounded p-0.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]"
+              title="Save current filters as a quick filter"
+              aria-label="Save current filters as a quick filter"
+            >
+              <Plus size={12} />
+            </button>
+          ) : null}
         </div>
         {showFilterSettings && (
-          <div className="mb-2 p-2 rounded-md bg-[var(--surface-2)] border border-[var(--border)] space-y-1.5">
-            <p className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Filter visibility</p>
-            {QUICK_FILTERS.map((filter) => (
-              <div key={filter.id} className="flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
-                <span className="min-w-0 truncate">{filter.label}</span>
-                <Select
-                  value={getQuickFilterVisibility(filter, quickFilterVisibility, hiddenQuickFilters)}
-                  onValueChange={(visibility) => setQuickFilterVisibility(
-                    filter.id,
-                    visibility as QuickFilterVisibility,
-                  )}
-                >
-                  <SelectTrigger
-                    variant="inline"
-                    aria-label={`${filter.label} visibility`}
-                    className="w-32"
+          <div className="mb-2 space-y-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-2)] p-2">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-1 text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
+              <span>Filter</span>
+              <span className="text-right">Rule</span>
+            </div>
+            {QUICK_FILTERS.map((filter) => {
+              const visibility = getQuickFilterVisibility(
+                filter,
+                quickFilterVisibility,
+                hiddenQuickFilters,
+              );
+              const visibilityLabel = QUICK_FILTER_VISIBILITY_LABELS[visibility];
+
+              return (
+                <div key={filter.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-1 text-xs text-[var(--text-secondary)]">
+                  <span className="min-w-0 truncate" title={filter.label}>{filter.label}</span>
+                  <Select
+                    value={visibility}
+                    onValueChange={(nextVisibility) => setQuickFilterVisibility(
+                      filter.id,
+                      nextVisibility as QuickFilterVisibility,
+                    )}
                   >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="always">Always</SelectItem>
-                    <SelectItem value="when-not-empty">When not empty</SelectItem>
-                    <SelectItem value="hidden">Hidden</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            ))}
+                    <SelectTrigger
+                      variant="inline"
+                      aria-label={`${filter.label} visibility: ${visibilityLabel}`}
+                      title={visibilityLabel}
+                      className="ml-auto w-10 shrink-0 justify-end"
+                    >
+                      <QuickFilterVisibilityIcon visibility={visibility} />
+                    </SelectTrigger>
+                    <SelectContent align="end" className="min-w-40">
+                      <SelectItem value="always">Always</SelectItem>
+                      <SelectItem value="when-not-empty">When not empty</SelectItem>
+                      <SelectItem value="hidden">Hidden</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })}
           </div>
         )}
         {!collapsedSections.has('quickFilters') && (
@@ -439,11 +484,55 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                 />
               )}
               label={filter.label}
-              count={taskResponse.stats[filter.statKey]}
+              count={taskResponse.stats[filter.statKey] ?? 0}
               active={quickFilter === filter.id}
               onClick={() => setQuickFilter(quickFilter === filter.id ? null : filter.id)}
             />
           ))}
+          {savedQuickFilters.map((filter) => {
+            const active = activeSavedQuickFilterId === filter.id;
+            return (
+              <div key={filter.id} className="group flex items-center">
+                <div className="min-w-0 flex-1">
+                  <SidebarNavItem
+                    icon={(
+                      <IconRenderer
+                        value={filter.icon}
+                        size={14}
+                        color={filter.iconColor}
+                        fallback={<Filter size={14} />}
+                      />
+                    )}
+                    label={filter.name}
+                    count={0}
+                    active={active}
+                    onClick={() => {
+                      if (active) clearSavedQuickFilter?.();
+                      else applyQuickFilter?.(filter);
+                    }}
+                  />
+                </div>
+                {editQuickFilter ? <button
+                  type="button"
+                  onClick={() => editQuickFilter(filter)}
+                  className="rounded p-1 text-[var(--text-muted)] opacity-0 transition-[color,opacity] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] group-hover:opacity-100 group-focus-within:opacity-100"
+                  aria-label={`Edit ${filter.name}`}
+                  title={`Edit ${filter.name}`}
+                >
+                  <Pencil size={12} />
+                </button> : null}
+                {deleteQuickFilter ? <button
+                  type="button"
+                  onClick={() => deleteQuickFilter(filter.id)}
+                  className="rounded p-1 text-[var(--text-muted)] opacity-0 transition-[color,opacity] hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100 group-focus-within:opacity-100"
+                  aria-label={`Delete ${filter.name}`}
+                  title={`Delete ${filter.name}`}
+                >
+                  <Trash2 size={12} />
+                </button> : null}
+              </div>
+            );
+          })}
         </div>
         )}
       </div>
@@ -573,8 +662,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
           <div className="flex flex-wrap gap-1">
             {(['critical', 'high', 'medium', 'low', 'none'] as const).map((p) => {
               const isActive = priorityFilter.includes(p);
-              // Only show counts when no priority filter is active (counts are from unfiltered results)
-              const count = priorityFilter.length === 0 ? taskResponse.tasks.filter((t) => t.priority === p).length : 0;
+              const count = priorityFilter.length === 0 ? taskResponse.facetCounts.priorities[p] ?? 0 : 0;
               return (
                 <button
                   key={p}
@@ -620,8 +708,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
           <div className="flex flex-wrap gap-1">
             {(['todo', 'in_progress', 'done', 'cancelled'] as const).map((s) => {
               const isActive = statusFilter.includes(s);
-              // Only show counts when no status filter is active (counts are from unfiltered results)
-              const count = statusFilter.length === 0 ? taskResponse.tasks.filter((t) => t.status === s).length : 0;
+              const count = statusFilter.length === 0 ? taskResponse.facetCounts.statuses[s] ?? 0 : 0;
               return (
                 <button
                   key={s}
@@ -752,8 +839,10 @@ function QuickFilterIcon({
     user: <User {...props} />,
     sparkles: <Sparkles {...props} />,
     completed: <CheckCircle2 {...props} />,
+    repeat: <Repeat {...props} />,
     waiting: <Hourglass {...props} />,
     'no-date': <CalendarX2 {...props} />,
+    delegated: <Bot {...props} />,
   };
   return icons[icon];
 }

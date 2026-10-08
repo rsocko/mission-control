@@ -54,6 +54,7 @@ export function createFakeTaskReadRepository(
       no_effort: 0,
       no_tags: 0,
       no_planning_horizon: 0,
+      no_project: 0,
     }),
     listQuickSortTasks: async () => [],
     getQuickSortSuggestionInputs: async () => ({
@@ -61,6 +62,7 @@ export function createFakeTaskReadRepository(
       sourceRankings: [],
       tags: [],
       taskTags: [],
+      projectAffinities: [],
     }),
     ...overrides,
   };
@@ -85,6 +87,7 @@ export function registerFakeTaskCorePersistence(
           myDay: 0,
           recentlyCreated: 0,
           recentlyClosed: 0,
+          recurring: 0,
           waiting: 0,
           inbox: 0,
         },
@@ -113,6 +116,8 @@ export function registerFakeTaskCorePersistence(
       getTaskRemovalContext: async () => null,
       applyTaskRemoval: async () => ({ kind: 'not-found' }),
       finalizeRemoteTaskRemoval: async () => ({ kind: 'not-found' }),
+      restoreTask: async () => ({ kind: 'not-found' }),
+      purgeDeletedBefore: async () => [],
       ...inputs.removals,
     },
     ancillary: {
@@ -124,6 +129,8 @@ export function registerFakeTaskCorePersistence(
       copyTask: async () => ({ kind: 'task-not-found' }),
       promoteSubtask: async () => ({ kind: 'not-found' }),
       listSubtasks: async () => [],
+      getSubtaskOrderState: async () => null,
+      reorderSubtasks: async () => ({ kind: 'parent-not-found' }),
       getSubtaskProposalSnapshot: async () => null,
       createSubtask: async () => ({ kind: 'parent-not-found' }),
       acceptSubtaskProposal: async () => ({ kind: 'stale' }),

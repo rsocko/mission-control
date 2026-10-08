@@ -4,6 +4,10 @@ import type {
   TaskReminderRepository,
 } from '@/db/persistence/task-reminders';
 import {
+  calculateNextNagAt,
+  createTaskReminderDeliveryPlans,
+} from '@/db/persistence/task-reminders';
+import {
   calculateTaskReminderRetryDelayMs,
   runDueTaskReminders,
 } from '@/lib/push/task-reminders';
@@ -65,5 +69,61 @@ describe('task reminder orchestration', () => {
       900_000,
       900_000,
     ]);
+  });
+
+  it('advances from the scheduled slot without replaying missed nag intervals', () => {
+    expect(calculateNextNagAt({
+      scheduledAt: '2026-08-31T11:00:00.000Z',
+      now: new Date('2026-08-31T11:12:30.000Z'),
+      intervalMinutes: 5,
+      stopAt: null,
+    })).toBe('2026-08-31T11:15:00.000Z');
+    expect(calculateNextNagAt({
+      scheduledAt: '2026-08-31T11:00:00.000Z',
+      now: new Date('2026-08-31T11:12:30.000Z'),
+      intervalMinutes: 5,
+      stopAt: '2026-08-31T11:14:00.000Z',
+    })).toBeNull();
+  });
+
+  it('pauses persistent delivery without suppressing ordinary reminders', () => {
+    const input = {
+      notificationId: 'notification-1',
+      title: 'Reminder: Submit report',
+      body: 'This task is ready for your attention.',
+      navigationTarget: '/today?taskId=task-1',
+      rule: null,
+      state: {
+        channelEnabled: true,
+        persistentRemindersEnabled: false,
+        doNotDisturb: false,
+        quietHours: false,
+        webPushSubscriptions: true,
+        apnsRegistrations: false,
+        globalActiveCount: 0,
+        ruleActiveCount: 0,
+      },
+      context: {
+        currentHour: 12,
+        webPushConfigured: true,
+        apns: null,
+        globalMaxPerHour: 100,
+      },
+    } as const;
+
+    expect(createTaskReminderDeliveryPlans({
+      ...input,
+      persistentReminder: true,
+    })[0]).toMatchObject({
+      status: 'suppressed',
+      suppressionReason: 'persistent_reminders_paused',
+    });
+    expect(createTaskReminderDeliveryPlans({
+      ...input,
+      persistentReminder: false,
+    })[0]).toMatchObject({
+      status: 'pending',
+      suppressionReason: null,
+    });
   });
 });

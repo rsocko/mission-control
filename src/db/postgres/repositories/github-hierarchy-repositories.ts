@@ -199,6 +199,7 @@ export function createPostgresGitHubHierarchyRepositories(
              connector_type AS "connectorType",
              is_checklist_item AS "isChecklistItem",
              parent_id AS "parentId",
+             sibling_order AS "siblingOrder",
              depth,
              metadata
            FROM tasks
@@ -232,22 +233,65 @@ export function createPostgresGitHubHierarchyRepositories(
           return { applied: false, updated: 0, fenced: true };
         }
 
+        const existingParentByTaskId = new Map(
+          taskRows.map((task) => [task.id, task.parentId] as const),
+        );
+        const revisedParentIds = new Set<string>();
         let updated = 0;
         for (const update of verdict.updates) {
+          const siblingOrder = update.siblingOrder === undefined
+            ? null
+            : update.siblingOrder;
           if (update.metadata !== undefined) {
             const result = await client.query(
-              `UPDATE tasks SET parent_id = $1, depth = $2, metadata = $3 WHERE id = $4`,
-              [update.parentId, update.depth, update.metadata, update.taskId],
+              `UPDATE tasks
+               SET parent_id = $1,
+                   depth = $2,
+                   metadata = $3,
+                   sibling_order = CASE WHEN $4::boolean THEN $5 ELSE sibling_order END
+               WHERE id = $6`,
+              [
+                update.parentId,
+                update.depth,
+                update.metadata,
+                update.siblingOrder !== undefined,
+                siblingOrder,
+                update.taskId,
+              ],
             );
             updated += result.rowCount ?? 0;
           } else {
             const result = await client.query(
-              `UPDATE tasks SET parent_id = $1, depth = $2 WHERE id = $3`,
-              [update.parentId, update.depth, update.taskId],
+              `UPDATE tasks
+               SET parent_id = $1,
+                   depth = $2,
+                   sibling_order = CASE WHEN $3::boolean THEN $4 ELSE sibling_order END
+               WHERE id = $5`,
+              [
+                update.parentId,
+                update.depth,
+                update.siblingOrder !== undefined,
+                siblingOrder,
+                update.taskId,
+              ],
             );
             updated += result.rowCount ?? 0;
           }
+          if (update.subtaskOrderChanged) {
+            const previousParentId = existingParentByTaskId.get(update.taskId);
+            if (previousParentId) revisedParentIds.add(previousParentId);
+            if (update.parentId) revisedParentIds.add(update.parentId);
+          }
         }
+        for (const parentId of revisedParentIds) {
+          await client.query(
+            `UPDATE tasks
+             SET subtask_order_revision = subtask_order_revision + 1
+             WHERE id = $1`,
+            [parentId],
+          );
+        }
+
         return { applied: true, updated, fenced: false };
       });
     },

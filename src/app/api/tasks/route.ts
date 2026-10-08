@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { listTaskDelegationSummaries } from '@/lib/external-agents/task-delegation';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import { logWriteThrough } from '@/lib/sync/write-through-log';
 import { CAPABILITY_DEFAULTS } from '@/lib/connectors/capabilities';
@@ -13,7 +14,12 @@ import {
   type SourceRanking,
 } from '@/lib/smart-score';
 import { getLocalToday } from '@/lib/utils/date';
-import { isDemoMode } from '@/lib/mode';
+import { getTimezone, isDemoMode } from '@/lib/mode';
+import {
+  canonicalizeLegacyRecurrence,
+  extractRecurrenceLocalTime,
+} from '@/lib/recurrence/canonical';
+import { applyRecurrenceEditorOptions } from '@/lib/recurrence/editor';
 import type { TaskPriority } from '@/types';
 import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 import type { ConnectorCapabilities } from '@/types';
@@ -50,11 +56,40 @@ import {
   taskCollectionGroupReturnsEmpty,
 } from '@/lib/tasks/core/filter-spec';
 import type { TaskCoreTaskRow, TaskListSortField } from '@/lib/tasks/core/contracts';
+import {
+  buildSubtaskTask,
+  writeThroughSubtask,
+} from '@/lib/tasks/subtask-creation';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import {
+  claimRyMessagePromotionIntent,
+  fulfillRyMessagePromotionIntent,
+} from '@/lib/connectors/rymessage/task-promotion';
 
 const VALID_PRIORITIES = ['critical', 'high', 'medium', 'low', 'none'];
 
 function isTaskPriority(value: unknown): value is TaskPriority {
   return VALID_PRIORITIES.includes(String(value));
+}
+
+function parseSubtaskTitles(value: unknown): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100) return null;
+  const titles = value.map((subtask) => {
+    if (typeof subtask === 'string') return subtask.trim();
+    if (
+      subtask
+      && typeof subtask === 'object'
+      && 'title' in subtask
+      && typeof subtask.title === 'string'
+    ) {
+      return subtask.title.trim();
+    }
+    return '';
+  });
+  return titles.every((title) => title.length > 0 && title.length <= 200)
+    ? titles
+    : null;
 }
 
 const TASK_SORT_FIELDS = new Set<TaskListSortField>([
@@ -132,11 +167,14 @@ export async function GET(request: Request) {
           myDay: 0,
           recentlyCreated: 0,
           recentlyClosed: 0,
+          recurring: 0,
           waiting: 0,
           inbox: 0,
+          delegated: 0,
         },
         hasMore: false,
         sourceCounts: {},
+        facetCounts: { priorities: {}, statuses: {} },
         availableTags: [],
         pagination: { limit, offset, maxLimit: MAX_TASK_PAGE_SIZE },
       });
@@ -161,6 +199,7 @@ export async function GET(request: Request) {
         stats: collection.stats,
         hasMore: false,
         sourceCounts: collection.sourceCounts,
+        facetCounts: collection.facetCounts,
         availableTags: [],
         pagination: { limit, offset, maxLimit: MAX_TASK_PAGE_SIZE },
       });
@@ -232,7 +271,10 @@ export async function GET(request: Request) {
       for (const score of scoredRows) scoredById.set(score.taskId, score);
     }
 
-    const editPolicies = await resolveTaskEditPolicies(result, connectorEditPolicyContexts);
+    const [editPolicies, delegationSummaries] = await Promise.all([
+      resolveTaskEditPolicies(result, connectorEditPolicyContexts),
+      listTaskDelegationSummaries(result.map(({ id }) => id)),
+    ]);
     const smartScoreBudgetReached = sortBy === 'smartScore'
       && collection.total > SMART_SCORE_CANDIDATE_LIMIT;
     if (smartScoreBudgetReached) {
@@ -274,6 +316,7 @@ export async function GET(request: Request) {
           projectPhaseMemberships: task.projectPhaseMemberships,
           linkedSourceCount: task.linkedSourceCount || 0,
           editPolicy: requireTaskEditPolicy(editPolicies, task.id),
+          delegation: delegationSummaries.get(task.id) ?? null,
           ...(scored ? {
             smartScore: Number.isFinite(scored.score.total) ? scored.score.total : 0,
             scoreBreakdown: scored.score,
@@ -291,6 +334,7 @@ export async function GET(request: Request) {
           : collection.total
       ),
       sourceCounts: collection.sourceCounts,
+      facetCounts: collection.facetCounts,
       availableTags: collection.availableTags,
       pagination: { limit, offset, maxLimit: MAX_TASK_PAGE_SIZE },
       ...(sortBy === 'smartScore' ? {
@@ -306,6 +350,13 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let idempotentTaskId: string | null = null;
+  let promotionIdentity: {
+    actionId: string;
+    intentId: string;
+    connectorId: string;
+    expectedRevision?: number;
+  } | null = null;
   try {
     const body = await request.json();
     const {
@@ -324,7 +375,17 @@ export async function POST(request: Request) {
       estimatedDuration,
       effort,
     } = body;
+    const subtaskTitles = parseSubtaskTitles(body.subtasks);
+    if (!subtaskTitles) {
+      return ApiErrors.badRequest(
+        'subtasks must contain at most 100 non-empty titles of 200 characters or fewer',
+      );
+    }
     const recurrenceMode = body.recurrenceMode === 'completion' ? 'completion' : 'schedule';
+    const recurrenceSkipDates = Array.isArray(body.recurrenceSkipDates)
+      ? body.recurrenceSkipDates
+      : [];
+    const recurrenceCatchUp = body.recurrenceCatchUp === 'none' ? 'none' : 'latest';
     const requestedConnectorInstanceId = typeof body.connectorInstanceId === 'string'
       && body.connectorInstanceId.trim()
       ? body.connectorInstanceId.trim()
@@ -332,8 +393,26 @@ export async function POST(request: Request) {
     const triageItemId = typeof body.triageItemId === 'string' && body.triageItemId
       ? body.triageItemId
       : null;
+    const idempotencyKey = typeof body.idempotencyKey === 'string'
+      ? body.idempotencyKey
+      : null;
+    if (
+      idempotencyKey
+      && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+        .test(idempotencyKey)
+    ) {
+      return ApiErrors.badRequest('idempotencyKey must be a canonical UUID');
+    }
     if (typeof title !== 'string' || !title.trim()) {
       return ApiErrors.badRequest('title is required');
+    }
+    if (
+      recurrenceSkipDates.length > 100
+      || recurrenceSkipDates.some((date: unknown) => (
+        typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)
+      ))
+    ) {
+      return ApiErrors.badRequest('recurrenceSkipDates must contain at most 100 calendar dates');
     }
     const resolvedPriority: TaskPriority = isTaskPriority(priority) ? priority : 'none';
     if (
@@ -344,11 +423,57 @@ export async function POST(request: Request) {
       return ApiErrors.badRequest('planningHorizon must be now, next, later, someday, or null');
     }
 
-    const id = crypto.randomUUID();
+    const id = idempotencyKey || crypto.randomUUID();
+    idempotentTaskId = idempotencyKey ? id : null;
     const now = new Date().toISOString();
     const metadata: Record<string, unknown> = {};
     if (recurrence) metadata.recurrence = recurrence;
     if (triageItemId) metadata.triageItemId = triageItemId;
+    if (idempotencyKey) {
+      metadata.creationIdempotencyKey = idempotencyKey;
+      if (body.rymessagePromotion && typeof body.rymessagePromotion === 'object') {
+        const promotion = body.rymessagePromotion as Record<string, unknown>;
+        if (
+          typeof promotion.actionId !== 'string'
+          || typeof promotion.notificationId !== 'string'
+          || typeof promotion.connectorId !== 'string'
+        ) {
+          return ApiErrors.badRequest(
+            'rymessagePromotion requires actionId, notificationId, and connectorId',
+          );
+        }
+        promotionIdentity = {
+          actionId: promotion.actionId,
+          intentId: idempotencyKey,
+          connectorId: promotion.connectorId,
+        };
+        metadata.rymessagePromotion = {
+          ...promotionIdentity,
+          notificationId: promotion.notificationId,
+        };
+      }
+      const existing = await getCorePersistenceRepositories().tasks.get(id);
+      if (existing) {
+        const existingMetadata = existing.metadata && typeof existing.metadata === 'object'
+          ? existing.metadata as Record<string, unknown>
+          : {};
+        if (existingMetadata.creationIdempotencyKey !== idempotencyKey) {
+          return ApiErrors.conflict('idempotencyKey is already in use');
+        }
+        if (
+          promotionIdentity
+          && existing.syncStatus === 'synced'
+        ) {
+          await fulfillRyMessagePromotionIntent(promotionIdentity, existing);
+        }
+        return NextResponse.json({ id, replayed: true }, { status: 200 });
+      }
+      if (promotionIdentity) {
+        promotionIdentity.expectedRevision = await claimRyMessagePromotionIntent(
+          promotionIdentity,
+        );
+      }
+    }
     metadata.missionControlTaskId = id;
 
     const resolvedConnectorType = typeof connectorType === 'string' ? connectorType : 'local';
@@ -360,6 +485,14 @@ export async function POST(request: Request) {
     }
     if (recurrenceMode === 'completion' && isRemote) {
       return ApiErrors.badRequest('Completion-anchored recurrence is available only for local tasks');
+    }
+    if (
+      isRemote
+      && (recurrenceSkipDates.length > 0 || recurrenceCatchUp !== 'latest')
+    ) {
+      return ApiErrors.badRequest(
+        'Exceptions and catch-up policy are available only for Mission Control tasks',
+      );
     }
 
     const persistence = await getTaskCorePersistence();
@@ -405,6 +538,37 @@ export async function POST(request: Request) {
       if (capabilities.listSelectionMode === 'required' && !sourceListId) {
         return ApiErrors.badRequest(
           `sourceListId is required for ${resolvedConnectorType} connector`,
+        );
+      }
+      if (subtaskTitles.length > 0 && capabilities.subtasks !== true) {
+        return ApiErrors.badRequest('The selected connector does not support subtasks');
+      }
+    }
+    if (recurrence) {
+      try {
+        metadata.canonicalRecurrence = applyRecurrenceEditorOptions(
+          canonicalizeLegacyRecurrence({
+            recurrence,
+            mode: recurrenceMode,
+            startDate: typeof dueDate === 'string'
+              ? dueDate.slice(0, 10)
+              : getLocalToday(),
+            localTime: extractRecurrenceLocalTime(dueDate, getTimezone()),
+            timezone: getTimezone(),
+            seriesIdentity: {
+              kind: 'mission-control',
+              stableId: id,
+              ...(isRemote ? { connectorInstanceId } : {}),
+            },
+          }),
+          {
+            skipDates: recurrenceSkipDates,
+            catchUp: recurrenceCatchUp,
+          },
+        );
+      } catch (error) {
+        return ApiErrors.badRequest(
+          error instanceof Error ? error.message : 'Invalid recurrence',
         );
       }
     }
@@ -525,6 +689,27 @@ export async function POST(request: Request) {
     }
 
     const committedTask = createResult.task;
+    const createdSubtasks: Array<{ id: string; title: string }> = [];
+    for (const subtaskTitle of subtaskTitles) {
+      const subtaskId = crypto.randomUUID();
+      const outcome = await persistence.ancillary.createSubtask({
+        task: buildSubtaskTask(committedTask, {
+          id: subtaskId,
+          title: subtaskTitle,
+          priority: 'none',
+          planningHorizon: null,
+          dueDate: null,
+          effort: null,
+          now,
+          syncStatus: shouldWriteThrough ? 'pending_push' : 'synced',
+        }),
+      });
+      if (outcome.kind !== 'created') {
+        throw new Error(`Failed to persist initial subtask: ${outcome.kind}`);
+      }
+      createdSubtasks.push({ id: subtaskId, title: subtaskTitle });
+    }
+
     if (shouldWriteThrough) {
       void writeThroughCreate({
         id: committedTask.id,
@@ -538,9 +723,31 @@ export async function POST(request: Request) {
         connectorInstanceId: committedTask.connectorInstanceId,
         metadata,
         tagNames: createResult.sourceTagNames,
+        promotionIdentity,
+        subtasks: createdSubtasks,
       }).catch((error) => {
         logger.error({ err: error, taskId: id }, 'Write-through task creation failed unexpectedly');
       });
+    } else if (promotionIdentity) {
+      try {
+        await fulfillRyMessagePromotionIntent(promotionIdentity, {
+          id: committedTask.id,
+          sourceId: committedTask.sourceId,
+          connectorType: committedTask.connectorType,
+          connectorInstanceId: committedTask.connectorInstanceId,
+          ...(committedTask.sourceListId
+            ? { sourceListId: committedTask.sourceListId }
+            : {}),
+          title: committedTask.title,
+          status: 'todo',
+          updatedAt: committedTask.updatedAt,
+        });
+      } catch (error) {
+        logger.warn(
+          { err: error, taskId: id },
+          'Task created but RyMessage materialization fulfillment requires reconciliation',
+        );
+      }
     }
 
     try {
@@ -550,8 +757,24 @@ export async function POST(request: Request) {
     }
 
     const [editPolicy] = (await resolveTaskEditPolicies([committedTask])).values();
-    return NextResponse.json({ id, editPolicy }, { status: 201 });
+    return NextResponse.json({
+      id,
+      editPolicy,
+      subtasks: createdSubtasks,
+    }, { status: 201 });
   } catch (error) {
+    if (idempotentTaskId) {
+      const existing = await getCorePersistenceRepositories().tasks.get(idempotentTaskId);
+      const existingMetadata = existing?.metadata && typeof existing.metadata === 'object'
+        ? existing.metadata as Record<string, unknown>
+        : {};
+      if (existingMetadata.creationIdempotencyKey === idempotentTaskId) {
+        return NextResponse.json(
+          { id: idempotentTaskId, replayed: true },
+          { status: 200 },
+        );
+      }
+    }
     return ApiErrors.internal('Failed to create task', error);
   }
 }
@@ -568,6 +791,13 @@ async function writeThroughCreate(params: {
   connectorInstanceId: string;
   metadata: Record<string, unknown>;
   tagNames?: string[];
+  promotionIdentity?: {
+    actionId: string;
+    intentId: string;
+    connectorId: string;
+    expectedRevision?: number;
+  } | null;
+  subtasks: Array<{ id: string; title: string }>;
 }) {
   let pushLeaseToken: string | null = null;
   try {
@@ -640,6 +870,23 @@ async function writeThroughCreate(params: {
     );
     if (!finalized) return;
 
+    if (params.promotionIdentity) {
+      try {
+        await fulfillRyMessagePromotionIntent(params.promotionIdentity, {
+          ...created,
+          id: params.id,
+          connectorType: connector.type,
+          connectorInstanceId: params.connectorInstanceId,
+          sourceListId: params.sourceListId,
+        });
+      } catch (error) {
+        logger.warn(
+          { err: error, taskId: params.id },
+          'Provider task created but RyMessage materialization fulfillment requires reconciliation',
+        );
+      }
+    }
+
     try {
       await persistCreatedTaskIdentity({
         taskId: params.id,
@@ -653,6 +900,16 @@ async function writeThroughCreate(params: {
         { err: error, taskId: params.id },
         'Task created but external identity persistence requires reconciliation',
       );
+    }
+
+    for (const subtask of params.subtasks) {
+      await writeThroughSubtask({
+        subtaskId: subtask.id,
+        title: subtask.title,
+        parentTaskId: params.id,
+        parentSourceId: created.sourceId,
+        connectorInstanceId: params.connectorInstanceId,
+      });
     }
 
     await logWriteThrough({

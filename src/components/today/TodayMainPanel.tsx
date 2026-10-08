@@ -20,7 +20,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import Link from 'next/link';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   DndContext,
   KeyboardSensor,
@@ -154,7 +154,6 @@ interface TodayMainPanelProps {
     selectedTaskId: string | null;
     selectTask: (taskId: string | null) => void;
     doubleClickTask?: (taskId: string) => void;
-    cancelPendingTaskSelection?: () => void;
   };
   focus: {
     showTimer: boolean;
@@ -229,7 +228,6 @@ export function TodayMainPanel({
   } = taskActions;
   const {
     selectedTaskId, selectTask: onSelectTask, doubleClickTask: onDoubleClickTask,
-    cancelPendingTaskSelection: onCancelPendingTaskSelection,
   } = selection;
   const {
     showTimer, setShowTimer: onSetShowTimer, focusTask, setFocusTask: onSetFocusTask,
@@ -680,7 +678,7 @@ export function TodayMainPanel({
           </div>
         )}
 
-        {(showTimer || focusTask) && <div className="mb-6"><TimerPanel taskTitle={focusTask?.title} taskDeadline={focusTask?.dueDate || undefined} /></div>}
+        <div className={showTimer || focusTask ? 'mb-6' : ''}><TimerPanel taskId={focusTask?.taskId} taskTitle={focusTask?.title} taskDeadline={focusTask?.dueDate || undefined} hiddenWhenIdle={!showTimer && !focusTask} onRestore={onSetShowTimer} /></div>
 
         {loading ? (
           <div className="space-y-4 py-4 animate-pulse">
@@ -777,7 +775,11 @@ export function TodayMainPanel({
                 </div>
               )}
               {bulk.bulkMode && (
-                <BulkActionBar selectedCount={bulk.bulkSelected.size} onCancel={bulk.clearSelection}>
+                <BulkActionBar
+                  selectedCount={bulk.bulkSelected.size}
+                  taskIds={Array.from(bulk.bulkSelected)}
+                  onCancel={bulk.clearSelection}
+                >
                   <button
                     disabled={Boolean(bulkStatusBlockedReason)}
                     title={bulkStatusBlockedReason}
@@ -987,18 +989,12 @@ export function TodayMainPanel({
                                       onRemove={(taskId) => { void onRemoveFromDay(taskId); }}
                                       onSelect={onSelectTask}
                                       onDoubleClick={onDoubleClickTask}
-                                      onModifierClick={(taskId, event) => {
-                                        onCancelPendingTaskSelection?.();
-                                        handleModifierClick(taskId, event);
-                                      }}
+                                      onModifierClick={handleModifierClick}
                                       isSelected={selectedTaskId === item.taskId}
                                       isCompleting={completingIds.has(item.taskId)}
                                       bulkMode={bulk.bulkMode}
                                       bulkSelected={bulk.bulkSelected.has(item.taskId)}
-                                      onBulkToggle={() => {
-                                        onCancelPendingTaskSelection?.();
-                                        bulk.toggleItem(item.taskId);
-                                      }}
+                                      onBulkToggle={() => bulk.toggleItem(item.taskId)}
                                       contextMenuActions={getContextMenuActions({
                                         id: item.taskId,
                                         title: item.title,

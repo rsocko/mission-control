@@ -57,6 +57,7 @@ Move beyond "how many tasks did I complete?" to understand behavioral patterns. 
 | **Task Age** | Distribution of open tasks across <1, 1–7, 8–30, 31–60, 61–90, and >90 day buckets |
 | **Routine Heatmap** | Daily routine completion density (calendar grid) |
 | **Project Velocity** | Completion rate per project (bar chart) |
+| **Active vs Closed** | Current open tasks compared with period completions across lists, tags, projects, and sources |
 | **Planning Friction** | Missed day/focus commitments, elapsed time blocks, overdue transitions, snooze extensions, later due-date moves, and task/list/tag patterns |
 
 ### AI Observations

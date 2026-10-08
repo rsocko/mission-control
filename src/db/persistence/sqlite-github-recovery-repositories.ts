@@ -45,6 +45,7 @@ import type {
   GitHubBulkTransferSuccessionRecord,
   GitHubRecoveryIssuePlanRow,
   GitHubRecoveryPersistence,
+  GitHubRecoveryRepositoryBinding,
   GitHubRepointApplyResult,
   GitHubRepointOperationRecord,
   GitHubRepointPersistence,
@@ -110,7 +111,8 @@ export function createSqliteGitHubRecoveryRepositories(
         binding.external_entity_id AS issueEntityId,
         entity.stable_id AS issueStableId,
         locator.issue_number AS issueNumber,
-        locator.repository_entity_id AS repositoryEntityId
+        locator.repository_entity_id AS repositoryEntityId,
+        binding.state AS bindingState
       FROM tasks AS task
       LEFT JOIN external_entity_bindings AS binding
         ON binding.connector_instance_id = task.connector_instance_id
@@ -158,6 +160,7 @@ export function createSqliteGitHubRecoveryRepositories(
           issueStableId: null,
           issueNumber: null,
           repositoryEntityId: null,
+          bindingState: null,
         };
       }
       const entity = tx.select().from(externalEntities)
@@ -169,6 +172,7 @@ export function createSqliteGitHubRecoveryRepositories(
         issueStableId: entity?.stableId ?? null,
         issueNumber: locator?.issueNumber ?? null,
         repositoryEntityId: locator?.repositoryEntityId ?? null,
+        bindingState: binding.state,
       };
     });
   }
@@ -587,8 +591,46 @@ export function createSqliteGitHubRecoveryRepositories(
     async applyNativeTransferRouting(input) {
       let collision = false;
       runTransaction((tx) => {
+        const currentTask = tx.select({
+          sourceId: tasks.sourceId,
+          metadata: tasks.metadata,
+        }).from(tasks).where(and(
+          eq(tasks.id, input.taskId),
+          eq(tasks.connectorInstanceId, input.connectorInstanceId),
+        )).limit(1).get();
+        if (!currentTask || currentTask.sourceId.toLowerCase() !== input.legacySourceId.toLowerCase()) {
+          throw new Error('Native GitHub transfer task route changed before routing update');
+        }
+        const binding = tx.select().from(externalEntityBindings).where(and(
+          eq(externalEntityBindings.connectorInstanceId, input.connectorInstanceId),
+          eq(externalEntityBindings.bindingType, 'task'),
+          eq(externalEntityBindings.localId, input.taskId),
+          inArray(externalEntityBindings.state, [...ACTIVE_BINDING_STATES]),
+        )).limit(1).get();
+        if (!binding || binding.externalEntityId !== input.issueEntityId) {
+          throw new Error('Native GitHub transfer binding changed before routing update');
+        }
+        const destinationEntity = upsertExternalEntityInTransaction(tx, {
+          identity: input.identity,
+          observedAt: input.observedAt,
+        });
+        if (destinationEntity.id !== input.issueEntityId) {
+          const occupied = tx.select().from(externalEntityBindings).where(and(
+            eq(externalEntityBindings.connectorInstanceId, input.connectorInstanceId),
+            eq(externalEntityBindings.externalEntityId, destinationEntity.id),
+          )).limit(1).get();
+          if (occupied) {
+            throw new Error('Native GitHub transfer successor identity is already bound');
+          }
+          tx.update(externalEntityLocators).set({
+            validTo: input.observedAt,
+          }).where(and(
+            eq(externalEntityLocators.externalEntityId, input.issueEntityId),
+            isNull(externalEntityLocators.validTo),
+          )).run();
+        }
         const observed = observeOperatorExternalEntityLocatorInTransaction(tx, {
-          entityId: input.issueEntityId,
+          entityId: destinationEntity.id,
           identity: input.identity,
           locator: input.locator,
           repositoryEntityId: input.targetRepositoryEntityId,
@@ -601,7 +643,7 @@ export function createSqliteGitHubRecoveryRepositories(
             bindingType: 'task',
             localIds: [input.taskId],
             externalEntityIds: [
-              input.issueEntityId,
+              destinationEntity.id,
               ...(observed.conflictingEntityId ? [observed.conflictingEntityId] : []),
             ],
             legacyIdentity: input.legacySourceId,
@@ -612,10 +654,12 @@ export function createSqliteGitHubRecoveryRepositories(
           collision = true;
           return;
         }
-        const currentTask = tx.select({ metadata: tasks.metadata }).from(tasks)
-          .where(eq(tasks.id, input.taskId)).limit(1).get();
-        if (!currentTask) {
-          throw new Error('Native GitHub transfer task disappeared before routing update');
+        if (destinationEntity.id !== input.issueEntityId) {
+          tx.update(externalEntityBindings).set({
+            externalEntityId: destinationEntity.id,
+            verifiedAt: input.observedAt,
+            updatedAt: input.now,
+          }).where(eq(externalEntityBindings.id, binding.id)).run();
         }
         tx.update(tasks).set({
           sourceId: input.newSourceId,
@@ -655,7 +699,8 @@ export function createSqliteGitHubRecoveryRepositories(
       SELECT
         entities.id AS repositoryEntityId,
         entities.stable_id AS repositoryStableId,
-        bindings.local_id AS localId
+        bindings.local_id AS localId,
+        bindings.state AS bindingState
       FROM external_entity_bindings AS bindings
       INNER JOIN external_entities AS entities
         ON entities.id = bindings.external_entity_id
@@ -673,6 +718,7 @@ export function createSqliteGitHubRecoveryRepositories(
       repositoryEntityId: string;
       repositoryStableId: string;
       localId: string;
+      bindingState: GitHubRecoveryRepositoryBinding['bindingState'];
     }>;
     return rows.length === 1 ? rows[0] : null;
   }

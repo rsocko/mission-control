@@ -101,6 +101,7 @@ describe('process-wide runtime registries', () => {
       removeNotification: vi.fn(),
       warmUp: vi.fn(),
       search: vi.fn(),
+      facets: vi.fn(),
     };
     const enrich = vi.fn(async () => null);
     const upsert = vi.fn(async () => undefined);

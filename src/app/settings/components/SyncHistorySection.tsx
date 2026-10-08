@@ -9,7 +9,7 @@ import {
   Check, ChevronDown, ListFilter, X,
 } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type {
   ConnectorConfig,
   SyncLogEntry,
@@ -54,6 +54,7 @@ function initialHistoryFilters(
 }
 
 const triggerLabels: Record<NonNullable<SyncLogEntry['trigger']>, string> = {
+  manual: 'Manual',
   api: 'Manual',
   schedule: 'Scheduled',
   nightly: 'Nightly',
@@ -1437,7 +1438,10 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
           taskId={selectedTaskId}
           mode="dialog"
           portalDialog
-          onClose={() => setSelectedTaskId(null)}
+          onClose={(reason) => setSelectedTaskId(
+            null,
+            reason === 'task-removed' ? { history: 'replace' } : undefined,
+          )}
         />
       )}
       {selectedSnapshotId && (

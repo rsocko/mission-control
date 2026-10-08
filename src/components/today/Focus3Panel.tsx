@@ -23,7 +23,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { dropdownVariants, fadeSlideUp, scaleIn } from '@/lib/motion';
 import { TaskPickerDialog } from '@/components/projects/TaskPickerDialog';
 import { AddTaskModal } from '@/components/add-task';
@@ -253,7 +253,6 @@ export function Focus3Panel({
 
     if (outcome === 'completed') {
       toast.success(`"${title}" completed`);
-      window.dispatchEvent(new CustomEvent('mc:task-completed'));
       fetchFocusItems();
       onRefresh?.();
     } else if (outcome === 'failed') {

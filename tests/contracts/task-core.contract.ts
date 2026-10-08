@@ -5,6 +5,11 @@ import type {
   TaskCoreTaskRow,
   TaskFilterSpec,
 } from '@/lib/tasks/core/contracts';
+import {
+  canonicalizeLegacyRecurrence,
+  type CanonicalRecurrenceRuleV1,
+  type LegacyRecurrenceInput,
+} from '@/lib/recurrence/canonical';
 
 /**
  * Shared, backend-neutral contract suite for the task-core persistence
@@ -32,6 +37,7 @@ export interface SeedTask {
   createdAt?: string;
   updatedAt?: string;
   completedAt?: string | null;
+  deletedAt?: string | null;
   parentId?: string | null;
   depth?: number;
   isChecklistItem?: boolean;
@@ -211,8 +217,28 @@ export interface TaskCoreContractHarness {
   listProjectPhaseIds(taskId: string): Promise<string[]>;
   listIngestSuppressions(): Promise<Array<{ connectorInstanceId: string; sourceId: string }>>;
   listAttachmentTaskIds(): Promise<string[]>;
+  listRecurrenceOccurrences(): Promise<Array<{
+    occurrenceId: string;
+    taskId: string;
+    generatedFromTaskId: string | null;
+    seriesId: string;
+    ruleRevisionId: string;
+    effectiveKind: string;
+    effectiveValue: string;
+    timezoneId: string;
+    connectorInstanceId: string | null;
+  }>>;
+  listRecurrenceBackfillDecisions(): Promise<Array<{
+    occurrenceId: string;
+    decision: string;
+    reason: string;
+    taskId: string | null;
+    supersededByOccurrenceId: string | null;
+    decidedAt: string;
+  }>>;
   listMyDayTaskIds(): Promise<string[]>;
   getTaskUpdatedAt(taskId: string): Promise<string | null>;
+  getTaskDeletedAt(taskId: string): Promise<string | null>;
   countOutboxEvents(stableKey: string): Promise<number>;
   insertTriageItem(input: {
     id: string;
@@ -256,6 +282,115 @@ export function makeSpec(overrides: Partial<TaskFilterSpec> = {}): TaskFilterSpe
 }
 
 const NOW = '2026-08-05T12:00:00.000Z';
+
+function completionRule(stableId = 'task-recurring') {
+  return canonicalizeLegacyRecurrence({
+    recurrence: 'daily',
+    mode: 'completion',
+    startDate: TODAY,
+    localTime: null,
+    timezone: 'UTC',
+    seriesIdentity: { kind: 'mission-control', stableId },
+  });
+}
+
+function scheduleRule(overrides: Partial<LegacyRecurrenceInput> = {}) {
+  return canonicalizeLegacyRecurrence({
+    recurrence: 'daily',
+    mode: 'schedule',
+    startDate: TODAY,
+    localTime: null,
+    timezone: 'UTC',
+    seriesIdentity: { kind: 'mission-control', stableId: 'projected-series' },
+    ...overrides,
+  });
+}
+
+function occurrenceRequest(
+  taskId: string,
+  rule: CanonicalRecurrenceRuleV1,
+  input: {
+    localDate?: string;
+    instant?: string | null;
+    occurrenceNumber?: number | null;
+  } = {},
+) {
+  const connectorIdentity = rule.series.identity.kind === 'connector'
+    ? rule.series.identity
+    : null;
+  const task = {
+    ...writableTask(taskId),
+    sourceId: connectorIdentity ? `${connectorIdentity.connectorType}:${taskId}` : `local:${taskId}`,
+    connectorType: connectorIdentity?.connectorType ?? 'local',
+    connectorInstanceId: connectorIdentity?.connectorInstanceId ?? 'local',
+    dueDate: input.instant ?? input.localDate ?? WEEK,
+  };
+  return {
+    rule,
+    occurrence: {
+      localDate: input.localDate ?? WEEK,
+      instant: input.instant ?? null,
+      occurrenceNumber: input.occurrenceNumber ?? 1,
+      anchor: { kind: 'schedule' as const, startDate: TODAY },
+    },
+    task,
+    tagIds: [],
+    projectIds: [],
+    schedule: {
+      taskId,
+      scheduledDate: input.localDate ?? WEEK,
+      scheduledTime: null,
+      estimatedDuration: null,
+      isTimeBlocked: false,
+      recurrence: 'FREQ=DAILY',
+      recurrenceMode: 'schedule' as const,
+    },
+    event: {
+      stableKey: `task-created:${taskId}`,
+      type: 'task.created' as const,
+      timestamp: task.createdAt,
+      payload: { taskId },
+    },
+  };
+}
+
+function backfillRequest(
+  rule: CanonicalRecurrenceRuleV1,
+  input: {
+    startInclusive?: string;
+    endExclusive?: string;
+    asOf?: string;
+    decidedAt?: string;
+  } = {},
+) {
+  return {
+    rule,
+    range: {
+      kind: 'local-date' as const,
+      startInclusive: input.startInclusive ?? TODAY,
+      endExclusive: input.endExclusive ?? '2026-08-18',
+    },
+    asOf: {
+      kind: 'local-date' as const,
+      value: input.asOf ?? '2026-08-18',
+    },
+    decidedAt: input.decidedAt ?? '2026-08-18T12:00:00.000Z',
+    materializationFor(occurrence: { localDate: string; instant: string | null }) {
+      const request = occurrenceRequest(
+        `backfill-${occurrence.localDate}`,
+        rule,
+        { localDate: occurrence.localDate, instant: occurrence.instant },
+      );
+      return {
+        task: request.task,
+        tagIds: request.tagIds,
+        projectIds: request.projectIds,
+        schedule: request.schedule,
+        event: request.event,
+      };
+    },
+  };
+}
 
 function baseTasks(): SeedTask[] {
   return [
@@ -560,7 +695,7 @@ export function describeTaskCoreContract(
           .map((task) => task.id)).toHaveLength(1);
       });
 
-      it('orders subtasks by creation time and stable id tie-breaker', async () => {
+      it('appends new subtasks and atomically reorders an exact sibling set', async () => {
         await harness.insertTasks([{ id: 'ordered-parent' }]);
         const repository = harness.persistence.ancillary;
         for (const task of [
@@ -588,10 +723,35 @@ export function describeTaskCoreContract(
           });
         }
         await expect(repository.listSubtasks('ordered-parent')).resolves.toEqual([
-          expect.objectContaining({ id: 'ordered-a' }),
-          expect.objectContaining({ id: 'ordered-b' }),
-          expect.objectContaining({ id: 'ordered-c' }),
+          expect.objectContaining({ id: 'ordered-c', siblingOrder: 0 }),
+          expect.objectContaining({ id: 'ordered-b', siblingOrder: 1 }),
+          expect.objectContaining({ id: 'ordered-a', siblingOrder: 2 }),
         ]);
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-c', 'ordered-b'],
+          expectedRevision: 0,
+        })).resolves.toEqual({ kind: 'reordered', revision: 1 });
+        await expect(repository.listSubtasks('ordered-parent')).resolves.toEqual([
+          expect.objectContaining({ id: 'ordered-a', siblingOrder: 0 }),
+          expect.objectContaining({ id: 'ordered-c', siblingOrder: 1 }),
+          expect.objectContaining({ id: 'ordered-b', siblingOrder: 2 }),
+        ]);
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-b', 'ordered-c'],
+          expectedRevision: 0,
+        })).resolves.toEqual({ kind: 'revision-conflict', currentRevision: 1 });
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-b', 'not-a-child'],
+          expectedRevision: 1,
+        })).resolves.toEqual({ kind: 'invalid-children' });
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-a', 'ordered-c'],
+          expectedRevision: 1,
+        })).resolves.toEqual({ kind: 'invalid-children' });
       });
 
       it('normalizes concurrent tag mutations by slug and keeps links idempotent', async () => {
@@ -846,6 +1006,395 @@ export function describeTaskCoreContract(
       });
     });
 
+    describe('recurrence occurrence materialization', () => {
+      it('atomically elects one task across replay and concurrent writers', async () => {
+        const rule = scheduleRule();
+        const [first, second] = await Promise.all([
+          harness.persistence.occurrences.materializeOccurrence(
+            occurrenceRequest('occurrence-writer-a', rule),
+          ),
+          harness.persistence.occurrences.materializeOccurrence(
+            occurrenceRequest('occurrence-writer-b', rule),
+          ),
+        ]);
+
+        expect([first.kind, second.kind].sort()).toEqual(['created', 'existing']);
+        expect(first.taskId).toBe(second.taskId);
+        expect(await harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-replay', rule),
+        )).toMatchObject({
+          kind: 'existing',
+          taskId: first.taskId,
+        });
+        expect((await harness.listTaskIds()).filter(
+          (id) => id.startsWith('occurrence-writer-'),
+        )).toEqual([first.taskId]);
+        expect(await harness.listRecurrenceOccurrences()).toHaveLength(1);
+      });
+
+      it('rolls back a claim when candidate persistence fails so a partial retry can win', async () => {
+        const rule = scheduleRule({ seriesIdentity: {
+          kind: 'mission-control',
+          stableId: 'partial-retry-series',
+        } });
+        const mismatched = occurrenceRequest('occurrence-mismatched', rule);
+        await expect(harness.persistence.occurrences.materializeOccurrence({
+          ...mismatched,
+          schedule: { ...mismatched.schedule, scheduledDate: TODAY },
+        })).rejects.toThrow('schedule must match');
+        expect(await harness.listRecurrenceOccurrences()).toEqual([]);
+
+        await harness.insertTasks([{ id: 'occurrence-duplicate-task' }]);
+
+        await expect(harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-duplicate-task', rule),
+        )).rejects.toThrow();
+        expect(await harness.listRecurrenceOccurrences()).toEqual([]);
+
+        await expect(harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-retry-task', rule),
+        )).resolves.toMatchObject({
+          kind: 'created',
+          taskId: 'occurrence-retry-task',
+        });
+      });
+
+      it('separates rule revisions, instant identities, and connector instances', async () => {
+        const daily = scheduleRule();
+        const weekly = scheduleRule({ recurrence: 'weekly' });
+        const timed = scheduleRule({
+          localTime: '09:00',
+          timezone: 'America/New_York',
+        });
+        await harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-daily', daily),
+        );
+        await harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-weekly', weekly),
+        );
+        await harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-timed', timed, {
+            instant: '2026-08-17T13:00:00.000Z',
+          }),
+        );
+
+        for (const connectorInstanceId of ['planner-a', 'planner-b']) {
+          const connectorRule = scheduleRule({
+            seriesIdentity: {
+              kind: 'connector',
+              connectorType: 'microsoft-planner',
+              connectorInstanceId,
+              externalSeriesId: 'provider-series',
+              stability: 'provider',
+            },
+            source: {
+              owner: 'connector',
+              connectorType: 'microsoft-planner',
+              connectorInstanceId,
+              support: { status: 'supported', reasons: [] },
+              raw: { recurrence: 'daily' },
+            },
+          });
+          await harness.persistence.occurrences.materializeOccurrence(
+            occurrenceRequest(`occurrence-${connectorInstanceId}`, connectorRule),
+          );
+        }
+
+        const rows = await harness.listRecurrenceOccurrences();
+        expect(rows).toHaveLength(5);
+        expect(new Set(rows
+          .filter((row) => row.taskId === 'occurrence-daily' || row.taskId === 'occurrence-weekly')
+          .map((row) => row.ruleRevisionId)).size).toBe(2);
+        expect(rows).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            taskId: 'occurrence-timed',
+            effectiveKind: 'instant',
+            effectiveValue: '2026-08-17T13:00:00.000Z',
+            timezoneId: 'America/New_York',
+          }),
+          expect.objectContaining({
+            taskId: 'occurrence-planner-a',
+            connectorInstanceId: 'planner-a',
+          }),
+          expect.objectContaining({
+            taskId: 'occurrence-planner-b',
+            connectorInstanceId: 'planner-b',
+          }),
+        ]));
+        const connectorSeries = rows
+          .filter((row) => row.connectorInstanceId !== null)
+          .map((row) => row.seriesId);
+        expect(new Set(connectorSeries).size).toBe(2);
+      });
+
+      it('retains the logical occurrence claim after task deletion', async () => {
+        const rule = scheduleRule({
+          seriesIdentity: {
+            kind: 'connector',
+            connectorType: 'scout',
+            connectorInstanceId: 'scout-durable',
+            externalSeriesId: 'durable-claim-series',
+            stability: 'provider',
+          },
+          source: {
+            owner: 'connector',
+            connectorType: 'scout',
+            connectorInstanceId: 'scout-durable',
+            support: { status: 'supported', reasons: [] },
+            raw: { recurrence: 'daily' },
+          },
+        });
+        const created = await harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-to-delete', rule),
+        );
+        expect(await harness.persistence.scoutDeletion.hardDeleteScoutTask(created.taskId))
+          .toMatchObject({ kind: 'deleted' });
+        expect(await harness.listTaskIds()).not.toContain(created.taskId);
+
+        await expect(harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-after-delete', rule),
+        )).resolves.toMatchObject({
+          kind: 'existing',
+          taskId: created.taskId,
+        });
+        expect(await harness.listTaskIds()).not.toContain('occurrence-after-delete');
+        expect(await harness.listRecurrenceOccurrences()).toHaveLength(1);
+      });
+
+      it('backfills a range without recreating collapsed identities on replay or concurrency', async () => {
+        const rule = scheduleRule({
+          seriesIdentity: { kind: 'mission-control', stableId: 'backfill-replay-series' },
+        });
+        const request = backfillRequest(rule, {
+          endExclusive: '2026-08-15',
+          asOf: '2026-08-14',
+        });
+        const [first, concurrent] = await Promise.all([
+          harness.persistence.occurrences.backfillRange(request),
+          harness.persistence.occurrences.backfillRange({
+            ...request,
+            decidedAt: '2026-08-18T13:00:00.000Z',
+          }),
+        ]);
+
+        expect(first).toEqual(concurrent);
+        expect(first).toMatchObject({
+          status: 'success',
+          decisions: [
+            { decision: 'collapsed', taskId: null },
+            { decision: 'collapsed', taskId: null },
+            { decision: 'collapsed', taskId: null },
+            { decision: 'collapsed', taskId: null },
+            { decision: 'materialized', taskId: 'backfill-2026-08-14' },
+          ],
+        });
+        const replay = await harness.persistence.occurrences.backfillRange({
+          ...request,
+          decidedAt: '2026-08-19T12:00:00.000Z',
+        });
+        expect(replay).toEqual(first);
+        expect(await harness.listRecurrenceOccurrences()).toHaveLength(1);
+        expect(await harness.listRecurrenceBackfillDecisions()).toHaveLength(5);
+      });
+
+      it('preserves touched, completed, and in-progress occurrences while superseding untouched pileup', async () => {
+        const rule = scheduleRule({
+          seriesIdentity: { kind: 'mission-control', stableId: 'backfill-touch-series' },
+        });
+        const existing = [
+          { date: '2026-08-10', status: 'done', description: null },
+          { date: '2026-08-11', status: 'in_progress', description: null },
+          { date: '2026-08-12', status: 'todo', description: 'Durable note' },
+          { date: '2026-08-13', status: 'todo', description: null },
+          { date: '2026-08-14', status: 'todo', description: null },
+          { date: '2026-08-15', status: 'todo', description: null },
+          { date: '2026-08-16', status: 'todo', description: null },
+        ];
+        for (const item of existing) {
+          const request = occurrenceRequest(`touch-${item.date}`, rule, {
+            localDate: item.date,
+          });
+          await harness.persistence.occurrences.materializeOccurrence({
+            ...request,
+            task: {
+              ...request.task,
+              status: item.status,
+              description: item.description,
+              updatedAt: item.date === '2026-08-16'
+                ? '2026-08-16T13:00:00.000Z'
+                : request.task.updatedAt,
+            },
+          });
+        }
+        await harness.insertAttachments([{
+          id: 'touch-attachment',
+          taskId: 'touch-2026-08-13',
+          name: 'evidence.txt',
+          size: 1,
+        }]);
+        await harness.insertProjects([{ id: 'touch-project', name: 'Touch project' }]);
+        await harness.insertTaskProjects([{
+          taskId: 'touch-2026-08-14',
+          projectId: 'touch-project',
+        }]);
+        const historyContext = await harness.persistence.mutations.getTaskWriteContext(
+          'touch-2026-08-14',
+        );
+        expect(historyContext).not.toBeNull();
+        if (!historyContext) return;
+        await expect(harness.persistence.mutations.mutateTask({
+          taskId: 'touch-2026-08-14',
+          expectedUpdatedAt: historyContext.task.updatedAt,
+          expectedStatusForTerminalTransition: null,
+          now: historyContext.task.updatedAt,
+          patch: { planningHorizon: 'next' },
+          planningHistory: {
+            previousValue: null,
+            newValue: 'next',
+          },
+        })).resolves.toMatchObject({ kind: 'committed' });
+        await harness.persistence.timeActivities.start({
+          taskId: 'touch-2026-08-15',
+          commandId: 'touch-time-activity',
+          serverNow: '2026-08-15T12:00:00.000Z',
+          mode: 'focus',
+          targetSeconds: 60,
+        });
+
+        const result = await harness.persistence.occurrences.backfillRange(
+          backfillRequest(rule, {
+            endExclusive: '2026-08-18',
+            asOf: '2026-08-18',
+          }),
+        );
+        expect(result.status).toBe('success');
+        if (result.status !== 'success') return;
+        expect(result.decisions.map(({ decision, reason }) => [decision, reason])).toEqual([
+          ['preserved', 'protected-status:done'],
+          ['preserved', 'protected-status:in_progress'],
+          ['preserved', 'touched:description'],
+          ['preserved', 'touched:attachment'],
+          ['preserved', 'touched:history,planning-membership'],
+          ['preserved', 'touched:time-activity'],
+          ['preserved', 'touched:field-edit'],
+          ['materialized', 'current-actionable'],
+        ]);
+        for (const item of existing) {
+          expect(await harness.getTaskDeletedAt(`touch-${item.date}`)).toBeNull();
+        }
+      });
+
+      it('supersedes only untouched local missed tasks and never synthesizes connector occurrences', async () => {
+        const localRule = scheduleRule({
+          seriesIdentity: { kind: 'mission-control', stableId: 'backfill-supersede-series' },
+        });
+        for (const date of ['2026-08-10', '2026-08-11']) {
+          await harness.persistence.occurrences.materializeOccurrence(
+            occurrenceRequest(`supersede-${date}`, localRule, { localDate: date }),
+          );
+        }
+        const local = await harness.persistence.occurrences.backfillRange(
+          backfillRequest(localRule, {
+            endExclusive: '2026-08-13',
+            asOf: '2026-08-13',
+          }),
+        );
+        expect(local).toMatchObject({
+          status: 'success',
+          decisions: [
+            { decision: 'superseded', taskId: 'supersede-2026-08-10' },
+            { decision: 'superseded', taskId: 'supersede-2026-08-11' },
+            { decision: 'materialized', taskId: 'backfill-2026-08-12' },
+          ],
+        });
+        expect(await harness.getTaskDeletedAt('supersede-2026-08-10'))
+          .toBe('2026-08-18T12:00:00.000Z');
+
+        const connectorRule = scheduleRule({
+          seriesIdentity: {
+            kind: 'connector',
+            connectorType: 'scout',
+            connectorInstanceId: 'connector-backfill',
+            externalSeriesId: 'series',
+            stability: 'provider',
+          },
+          source: {
+            owner: 'connector',
+            connectorType: 'scout',
+            connectorInstanceId: 'connector-backfill',
+            support: { status: 'supported', reasons: [] },
+            raw: {},
+          },
+        });
+        const existing = occurrenceRequest('connector-existing', connectorRule, {
+          localDate: '2026-08-10',
+        });
+        await harness.persistence.occurrences.materializeOccurrence(existing);
+        const connector = await harness.persistence.occurrences.backfillRange(
+          backfillRequest(connectorRule, {
+            endExclusive: '2026-08-13',
+            asOf: '2026-08-13',
+          }),
+        );
+        expect(connector).toMatchObject({
+          status: 'success',
+          decisions: [
+            { decision: 'preserved', taskId: 'connector-existing' },
+            { decision: 'connector-owned-missing', taskId: null },
+            { decision: 'connector-owned-missing', taskId: null },
+          ],
+        });
+        expect(await harness.getTaskDeletedAt('connector-existing')).toBeNull();
+        expect(await harness.persistence.scoutDeletion.hardDeleteScoutTask('connector-existing'))
+          .toMatchObject({ kind: 'deleted' });
+        expect((await harness.listRecurrenceBackfillDecisions()).find(
+          ({ reason }) => reason === 'connector-owned-existing',
+        )?.taskId).toBeNull();
+      });
+
+      it('rejects projection work bounds before materialization', async () => {
+        const rangeBound = await harness.persistence.occurrences.backfillRange({
+          ...backfillRequest(scheduleRule(), {
+            startInclusive: '2020-01-01',
+            endExclusive: '2031-01-01',
+            asOf: '2031-01-01',
+          }),
+          limits: { maxOccurrences: 2 },
+        });
+        expect(rangeBound).toEqual({
+          status: 'bounds-exceeded',
+          bound: 'range',
+          maximum: 3_660,
+        });
+        const occurrenceBound = await harness.persistence.occurrences.backfillRange({
+          ...backfillRequest(scheduleRule(), {
+            startInclusive: '2020-01-01',
+            endExclusive: '2030-01-01',
+            asOf: '2030-01-01',
+          }),
+          limits: { maxOccurrences: 2 },
+        });
+        expect(occurrenceBound).toEqual({
+          status: 'bounds-exceeded',
+          bound: 'occurrences',
+          maximum: 2,
+        });
+        const iterationBound = await harness.persistence.occurrences.backfillRange({
+          ...backfillRequest(scheduleRule(), {
+            endExclusive: '2026-08-12',
+            asOf: '2026-08-12',
+          }),
+          limits: { maxIterations: 1 },
+        });
+        expect(iterationBound).toEqual({
+          status: 'bounds-exceeded',
+          bound: 'iterations',
+          maximum: 1,
+        });
+        expect(await harness.listRecurrenceBackfillDecisions()).toEqual([]);
+      });
+    });
+
     describe('collection, detail, and write transactions', () => {
       it('hydrates collection/detail data and treats search metacharacters literally', async () => {
         await harness.insertTasks([
@@ -880,6 +1429,10 @@ export function describeTaskCoreContract(
           projectIds: ['project-1'],
         });
         expect(collection.rows[0].tags.map((tag) => tag.id)).toEqual(['tag-api']);
+        expect(collection.facetCounts).toEqual({
+          priorities: { none: 1 },
+          statuses: { todo: 1 },
+        });
 
         const detail = await harness.persistence.details.getTaskDetail('task-literal', TODAY);
         expect(detail).toMatchObject({
@@ -1087,6 +1640,16 @@ export function describeTaskCoreContract(
             scheduledDate: WEEK,
             scheduledTime: null,
             reminderAt: null,
+            reminderNagInterval: null,
+            reminderNagStopAt: null,
+            reminderNagSeriesId: null,
+            rule: completionRule(),
+            occurrence: {
+              localDate: WEEK,
+              instant: null,
+              occurrenceNumber: null,
+              anchor: { kind: 'completion', completedAt: firstNow },
+            },
             metadata: { recurrence: 'FREQ=DAILY' },
           },
         });
@@ -1099,6 +1662,15 @@ export function describeTaskCoreContract(
         expect(await harness.listProjectPhaseIds('task-successor')).toEqual(['phase-recurring']);
         expect(await harness.listTaskDependencyIds('task-successor')).toEqual(['task-prerequisite']);
         expect(await harness.listAttachmentTaskIds()).toContain('task-successor');
+        expect(await harness.listRecurrenceOccurrences()).toEqual([
+          expect.objectContaining({
+            taskId: 'task-successor',
+            generatedFromTaskId: 'task-recurring',
+            effectiveKind: 'local-date',
+            effectiveValue: WEEK,
+            timezoneId: 'UTC',
+          }),
+        ]);
 
         const second = await harness.persistence.mutations.mutateTask({
           taskId: 'task-recurring',
@@ -1112,6 +1684,16 @@ export function describeTaskCoreContract(
             scheduledDate: WEEK,
             scheduledTime: null,
             reminderAt: null,
+            reminderNagInterval: null,
+            reminderNagStopAt: null,
+            reminderNagSeriesId: null,
+            rule: completionRule(),
+            occurrence: {
+              localDate: WEEK,
+              instant: null,
+              occurrenceNumber: null,
+              anchor: { kind: 'completion', completedAt: firstNow },
+            },
             metadata: {},
           },
         });
@@ -1120,6 +1702,7 @@ export function describeTaskCoreContract(
           recurrenceNextTaskId: 'task-successor',
         });
         expect(await harness.listTaskIds()).not.toContain('task-successor-duplicate');
+        expect(await harness.listRecurrenceOccurrences()).toHaveLength(1);
       });
 
       it('deletes a local task atomically and rejects a stale deletion', async () => {
@@ -1135,8 +1718,28 @@ export function describeTaskCoreContract(
           expectedUpdatedAt: NOW,
           mode: 'local-delete',
           now: NOW,
-        })).toEqual({ kind: 'committed', action: 'deleted', taskVersion: null });
+        })).toEqual({ kind: 'committed', action: 'deleted', taskVersion: NOW });
         expect(await harness.persistence.details.getTaskDetail('task-delete', TODAY)).toBeNull();
+        expect(await harness.getTaskDeletedAt('task-delete')).toBe(NOW);
+        expect(await harness.persistence.removals.restoreTask(
+          'task-delete',
+          '2026-08-05T12:01:00.000Z',
+        )).toMatchObject({ kind: 'restored', task: { id: 'task-delete' } });
+        expect(await harness.persistence.details.getTaskDetail('task-delete', TODAY))
+          .toMatchObject({ task: { id: 'task-delete' } });
+      });
+
+      it('purges only soft-deleted tasks older than the retention cutoff', async () => {
+        await harness.insertTasks([
+          { id: 'task-old-delete', deletedAt: '2026-07-01T00:00:00.000Z' },
+          { id: 'task-new-delete', deletedAt: '2026-08-04T00:00:00.000Z' },
+          { id: 'task-active' },
+        ]);
+
+        expect(await harness.persistence.removals.purgeDeletedBefore(
+          '2026-08-01T00:00:00.000Z',
+        )).toEqual(['task-old-delete']);
+        expect(await harness.listTaskIds()).toEqual(['task-active', 'task-new-delete']);
       });
 
       it('fences remote deletion finalization by both lease and task version', async () => {
@@ -1182,6 +1785,14 @@ export function describeTaskCoreContract(
       it('an empty spec matches every visible task', async () => {
         const count = await harness.persistence.queries.countTasks(makeSpec());
         expect(count).toBe(4);
+      });
+
+      it('excludes soft-deleted tasks from canonical queries', async () => {
+        await harness.insertTasks([{
+          id: 'task-deleted',
+          deletedAt: '2026-08-05T12:00:00.000Z',
+        }]);
+        expect(await harness.persistence.queries.countTasks(makeSpec())).toBe(4);
       });
 
       it('applies the default active disposition without dropping other rows', async () => {
@@ -1340,6 +1951,35 @@ export function describeTaskCoreContract(
         )).toBe(2);
       });
 
+      it('finds local schedules and provider-owned recurrence metadata', async () => {
+        await harness.insertTasks([
+          {
+            ...writableTask('local-recurring'),
+            metadata: {},
+          },
+          {
+            ...writableTask('provider-recurring'),
+            connectorType: 'microsoft-todo',
+            connectorInstanceId: 'todo-1',
+            sourceId: 'list:provider-recurring',
+            metadata: { recurrence: 'monthly' },
+          },
+        ]);
+        await harness.insertTaskSchedules([{
+          taskId: 'local-recurring',
+          scheduledDate: TODAY,
+          recurrence: 'every 4 days',
+          recurrenceMode: 'completion',
+        }]);
+
+        const recurring = makeSpec({ quickFilter: 'recurring' });
+        expect(await harness.persistence.queries.countTasks(
+          recurring,
+          { includeQuickFilter: true },
+        )).toBe(2);
+        expect((await harness.persistence.queries.getStats(makeSpec())).recurring).toBe(2);
+      });
+
       it('computes every stat counter over the same base filter', async () => {
         const stats = await harness.persistence.queries.getStats(makeSpec());
         expect(stats.totalOpen).toBe(3);
@@ -1351,6 +1991,7 @@ export function describeTaskCoreContract(
         expect(stats.myDay).toBe(1);
         expect(stats.waiting).toBe(1);
         expect(stats.recentlyClosed).toBe(1);
+        expect(stats.recurring).toBe(0);
       });
 
       it('reads GitHub identity evidence only from enabled, non-deleted connectors', async () => {
@@ -1386,6 +2027,60 @@ export function describeTaskCoreContract(
 
       it('returns an empty inbox list configuration when the setting is absent', async () => {
         expect(await harness.persistence.filterInputs.listInboxListEntries()).toEqual([]);
+      });
+
+      it('includes the enabled Microsoft To Do default list in Inbox automatically', async () => {
+        await harness.insertConnectors([
+          { id: 'ms-1', type: 'microsoft-todo' },
+          { id: 'ms-disabled', type: 'microsoft-todo', enabled: false },
+        ]);
+        await harness.insertSourceLists([
+          {
+            id: 'sl-tasks',
+            connectorInstanceId: 'ms-1',
+            sourceId: 'tasks-list',
+            name: 'Renamed Tasks',
+            wellKnownListName: 'defaultList',
+          },
+          {
+            id: 'sl-disabled',
+            connectorInstanceId: 'ms-disabled',
+            sourceId: 'disabled-tasks-list',
+            name: 'Tasks',
+            wellKnownListName: 'defaultList',
+          },
+        ]);
+        await harness.insertTasks([
+          {
+            ...writableTask('todo-default-list'),
+            connectorType: 'microsoft-todo',
+            connectorInstanceId: 'ms-1',
+            sourceId: 'mstodo:default-list-task',
+            sourceListId: 'tasks-list',
+            sourceListName: 'Renamed Tasks',
+          },
+          {
+            ...writableTask('todo-other-instance'),
+            connectorType: 'microsoft-todo',
+            connectorInstanceId: 'other-ms-instance',
+            sourceId: 'mstodo:other-instance-task',
+            sourceListId: 'tasks-list',
+            sourceListName: 'Renamed Tasks',
+          },
+        ]);
+
+        expect(await harness.persistence.filterInputs.listInboxListEntries()).toEqual([
+          {
+            connectorType: 'microsoft-todo',
+            connectorInstanceId: 'ms-1',
+            sourceListId: 'tasks-list',
+          },
+        ]);
+        expect(await harness.persistence.queries.countTasks(
+          makeSpec({ quickFilter: 'inbox' }),
+          { includeQuickFilter: true },
+        )).toBe(3);
+        expect((await harness.persistence.queries.getStats(makeSpec())).inbox).toBe(3);
       });
 
       it('counts tasks per connector type over the base filter', async () => {
@@ -2768,11 +3463,29 @@ export function describeTaskCoreContract(
       });
 
       it('searches relationship candidates with SQLite LIKE wildcard and binary ordering', async () => {
+        await harness.insertConnectors([{
+          id: 'deleted-candidate-connector',
+          type: 'test',
+          deletedAt: NOW,
+        }]);
         await harness.insertTasks([
           { id: 'source', title: 'Source task' },
           { id: 'candidate-b', title: 'alpha task' },
           { id: 'candidate-a', title: 'Alpha task' },
           { id: 'candidate-other', title: 'Other' },
+          { id: 'candidate-deleted', title: 'Alpha deleted', deletedAt: NOW },
+          { id: 'candidate-handled', title: 'Alpha handled', localDisposition: 'handled' },
+          {
+            id: 'candidate-notification',
+            title: 'Alpha notification',
+            connectorType: 'outlook-email',
+          },
+          {
+            id: 'candidate-deleted-connector',
+            title: 'Alpha disconnected',
+            connectorInstanceId: 'deleted-candidate-connector',
+          },
+          { id: 'source-deleted', title: 'Deleted source', deletedAt: NOW },
         ]);
         await harness.insertProjects([{ id: 'project-read', name: 'Read Project' }]);
         await harness.insertTaskProjects([
@@ -2800,14 +3513,38 @@ export function describeTaskCoreContract(
           query: '',
           limit: 20,
         })).toBeNull();
+        expect(await harness.persistence.taskReads.searchRelationshipCandidates({
+          taskId: 'source-deleted',
+          query: '',
+          limit: 20,
+        })).toBeNull();
       });
 
-      it('preserves duplicate candidate visibility and binary assignee ordering', async () => {
+      it('limits duplicate candidates and assignee options to current-visible tasks', async () => {
+        await harness.insertConnectors([{
+          id: 'deleted-read-connector',
+          type: 'test',
+          deletedAt: NOW,
+        }]);
         await harness.insertTasks([
           { id: 'open-a', status: 'todo', assignee: 'alice' },
           { id: 'open-b', status: 'in_progress', assignee: ' Bob ' },
           { id: 'closed', status: 'done', assignee: 'alice' },
           { id: 'blank', status: 'todo', assignee: '   ' },
+          { id: 'soft-deleted', status: 'todo', assignee: 'deleted', deletedAt: NOW },
+          { id: 'handled', status: 'todo', assignee: 'handled', localDisposition: 'handled' },
+          {
+            id: 'notification-only',
+            status: 'todo',
+            assignee: 'notification',
+            connectorType: 'outlook-email',
+          },
+          {
+            id: 'deleted-connector-task',
+            status: 'todo',
+            assignee: 'disconnected',
+            connectorInstanceId: 'deleted-read-connector',
+          },
         ]);
 
         expect((await harness.persistence.taskReads.listDuplicateDetectionTasks({
@@ -2821,6 +3558,11 @@ export function describeTaskCoreContract(
       });
 
       it('computes scalar and many-to-many groups with canonical visibility', async () => {
+        await harness.insertConnectors([{
+          id: 'group-deleted-connector',
+          type: 'test',
+          deletedAt: NOW,
+        }]);
         await harness.insertTasks([
           {
             id: 'group-a',
@@ -2840,6 +3582,18 @@ export function describeTaskCoreContract(
             connectorType: '',
             dueDate: null,
             effort: null,
+          },
+          { id: 'group-deleted', priority: 'critical', deletedAt: NOW },
+          { id: 'group-handled', priority: 'critical', localDisposition: 'handled' },
+          {
+            id: 'group-notification',
+            priority: 'critical',
+            connectorType: 'outlook-email',
+          },
+          {
+            id: 'group-disconnected',
+            priority: 'critical',
+            connectorInstanceId: 'group-deleted-connector',
           },
         ]);
         await harness.insertSourceLists([{
@@ -2873,7 +3627,7 @@ export function describeTaskCoreContract(
         } as const;
         for (const groupBy of Object.keys(expected) as Array<keyof typeof expected>) {
           expect(await harness.persistence.taskReads.getGroupCounts({
-            spec: makeSpec(),
+            spec: makeSpec({ localDispositions: ['active'] }),
             groupBy,
           })).toEqual(expected[groupBy]);
         }
@@ -2900,6 +3654,7 @@ export function describeTaskCoreContract(
             sourceListName: 'Raw List',
           },
           { id: 'queue-closed', status: 'done', priority: 'none' },
+          { id: 'queue-soft-deleted', deletedAt: '2026-08-09T00:00:00.000Z' },
           { id: 'queue-child', parentId: 'queue-a', priority: 'none' },
           { id: 'queue-snoozed', snoozedUntil: '2026-08-11T00:00:00.000Z', priority: 'none' },
           { id: 'queue-skipped', priority: 'none' },
@@ -2966,6 +3721,7 @@ export function describeTaskCoreContract(
           no_effort: 4,
           no_tags: 3,
           no_planning_horizon: 4,
+          no_project: 3,
         });
         const queue = await harness.persistence.taskReads.listQuickSortTasks({
           ...scope,
@@ -3000,6 +3756,61 @@ export function describeTaskCoreContract(
         }));
       });
 
+      it('excludes soft-deleted tasks from every quick-sort mode, counts, and source choices', async () => {
+        const scope = {
+          now: '2026-08-10T12:00:00.000Z',
+          skipCutoff: '2026-08-03T12:00:00.000Z',
+          sourceTypes: [],
+          sourceListId: null,
+          sourceListName: null,
+          connectorInstanceId: null,
+        };
+        await harness.insertTasks([
+          { id: 'live-task', sourceListId: 'live-list', sourceListName: 'Live list' },
+          {
+            id: 'deleted-task',
+            sourceListId: 'deleted-list',
+            sourceListName: 'Deleted list',
+            deletedAt: '2026-08-09T00:00:00.000Z',
+            createdAt: '2026-08-09T00:00:00.000Z',
+          },
+        ]);
+
+        expect(await harness.persistence.details.getTaskDetail('deleted-task', '2026-08-10'))
+          .toBeNull();
+        expect(await harness.persistence.taskReads.getQuickSortCounts(scope)).toEqual({
+          no_priority: 1,
+          quadrant: 1,
+          no_effort: 1,
+          no_tags: 1,
+          no_planning_horizon: 1,
+          no_project: 1,
+        });
+        for (const mode of [
+          'no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon', 'no_project',
+        ] as const) {
+          const queue = await harness.persistence.taskReads.listQuickSortTasks({
+            ...scope, mode, order: 'newest', limit: 1,
+          });
+          expect(queue.map((task) => task.id)).toEqual(['live-task']);
+        }
+        const sources = await harness.persistence.taskReads.listQuickSortSources(scope);
+        expect(sources.rows).toEqual([expect.objectContaining({
+          sourceListId: 'live-list',
+          count: 1,
+        })]);
+        expect(await harness.persistence.taskReads.getQuickSortCounts({
+          ...scope, sourceListId: 'deleted-list',
+        })).toEqual({
+          no_priority: 0,
+          quadrant: 0,
+          no_effort: 0,
+          no_tags: 0,
+          no_planning_horizon: 0,
+          no_project: 0,
+        });
+      });
+
       it('returns deterministic quick-sort suggestion inputs', async () => {
         await harness.insertTasks([
           { id: 'suggestion-task', title: 'Fix bug', priority: 'none' },
@@ -3019,6 +3830,11 @@ export function describeTaskCoreContract(
           name: 'Local',
           rank: 1,
         }]);
+        await harness.insertProjects([{ id: 'suggestion-project', name: 'Suggested Project' }]);
+        await harness.insertTaskProjects([{
+          taskId: 'other-task',
+          projectId: 'suggestion-project',
+        }]);
 
         const inputs = await harness.persistence.taskReads
           .getQuickSortSuggestionInputs(['suggestion-task', 'missing']);
@@ -3032,6 +3848,15 @@ export function describeTaskCoreContract(
         }]);
         expect(inputs.tags.map((tag) => tag.id)).toEqual(['tag-a', 'tag-b']);
         expect(inputs.taskTags).toHaveLength(2);
+        expect(inputs.projectAffinities).toContainEqual(expect.objectContaining({
+          taskId: 'other-task',
+          projectId: 'suggestion-project',
+          projectName: 'Suggested Project',
+        }));
+        expect(inputs.projectAffinities).toContainEqual(expect.objectContaining({
+          taskId: 'suggestion-task',
+          projectId: null,
+        }));
       });
     });
 

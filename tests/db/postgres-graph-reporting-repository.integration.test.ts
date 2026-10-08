@@ -34,7 +34,20 @@ async function pool(): Promise<Pool> {
 }
 
 async function clear(database: Pool): Promise<void> {
-  for (const table of TABLES) await database.query(`DELETE FROM "${table}"`);
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT set_config('mission_control.suppress_task_history', 'on', true)`,
+    );
+    for (const table of TABLES) await client.query(`DELETE FROM "${table}"`);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 afterAll(async () => {

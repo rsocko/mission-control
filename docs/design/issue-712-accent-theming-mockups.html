@@ -1,0 +1,1100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Control — Context Accent Theming Concepts</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #020617;
+      --rail: #0b1120;
+      --surface: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --border: #1e293b;
+      --border-strong: #334155;
+      --text: #f8fafc;
+      --text-2: #94a3b8;
+      --text-3: #8190a6;
+      --blue: #3b82f6;
+      --success: #10b981;
+      --context: #14b8a6;
+      --context-rgb: 20, 184, 166;
+      --context-soft: rgba(var(--context-rgb), .1);
+      --context-mid: rgba(var(--context-rgb), .24);
+      --context-strong: rgba(var(--context-rgb), .72);
+      --frame-size: 1px;
+      --wash-opacity: .04;
+      --backdrop-opacity: 0;
+      --radius: 12px;
+      --ease: cubic-bezier(.2, .8, .2, 1);
+      font-family: Geist, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--bg); }
+    body {
+      margin: 0;
+      min-width: 320px;
+      overflow-x: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, select, input { font: inherit; }
+    button { color: inherit; }
+    button, select, input[type="range"] { cursor: pointer; }
+    button:focus-visible, select:focus-visible, input:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+    ::selection { background: var(--context); color: #06111b; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--rail); }
+    ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; }
+
+    .prototype {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .concept-bar {
+      position: relative;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) auto auto;
+      gap: 18px;
+      align-items: center;
+      min-height: 76px;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      background: #070d1a;
+    }
+    .concept-title { min-width: 0; }
+    .concept-title h1 {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.2;
+      letter-spacing: -.01em;
+    }
+    .concept-title p {
+      margin: 5px 0 0;
+      color: var(--text-3);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .segmented {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--rail);
+    }
+    .segmented button {
+      min-height: 32px;
+      padding: 6px 11px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-3);
+      font-size: 11px;
+      font-weight: 650;
+      transition: background 140ms, color 140ms;
+    }
+    .segmented button:hover { color: var(--text); }
+    .segmented button[aria-pressed="true"] {
+      background: var(--surface-2);
+      color: var(--text);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .28);
+    }
+    .settings-toggle {
+      display: inline-flex;
+      min-height: 36px;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      background: var(--surface);
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .settings-toggle:hover { border-color: var(--context-strong); }
+    .settings-toggle svg { width: 15px; height: 15px; }
+
+    .app-frame {
+      display: grid;
+      grid-template-columns: 216px minmax(0, 1fr) 0;
+      min-height: 0;
+      transition: grid-template-columns 240ms var(--ease);
+    }
+    .app-frame.settings-open { grid-template-columns: 216px minmax(0, 1fr) 342px; }
+
+    .rail {
+      position: relative;
+      z-index: 4;
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
+      background: var(--rail);
+    }
+    .brand {
+      display: flex;
+      height: 58px;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 760;
+      letter-spacing: -.01em;
+    }
+    .mark {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      place-items: center;
+      border-radius: 7px;
+      background: var(--blue);
+      color: white;
+      font-size: 11px;
+    }
+    .rail-nav { padding: 10px 8px; }
+    .nav-label {
+      margin: 14px 8px 6px;
+      color: var(--text-3);
+      font-size: 9px;
+      font-weight: 760;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .nav-item {
+      position: relative;
+      display: flex;
+      width: 100%;
+      min-height: 36px;
+      align-items: center;
+      gap: 9px;
+      margin: 2px 0;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-2);
+      text-align: left;
+      font-size: 12px;
+    }
+    .nav-item:hover { background: var(--surface-2); color: var(--text); }
+    .nav-item.active { background: var(--surface-2); color: var(--text); }
+    .nav-item.active::before {
+      position: absolute;
+      left: 0;
+      width: 3px;
+      height: 18px;
+      border-radius: 0 3px 3px 0;
+      background: var(--context);
+      content: "";
+    }
+    .nav-icon {
+      display: grid;
+      width: 18px;
+      place-items: center;
+      color: var(--text-3);
+    }
+    .nav-svg { width: 15px; height: 15px; }
+    .project-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .nav-item.active .nav-icon { color: var(--context); }
+    .nav-count {
+      margin-left: auto;
+      color: var(--text-3);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .rail-footer {
+      margin-top: auto;
+      padding: 10px 8px 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .workspace {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      background: var(--bg);
+      isolation: isolate;
+    }
+    .workspace::before {
+      position: fixed;
+      z-index: -2;
+      inset: 76px 0 0 216px;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(var(--context-rgb), var(--wash-opacity)), transparent 38%),
+        var(--bg);
+      content: "";
+      transition: background 220ms var(--ease);
+    }
+    .workspace::after {
+      position: fixed;
+      z-index: 10;
+      inset: 76px 0 0 216px;
+      pointer-events: none;
+      border: var(--frame-size) solid var(--context);
+      opacity: .86;
+      content: "";
+      transition: opacity 220ms var(--ease);
+    }
+    .app-frame.settings-open .workspace::after { right: 342px; }
+
+    .backdrop-layer {
+      position: fixed;
+      z-index: 0;
+      inset: 76px 0 0 216px;
+      pointer-events: none;
+      background-color: var(--bg);
+      background-position: center top;
+      background-repeat: no-repeat;
+      background-size: cover;
+      opacity: var(--backdrop-opacity);
+      transition: opacity 260ms var(--ease), filter 260ms var(--ease);
+    }
+    .app-frame.settings-open .backdrop-layer { right: 342px; }
+    .backdrop-layer[data-backdrop="aurora"] {
+      background-image:
+        radial-gradient(ellipse at 15% 2%, rgba(var(--context-rgb), .82) 0, rgba(var(--context-rgb), .24) 27%, transparent 52%),
+        radial-gradient(ellipse at 82% 8%, rgba(59, 130, 246, .5) 0, rgba(59, 130, 246, .12) 26%, transparent 50%),
+        linear-gradient(155deg, #071628 0%, #06101e 44%, var(--bg) 78%);
+    }
+    .backdrop-layer[data-backdrop="ridge"] {
+      background-image:
+        linear-gradient(155deg, rgba(var(--context-rgb), .32), transparent 58%),
+        url("issue-712-backdrop-ridge.svg");
+    }
+    .backdrop-layer[data-backdrop="nebula"] {
+      background-image:
+        radial-gradient(circle at 72% 18%, rgba(var(--context-rgb), .72), transparent 24%),
+        radial-gradient(circle at 40% 72%, rgba(168, 85, 247, .34), transparent 30%),
+        radial-gradient(circle at 8% 22%, rgba(6, 182, 212, .3), transparent 28%),
+        linear-gradient(135deg, #081326 0%, #020617 72%);
+    }
+    .backdrop-layer[data-backdrop="none"] { background: var(--bg); }
+
+    .page-header {
+      position: sticky;
+      z-index: 3;
+      top: 0;
+      border-bottom: 1px solid var(--border);
+      background: rgba(11, 17, 32, .96);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, .18);
+    }
+    .header-main {
+      display: flex;
+      min-height: 61px;
+      align-items: center;
+      gap: 12px;
+      padding: 10px clamp(18px, 3vw, 34px);
+    }
+    .project-glyph {
+      position: relative;
+      display: grid;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 auto;
+      place-items: center;
+      border: 1px solid color-mix(in srgb, var(--context) 28%, var(--border));
+      border-radius: 8px;
+      background: var(--context-soft);
+      color: var(--context);
+      font-size: 15px;
+    }
+    .title-stack { min-width: 0; flex: 1; }
+    .title-stack h2 {
+      margin: 0;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 680;
+      letter-spacing: -.015em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .context-path { margin-top: 3px; color: var(--text-3); font-size: 10px; }
+    .metrics {
+      display: flex;
+      gap: 16px;
+      color: var(--text-3);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .metrics strong { color: var(--text); font-weight: 700; }
+    .page-tabs {
+      display: flex;
+      gap: 3px;
+      min-height: 35px;
+      padding: 0 clamp(18px, 3vw, 34px);
+    }
+    .page-tab {
+      position: relative;
+      padding: 7px 10px 9px;
+      border: 0;
+      background: transparent;
+      color: var(--text-3);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .page-tab.active { color: var(--text); }
+    .page-tab.active::after {
+      position: absolute;
+      right: 8px;
+      bottom: -1px;
+      left: 8px;
+      height: 2px;
+      background: var(--context);
+      content: "";
+    }
+
+    .content {
+      position: relative;
+      z-index: 1;
+      width: min(1120px, 100%);
+      margin: 0 auto;
+      padding: 24px clamp(18px, 3vw, 34px) 90px;
+    }
+    .context-strip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 38px;
+      margin-bottom: 18px;
+      padding: 7px 10px;
+      border: 1px solid color-mix(in srgb, var(--context) 22%, var(--border));
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--context) 6%, var(--rail));
+      color: var(--text-2);
+      font-size: 11px;
+    }
+    .context-strip .line {
+      width: 26px;
+      height: 2px;
+      background: var(--context);
+    }
+    .context-strip strong { color: var(--text); font-weight: 650; }
+    .context-strip span:last-child { margin-left: auto; color: var(--text-3); }
+
+    .overview-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(250px, .78fr);
+      gap: 16px;
+    }
+    .section {
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+    }
+    .section + .section { margin-top: 26px; }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 11px;
+    }
+    .section-head h3 {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: -.01em;
+    }
+    .section-head span, .subtle { color: var(--text-3); font-size: 10px; }
+    .task-list {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(17, 24, 39, .9);
+    }
+    .task {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      min-height: 48px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .task:last-child { border-bottom: 0; }
+    .task:hover { background: rgba(30, 41, 59, .58); }
+    .check {
+      width: 15px;
+      height: 15px;
+      border: 1px solid var(--border-strong);
+      border-radius: 4px;
+    }
+    .task-title { font-size: 12px; }
+    .task-meta { margin-top: 3px; color: var(--text-3); font-size: 9px; }
+    .pill {
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--text-2);
+      font-size: 9px;
+      white-space: nowrap;
+    }
+    .pill.active-state { background: rgba(59, 130, 246, .12); color: #93c5fd; }
+    .pill.complete-state { background: rgba(16, 185, 129, .12); color: #6ee7b7; }
+
+    .progress-panel {
+      min-height: 168px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(17, 24, 39, .9);
+    }
+    .progress-panel h3 { margin: 0; font-size: 12px; }
+    .big-stat {
+      margin-top: 20px;
+      font-size: 34px;
+      font-weight: 760;
+      letter-spacing: -.04em;
+      font-variant-numeric: tabular-nums;
+    }
+    .big-stat span { color: var(--text-3); font-size: 12px; font-weight: 500; letter-spacing: 0; }
+    .progress-track {
+      height: 5px;
+      margin-top: 10px;
+      overflow: hidden;
+      border-radius: 99px;
+      background: var(--surface-3);
+    }
+    .progress-fill { width: 64%; height: 100%; background: var(--context); }
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .mini-stat { border-top: 1px solid var(--border); padding-top: 8px; color: var(--text-3); font-size: 9px; }
+    .mini-stat strong { display: block; margin-bottom: 2px; color: var(--text); font-size: 13px; }
+
+    .list-hero {
+      position: relative;
+      min-height: 118px;
+      margin: -24px calc(clamp(18px, 3vw, 34px) * -1) 20px;
+      padding: 24px clamp(18px, 3vw, 34px) 18px;
+      overflow: hidden;
+      border-bottom: 1px solid color-mix(in srgb, var(--context) 36%, var(--border));
+      background:
+        linear-gradient(90deg, rgba(2, 6, 23, .9), rgba(2, 6, 23, .32)),
+        linear-gradient(130deg, rgba(var(--context-rgb), .38), transparent 66%);
+    }
+    .list-hero > * { position: relative; z-index: 1; }
+    .list-hero h3 { margin: 11px 0 0; font-size: 25px; letter-spacing: -.035em; }
+    .list-hero p { width: min(560px, 80%); margin: 7px 0 0; color: #cbd5e1; font-size: 11px; line-height: 1.5; }
+    .source-label { color: color-mix(in srgb, var(--context) 68%, white); font-size: 9px; font-weight: 720; letter-spacing: .08em; text-transform: uppercase; }
+
+    .portfolio-note {
+      display: none;
+      margin-bottom: 18px;
+      color: var(--text-2);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+    .project-grid {
+      display: none;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .project-card {
+      position: relative;
+      min-height: 146px;
+      overflow: hidden;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--rail);
+    }
+    .project-card::before {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(145deg, color-mix(in srgb, var(--card-color) 12%, transparent), transparent 58%);
+      content: "";
+    }
+    .project-card > * { position: relative; }
+    .project-card .card-icon {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 7px;
+      background: color-mix(in srgb, var(--card-color) 14%, transparent);
+      color: var(--card-color);
+    }
+    .project-card h4 { margin: 26px 0 5px; font-size: 12px; }
+    .project-card p { margin: 0; color: var(--text-3); font-size: 9px; line-height: 1.45; }
+    .card-progress { height: 3px; margin-top: 15px; background: var(--surface-2); }
+    .card-progress span { display: block; width: var(--progress); height: 100%; background: var(--card-color); }
+
+    .workspace[data-view="portfolio"] .page-header,
+    .workspace[data-view="portfolio"] .context-strip,
+    .workspace[data-view="portfolio"] .overview-grid,
+    .workspace[data-view="portfolio"] .list-hero { display: none; }
+    .workspace[data-view="portfolio"] .portfolio-note { display: block; }
+    .workspace[data-view="portfolio"] .project-grid { display: grid; }
+    .workspace[data-view="portfolio"]::after { opacity: 0; }
+    .workspace[data-view="portfolio"]::before { background: var(--bg); }
+    .workspace[data-view="portfolio"] .backdrop-layer { opacity: 0; }
+    .workspace[data-view="portfolio"] .content { padding-top: 34px; }
+    .workspace[data-view="list"] .context-strip { display: none; }
+    .workspace[data-view="project"] .list-hero { display: none; }
+
+    .settings-panel {
+      position: relative;
+      z-index: 5;
+      min-width: 0;
+      overflow: auto;
+      border-left: 1px solid var(--border);
+      background: var(--rail);
+      opacity: 0;
+      pointer-events: none;
+      visibility: hidden;
+      transition: opacity 140ms var(--ease);
+    }
+    .concept-bar button, .page-tab, .icon-button, .scope-choice, .pattern-option, select { min-height: 44px; }
+    .settings-open .settings-panel { opacity: 1; pointer-events: auto; visibility: visible; }
+    .settings-head {
+      position: sticky;
+      z-index: 2;
+      top: 0;
+      display: flex;
+      min-height: 58px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--rail);
+    }
+    .settings-head h2 { margin: 0; font-size: 13px; }
+    .settings-head p { margin: 3px 0 0; color: var(--text-3); font-size: 9px; }
+    .icon-button {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-3);
+      font-size: 17px;
+    }
+    .icon-button:hover { background: var(--surface-2); color: var(--text); }
+    .settings-body { padding: 16px; }
+    .setting-group {
+      padding: 16px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .setting-group:first-child { padding-top: 0; }
+    .setting-group h3 { margin: 0 0 4px; font-size: 11px; }
+    .setting-group > p { margin: 0 0 12px; color: var(--text-3); font-size: 9px; line-height: 1.5; }
+    .scope-row {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+    }
+    .scope-choice {
+      min-height: 50px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      text-align: left;
+    }
+    .scope-choice strong { display: block; font-size: 10px; }
+    .scope-choice span { display: block; margin-top: 3px; color: var(--text-3); font-size: 8px; line-height: 1.3; }
+    .scope-choice.active { border-color: var(--context-strong); background: var(--context-soft); }
+    .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+    .swatch {
+      width: 28px;
+      height: 28px;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 50%;
+      background: var(--swatch);
+    }
+    .swatch.active { box-shadow: 0 0 0 2px var(--rail), 0 0 0 4px white; }
+    .field-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 7px;
+      color: var(--text-2);
+      font-size: 9px;
+      font-weight: 650;
+    }
+    .field-label output { color: var(--context); font-variant-numeric: tabular-nums; }
+    input[type="range"] { width: 100%; accent-color: var(--context); }
+    select {
+      width: 100%;
+      height: 34px;
+      padding: 0 9px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 10px;
+    }
+    .pattern-options {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 7px;
+    }
+    .pattern-option {
+      position: relative;
+      display: flex;
+      min-height: 72px;
+      align-items: flex-end;
+      overflow: hidden;
+      padding: 9px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--thumb);
+      background-position: center;
+      background-repeat: no-repeat;
+      background-size: cover;
+      box-shadow: inset 0 -36px 28px -20px rgba(2, 6, 23, .96);
+      color: var(--text);
+      text-align: left;
+      font-size: 9px;
+      font-weight: 650;
+      text-shadow: 0 1px 2px rgba(2, 6, 23, .9);
+    }
+    .pattern-option.active {
+      border-color: var(--context);
+      box-shadow:
+        inset 0 0 0 1px var(--context-mid),
+        inset 0 -36px 28px -20px rgba(2, 6, 23, .96);
+    }
+    .recommendation {
+      margin-top: 16px;
+      padding: 12px;
+      border: 1px solid color-mix(in srgb, var(--context) 26%, var(--border));
+      border-radius: 8px;
+      background: var(--context-soft);
+      color: var(--text-2);
+      font-size: 9px;
+      line-height: 1.55;
+    }
+    .recommendation strong { color: var(--text); }
+
+    .mode-whisper { --frame-size: 1px; --wash-opacity: .025; --backdrop-opacity: 0; }
+    .mode-whisper .page-header {
+      background:
+        linear-gradient(90deg, rgba(var(--context-rgb), .07), transparent 28%),
+        rgba(11, 17, 32, .96);
+      box-shadow: none;
+    }
+    .mode-frame { --frame-size: 5px; --wash-opacity: .035; --backdrop-opacity: 0; }
+    .mode-atmosphere { --frame-size: 2px; --wash-opacity: .08; --backdrop-opacity: .62; }
+    .mode-atmosphere .backdrop-layer {
+      filter: saturate(.82) brightness(.68);
+      mask-image: linear-gradient(to bottom, black 0, rgba(0,0,0,.76) 52%, transparent 100%);
+    }
+    .mode-canvas { --frame-size: 0; --wash-opacity: .1; --backdrop-opacity: 1; }
+    .mode-canvas .page-header { background: rgba(11, 17, 32, .82); backdrop-filter: blur(14px); }
+    .mode-canvas .content { padding-top: 34px; }
+    .mode-canvas .task-list,
+    .mode-canvas .progress-panel {
+      background: rgba(11, 17, 32, .9);
+      box-shadow: 0 18px 46px rgba(0, 0, 0, .26);
+    }
+    .mode-canvas .list-hero {
+      min-height: 164px;
+      padding-top: 42px;
+      background: linear-gradient(90deg, rgba(2, 6, 23, .86), rgba(2, 6, 23, .14));
+    }
+
+    .decision-dock {
+      position: fixed;
+      z-index: 15;
+      right: 16px;
+      bottom: 14px;
+      left: 232px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: max-content;
+      max-width: calc(100vw - 590px);
+      padding: 7px 9px;
+      border: 1px solid var(--border-strong);
+      border-radius: 9px;
+      background: rgba(11, 17, 32, .94);
+      box-shadow: 0 16px 32px rgba(0,0,0,.34);
+      backdrop-filter: blur(12px);
+      color: var(--text-3);
+      font-size: 9px;
+      transition: right 240ms var(--ease);
+    }
+    .settings-open .decision-dock { right: 358px; }
+    .decision-dock strong { color: var(--text); }
+    .decision-dock span:last-child { color: var(--context); }
+
+    @media (max-width: 980px) {
+      .concept-bar { grid-template-columns: 1fr auto; }
+      .concept-bar .view-switcher { grid-column: 1 / -1; grid-row: 2; }
+      .app-frame, .app-frame.settings-open { grid-template-columns: 64px minmax(0, 1fr) 314px; }
+      .app-frame:not(.settings-open) { grid-template-columns: 64px minmax(0, 1fr) 0; }
+      .rail .brand span:last-child, .nav-item span:not(.nav-icon), .nav-count, .nav-label { display: none; }
+      .brand { justify-content: center; padding: 0; }
+      .nav-item { justify-content: center; padding: 0; }
+      .workspace::before, .workspace::after, .backdrop-layer { left: 64px; }
+      .app-frame.settings-open .workspace::after, .app-frame.settings-open .backdrop-layer { right: 314px; }
+      .overview-grid { grid-template-columns: 1fr; }
+      .decision-dock { left: 80px; max-width: calc(100vw - 410px); }
+      .settings-open .decision-dock { right: 330px; }
+    }
+
+    @media (max-width: 720px) {
+      .concept-bar { display: flex; flex-wrap: wrap; gap: 8px; }
+      .concept-title { flex: 1 1 100%; }
+      .segmented { max-width: 100%; overflow-x: auto; }
+      .app-frame, .app-frame.settings-open, .app-frame:not(.settings-open) { grid-template-columns: minmax(0, 1fr); }
+      .rail { display: none; }
+      .workspace::before, .workspace::after, .backdrop-layer { inset: 112px 0 0; }
+      .app-frame.settings-open .workspace::after, .app-frame.settings-open .backdrop-layer { right: 0; }
+      .settings-panel {
+        position: fixed;
+        z-index: 30;
+        inset: 112px 0 0 14%;
+        box-shadow: -20px 0 40px rgba(0,0,0,.42);
+      }
+      .metrics { display: none; }
+      .project-grid { grid-template-columns: 1fr; }
+      .decision-dock { right: 12px !important; bottom: 10px; left: 12px; width: auto; max-width: none; }
+      .decision-dock span:nth-child(2) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype">
+    <header class="concept-bar">
+      <div class="concept-title">
+        <h1>Context accent theming — issue #712</h1>
+        <p>Interactive design study. Compare the same working surface without losing Mission Control’s density.</p>
+      </div>
+      <div class="segmented view-switcher" aria-label="Preview a context">
+        <button type="button" data-view="project" aria-pressed="true">Project</button>
+        <button type="button" data-view="list" aria-pressed="false">List</button>
+        <button type="button" data-view="portfolio" aria-pressed="false">Projects overview</button>
+      </div>
+      <button class="settings-toggle" type="button" aria-expanded="true" aria-controls="theme-settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
+          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.2 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.4v-4h.1A1.7 1.7 0 0 0 4.2 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 8.6 4.2a1.7 1.7 0 0 0 1-.6A1.7 1.7 0 0 0 10 2.5v-.1h4v.1a1.7 1.7 0 0 0 1 1.7 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 8.6a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.1v4h-.1a1.7 1.7 0 0 0-1.7 1Z"/>
+        </svg>
+        Theme settings
+      </button>
+    </header>
+
+    <div class="app-frame settings-open mode-frame">
+      <aside class="rail" aria-label="Mission Control navigation">
+        <div class="brand"><span class="mark">MC</span><span>Mission Control</span></div>
+        <nav class="rail-nav">
+          <div class="nav-label">Workspace</div>
+          <button class="nav-item" type="button"><span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1Z"/></svg></span><span>Today</span><span class="nav-count">8</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16.5 8"/></svg></span><span>All tasks</span><span class="nav-count">64</span></button>
+          <button class="nav-item active" type="button"><span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 7.5h7l2 2h9v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/><path d="M3 7.5V5a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v2.5"/></svg></span><span>Projects</span><span class="nav-count">12</span></button>
+          <div class="nav-label">Recent projects</div>
+          <button class="nav-item active" type="button"><span class="nav-icon" style="color:#14b8a6"><span class="project-dot"></span></span><span>Home automation</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon" style="color:#f59e0b"><span class="project-dot"></span></span><span>Workshop build</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon" style="color:#a855f7"><span class="project-dot"></span></span><span>Mission Control</span></button>
+        </nav>
+        <div class="rail-footer">
+          <button class="nav-item" type="button"><span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l-2.8 2.8a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6h-4a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-2.8-2.8a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14v-4a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l2.8-2.8A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3h4a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l2.8 2.8a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1v4a1.7 1.7 0 0 0-1.6 1Z"/></svg></span><span>Settings</span></button>
+        </div>
+      </aside>
+
+      <section class="workspace" data-view="project" aria-label="Theme preview">
+        <div class="backdrop-layer" data-backdrop="aurora" aria-hidden="true"></div>
+        <header class="page-header">
+          <div class="header-main">
+            <span class="project-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7.5h7l2 2h9v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/><path d="M3 7.5V5a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v2.5"/></svg></span>
+            <div class="title-stack">
+              <h2 id="context-title">Home automation</h2>
+              <div class="context-path" id="context-path">Projects / Home automation</div>
+            </div>
+            <div class="metrics">
+              <span><strong>64%</strong> done</span>
+              <span><strong>18</strong> tasks</span>
+              <span><strong>3</strong> phases</span>
+            </div>
+          </div>
+          <nav class="page-tabs" aria-label="Project sections">
+            <button class="page-tab active" type="button">Overview</button>
+            <button class="page-tab" type="button">Plan <span class="subtle">3</span></button>
+            <button class="page-tab" type="button">Tasks <span class="subtle">18</span></button>
+            <button class="page-tab" type="button">Settings</button>
+          </nav>
+        </header>
+
+        <div class="content">
+          <section class="list-hero">
+            <span class="source-label">Microsoft To Do · Personal</span>
+            <h3>Weekend projects</h3>
+            <p>List-level themes can be more expressive because the working set is narrow and temporary. Content remains on solid operational surfaces.</p>
+          </section>
+
+          <div class="context-strip">
+            <span class="line" aria-hidden="true"></span>
+            <span><strong>Home automation</strong> is using its project accent at Balanced strength.</span>
+            <span>Project settings → Appearance</span>
+          </div>
+
+          <section class="overview-grid">
+            <div>
+              <section class="section">
+                <div class="section-head"><h3>Next actions</h3><span>4 open</span></div>
+                <div class="task-list">
+                  <div class="task"><span class="check"></span><div><div class="task-title">Map Zigbee dead zones upstairs</div><div class="task-meta">Due today · 25 min · Home automation</div></div><span class="pill active-state">In progress</span></div>
+                  <div class="task"><span class="check"></span><div><div class="task-title">Move garage sensors to new coordinator</div><div class="task-meta">Hardware · 40 min · Blocked by delivery</div></div><span class="pill">Waiting</span></div>
+                  <div class="task"><span class="check"></span><div><div class="task-title">Create nighttime lighting scene</div><div class="task-meta">Home Assistant · Low energy</div></div><span class="pill">Next</span></div>
+                  <div class="task"><span class="check"></span><div><div class="task-title">Document device naming convention</div><div class="task-meta">Docs · 15 min</div></div><span class="pill">Backlog</span></div>
+                </div>
+              </section>
+              <section class="section">
+                <div class="section-head"><h3>Current phase</h3><span>Infrastructure · 6 of 9 tasks</span></div>
+                <div class="task-list">
+                  <div class="task"><span class="check" style="border-color:var(--success);background:var(--success)"></span><div><div class="task-title">Coordinator migration</div><div class="task-meta">Completed yesterday</div></div><span class="pill complete-state">Complete</span></div>
+                  <div class="task"><span class="check"></span><div><div class="task-title">Validate router coverage</div><div class="task-meta">3 subtasks · Updated 2h ago</div></div><span class="pill">Active</span></div>
+                </div>
+              </section>
+            </div>
+            <aside>
+              <div class="progress-panel">
+                <h3>Project progress</h3>
+                <div class="big-stat">64<span>% complete</span></div>
+                <div class="progress-track"><div class="progress-fill"></div></div>
+                <div class="stats-row">
+                  <div class="mini-stat"><strong>18</strong>tasks</div>
+                  <div class="mini-stat"><strong>3</strong>phases</div>
+                  <div class="mini-stat"><strong>6d</strong>active</div>
+                </div>
+              </div>
+            </aside>
+          </section>
+
+          <p class="portfolio-note"><strong>Projects overview stays neutral.</strong> Multiple project colors are data, so no single accent owns the page. Each card carries a restrained local tint and progress color.</p>
+          <section class="project-grid">
+            <article class="project-card" style="--card-color:#14b8a6;--progress:64%"><span class="card-icon"><span class="project-dot"></span></span><h4>Home automation</h4><p>Next: Map Zigbee dead zones upstairs</p><div class="card-progress"><span></span></div></article>
+            <article class="project-card" style="--card-color:#f59e0b;--progress:38%"><span class="card-icon"><span class="project-dot"></span></span><h4>Workshop build</h4><p>Next: Finish dust collection layout</p><div class="card-progress"><span></span></div></article>
+            <article class="project-card" style="--card-color:#a855f7;--progress:81%"><span class="card-icon"><span class="project-dot"></span></span><h4>Mission Control</h4><p>Next: Review connector sync health</p><div class="card-progress"><span></span></div></article>
+            <article class="project-card" style="--card-color:#3b82f6;--progress:52%"><span class="card-icon"><span class="project-dot"></span></span><h4>Office refresh</h4><p>Next: Order acoustic panels</p><div class="card-progress"><span></span></div></article>
+            <article class="project-card" style="--card-color:#ef4444;--progress:22%"><span class="card-icon"><span class="project-dot"></span></span><h4>Network migration</h4><p>Next: Inventory reserved addresses</p><div class="card-progress"><span></span></div></article>
+            <article class="project-card" style="--card-color:#84cc16;--progress:73%"><span class="card-icon"><span class="project-dot"></span></span><h4>Garden irrigation</h4><p>Next: Test north bed pressure</p><div class="card-progress"><span></span></div></article>
+          </section>
+        </div>
+      </section>
+
+      <aside class="settings-panel" id="theme-settings" aria-label="Theme settings">
+        <div class="settings-head">
+          <div><h2 id="settings-title">Project appearance</h2><p id="settings-subtitle">Home automation · saved automatically</p></div>
+          <button class="icon-button close-settings" type="button" aria-label="Close theme settings"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="settings-body">
+          <section class="setting-group">
+            <h3>Theme scope</h3>
+            <p>Projects inherit the global default. Lists inherit their project unless overridden.</p>
+            <div class="scope-row">
+              <button class="scope-choice active" type="button" aria-pressed="true"><strong>Custom</strong><span>Theme this context</span></button>
+              <button class="scope-choice" type="button" aria-pressed="false"><strong>Inherit</strong><span>Use parent or global</span></button>
+            </div>
+          </section>
+
+          <section class="setting-group">
+            <h3>Accent color</h3>
+            <p>Used for identity and context only. Action blue remains consistent.</p>
+            <div class="swatches" aria-label="Accent color">
+              <button class="swatch active" type="button" data-color="#14b8a6" data-rgb="20, 184, 166" style="--swatch:#14b8a6" aria-label="Teal" aria-pressed="true"></button>
+              <button class="swatch" type="button" data-color="#3b82f6" data-rgb="59, 130, 246" style="--swatch:#3b82f6" aria-label="Blue" aria-pressed="false"></button>
+              <button class="swatch" type="button" data-color="#a855f7" data-rgb="168, 85, 247" style="--swatch:#a855f7" aria-label="Purple" aria-pressed="false"></button>
+              <button class="swatch" type="button" data-color="#f59e0b" data-rgb="245, 158, 11" style="--swatch:#f59e0b" aria-label="Amber" aria-pressed="false"></button>
+              <button class="swatch" type="button" data-color="#ef4444" data-rgb="239, 68, 68" style="--swatch:#ef4444" aria-label="Red" aria-pressed="false"></button>
+              <button class="swatch" type="button" data-color="#84cc16" data-rgb="132, 204, 22" style="--swatch:#84cc16" aria-label="Lime" aria-pressed="false"></button>
+            </div>
+          </section>
+
+          <section class="setting-group">
+            <h3>Presence</h3>
+            <p>One scale controls how much the context theme changes the workspace.</p>
+            <label class="field-label" for="intensity"><span>Theme strength</span><output id="intensity-output">Balanced</output></label>
+            <input id="intensity" type="range" min="0" max="3" value="1" step="1">
+            <div class="segmented" style="display:flex;margin-top:10px">
+              <button type="button" data-mode="whisper" aria-pressed="false">Whisper</button>
+              <button type="button" data-mode="frame" aria-pressed="true">Frame</button>
+              <button type="button" data-mode="atmosphere" aria-pressed="false">Atmosphere</button>
+              <button type="button" data-mode="canvas" aria-pressed="false">Canvas</button>
+            </div>
+          </section>
+
+          <section class="setting-group">
+            <h3>Backdrop</h3>
+            <p>Choose a gradient or image treatment. Atmosphere fades it into the canvas; Canvas uses it across the full workspace.</p>
+            <div class="pattern-options">
+              <button class="pattern-option" type="button" data-backdrop-choice="none" style="--thumb:#020617" aria-pressed="false">None</button>
+              <button class="pattern-option active" type="button" data-backdrop-choice="aurora" style="--thumb:radial-gradient(circle at 15% 15%,rgba(20,184,166,.9),transparent 46%),linear-gradient(145deg,#163c57,#020617)" aria-pressed="true">Aurora</button>
+              <button class="pattern-option" type="button" data-backdrop-choice="ridge" style="--thumb:linear-gradient(155deg,rgba(20,184,166,.28),transparent 58%),url('issue-712-backdrop-ridge.svg')" aria-pressed="false">Dusk ridge</button>
+              <button class="pattern-option" type="button" data-backdrop-choice="nebula" style="--thumb:radial-gradient(circle at 70% 20%,rgba(20,184,166,.8),transparent 35%),radial-gradient(circle at 25% 70%,rgba(168,85,247,.55),transparent 38%),linear-gradient(145deg,#111d3b,#020617)" aria-pressed="false">Nebula</button>
+            </div>
+          </section>
+
+          <section class="setting-group">
+            <label class="field-label" for="global-default"><span>Global default</span></label>
+            <select id="global-default">
+              <option>Frame — balanced</option>
+              <option>Whisper — minimal</option>
+              <option>Atmosphere — expressive</option>
+              <option>Off — identity marks only</option>
+            </select>
+          </section>
+
+          <div class="recommendation">
+            <strong>Recommended default:</strong> Frame for projects, Atmosphere for lists, and neutral portfolio pages. Keep a single global strength preference, then allow project/list overrides.
+          </div>
+        </div>
+      </aside>
+
+      <div class="decision-dock" aria-live="polite">
+        <strong id="dock-mode">Frame</strong>
+        <span id="dock-detail">A strong boundary marks the project without changing the working surface.</span>
+        <span id="dock-scope">Project theme</span>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const root = document.documentElement;
+    const frame = document.querySelector('.app-frame');
+    const workspace = document.querySelector('.workspace');
+    const backdropLayer = document.querySelector('.backdrop-layer');
+    const settingsToggle = document.querySelector('.settings-toggle');
+    const settingsPanel = document.querySelector('.settings-panel');
+    const closeSettings = document.querySelector('.close-settings');
+    const intensity = document.querySelector('#intensity');
+    const intensityOutput = document.querySelector('#intensity-output');
+    const dockMode = document.querySelector('#dock-mode');
+    const dockDetail = document.querySelector('#dock-detail');
+    const dockScope = document.querySelector('#dock-scope');
+    const contextTitle = document.querySelector('#context-title');
+    const contextPath = document.querySelector('#context-path');
+    const settingsTitle = document.querySelector('#settings-title');
+    const settingsSubtitle = document.querySelector('#settings-subtitle');
+    const modes = ['whisper', 'frame', 'atmosphere', 'canvas'];
+    const modeLabels = ['Whisper', 'Frame', 'Atmosphere', 'Canvas'];
+    const modeDetails = {
+      whisper: 'Identity stays in the icon, tab, navigation marker, and progress.',
+      frame: 'A strong boundary marks the project without changing the working surface.',
+      atmosphere: 'The backdrop fades through the upper workspace while content remains solid.',
+      canvas: 'The selected gradient or image becomes the workspace itself.',
+    };
+
+    function setSettings(open) {
+      frame.classList.toggle('settings-open', open);
+      settingsToggle.setAttribute('aria-expanded', String(open));
+      settingsPanel.toggleAttribute('inert', !open);
+      settingsPanel.setAttribute('aria-hidden', String(!open));
+    }
+
+    function setMode(mode) {
+      modes.forEach((name) => frame.classList.remove(`mode-${name}`));
+      frame.classList.add(`mode-${mode}`);
+      const index = modes.indexOf(mode);
+      intensity.value = String(index);
+      intensityOutput.textContent = mode === 'frame' ? 'Balanced' : modeLabels[index];
+      dockMode.textContent = modeLabels[index];
+      dockDetail.textContent = modeDetails[mode];
+      document.querySelectorAll('[data-mode]').forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
+      });
+    }
+
+    function setView(view) {
+      workspace.dataset.view = view;
+      document.querySelectorAll('[data-view]').forEach((button) => {
+        button.setAttribute('aria-pressed', String(button.dataset.view === view));
+      });
+
+      const isList = view === 'list';
+      const isPortfolio = view === 'portfolio';
+      contextTitle.textContent = isList ? 'Weekend projects' : 'Home automation';
+      contextPath.textContent = isList ? 'Lists / Personal / Weekend projects' : 'Projects / Home automation';
+      settingsTitle.textContent = isList ? 'List appearance' : isPortfolio ? 'Appearance defaults' : 'Project appearance';
+      settingsSubtitle.textContent = isList ? 'Weekend projects · overrides project' : isPortfolio ? 'Applied when a context has no override' : 'Home automation · saved automatically';
+      dockScope.textContent = isList ? 'List override' : isPortfolio ? 'Neutral multi-context view' : 'Project theme';
+      if (isList && frame.classList.contains('mode-frame')) setMode('atmosphere');
+      if (isPortfolio) setSettings(false);
+    }
+
+    settingsToggle.addEventListener('click', () => setSettings(!frame.classList.contains('settings-open')));
+    closeSettings.addEventListener('click', () => setSettings(false));
+
+    document.querySelectorAll('[data-view]').forEach((button) => {
+      button.addEventListener('click', () => setView(button.dataset.view));
+    });
+
+    document.querySelectorAll('[data-mode]').forEach((button) => {
+      button.addEventListener('click', () => setMode(button.dataset.mode));
+    });
+
+    intensity.addEventListener('input', () => setMode(modes[Number(intensity.value)]));
+
+    document.querySelectorAll('.swatch').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.swatch').forEach((swatch) => {
+          swatch.classList.remove('active');
+          swatch.setAttribute('aria-pressed', 'false');
+        });
+        button.classList.add('active');
+        button.setAttribute('aria-pressed', 'true');
+        root.style.setProperty('--context', button.dataset.color);
+        root.style.setProperty('--context-rgb', button.dataset.rgb);
+      });
+    });
+
+    document.querySelectorAll('[data-backdrop-choice]').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('[data-backdrop-choice]').forEach((option) => {
+          option.classList.remove('active');
+          option.setAttribute('aria-pressed', 'false');
+        });
+        button.classList.add('active');
+        button.setAttribute('aria-pressed', 'true');
+        backdropLayer.dataset.backdrop = button.dataset.backdropChoice;
+        if (button.dataset.backdropChoice !== 'none' && ['whisper', 'frame'].some((mode) => frame.classList.contains(`mode-${mode}`))) {
+          setMode('atmosphere');
+        }
+      });
+    });
+
+    document.querySelectorAll('.scope-choice').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.scope-choice').forEach((choice) => {
+          choice.classList.remove('active');
+          choice.setAttribute('aria-pressed', 'false');
+        });
+        button.classList.add('active');
+        button.setAttribute('aria-pressed', 'true');
+      });
+    });
+
+    document.querySelectorAll('.page-tab').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.page-tab').forEach((tab) => tab.classList.remove('active'));
+        button.classList.add('active');
+        if (button.textContent.trim() === 'Settings') setSettings(true);
+      });
+    });
+  </script>
+</body>
+</html>

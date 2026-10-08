@@ -129,7 +129,7 @@ export function TaskStatusField({
 
   return (
     <div className="relative flex min-h-28 flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
-      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
         {status === 'done' ? (
           <CheckCircle2 size={13} className="flex-shrink-0 text-[var(--success)]" />
         ) : (
@@ -139,7 +139,7 @@ export function TaskStatusField({
         )}
         Status
       </span>
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Select
           value={status}
           onValueChange={(next) => {
@@ -151,10 +151,10 @@ export function TaskStatusField({
           <SelectTrigger
             aria-label="Task status"
             title={!canEditStatus ? statusBlockedReason : statusSaveLabel}
-            className={
+            className={`min-w-0 max-w-full flex-1 basis-28 ${
             status === 'done' ? 'text-[var(--success)]' :
             TASK_STATUS_VISUALS[status as keyof typeof TASK_STATUS_VISUALS]?.textClass ?? TASK_STATUS_VISUALS.todo.textClass
-          }>
+          }`}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -174,7 +174,7 @@ export function TaskStatusField({
 
         {/* Status reason badge — shown when task is closed with a specific reason */}
         {isClosed && statusReason && statusReason !== 'completed' && (
-          <span className={`text-xs rounded px-1.5 py-0.5 font-medium ${
+          <span className={`inline-flex max-w-full flex-wrap items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium whitespace-normal break-words ${
             statusReason === 'not_planned'
               ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
               : statusReason === 'moved'
@@ -377,7 +377,7 @@ export function TaskPriorityField({
 }: TaskPriorityFieldProps) {
   return (
     <div className="flex min-h-28 flex-col items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
-      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]"><Flag size={13} />Priority</span>
+      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]"><Flag size={13} className="text-[var(--text-tertiary)]" />Priority</span>
       <Select value={priority || 'none'} onValueChange={onPriorityChange} disabled={!canEditPriority}>
         <SelectTrigger
           aria-label="Task priority"
@@ -394,7 +394,7 @@ export function TaskPriorityField({
         </SelectContent>
       </Select>
       <div className="mt-auto w-full space-y-1.5">
-        <PlanningHorizonFieldLabel className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]" />
+        <PlanningHorizonFieldLabel className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] [&_svg]:text-[var(--text-tertiary)]" />
         <Select
           value={planningHorizon ?? 'none'}
           onValueChange={(value) => onPlanningHorizonChange(
@@ -458,7 +458,7 @@ export function TaskDueDateField({
 }: TaskDueDateFieldProps) {
   return (
     <div className="relative flex min-h-28 flex-col items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
-      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]"><Calendar size={13} />Due date</span>
+      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]"><Calendar size={13} className="text-[var(--text-tertiary)]" />Due date</span>
       {hasRecurrence && (
         <Tooltip content="View recurrence settings">
           <button
@@ -532,7 +532,7 @@ export function TaskEffortField({
 }: TaskEffortFieldProps) {
   return (
     <div className="flex min-h-28 flex-col items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
-      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]"><Gauge size={13} />Effort</span>
+      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]"><Gauge size={13} className="text-[var(--text-tertiary)]" />Effort</span>
       <div className="w-full" title={effortDurationBlockedReason}>
         <EffortSelect effort={effort} onChange={onEffortChange} disabled={!canEditEffortAndDuration} highlight={effortHighlight} />
       </div>

@@ -63,8 +63,9 @@ vi.mock('@/lib/hooks/useQuickAddContext', () => ({
 vi.mock('@/lib/hooks/useTaskSelection', () => ({
   useTaskSelection: () => ({
     selectedTaskId: null,
-    toggleTask: vi.fn(),
-    closeTask: vi.fn(),
+    selectTask: vi.fn(),
+    handleTaskClick: vi.fn(),
+    handleTaskDoubleClick: vi.fn(),
   }),
 }));
 

@@ -2,7 +2,7 @@
 title: "Dashboard KPI Customization"
 status: implemented
 created: 2026-06-25
-last_reviewed: 2026-07-18
+last_reviewed: 2026-09-17
 category: design
 related:
   - "[Go-Forward Plan](../planning/GO-FORWARD-PLAN.md)"
@@ -49,16 +49,19 @@ Every KPI card is a self-contained widget with:
 | `overdue` | Overdue | Counter | `stats.overdue` | Filter: overdue | ✅ Live |
 | `due-this-week` | Due This Week | Counter | `stats.dueThisWeek` | Filter: week | ✅ Live |
 | `unread-alerts` | Unread Alerts | Counter | `alerts.unread.length` | Navigate: alerts | ✅ Live |
-| `my-day` | My Day | Counter | `stats.myDay` | Navigate: /today | ⚡ Ready (API exists, no card) |
-| `high-priority` | High Priority | Counter | `stats.highPriority` | Filter: priority=high | ⚡ Ready (API exists, no card) |
-| `this-week-progress` | This Week | Fraction + bar | Completed/Total this week | — | 🔧 Needs API |
-| `routines-kept` | Routines | Percentage + bar | Routine completions / targets | Navigate: /routines | 🔧 Needs API |
-| `streak` | Streak | Counter + dots | Consecutive active days | — | 🔧 Needs API |
-| `focus-3` | Focus 3 | Fraction + dots | Focus items completed today | Navigate: /today | 🔧 Needs API |
-| `daily-avg` | Daily Avg | Counter + sparkline | 7-day rolling average | — | 🔧 Needs API |
+| `my-day` | My Day | Counter | `stats.myDay` | Navigate: /today | ✅ Live |
+| `high-priority` | High Priority | Counter | `stats.highPriority` | Filter: priority=high | ✅ Live |
+| `this-week-progress` | This Week | Fraction + bar | Completed/Total this week | — | ✅ Live |
+| `routines-kept` | Routines | Percentage + bar | Routine completions / targets | Navigate: /routines | ✅ Live |
+| `streak` | Streak | Counter + dots | Consecutive active days | — | ✅ Live |
+| `focus-3` | Focus 3 | Fraction + dots | Focus items completed today | Navigate: /today | ✅ Live |
+| `daily-avg` | Daily Avg | Counter + sparkline | 7-day rolling average | — | ✅ Live |
 | `in-transit` | Packages | Counter | Shipment tracker (future) | Navigate: /shipments | 🔧 Needs connector |
-| `completed-today` | Done Today | Counter | Completions since midnight | — | 🔧 Needs API |
-| `assigned-to-me` | Assigned to Me | Counter | `stats.assignedToMe` | Filter: assigned | ⚡ Ready (API exists, no card) |
+| `completed-today` | Done Today | Counter | Completions since midnight | — | ✅ Live |
+| `assigned-to-me` | Assigned to Me | Counter | `stats.assignedToMe` | Filter: assigned | ✅ Live |
+| `horizon-next` | Next Horizon | Counter | Open tasks where `planning_horizon = next` | — | ✅ Live |
+| `horizon-soon` | Soon Horizon | Counter | Open tasks where `planning_horizon = soon` | — | ✅ Live |
+| `needs-horizon` | Needs Horizon | Counter | Open tasks without a planning horizon | — | ✅ Live |
 
 ### Default Configurations
 
@@ -76,7 +79,8 @@ Users shouldn't have to configure anything upfront. Provide sensible defaults th
 
 **"Operations" preset (for heavy multi-source users):**
 ```
-[ total-open, overdue, my-day, high-priority, unread-alerts ]
+[ total-open, overdue, my-day, high-priority, assigned-to-me,
+  needs-horizon, triage-pending, doc-actions-pending, unread-alerts ]
 ```
 
 Users can also build custom layouts from the full catalog.
@@ -165,9 +169,11 @@ Selecting a preset replaces the current selection. "Custom" is read-only — it 
 
 ## Data Model
 
-### `user_preferences` Table (existing)
+### Browser preference
 
-Store KPI configuration as a JSON preference:
+Store KPI configuration as a validated JSON preference in browser storage. Mission Control
+does not currently have a general-purpose user preferences table, so server-side or cross-device
+sync is intentionally out of scope for this implementation.
 
 ```typescript
 // Key: 'dashboard_kpis'
@@ -180,11 +186,10 @@ Store KPI configuration as a JSON preference:
   pauseOnHover: true,                       // Freeze rotation on mouse hover
   autoPinOnFilter: true,                    // Auto-pin cards when user clicks to filter
   autoSurface: true,
-  preset: 'default'    // 'default' | 'progress' | 'operations' | 'custom'
 }
 ```
 
-Falls back to the default 4-card layout if no preference is set.
+Malformed, stale, or empty preferences fall back to the default 4-card layout.
 
 ### API Changes
 
@@ -451,4 +456,3 @@ The mockups remain as visual references but the implementation should follow the
 5. **My Day should be a KPI, not just a nav item.** The count is already computed (`stats.myDay`). Surfacing it as a stat card creates a natural "pull" to check and plan the day — aligns with ADHD-focused design goals.
 
 6. **Routine rollup KPI complements the Routine Snapshot widget.** The KPI card shows "71% kept" at a glance; the full Routine Snapshot widget below shows the individual routine checklist. They serve different cognitive needs (summary vs. actionable list).
-

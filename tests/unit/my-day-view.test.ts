@@ -1,6 +1,7 @@
 import type { MyDayItem } from '@/components/today/types';
 import {
   applyMyDayItemOrder,
+  createOptimisticMyDayItem,
   filterMyDayItems,
   getMyDayCompletionPercentage,
   groupMyDayItems,
@@ -40,6 +41,31 @@ function makeItem(overrides: Partial<MyDayItem> = {}): MyDayItem {
 }
 
 describe('My Day view helpers', () => {
+  it('only creates optimistic items when the edit policy is available', () => {
+    expect(createOptimisticMyDayItem({
+      taskId: 'task-2',
+      title: 'Added from search',
+    }, 2)).toBeNull();
+
+    expect(createOptimisticMyDayItem({
+      taskId: 'task-2',
+      title: 'Added from search',
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-1',
+      sourceId: 'remote-task-2',
+      editPolicy: editableTaskPolicy,
+    }, 2, '2026-08-05T13:00:00.000Z')).toMatchObject({
+      id: 'optimistic-task-2',
+      taskId: 'task-2',
+      order: 2,
+      title: 'Added from search',
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-1',
+      sourceId: 'remote-task-2',
+      editPolicy: editableTaskPolicy,
+    });
+  });
+
   it('applies Dashboard keyword and structured filters to My Day items', () => {
     const items = [
       makeItem({

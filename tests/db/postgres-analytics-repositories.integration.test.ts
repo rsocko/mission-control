@@ -43,7 +43,20 @@ async function getSharedPool(): Promise<Pool> {
 }
 
 async function truncate(pool: Pool) {
-  for (const table of TABLES) await pool.query(`DELETE FROM ${table}`);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT set_config('mission_control.suppress_task_history', 'on', true)`,
+    );
+    for (const table of TABLES) await client.query(`DELETE FROM ${table}`);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 afterAll(async () => {
@@ -135,8 +148,11 @@ describe.skipIf(!connectionString)('PostgreSQL analytics runtime behaviour', () 
         repository.insights.listCompletedTimestampsIn(range),
         repository.insights.listCreatedTimestampsIn(range),
         repository.insights.listCompletionSpansIn(range),
+        repository.insights.listCompletedTaskTimingsIn(range),
         repository.insights.listCompletedTimestampsSince(range.startInclusive),
         repository.insights.sourceBreakdownIn(range),
+        repository.insights.countCurrentTasksByPriority(),
+        repository.insights.countCurrentTasksByStatus(),
         repository.insights.listOpenTaskCreatedTimestamps(),
         repository.insights.listPlanningFrictionEvents(['due_date_pushed'], range),
         repository.insights.listActiveProjects(),

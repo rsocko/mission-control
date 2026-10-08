@@ -9,12 +9,27 @@ export type SyncJobStatus =
   | 'cancelled';
 
 export type SyncJobSource =
+  | 'manual'
   | 'api'
   | 'schedule'
   | 'nightly'
   | 'watchdog'
   | 'recovery'
   | 'operator-canary';
+
+const SYNC_JOB_SOURCE_PRIORITIES: Readonly<Record<SyncJobSource, number>> = {
+  manual: 100,
+  'operator-canary': 90,
+  recovery: 80,
+  watchdog: 60,
+  api: 50,
+  schedule: 20,
+  nightly: 10,
+};
+
+export function getSyncJobPriority(source: SyncJobSource): number {
+  return SYNC_JOB_SOURCE_PRIORITIES[source];
+}
 
 export interface SyncJob {
   id: string;

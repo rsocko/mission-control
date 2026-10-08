@@ -7,6 +7,32 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Chainable DB mock ──────────────────────────────────────────────────────
 
+const actionMocks = vi.hoisted(() => ({
+  executeNotificationAction: vi.fn(),
+  executeApprovalDecision: vi.fn(),
+  queueFollowUpSync: vi.fn(),
+}));
+
+vi.mock('@/lib/connectors/runtime', () => ({
+  getOrInitializeConnector: vi.fn(async (connectorId: string) => (
+    connectorId.startsWith('paperclip')
+      ? {
+          type: 'paperclip',
+          executeApprovalDecision: actionMocks.executeApprovalDecision,
+        }
+      : {
+          type: 'home-assistant',
+          executeNotificationAction: actionMocks.executeNotificationAction,
+        }
+  )),
+}));
+
+vi.mock('@/lib/sync', () => ({
+  syncScheduler: {
+    queueFollowUpSync: actionMocks.queueFollowUpSync,
+  },
+}));
+
 type ChainableProxy = Record<PropertyKey, unknown>;
 
 function chainable<T>(terminal: T) {
@@ -152,6 +178,8 @@ const mockWebPersistence = {
   updateNotificationFromAction: vi.fn(async () => {
     await mockDb.update();
   }),
+  claimProviderAction: vi.fn().mockResolvedValue(true),
+  finalizeProviderAction: vi.fn().mockResolvedValue(true),
   claimWorkflowAction: vi.fn(async () => {
     const result = await mockDb.update();
     return result.changes === 1;
@@ -560,6 +588,10 @@ describe('POST /api/notifications/[id]/snooze', () => {
   });
 
   it('accepts valid duration and snoozes', async () => {
+    mockWebPersistence.findNotificationForAction.mockResolvedValueOnce({
+      id: 'n1',
+      connectorType: 'home-assistant',
+    });
     const { POST } = await import('@/app/api/notifications/[id]/snooze/route');
     const req = new Request('http://localhost/api/notifications/n1/snooze', {
       method: 'POST',
@@ -593,7 +625,12 @@ describe('POST /api/notifications/[id]/snooze', () => {
 });
 
 describe('POST /api/notifications/[id]/actions/[actionId]', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    actionMocks.executeNotificationAction.mockResolvedValue(undefined);
+    actionMocks.executeApprovalDecision.mockResolvedValue(undefined);
+    actionMocks.queueFollowUpSync.mockResolvedValue(undefined);
+  });
 
   it('should import action route module', async () => {
     const routeMod = await import('@/app/api/notifications/[id]/actions/[actionId]/route');
@@ -654,6 +691,119 @@ describe('POST /api/notifications/[id]/actions/[actionId]', () => {
 
     const res = await POST(req, { params: Promise.resolve({ id: 'n1', actionId: 'a1' }) });
     expect(res.status).toBe(400);
+  });
+
+  it('dismisses a Home Assistant notification locally and queues reconciliation', async () => {
+    mockWebPersistence.findNotificationForAction.mockResolvedValueOnce({
+      id: 'n1',
+      sourceId: 'water_filter',
+      connectorType: 'home-assistant',
+      connectorInstanceId: 'ha-home',
+      title: 'Replace water filter',
+      body: null,
+      category: 'home',
+      navigationTarget: null,
+      metadata: { notificationId: 'water_filter' },
+      presentation: {},
+    });
+    mockWebPersistence.findNotificationAction.mockResolvedValueOnce({
+      id: 'a1',
+      notificationId: 'n1',
+      actionType: 'dismiss_persistent_notification',
+      payload: {},
+    });
+
+    const { POST } = await import('@/app/api/notifications/[id]/actions/[actionId]/route');
+    const response = await POST(new Request(
+      'http://localhost/api/notifications/n1/actions/a1',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    ), {
+      params: Promise.resolve({ id: 'n1', actionId: 'a1' }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      result: {
+        type: 'home_assistant_action_accepted',
+        action: 'dismiss_persistent_notification',
+      },
+    });
+    expect(mockWebPersistence.updateNotificationFromAction).toHaveBeenCalledWith({
+      notificationId: 'n1',
+      state: 'dismissed',
+      now: expect.any(String),
+    });
+    expect(actionMocks.queueFollowUpSync).toHaveBeenCalledWith('ha-home');
+  });
+
+  it('claims and executes a Paperclip approval before queuing reconciliation', async () => {
+    mockWebPersistence.findNotificationForAction.mockResolvedValueOnce({
+      id: 'n1',
+      sourceId: 'approval:approval-1',
+      connectorType: 'paperclip',
+      connectorInstanceId: 'paperclip-board',
+      title: 'Board approval requested',
+      body: null,
+      category: 'automation',
+      navigationTarget: null,
+      metadata: {
+        approvalId: 'approval-1',
+        companyId: 'company-1',
+      },
+      presentation: {},
+    });
+    mockWebPersistence.findNotificationAction.mockResolvedValueOnce({
+      id: 'a1',
+      notificationId: 'n1',
+      actionType: 'paperclip_approve',
+      payload: {},
+    });
+
+    const { POST } = await import('@/app/api/notifications/[id]/actions/[actionId]/route');
+    const response = await POST(new Request(
+      'http://localhost/api/notifications/n1/actions/a1',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisionNote: 'Approved for the pilot.' }),
+      },
+    ), {
+      params: Promise.resolve({ id: 'n1', actionId: 'a1' }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      result: {
+        type: 'paperclip_approval_decision_accepted',
+        decision: 'approve',
+      },
+    });
+    expect(mockWebPersistence.claimProviderAction).toHaveBeenCalledWith({
+      notificationId: 'n1',
+      actionId: 'a1',
+      claimedAt: expect.any(String),
+      recoveryCutoff: expect.any(String),
+    });
+    expect(actionMocks.executeApprovalDecision).toHaveBeenCalledWith(
+      'approve',
+      { approvalId: 'approval-1', companyId: 'company-1' },
+      { decisionNote: 'Approved for the pilot.' },
+    );
+    expect(mockWebPersistence.finalizeProviderAction).toHaveBeenCalledWith({
+      notificationId: 'n1',
+      claimedAt: expect.any(String),
+      now: expect.any(String),
+      success: true,
+      error: null,
+    });
+    expect(actionMocks.queueFollowUpSync).toHaveBeenCalledWith('paperclip-board');
+    expect(mockWebPersistence.updateNotificationFromAction).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_AI_ROUTING_POLICY } from '@/lib/ai/sensitivity-policy';
 
 const mocks = vi.hoisted(() => ({
   getOverview: vi.fn(),
@@ -33,6 +34,11 @@ vi.mock('@/lib/sync/connector-lock', () => ({
   runWithConnectorOperationLease: vi.fn(
     async (_id: string, _type: string, work: () => Promise<unknown>) => work(),
   ),
+}));
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: vi.fn(async () => ({
+    routingPolicy: DEFAULT_AI_ROUTING_POLICY,
+  })),
 }));
 
 const sourceList = {
@@ -83,6 +89,7 @@ describe('connector management API routes', () => {
       }],
       syncOutcomes: [{
         connectorId: 'connector-1',
+        lastSyncAt: '2026-09-04T02:00:00.000Z',
         lastSyncedAt: '2026-09-04T01:00:00.000Z',
         success: false,
         error: 'offline',
@@ -105,6 +112,7 @@ describe('connector management API routes', () => {
         id: 'connector-1',
         credentials: {},
         hasCredentials: true,
+        lastSyncAt: '2026-09-04T02:00:00.000Z',
         lastSyncStatus: 'failed',
         lastSyncError: 'offline',
       }],
@@ -112,6 +120,53 @@ describe('connector management API routes', () => {
         id: 'list-1',
         taskCount: 3,
         selectedForSync: true,
+      }],
+    });
+  });
+
+  it('returns explicit success for an environment-backed RyMessage connector', async () => {
+    mocks.getOverview.mockResolvedValue({
+      connectors: [{
+        id: 'rymessage',
+        type: 'rymessage',
+        name: 'RyMessage',
+        enabled: true,
+        syncMode: 'poll',
+        pollIntervalMinutes: 5,
+        capabilities: { read: true },
+        credentials: {},
+        settings: { credentialEnv: 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN' },
+        syncedLists: [],
+        createdAt: '2026-09-30T19:00:00.000Z',
+        updatedAt: '2026-09-30T19:00:00.000Z',
+        deletedAt: null,
+        lastTestStatus: null,
+        lastTestError: null,
+        lastTestAt: null,
+      }],
+      sourceLists: [],
+      openTaskCounts: [],
+      syncOutcomes: [{
+        connectorId: 'rymessage',
+        lastSyncAt: '2026-09-30T20:00:00.000Z',
+        lastSyncedAt: '2026-09-30T20:00:00.000Z',
+        success: true,
+        error: null,
+      }],
+    });
+
+    const { GET } = await import('@/app/api/connectors/route');
+    const response = await GET(new Request('http://localhost/api/connectors'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      connectors: [{
+        id: 'rymessage',
+        hasCredentials: false,
+        settings: { credentialEnv: 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN' },
+        lastSyncAt: '2026-09-30T20:00:00.000Z',
+        lastSyncStatus: 'success',
+        lastSyncError: null,
       }],
     });
   });

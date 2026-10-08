@@ -1,12 +1,14 @@
-﻿'use client';
+'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ChevronRight, Loader2, Shield, Eye, EyeOff,
   AlertTriangle, ExternalLink, CheckCircle2, XCircle, Save, Activity, Wifi,
+  Info, Search, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipProvider } from '@/components/ui/Tooltip';
 import {
   Select,
   SelectContent,
@@ -18,7 +20,7 @@ import {
   staggerContainer, fadeSlideUp, modalOverlay, modalContent,
 } from '@/lib/motion';
 import type { ConnectorConfig } from './types';
-import { CONNECTOR_TYPES } from './types';
+import { CONNECTOR_TYPES, isFinanceConnectorType } from './types';
 import { DEFAULT_DOCUMENT_INTELLIGENCE_URL } from '@/lib/connectors/document-intelligence';
 import {
   DEFAULT_TYRION_BRIDGE_URL,
@@ -32,22 +34,63 @@ import {
   currencySchema,
   supportedCurrencyCodes,
 } from '@/lib/finance/currency';
+import {
+  connectorBaselineClassification,
+  type ConnectorDataClassification,
+} from '@/lib/connectors/data-classification';
+import {
+  ConnectorClassificationBadge,
+  ConnectorClassificationProvider,
+  ConnectorClassificationSetup,
+} from './ConnectorDataClassification';
 
 const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
   process.env.NODE_ENV,
 );
 
+const CONNECTOR_SEARCH_KEYWORDS: Record<string, string[]> = {
+  'microsoft-todo': ['tasks', 'lists', 'personal'],
+  'microsoft-todo-work': ['tasks', 'lists', 'corporate', 'm365'],
+  'github-issues': ['code', 'development', 'repository', 'repos'],
+  'outlook-calendar': ['meetings', 'events', 'schedule', 'm365'],
+  'outlook-email': ['mail', 'inbox', 'm365'],
+  scout: ['microsoft', 'email', 'teams', 'meetings', 'planner'],
+  paperclip: ['agents', 'approvals'],
+  rymessage: ['messages', 'sms', 'text'],
+  'finance-manager': ['finance', 'budget', 'transactions', 'money'],
+  'custom-rest': ['api', 'webhook', 'custom', 'http'],
+  'document-intelligence': ['documents', 'paperless', 'files'],
+  'home-assistant': ['smart home', 'devices', 'automation'],
+};
+
 // --- Add Connector Modal --------------------------------------------------
 
-type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-home-assistant' | 'configure-other';
+type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-paperclip' | 'configure-home-assistant' | 'configure-rymessage' | 'configure-other';
 
-function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+function AddConnectorModal({
+  onClose,
+  onAdded,
+  classificationDefaults,
+  connectors = [],
+}: {
+  onClose: () => void;
+  onAdded: () => void;
+  classificationDefaults?: Record<string, ConnectorDataClassification>;
+  connectors?: ConnectorConfig[];
+}) {
   const [step, setStep] = useState<ConnectorSetupStep>('select');
   const [selectedType, setSelectedType] = useState<string | null>(null);
-  useCloseOnEscape(onClose);
+  const [classificationOverride, setClassificationOverride] =
+    useState<ConnectorDataClassification | null>(null);
+  const [dismissible, setDismissible] = useState(true);
+  const requestClose = useCallback(() => {
+    if (dismissible) onClose();
+  }, [dismissible, onClose]);
+  useCloseOnEscape(requestClose, dismissible);
 
   function handleSelectType(type: string) {
     setSelectedType(type);
+    setClassificationOverride(null);
     if (type === 'microsoft-todo') {
       setStep('configure-mstodo');
     } else if (type === 'microsoft-todo-work') {
@@ -64,8 +107,12 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
       setStep('configure-outlook-calendar');
     } else if (type === 'scout') {
       setStep('configure-scout');
+    } else if (type === 'paperclip') {
+      setStep('configure-paperclip');
     } else if (type === 'home-assistant') {
       setStep('configure-home-assistant');
+    } else if (type === 'rymessage') {
+      setStep('configure-rymessage');
     } else {
       setStep('configure-other');
     }
@@ -77,8 +124,8 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
       initial="hidden"
       animate="show"
       exit="exit"
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
-      onClick={onClose}
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={requestClose}
     >
       <motion.div
         variants={modalContent}
@@ -88,15 +135,31 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
         role="dialog"
         aria-modal="true"
         aria-label="Add connector"
-        className={`bg-[var(--surface-1)] rounded-2xl shadow-2xl w-full p-6 border border-[var(--border)] max-h-[90vh] overflow-y-auto ${
-          step === 'configure-home-assistant' ? 'max-w-2xl' : 'max-w-lg'
+        className={`bg-[var(--surface-1)] rounded-2xl shadow-2xl w-full border border-[var(--border)] max-h-[90vh] ${
+          step === 'select'
+            ? 'max-w-3xl overflow-hidden'
+            : `${step === 'configure-home-assistant' ? 'max-w-2xl' : 'max-w-lg'} overflow-y-auto p-6`
         }`}
         onClick={e => e.stopPropagation()}
       >
-        <AnimatePresence mode="wait">
+        <ConnectorClassificationProvider override={classificationOverride}>
+          {selectedType && step !== 'select' && step !== 'configure-other' && (
+            <ConnectorClassificationSetup
+              connectorType={selectedType}
+              baseline={classificationDefaults?.[selectedType]}
+              override={classificationOverride}
+              onChange={setClassificationOverride}
+            />
+          )}
+          <AnimatePresence mode="wait">
           {step === 'select' && (
             <motion.div key="select" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.15 }}>
-              <ConnectorTypeSelector onSelect={handleSelectType} onClose={onClose} />
+              <ConnectorTypeSelector
+                onSelect={handleSelectType}
+                onClose={onClose}
+                classificationDefaults={classificationDefaults}
+                connectors={connectors}
+              />
             </motion.div>
           )}
           {step === 'configure-mstodo' && (
@@ -139,9 +202,24 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
               <ScoutSetup onBack={() => setStep('select')} onClose={onClose} onAdded={onAdded} />
             </motion.div>
           )}
+          {step === 'configure-paperclip' && (
+            <motion.div key="paperclip" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.15 }}>
+              <PaperclipSetup
+                onBack={() => setStep('select')}
+                onClose={onClose}
+                onAdded={onAdded}
+                setModalDismissible={setDismissible}
+              />
+            </motion.div>
+          )}
           {step === 'configure-home-assistant' && (
             <motion.div key="home-assistant" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.15 }}>
               <HomeAssistantSetup onBack={() => setStep('select')} onClose={onClose} onAdded={onAdded} />
+            </motion.div>
+          )}
+          {step === 'configure-rymessage' && (
+            <motion.div key="rymessage" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.15 }}>
+              <RyMessageSetup onBack={() => setStep('select')} onClose={onClose} onAdded={onAdded} />
             </motion.div>
           )}
           {step === 'configure-other' && (
@@ -160,15 +238,179 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
               </div>
             </motion.div>
           )}
-        </AnimatePresence>
+          </AnimatePresence>
+        </ConnectorClassificationProvider>
       </motion.div>
     </motion.div>
   );
 }
 
+function RyMessageSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose: () => void; onAdded: () => void }) {
+  const creation = useConnectorCreation();
+  const [name, setName] = useState('RyMessage Companion');
+  const [companionBaseUrl, setCompanionBaseUrl] = useState('');
+  const [trustedOrigin, setTrustedOrigin] = useState(() => (
+    typeof window === 'undefined' ? '' : window.location.origin
+  ));
+  const [trustedTaskOrigins, setTrustedTaskOrigins] = useState('');
+  const [credentialEnv, setCredentialEnv] = useState('RYMESSAGE_COMPANION_ACTION_FEED_TOKEN');
+  const [status, setStatus] = useState<'idle' | 'testing' | 'creating' | 'success' | 'error'>('idle');
+  const [error, setError] = useState('');
+
+  async function testAndCreate() {
+    setStatus('testing');
+    setError('');
+    const settings = {
+      mode: 'companion',
+      companionBaseUrl: companionBaseUrl.trim(),
+      trustedMissionControlOrigin: trustedOrigin.trim(),
+      trustedTaskOrigins: trustedTaskOrigins
+        .split(/[\n,]/)
+        .map(origin => origin.trim())
+        .filter(Boolean),
+      credentialEnv: credentialEnv.trim() || 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN',
+    };
+    try {
+      const response = await fetch('/api/connectors/test-pre-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'rymessage', settings }),
+      });
+      const result = await response.json() as { success?: boolean; error?: string };
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Companion connection test failed');
+      }
+      setStatus('creating');
+      await creation.create({
+        type: 'rymessage',
+        name: name.trim() || 'RyMessage Companion',
+        enabled: true,
+        syncMode: 'poll',
+        pollIntervalMinutes: 5,
+        capabilities: {
+          read: true,
+          write: false,
+          delete: false,
+          sync: true,
+          lists: false,
+          subtasks: false,
+          tags: false,
+          tagWriteBack: false,
+          notificationOnly: true,
+        },
+        credentials: {},
+        settings,
+        syncedLists: [],
+      });
+      setStatus('success');
+    } catch (setupError) {
+      setStatus('error');
+      setError(setupError instanceof Error ? setupError.message : String(setupError));
+    }
+  }
+
+  if (status === 'success') {
+    return (
+      <div className="py-5 text-center">
+        <CheckCircle2 size={40} className="mx-auto mb-3 text-emerald-400" />
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">RyMessage Companion connected</h3>
+        <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--text-tertiary)]">
+          Canonical Action Center items will appear as Mission Control notifications.
+        </p>
+        <Button className="mt-5" onClick={onAdded}>Done</Button>
+      </div>
+    );
+  }
+
+  const busy = status === 'testing' || status === 'creating';
+  return (
+    <div>
+      <div className="mb-5 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          aria-label="Back to connector types"
+        >
+          <ChevronRight size={16} className="rotate-180" />
+        </button>
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--surface-2)]">
+          <ConnectorBrandIcon type="rymessage" size={18} />
+        </div>
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Connect RyMessage Companion</h3>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <label htmlFor="rymessage-name" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Display name</label>
+          <input id="rymessage-name" value={name} onChange={event => setName(event.target.value)}
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none" />
+        </div>
+        <div>
+          <label htmlFor="rymessage-base-url" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Companion base URL</label>
+          <input id="rymessage-base-url" type="url" value={companionBaseUrl} onChange={event => setCompanionBaseUrl(event.target.value)}
+            placeholder="http://rymessage-companion:8080"
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none" />
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">Reachable from both the Mission Control web and worker runtimes.</p>
+        </div>
+        <div>
+          <label htmlFor="rymessage-trusted-origin" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Mission Control trusted origin</label>
+          <input id="rymessage-trusted-origin" type="url" value={trustedOrigin} onChange={event => setTrustedOrigin(event.target.value)}
+            placeholder="https://mission-control.example.com"
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none" />
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">Must exactly match an origin provisioned in Companion; paths, queries, and fragments are not allowed.</p>
+        </div>
+        <div>
+          <label htmlFor="rymessage-task-origins" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Trusted task-link origins</label>
+          <textarea
+            id="rymessage-task-origins"
+            value={trustedTaskOrigins}
+            onChange={event => setTrustedTaskOrigins(event.target.value)}
+            placeholder={'https://github.com\nhttps://tasks.example.com'}
+            rows={2}
+            aria-describedby="rymessage-task-origins-hint"
+            className="input-glow w-full resize-y rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+          />
+          <p id="rymessage-task-origins-hint" className="mt-1 text-xs text-[var(--text-tertiary)]">Optional. One exact HTTP(S) origin per line for links included in task projections.</p>
+        </div>
+        <div>
+          <label htmlFor="rymessage-credential-env" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Bearer credential environment variable</label>
+          <input id="rymessage-credential-env" value={credentialEnv} onChange={event => setCredentialEnv(event.target.value)}
+            spellCheck={false}
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none" />
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">The bearer value stays environment-only and must be available to both runtimes.</p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
+        <p className="text-xs leading-5 text-[var(--text-tertiary)]">
+          Stop Companion before provisioning. Run its <code className="rounded bg-[var(--surface-2)] px-1 py-0.5 text-[var(--text-secondary)]">integrationAdmin.js provision</code> command with a stable manager instance ID and this exact trusted origin, then place the one-time credential JSON value in the environment variable above.
+        </p>
+      </div>
+
+      {status === 'error' && (
+        <div role="alert" className="mt-4 flex gap-2 rounded-lg border border-red-800/40 bg-red-950/30 p-3 text-sm text-red-300">
+          <XCircle size={16} className="mt-0.5 shrink-0" />
+          <span>{error || creation.error || 'Connection failed'}</span>
+        </div>
+      )}
+
+      <div className="mt-5 flex justify-between gap-3">
+        <button type="button" onClick={onClose} disabled={busy}
+          className="px-3 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50">
+          Cancel
+        </button>
+        <Button onClick={testAndCreate} disabled={busy || !companionBaseUrl.trim() || !trustedOrigin.trim()}>
+          {busy ? <><Loader2 size={14} className="animate-spin" /> {status === 'testing' ? 'Testing connection' : 'Saving connector'}</> : <><Wifi size={14} /> Test and connect</>}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 const HA_SOURCE_OPTIONS = [
   { key: 'integrationHealth', label: 'Integration health', description: 'Setup, migration, and unload failures shown on Home Assistant’s Integrations page.' },
-  { key: 'entityAlerts', label: 'Device alerts', description: 'Rules for doors, batteries, motion, and package sensors.' },
+  { key: 'entityAlerts', label: 'Polled device rules', description: 'Legacy convenience rules for doors, batteries, motion, and package sensors. Prefer Home Assistant automations for custom logic.' },
   { key: 'updates', label: 'Updates', description: 'One actionable notification for each available update.' },
   { key: 'persistentNotifications', label: 'Persistent notifications', description: 'Notifications created in Home Assistant.' },
   { key: 'repairs', label: 'Repairs', description: 'Warnings and errors from Home Assistant Repairs.' },
@@ -589,34 +831,279 @@ function TierOption({
   );
 }
 
-function ConnectorTypeSelector({ onSelect, onClose }: { onSelect: (type: string) => void; onClose: () => void }) {
+function ConnectorTypeSelector({
+  onSelect,
+  onClose,
+  classificationDefaults,
+  connectors,
+}: {
+  onSelect: (type: string) => void;
+  onClose: () => void;
+  classificationDefaults?: Record<string, ConnectorDataClassification>;
+  connectors: ConnectorConfig[];
+}) {
+  type ClassificationFilter = 'all' | ConnectorDataClassification;
+
+  const [query, setQuery] = useState('');
+  const [classificationFilter, setClassificationFilter] =
+    useState<ClassificationFilter>('all');
+  const recommendedTypes = new Set(['microsoft-todo', 'github-issues', 'outlook-email']);
+
+  const connectedCounts = connectors.reduce<Record<string, number>>((counts, connector) => {
+    const catalogType = isFinanceConnectorType(connector.type)
+      ? 'finance-manager'
+      : connector.type;
+    counts[catalogType] = (counts[catalogType] ?? 0) + 1;
+    return counts;
+  }, {});
+
+  const connectorOptions = CONNECTOR_TYPES.map(connector => ({
+    ...connector,
+    classification:
+      classificationDefaults?.[connector.type]
+      ?? connectorBaselineClassification(connector.type),
+  }));
+
+  const filterOptions: Array<{ value: ClassificationFilter; label: string }> = [
+    { value: 'all', label: 'All' },
+    { value: 'standard', label: 'Standard' },
+    { value: 'restricted', label: 'Restricted' },
+  ];
+  if (connectorOptions.some(connector => connector.classification === 'local-only')) {
+    filterOptions.push({ value: 'local-only', label: 'Local only' });
+  }
+
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visibleConnectors = connectorOptions
+    .filter(connector =>
+      classificationFilter === 'all'
+      || connector.classification === classificationFilter)
+    .filter(connector => {
+      if (!normalizedQuery) return true;
+      return [
+        connector.name,
+        connector.description,
+        connector.type,
+        ...(CONNECTOR_SEARCH_KEYWORDS[connector.type] ?? []),
+      ].some(value => value.toLocaleLowerCase().includes(normalizedQuery));
+    });
+
+  const recommendedConnectors = normalizedQuery || classificationFilter !== 'all'
+    ? []
+    : visibleConnectors.filter(connector => recommendedTypes.has(connector.type));
+  const allConnectors = visibleConnectors
+    .filter(connector => !recommendedConnectors.includes(connector))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  function handleGridKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+
+    const cards = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-connector-card]'),
+    );
+    const activeIndex = cards.findIndex(
+      card => card === event.currentTarget.ownerDocument.activeElement,
+    );
+    if (activeIndex < 0) return;
+
+    const columns = event.currentTarget.clientWidth >= 640 ? 2 : 1;
+    const offset = {
+      ArrowDown: columns,
+      ArrowUp: -columns,
+      ArrowRight: 1,
+      ArrowLeft: -1,
+    }[event.key] ?? 0;
+    const nextIndex = Math.max(0, Math.min(cards.length - 1, activeIndex + offset));
+    if (nextIndex === activeIndex) return;
+
+    event.preventDefault();
+    cards[nextIndex]?.focus();
+  }
+
+  function renderConnectorCard(
+    connector: (typeof connectorOptions)[number],
+  ) {
+    const connectedCount = connectedCounts[connector.type] ?? 0;
+    return (
+      <motion.button
+        key={connector.type}
+        data-connector-card
+        variants={fadeSlideUp}
+        onClick={() => onSelect(connector.type)}
+        whileHover={{ y: -1, borderColor: 'rgba(96, 165, 250, 0.5)' }}
+        whileTap={{ scale: 0.98 }}
+        className="group min-h-24 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 text-left transition-colors hover:bg-blue-900/10"
+        aria-label={`${connectedCount > 0 ? 'Add another' : 'Add'} ${connector.name} ${connector.description}${connectedCount > 0 ? `, ${connectedCount} connected` : ''}`}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)]">
+            <ConnectorBrandIcon type={connector.type} size={20} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-sm font-medium text-[var(--text-primary)]">
+                {connector.name}
+              </span>
+              {connectedCount > 0 && (
+                <span className="text-[11px] font-medium text-blue-300">
+                  {connectedCount} connected
+                </span>
+              )}
+            </div>
+            <p className="mt-1 line-clamp-2 text-xs leading-4 text-[var(--text-tertiary)]">
+              {connector.description}
+            </p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <ConnectorClassificationBadge classification={connector.classification} />
+              <span className="text-xs font-medium text-blue-300 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                {connectedCount > 0 ? 'Add another' : 'Add'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </motion.button>
+    );
+  }
+
   return (
-    <>
-      <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">Add Connector</h3>
-      <motion.div variants={staggerContainer} initial="hidden" animate="show" className="grid grid-cols-2 gap-3">
-        {CONNECTOR_TYPES.map(ct => (
-            <motion.button
-              key={ct.type}
-              variants={fadeSlideUp}
-              onClick={() => onSelect(ct.type)}
-              whileHover={{ scale: 1.02, borderColor: 'rgba(96, 165, 250, 0.5)' }}
-              whileTap={{ scale: 0.97 }}
-              className="border border-[var(--border)] rounded-xl p-4 text-left hover:bg-blue-900/10 transition-colors"
+    <div className="flex max-h-[calc(90vh-2px)] flex-col">
+      <div className="border-b border-[var(--border)] bg-[var(--surface-1)] px-4 pb-4 pt-5 sm:px-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--text-primary)]">Add connector</h3>
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+              Choose a source to connect to Mission Control.
+            </p>
+          </div>
+          <div className="flex items-center gap-1">
+            {connectors.length > 0 && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg px-3 py-2 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              >
+                Manage connected
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              aria-label="Close connector picker"
             >
-              <div className="flex items-center gap-2.5 mb-1">
-                <div className="w-8 h-8 rounded-lg bg-[var(--surface-2)] flex items-center justify-center">
-                  <ConnectorBrandIcon type={ct.type} size={20} />
-                </div>
-                <span className="text-sm font-medium text-[var(--text-primary)]">{ct.name}</span>
-              </div>
-              <p className="text-xs text-[var(--text-tertiary)] ml-10">{ct.description}</p>
-            </motion.button>
-        ))}
-      </motion.div>
-      <div className="flex justify-end mt-6">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">Cancel</button>
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <label className="relative mt-4 block">
+          <Search
+            size={16}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
+          />
+          <span className="sr-only">Search connectors</span>
+          <input
+            type="search"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder="Search connectors..."
+            autoFocus
+            className="h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] pl-10 pr-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+          />
+        </label>
+
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Filter connectors by data handling">
+            {filterOptions.map(option => {
+              const count = connectorOptions.filter(connector =>
+                option.value === 'all' || connector.classification === option.value).length;
+              const selected = classificationFilter === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setClassificationFilter(option.value)}
+                  aria-pressed={selected}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    selected
+                      ? 'bg-blue-600 text-white'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  {option.label} {count}
+                </button>
+              );
+            })}
+          </div>
+          <TooltipProvider>
+            <Tooltip
+              placement="left"
+              content="Data handling"
+              subtitle="Standard may use eligible AI routes. Restricted stays private. Local only never leaves this host."
+            >
+              <button
+                type="button"
+                className="shrink-0 rounded-md p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                aria-label="About connector data handling"
+              >
+                <Info size={15} />
+              </button>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </div>
-    </>
+
+      <div
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6"
+        onKeyDown={handleGridKeyDown}
+      >
+        {visibleConnectors.length === 0 ? (
+          <div className="flex min-h-48 flex-col items-center justify-center text-center">
+            <Search size={24} className="mb-3 text-[var(--text-muted)]" />
+            <p className="text-sm font-medium text-[var(--text-primary)]">No connectors found</p>
+            <p className="mt-1 max-w-xs text-xs text-[var(--text-muted)]">
+              Try another name, product, or category.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                setClassificationFilter('all');
+              }}
+              className="mt-4 rounded-lg px-3 py-2 text-xs font-medium text-blue-300 hover:bg-blue-900/20"
+            >
+              Clear search and filters
+            </button>
+          </div>
+        ) : (
+          <motion.div variants={staggerContainer} initial="hidden" animate="show">
+            {recommendedConnectors.length > 0 && (
+              <section className="mb-6">
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  Recommended
+                </h4>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {recommendedConnectors.map(renderConnectorCard)}
+                </div>
+              </section>
+            )}
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  {recommendedConnectors.length > 0 ? 'More connectors' : 'Connectors'}
+                </h4>
+                <span className="text-xs tabular-nums text-[var(--text-muted)]">
+                  {visibleConnectors.length} result{visibleConnectors.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {allConnectors.map(renderConnectorCard)}
+              </div>
+            </section>
+          </motion.div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1654,7 +2141,7 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
         });
         if (!res.ok) throw new Error(await res.text());
         const result = await res.json();
-        const { toast } = await import('sonner');
+        const { toast } = await import('@/lib/toast');
         if (result.failed === 0) {
           toast.success(`Normalized ${result.succeeded} label${result.succeeded !== 1 ? 's' : ''}`);
         } else {
@@ -1998,6 +2485,313 @@ function ScoutSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose:
           {creation.status === 'success' ? 'Done' : 'Close'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function PaperclipSetup({
+  onBack,
+  onClose,
+  onAdded,
+  setModalDismissible,
+}: {
+  onBack: () => void;
+  onClose: () => void;
+  onAdded: () => void;
+  setModalDismissible: (dismissible: boolean) => void;
+}) {
+  const creation = useConnectorCreation();
+  const [apiOrigin, setApiOrigin] = useState('');
+  const [monitorAllCompanies, setMonitorAllCompanies] = useState(true);
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
+  const [authSessionId, setAuthSessionId] = useState('');
+  const [approvalUrl, setApprovalUrl] = useState('');
+  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [keyExpiresAt, setKeyExpiresAt] = useState<string | null>(null);
+  const [status, setStatus] = useState<
+    'idle' | 'starting' | 'awaiting-approval' | 'approved' | 'creating' | 'success' | 'error'
+  >('idle');
+  const [error, setError] = useState('');
+  const authorizationInProgress = status === 'starting'
+    || status === 'awaiting-approval'
+    || status === 'approved'
+    || status === 'creating';
+
+  useEffect(() => {
+    setModalDismissible(!authorizationInProgress);
+  }, [authorizationInProgress, setModalDismissible]);
+
+  async function connectPaperclip() {
+    setStatus('starting');
+    setError('');
+    try {
+      const startResponse = await fetch('/api/connectors/paperclip/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start', apiOrigin: apiOrigin.trim() }),
+      });
+      const start = await startResponse.json() as {
+        authSessionId?: string;
+        approvalUrl?: string;
+        expiresAt?: string;
+        suggestedPollIntervalMs?: number;
+        error?: string;
+      };
+      if (!startResponse.ok || !start.authSessionId || !start.approvalUrl) {
+        throw new Error(start.error || 'Could not start Paperclip authorization');
+      }
+      setAuthSessionId(start.authSessionId);
+      setApprovalUrl(start.approvalUrl);
+      setStatus('awaiting-approval');
+      window.open(start.approvalUrl, '_blank', 'noopener,noreferrer');
+      const deadline = Date.parse(start.expiresAt ?? '');
+      const pollEvery = Math.max(500, start.suggestedPollIntervalMs ?? 1000);
+      while (!Number.isFinite(deadline) || Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, pollEvery));
+        const pollResponse = await fetch('/api/connectors/paperclip/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'poll',
+            authSessionId: start.authSessionId,
+          }),
+        });
+        const result = await pollResponse.json() as {
+          status?: 'pending' | 'approved' | 'cancelled' | 'expired';
+          keyExpiresAt?: string | null;
+          companies?: Array<{ id: string; name: string }>;
+          error?: string;
+        };
+        if (!pollResponse.ok) {
+          throw new Error(result.error || 'Paperclip authorization check failed');
+        }
+        if (result.status === 'cancelled' || result.status === 'expired') {
+          throw new Error(`Paperclip authorization was ${result.status}`);
+        }
+        if (result.status !== 'approved') continue;
+        const authorizedCompanies = result.companies ?? [];
+        if (authorizedCompanies.length === 0) {
+          throw new Error('This Paperclip account has no accessible companies');
+        }
+        setCompanies(authorizedCompanies);
+        setSelectedCompanyIds(authorizedCompanies.map((company) => company.id));
+        setKeyExpiresAt(result.keyExpiresAt ?? null);
+        setStatus('approved');
+        return;
+      }
+      throw new Error('Paperclip authorization expired before approval');
+    } catch (setupError) {
+      setStatus('error');
+      setError(setupError instanceof Error ? setupError.message : String(setupError));
+    }
+  }
+
+  async function addConnector() {
+    const selectedCompanies = monitorAllCompanies
+      ? companies
+      : companies.filter((company) => selectedCompanyIds.includes(company.id));
+    if (selectedCompanies.length === 0 || !authSessionId) return;
+    const connectorName = monitorAllCompanies
+      ? 'Paperclip — All companies'
+      : selectedCompanies.length === 1
+        ? `Paperclip — ${selectedCompanies[0]!.name}`
+        : `Paperclip — ${selectedCompanies.length} companies`;
+    setStatus('creating');
+    setError('');
+    try {
+      await creation.create({
+        type: 'paperclip',
+        name: connectorName,
+        enabled: true,
+        syncMode: 'poll',
+        pollIntervalMinutes: 5,
+        capabilities: {
+          read: true,
+          write: false,
+          delete: false,
+          sync: true,
+          subtasks: false,
+          lists: false,
+          tags: false,
+          tagWriteBack: false,
+          notificationOnly: true,
+          listSelectionMode: 'not-applicable',
+        },
+        credentials: { authSessionId },
+        settings: {
+          apiOrigin: apiOrigin.trim(),
+          monitorAllCompanies,
+          companyIds: monitorAllCompanies
+            ? []
+            : selectedCompanies.map((company) => company.id),
+        },
+        syncedLists: [],
+      });
+      setStatus('success');
+      onAdded();
+    } catch (setupError) {
+      setStatus('error');
+      setError(setupError instanceof Error ? setupError.message : String(setupError));
+    }
+  }
+
+  function goBack() {
+    setModalDismissible(true);
+    onBack();
+  }
+
+  return (
+    <div>
+      <h3 className="mb-1 text-lg font-semibold text-[var(--text-primary)]">Connect Paperclip</h3>
+      <p className="text-sm text-[var(--text-tertiary)] mb-4">
+        Approve Mission Control in Paperclip, then choose which companies to monitor. No API key copy and paste required.
+      </p>
+      {status === 'success' ? (
+        <div className="py-4 text-center">
+          <CheckCircle2 size={32} className="mx-auto mb-2 text-emerald-400" />
+          <p className="text-sm text-[var(--text-primary)]">Paperclip connected.</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Approvals will appear on the next poll. This connection can also authorize Paperclip delegation routes.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <label className="block text-xs text-[var(--text-secondary)]">
+            Paperclip API origin
+            <input
+              aria-label="Paperclip API origin"
+              autoComplete="url"
+              placeholder="https://paperclip.example.com"
+              value={apiOrigin}
+              disabled={status === 'awaiting-approval' || status === 'approved' || status === 'creating'}
+              onChange={(event) => {
+                setApiOrigin(event.target.value);
+                setError('');
+              }}
+              className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+            />
+          </label>
+          {status === 'awaiting-approval' && (
+            <div className="rounded-lg border border-amber-700/40 bg-amber-950/20 p-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-amber-200">
+                <Loader2 size={14} className="animate-spin" />
+                Waiting for approval in Paperclip
+              </div>
+              <a
+                href={approvalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-flex items-center gap-1 text-xs text-[var(--accent)] hover:underline"
+              >
+                Open approval page <ExternalLink size={11} />
+              </a>
+            </div>
+          )}
+          {(status === 'approved' || status === 'creating') && (
+            <>
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-medium text-[var(--text-secondary)]">
+                  Companies to monitor
+                </legend>
+                <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
+                  <input
+                    type="checkbox"
+                    checked={monitorAllCompanies}
+                    onChange={(event) => setMonitorAllCompanies(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-[var(--border-strong)]"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-[var(--text-primary)]">
+                      All accessible companies
+                    </span>
+                    <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
+                      Newly accessible companies will be included automatically.
+                    </span>
+                  </span>
+                </label>
+                {!monitorAllCompanies && (
+                  <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-2">
+                    {companies.map((company) => {
+                      const checked = selectedCompanyIds.includes(company.id);
+                      return (
+                        <label
+                          key={company.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setSelectedCompanyIds((current) => (
+                              checked
+                                ? current.filter((companyId) => companyId !== company.id)
+                                : [...current, company.id]
+                            ))}
+                            className="h-4 w-4 rounded border-[var(--border-strong)]"
+                          />
+                          {company.name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </fieldset>
+              <div role="status" className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3 text-xs leading-5 text-[var(--text-muted)]">
+                <span className="font-medium text-[var(--text-secondary)]">Authorization approved; setup is not finished.</span>{' '}
+                Confirm the company scope, then select Add connector to save this connection. Mission Control created a named 90-day key and revoked the temporary login key.
+                {keyExpiresAt ? ` Renewal is due ${new Date(keyExpiresAt).toLocaleDateString()}.` : ''}
+              </div>
+            </>
+          )}
+          {(error || creation.error) && (
+            <p role="alert" className="text-xs text-red-400">
+              <AlertTriangle size={12} className="mr-1 inline" />
+              {error || creation.error}
+            </p>
+          )}
+          <div className="flex justify-between pt-2">
+            <button onClick={goBack} className="flex items-center gap-1 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
+              <ChevronRight size={12} className="rotate-180" /> Back
+            </button>
+            {status === 'approved' || status === 'creating' ? (
+              <button
+                onClick={() => void addConnector()}
+                disabled={
+                  status === 'creating'
+                  || (!monitorAllCompanies && selectedCompanyIds.length === 0)
+                }
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {status === 'creating' ? <Loader2 size={14} className="animate-spin" /> : null}
+                {status === 'creating' ? 'Adding…' : 'Add connector'}
+              </button>
+            ) : (
+              <button
+                onClick={() => void connectPaperclip()}
+                disabled={status === 'starting' || status === 'awaiting-approval' || !apiOrigin.trim()}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {status === 'starting' || status === 'awaiting-approval'
+                  ? <Loader2 size={14} className="animate-spin" />
+                  : <ExternalLink size={14} />}
+                {status === 'starting'
+                  ? 'Starting…'
+                  : status === 'awaiting-approval'
+                    ? 'Waiting…'
+                    : status === 'error'
+                      ? 'Try again'
+                      : 'Authorize in Paperclip'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      {status === 'success' && (
+        <div className="flex justify-end">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+            Done
+          </button>
+        </div>
+      )}
     </div>
   );
 }

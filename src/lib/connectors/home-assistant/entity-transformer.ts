@@ -8,6 +8,7 @@ import type { HomeAssistantState } from './ha-client';
 export interface AlertRule {
   id: string;
   entityPattern: string;
+  deviceClasses?: string[];
   condition: 'equals' | 'above' | 'below' | 'changed';
   value?: string;
   level: NotificationLevel;
@@ -32,6 +33,13 @@ export function matchesPatterns(entityId: string, patterns: string[]): boolean {
 export function evaluateCondition(entity: HomeAssistantState, rule: AlertRule, since?: Date): boolean {
   if (since && !hasChangedSince(entity, since)) {
     return false;
+  }
+
+  if (rule.deviceClasses?.length) {
+    const deviceClass = readString(entity.attributes?.device_class)?.toLowerCase();
+    if (!deviceClass || !rule.deviceClasses.some(candidate => candidate.toLowerCase() === deviceClass)) {
+      return false;
+    }
   }
 
   const state = entity.state.toLowerCase();

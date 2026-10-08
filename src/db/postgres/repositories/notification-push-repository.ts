@@ -9,6 +9,7 @@ import {
 
 const PUSH_DELIVERY_SETTING_KEY = 'push_delivery_enabled';
 const SCHEDULED_SUMMARIES_SETTING_KEY = 'scheduled_summaries_enabled';
+const PERSISTENT_REMINDERS_SETTING_KEY = 'persistent_reminders_enabled';
 const PREFERENCES_LOCK_KEY = 'mission-control:notification-push-preferences';
 
 interface PushPreferencesRow {
@@ -57,6 +58,14 @@ export function createPostgresNotificationPushRepository(
       const result = await pool.query<{ value: unknown }>(
         'SELECT value FROM app_settings WHERE key = $1',
         [PUSH_DELIVERY_SETTING_KEY],
+      );
+      return result.rows[0] ? parseStoredBooleanSetting(result.rows[0].value) : true;
+    },
+
+    async getPersistentRemindersEnabled() {
+      const result = await pool.query<{ value: unknown }>(
+        'SELECT value FROM app_settings WHERE key = $1',
+        [PERSISTENT_REMINDERS_SETTING_KEY],
       );
       return result.rows[0] ? parseStoredBooleanSetting(result.rows[0].value) : true;
     },
@@ -123,6 +132,22 @@ export function createPostgresNotificationPushRepository(
           `,
           [PUSH_DELIVERY_SETTING_KEY, JSON.stringify(pushDeliveryEnabled), input.updatedAt],
         );
+        if (input.persistentRemindersEnabled !== undefined) {
+          await client.query(
+            `
+              INSERT INTO app_settings (key, value, updated_at)
+              VALUES ($1, $2::jsonb, $3)
+              ON CONFLICT(key) DO UPDATE SET
+                value = EXCLUDED.value,
+                updated_at = EXCLUDED.updated_at
+            `,
+            [
+              PERSISTENT_REMINDERS_SETTING_KEY,
+              JSON.stringify(input.persistentRemindersEnabled),
+              input.updatedAt,
+            ],
+          );
+        }
         await client.query('COMMIT');
       } catch (error) {
         await rollback(client);

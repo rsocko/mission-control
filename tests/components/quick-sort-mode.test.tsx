@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   hasTasks: true,
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: mocks.toastError,
     info: vi.fn(),
@@ -50,7 +50,7 @@ vi.mock('@/lib/hooks/useQuickSortData', () => ({
       editPolicy: mocks.taskEditPolicy,
     }] : [],
     loading: false,
-    counts: { no_priority: 1, quadrant: 1, no_effort: 1, no_tags: 1, no_planning_horizon: 0 },
+    counts: { no_priority: 1, quadrant: 1, no_effort: 1, no_tags: 1, no_planning_horizon: 0, no_project: 1 },
     suggestions: mocks.suggestions,
     recentTagIds: [],
     dismiss: mocks.dismiss,

@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SubtaskSection } from '@/components/task-detail/SubtaskSection';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -16,6 +16,41 @@ afterEach(() => {
 });
 
 describe('SubtaskSection', () => {
+  it('shows concise accessible reorder handles without a persistent ordering notice', () => {
+    render(
+      <SubtaskSection
+        taskId="task-1"
+        subtasks={[
+          { id: 'subtask-1', title: 'First', status: 'todo' },
+          { id: 'subtask-2', title: 'Second', status: 'todo' },
+        ]}
+        onSubtasksChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Reorder "First"' })).toHaveAttribute(
+      'title',
+      'Reorder subtask',
+    );
+    expect(screen.queryByText(/saved in Mission Control only/i)).not.toBeInTheDocument();
+  });
+
+  it('hides reorder controls when subtasks are read-only', () => {
+    render(
+      <SubtaskSection
+        taskId="task-1"
+        subtasks={[
+          { id: 'subtask-1', title: 'First', status: 'todo' },
+          { id: 'subtask-2', title: 'Second', status: 'todo' },
+        ]}
+        onSubtasksChange={vi.fn()}
+        canEdit={false}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Reorder "First"' })).not.toBeInTheDocument();
+  });
+
   it('completes a subtask without refreshing the parent view', async () => {
     const onSubtasksChange = vi.fn();
     const onUpdate = vi.fn();

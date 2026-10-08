@@ -1,9 +1,10 @@
-import { beforeAll, describe } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createSqliteTaskReminderRepository } from '@/db/persistence/sqlite-task-reminder-repository';
 import {
   describeTaskReminderRepositoryContract,
   TASK_REMINDER_BASE_TIME,
+  TASK_REMINDER_DELIVERY_CONTEXT,
   type TaskReminderContractHarness,
 } from '../contracts/task-reminder-repository.contract';
 
@@ -26,6 +27,8 @@ async function createHarness(): Promise<TaskReminderContractHarness> {
         DELETE FROM task_schedules;
         DELETE FROM task_reminder_occurrences;
         DELETE FROM tasks;
+        DELETE FROM connector_configs
+        WHERE id IN ('deleted-reminder-connector', 'connector-delete-race');
         DELETE FROM push_subscriptions;
         DELETE FROM apns_registrations;
         DELETE FROM push_preferences;
@@ -39,16 +42,18 @@ async function createHarness(): Promise<TaskReminderContractHarness> {
         INSERT INTO tasks (
           id, source_id, connector_type, connector_instance_id, title, status,
           priority, reminder_at, reminder_relative, reminder_due_time,
-          created_at, updated_at, last_synced_at
-        ) VALUES (?, ?, 'local', 'local', ?, ?, 'none', ?, ?, ?, ?, ?, ?)
+          deleted_at, created_at, updated_at, last_synced_at
+        ) VALUES (?, ?, 'local', ?, ?, ?, 'none', ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.id,
         `local:${input.id}`,
+        input.connectorInstanceId ?? 'local',
         `Task ${input.id}`,
         input.status ?? 'todo',
         input.reminderAt,
         input.reminderRelative ?? null,
         input.reminderDueTime ?? null,
+        input.deletedAt ?? null,
         now,
         now,
         now,
@@ -59,6 +64,19 @@ async function createHarness(): Promise<TaskReminderContractHarness> {
           VALUES (?, '2026-09-01', ?)
         `).run(input.id, input.recurrence);
       }
+    },
+    async seedConnector(id, deletedAt = null) {
+      const now = TASK_REMINDER_BASE_TIME.toISOString();
+      sqlite.prepare(`
+        INSERT INTO connector_configs (
+          id, type, name, enabled, sync_mode, capabilities, credentials,
+          settings, synced_lists, created_at, updated_at, deleted_at
+        ) VALUES (?, 'test', ?, 1, 'poll', '{}', '{}', '{}', '[]', ?, ?, ?)
+      `).run(id, id, now, now, deletedAt);
+    },
+    async setConnectorDeleted(id, deletedAt) {
+      sqlite.prepare(`UPDATE connector_configs SET deleted_at = ? WHERE id = ?`)
+        .run(deletedAt, id);
     },
     async seedOccurrence(input) {
       const now = TASK_REMINDER_BASE_TIME.toISOString();
@@ -169,4 +187,124 @@ beforeAll(async () => {
 
 describe('SQLite task reminder repository', () => {
   describeTaskReminderRepositoryContract(createHarness);
+
+  it('advances a persistent reminder and updates one grouped notification', async () => {
+    const harness = await createHarness();
+    await harness.reset();
+    const scheduledAt = '2026-08-31T11:55:00.000Z';
+    sqlite.prepare(`
+      INSERT INTO tasks (
+        id, source_id, connector_type, connector_instance_id, title, status,
+        priority, reminder_at, reminder_nag_interval, reminder_nag_series_id,
+        reminder_nag_sequence, created_at, updated_at, last_synced_at
+      ) VALUES (
+        'nag-task', 'local:nag-task', 'local', 'local', 'Submit permit', 'todo',
+        'none', ?, 5, 'series-1', 0, ?, ?, ?
+      )
+    `).run(
+      scheduledAt,
+      TASK_REMINDER_BASE_TIME.toISOString(),
+      TASK_REMINDER_BASE_TIME.toISOString(),
+      TASK_REMINDER_BASE_TIME.toISOString(),
+    );
+
+    const firstClaim = await harness.repository.claimNext({
+      now: TASK_REMINDER_BASE_TIME,
+      leaseMs: 300_000,
+      maxAttempts: 5,
+    });
+    expect(firstClaim).toMatchObject({ seriesId: 'series-1', sequence: 0 });
+    await harness.repository.fire(firstClaim!, {
+      now: TASK_REMINDER_BASE_TIME,
+      delivery: TASK_REMINDER_DELIVERY_CONTEXT,
+    });
+
+    const nextAt = '2026-08-31T12:05:00.000Z';
+    expect(sqlite.prepare(`
+      SELECT reminder_at, reminder_nag_sequence FROM tasks WHERE id = 'nag-task'
+    `).get()).toMatchObject({
+      reminder_at: nextAt,
+      reminder_nag_sequence: 1,
+    });
+
+    const secondNow = new Date(nextAt);
+    const secondClaim = await harness.repository.claimNext({
+      now: secondNow,
+      leaseMs: 300_000,
+      maxAttempts: 5,
+    });
+    expect(secondClaim).toMatchObject({ seriesId: 'series-1', sequence: 1 });
+    await harness.repository.fire(secondClaim!, {
+      now: secondNow,
+      delivery: TASK_REMINDER_DELIVERY_CONTEXT,
+    });
+
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM notifications
+      WHERE source_id = 'task-reminder:series:series-1'
+    `).get()).toEqual({ count: 1 });
+    expect(sqlite.prepare(`
+      SELECT body FROM notifications WHERE source_id = 'task-reminder:series:series-1'
+    `).get()).toEqual({ body: 'Still pending · alerted 2 times.' });
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM task_reminder_occurrences
+      WHERE series_id = 'series-1'
+    `).get()).toEqual({ count: 2 });
+    const apnsDeliveries = sqlite.prepare(`
+      SELECT id, payload_snapshot
+      FROM notification_delivery_events
+      WHERE channel = 'apns'
+      ORDER BY created_at, id
+    `).all() as Array<{ id: string; payload_snapshot: unknown }>;
+    expect(apnsDeliveries).toHaveLength(2);
+    for (const delivery of apnsDeliveries) {
+      expect(parseJson(delivery.payload_snapshot)).toMatchObject({
+        deliveryId: delivery.id,
+        collapseId: expect.stringMatching(/^mc:/),
+        kind: 'task_reminder',
+      });
+    }
+    expect(new Set(apnsDeliveries.map((delivery) => (
+      (parseJson(delivery.payload_snapshot) as { collapseId: string }).collapseId
+    ))).size).toBe(1);
+  });
+
+  it('revives a cancelled occurrence under the task current series identity', async () => {
+    const harness = await createHarness();
+    await harness.reset();
+    const scheduledAt = '2026-08-31T11:55:00.000Z';
+    const now = TASK_REMINDER_BASE_TIME.toISOString();
+    sqlite.prepare(`
+      INSERT INTO tasks (
+        id, source_id, connector_type, connector_instance_id, title, status,
+        priority, reminder_at, reminder_nag_interval, reminder_nag_series_id,
+        reminder_nag_sequence, created_at, updated_at, last_synced_at
+      ) VALUES (
+        'revived-task', 'local:revived-task', 'local', 'local', 'Submit permit',
+        'todo', 'none', ?, 5, 'series-current', 3, ?, ?, ?
+      )
+    `).run(scheduledAt, now, now, now);
+    sqlite.prepare(`
+      INSERT INTO task_reminder_occurrences (
+        id, task_id, scheduled_at, series_id, sequence, state, attempt_count,
+        cancelled_at, created_at, updated_at
+      ) VALUES (
+        'cancelled-occurrence', 'revived-task', ?, 'series-old', 1, 'cancelled',
+        1, ?, ?, ?
+      )
+    `).run(scheduledAt, now, now, now);
+
+    const claim = await harness.repository.claimNext({
+      now: TASK_REMINDER_BASE_TIME,
+      leaseMs: 300_000,
+      maxAttempts: 5,
+    });
+
+    expect(claim).toMatchObject({
+      id: 'cancelled-occurrence',
+      seriesId: 'series-current',
+      sequence: 3,
+      attemptCount: 1,
+    });
+  });
 });

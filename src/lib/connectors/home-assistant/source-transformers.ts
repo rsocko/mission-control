@@ -35,12 +35,25 @@ function bool(value: unknown): boolean {
 }
 
 function finiteNumber(value: unknown): number | null {
+  if (
+    value === null
+    || value === undefined
+    || typeof value === 'boolean'
+    || (typeof value === 'string' && value.trim() === '')
+  ) {
+    return null;
+  }
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
 
 function safeId(value: string): string {
   return encodeURIComponent(value);
+}
+
+function humanizeIdentifier(value: string): string {
+  const words = value.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : value;
 }
 
 function sourceUrl(baseUrl: string, path: string): string {
@@ -266,6 +279,30 @@ function repairLevel(value: unknown): NotificationLevel {
   }
 }
 
+function isHomeAssistantRestartRepair(issue: HomeAssistantRepairIssue): boolean {
+  const domain = text(issue.domain)?.toLowerCase();
+  if (!['homeassistant', 'hassio', 'hacs', 'marketplace'].includes(domain ?? '')) {
+    return false;
+  }
+
+  return [issue.translation_key, issue.issue_id, issue.title].some((value) => {
+    const marker = text(value)?.toLowerCase().replace(/[\s-]+/g, '_');
+    return marker === 'restart_required' || marker?.startsWith('restart_required_');
+  });
+}
+
+function restartRepairTitle(issue: HomeAssistantRepairIssue): string | null {
+  if (!isHomeAssistantRestartRepair(issue)) return null;
+
+  const affectedName = text(issue.translation_placeholders?.name)
+    ?? (text(issue.issue_domain) ? humanizeIdentifier(String(issue.issue_domain)) : null);
+  if (!affectedName) return null;
+
+  return text(issue.translation_key)?.toLowerCase() === 'restart_required_uninstall'
+    ? `Restart to finish uninstalling ${affectedName}`
+    : `Restart to finish installing or updating ${affectedName}`;
+}
+
 export function buildRepairNotifications(input: {
   issues: HomeAssistantRepairIssue[];
   connectorType: string;
@@ -281,14 +318,19 @@ export function buildRepairNotifications(input: {
     if (!domain || !issueId || issue.ignored === true) return [];
     const level = repairLevel(issue.severity);
     const createdAt = text(issue.created) ?? new Date().toISOString();
-    const title = text(issue.title) ?? `${domain}: ${issueId.replace(/[_-]+/g, ' ')}`;
+    const repairName = text(issue.translation_key) ?? issueId;
+    const title = restartRepairTitle(issue)
+      ?? text(issue.title)
+      ?? `${humanizeIdentifier(domain)}: ${humanizeIdentifier(repairName)}`;
+    const affectedDomain = text(issue.issue_domain);
+    const affectedName = text(issue.translation_placeholders?.name);
     return [{
       id: `repair:${safeId(domain)}:${safeId(issueId)}`,
       sourceId: `${domain}:${issueId}`,
       connectorType: input.connectorType,
       connectorInstanceId: input.connectorInstanceId,
       title,
-      body: text(issue.description) ?? text(issue.translation_key) ?? undefined,
+      body: text(issue.description) ?? undefined,
       level,
       category: 'system',
       templateKey: `ha_repair_${String(issue.severity || 'warning')}`,
@@ -310,6 +352,12 @@ export function buildRepairNotifications(input: {
         severity: String(issue.severity || 'warning'),
         isFixable: issue.is_fixable === true,
         isPersistent: issue.is_persistent === true,
+        requiresRestart: isHomeAssistantRestartRepair(issue),
+        affectedDomain,
+        affectedName,
+        breaksInHomeAssistantVersion: text(issue.breaks_in_ha_version),
+        learnMoreUrl: text(issue.learn_more_url),
+        translationKey: text(issue.translation_key),
         baseUrl: input.baseUrl,
         actionsEnabled: input.actionsEnabled,
         pushDelivery: input.immediateActionNeeded

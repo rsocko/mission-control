@@ -11,13 +11,24 @@ import {
   registerDefaultNotificationProviders,
 } from '@/lib/notifications/providers';
 import { executeHomeAssistantProviderAction } from '@/lib/notifications/providers/home-assistant-action';
+import { executePaperclipProviderAction } from '@/lib/notifications/providers/paperclip-action';
+import { syncLogger } from '@/lib/logger';
+import { queueCompanionActionMutation } from '@/lib/connectors/rymessage/companion-action-service';
+import { stableCompanionOperationId } from '@/lib/connectors/rymessage/operation-id';
+import { unlinkRyMessageMaterialization } from '@/lib/connectors/rymessage/task-promotion';
+import { isUnavailableTaskAction } from '@/lib/notifications/task-association';
 
 const REMIND_LATER_DURATIONS = ['15m', '1h', 'tomorrow_morning'] as const;
 const HOME_ASSISTANT_MUTATING_ACTIONS = new Set([
   'install_update',
   'skip_update',
   'dismiss_persistent_notification',
+  'restart_home_assistant',
   'ignore_repair',
+]);
+const PAPERCLIP_MUTATING_ACTIONS = new Set([
+  'paperclip_approve',
+  'paperclip_reject',
 ]);
 type RemindLaterDuration = typeof REMIND_LATER_DURATIONS[number];
 
@@ -56,6 +67,22 @@ function parseActionPayload(value: unknown): Record<string, unknown> {
   return asRecord(JSON.parse(value));
 }
 
+async function queueProviderReconciliation(
+  connectorId: string,
+  notificationId: string,
+): Promise<void> {
+  try {
+    const { syncScheduler } = await import('@/lib/sync');
+    await syncScheduler.queueFollowUpSync(connectorId);
+  } catch (error) {
+    syncLogger.warn({
+      err: error,
+      connectorId,
+      notificationId,
+    }, 'Failed to queue provider action reconciliation');
+  }
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; actionId: string }> }
@@ -79,8 +106,16 @@ export async function POST(
 
     const now = new Date().toISOString();
     const payload = parseActionPayload(action.payload);
-    const requiresProviderClaim = notification.connectorType === 'home-assistant'
-      && HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType);
+    if (isUnavailableTaskAction(notification, { ...action, payload })) {
+      return ApiErrors.conflict('The related task is no longer available');
+    }
+    const requiresProviderClaim = (
+      notification.connectorType === 'home-assistant'
+      && HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType)
+    ) || (
+      notification.connectorType === 'paperclip'
+      && PAPERCLIP_MUTATING_ACTIONS.has(action.actionType)
+    );
     if (requiresProviderClaim) {
       const claimed = await persistence.claimProviderAction({
         notificationId: id,
@@ -90,10 +125,61 @@ export async function POST(
       });
       if (!claimed) {
         return NextResponse.json(
-          { success: false, error: 'This Home Assistant action is already being processed' },
+          { success: false, error: 'This provider action is already being processed' },
           { status: 409 },
         );
       }
+    }
+    if (
+      notification.connectorType === 'rymessage'
+      && (
+        action.actionType === 'rymessage_mark_handled'
+        || action.actionType === 'rymessage_dismiss'
+      )
+    ) {
+      const companionActionId = String(payload.actionId || '');
+      const connectorId = String(payload.connectorId || '');
+      const baseRevision = Number(payload.revision);
+      if (!companionActionId || !connectorId || !Number.isSafeInteger(baseRevision)) {
+        return ApiErrors.conflict('RyMessage action identity is incomplete');
+      }
+      await queueCompanionActionMutation(connectorId, {
+        contractVersion: '2.0',
+        operationId: stableCompanionOperationId(
+          `rymessage:${
+            action.actionType === 'rymessage_dismiss' ? 'dismissed' : 'handled'
+          }:${connectorId}:${companionActionId}:${baseRevision}`,
+        ),
+        actionId: companionActionId,
+        baseRevision,
+        mutation: {
+          kind: 'action.lifecycle',
+          state: action.actionType === 'rymessage_dismiss' ? 'dismissed' : 'handled',
+        },
+      });
+    }
+    if (
+      notification.connectorType === 'rymessage'
+      && action.actionType === 'rymessage_unlink'
+    ) {
+      const companionActionId = String(payload.actionId || '');
+      const connectorId = String(payload.connectorId || '');
+      const relationId = String(payload.relationId || '');
+      const expectedRevision = Number(payload.revision);
+      if (
+        !companionActionId
+        || !connectorId
+        || !relationId
+        || !Number.isSafeInteger(expectedRevision)
+      ) {
+        return ApiErrors.conflict('RyMessage relation identity is incomplete');
+      }
+      await unlinkRyMessageMaterialization({
+        connectorId,
+        actionId: companionActionId,
+        relationId,
+        expectedRevision,
+      });
     }
 
     registerDefaultNotificationProviders();
@@ -107,6 +193,8 @@ export async function POST(
       };
       providerResult = notification.connectorType === 'home-assistant'
         ? await executeHomeAssistantProviderAction(context)
+        : notification.connectorType === 'paperclip'
+          ? await executePaperclipProviderAction(context)
         : await executeNotificationProviderAction(context);
     } catch (error) {
       if (requiresProviderClaim) {
@@ -158,6 +246,15 @@ export async function POST(
           error: null,
         });
       }
+      if (
+        (
+          HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType)
+          || PAPERCLIP_MUTATING_ACTIONS.has(action.actionType)
+        )
+        && notification.connectorInstanceId
+      ) {
+        await queueProviderReconciliation(notification.connectorInstanceId, id);
+      }
       return NextResponse.json({ success: true, result: providerResult.result });
     }
     if (requiresProviderClaim) {
@@ -166,7 +263,7 @@ export async function POST(
         claimedAt: now,
         now: new Date().toISOString(),
         success: false,
-        error: 'Home Assistant provider declined the action',
+        error: 'Notification provider declined the action',
       });
     }
 

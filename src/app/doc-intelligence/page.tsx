@@ -18,13 +18,12 @@ import {
   MessageSquareText,
   PenLine,
   RefreshCw,
-  Search,
   ShieldAlert,
   SlidersHorizontal,
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { AgentAttribution } from '@/components/domains/AgentAttribution';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { TaskDocumentPreviewSection } from '@/components/task-detail/TaskDocumentPreviewSection';
@@ -32,6 +31,7 @@ import { GroupByDropdown, type GroupOption } from '@/components/toolbar/GroupByD
 import { SortDropdown, type SortOption } from '@/components/toolbar/SortDropdown';
 import { CollapsibleSection } from '@/components/dashboard/CollapsibleSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
 import { cn } from '@/lib/utils/cn';
@@ -49,6 +49,7 @@ import {
   type DocumentView,
   type SortDirection,
 } from './document-workspace';
+import type { TaskFieldUpdate } from '@/components/task-detail/task-detail-types';
 
 type ActionTypeFilter = 'all' | 'pay' | 'respond' | 'file' | 'archive' | 'review' | 'sign' | 'schedule';
 type UrgencyFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
@@ -274,7 +275,23 @@ export default function DocIntelligencePage() {
     localStorage.setItem(STORAGE_KEYS.view, 'all');
   }
 
-  const handleTaskUpdate = useCallback(() => { void fetchTasks(true); }, [fetchTasks]);
+  const handleTaskUpdate = useCallback((fields?: TaskFieldUpdate) => {
+    if (selectedTaskId && fields) {
+      setTasks((current) => current.map((task) => task.id === selectedTaskId
+        ? {
+            ...task,
+            ...(typeof fields.title === 'string' ? { title: fields.title } : {}),
+            ...(typeof fields.status === 'string' ? { status: fields.status } : {}),
+            ...(typeof fields.priority === 'string' ? { priority: fields.priority } : {}),
+            ...(fields.dueDate === null || typeof fields.dueDate === 'string'
+              ? { dueDate: fields.dueDate }
+              : {}),
+          }
+        : task));
+      return;
+    }
+    void fetchTasks(true);
+  }, [fetchTasks, selectedTaskId]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--background)]">
@@ -328,16 +345,13 @@ export default function DocIntelligencePage() {
         )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[180px] max-w-md flex-1">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-            <input
-              type="search"
-              placeholder="Search actions, documents, correspondents..."
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
-            />
-          </div>
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search actions, documents, correspondents..."
+            clearLabel="Clear document search"
+            className="min-w-[180px] max-w-md flex-1 rounded-lg bg-[var(--surface-2)] px-2.5 py-1.5 focus-within:border-[var(--accent)]"
+          />
 
           <button
             type="button"
@@ -465,7 +479,7 @@ export default function DocIntelligencePage() {
                         key={task.id}
                         task={task}
                         isSelected={task.id === selectedTaskId}
-                        onClick={() => taskSelection.toggleTask(task.id)}
+                        onClick={() => taskSelection.selectTask(task.id)}
                       />
                     ))}
                   </div>
@@ -480,7 +494,10 @@ export default function DocIntelligencePage() {
             <div className="h-full min-w-0 flex-1 2xl:max-w-[440px] 2xl:shrink-0">
               <TaskDetailPanel
                 taskId={selectedTaskId}
-                onClose={() => setSelectedTaskId(null)}
+                onClose={(reason) => setSelectedTaskId(
+                  null,
+                  reason === 'task-removed' ? { history: 'replace' } : undefined,
+                )}
                 onUpdate={handleTaskUpdate}
                 mode="panel"
                 minPanelWidth={420}

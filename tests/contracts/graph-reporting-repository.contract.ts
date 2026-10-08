@@ -112,6 +112,9 @@ export function describeGraphReportingRepositoryContract(
       await harness.insert('tasks', task('deleted-task', {
         connector_instance_id: 'connector-deleted',
       }));
+      await harness.insert('tasks', task('soft-deleted-task', {
+        deleted_at: NOW,
+      }));
       await harness.insert('tasks', task('notification-task', {
         connector_type: 'outlook-email',
       }));
@@ -131,6 +134,77 @@ export function describeGraphReportingRepositoryContract(
         filterInputs,
         taskIds: ['z-task', 'deleted-task', 'a-task'],
       })).toEqual(['a-task', 'z-task']);
+    });
+
+    it('excludes soft-deleted tasks from actionable graph and current project projections', async () => {
+      await harness.insert('hub_projects', project('project-1'));
+      await harness.insert('tasks', task('active-task'));
+      await harness.insert('tasks', task('deleted-task', { deleted_at: NOW }));
+      for (const taskId of ['active-task', 'deleted-task']) {
+        await harness.insert('task_projects', { task_id: taskId, project_id: 'project-1' });
+      }
+      await harness.insert('project_phases', {
+        id: 'phase-1',
+        project_id: 'project-1',
+        name: 'Build',
+        created_at: NOW,
+        updated_at: NOW,
+      });
+      for (const [id, taskId] of [['item-active', 'active-task'], ['item-deleted', 'deleted-task']]) {
+        await harness.insert('project_phase_items', {
+          id,
+          phase_id: 'phase-1',
+          task_id: taskId,
+          created_at: NOW,
+        });
+      }
+      await harness.insert('task_dependencies', {
+        id: 'dependency-1',
+        task_id: 'active-task',
+        depends_on_task_id: 'deleted-task',
+        type: 'blocks',
+        sync_status: 'local',
+        created_at: NOW,
+      });
+
+      const aggregate = await harness.repository.neighbors.readAggregate({
+        ref: { kind: 'project', id: 'project-1' },
+        limit: 10,
+      });
+      expect(aggregate.tasks.map(({ id }) => id)).toEqual(['active-task']);
+      expect((await harness.repository.neighbors.readTask({
+        taskId: 'deleted-task',
+        dependencyLimit: 10,
+        includeExplicit: true,
+        includeDerived: true,
+      })).center).toBeNull();
+      expect((await harness.repository.neighbors.readTask({
+        taskId: 'active-task',
+        dependencyLimit: 10,
+        includeExplicit: true,
+        includeDerived: true,
+      })).dependencyTasks).toEqual([]);
+      expect((await harness.repository.neighbors.listTasks([
+        'active-task',
+        'deleted-task',
+      ])).map(({ id }) => id)).toEqual(['active-task']);
+      expect((await harness.repository.neighbors.listRelationshipTasks([
+        'active-task',
+        'deleted-task',
+      ])).map(({ id }) => id)).toEqual(['active-task']);
+
+      const graph = await harness.repository.projects.read('project-1');
+      expect(graph.tasks.map(({ id }) => id)).toEqual(['active-task']);
+      expect(graph.phaseItems).toEqual([{ phaseId: 'phase-1', taskId: 'active-task' }]);
+      expect(graph.dependencies).toEqual([]);
+
+      const overview = await harness.repository.overview.read();
+      expect(overview.memberships).toEqual([{ projectId: 'project-1', taskId: 'active-task' }]);
+      expect(overview.tasks.map(({ id }) => id)).toEqual(['active-task']);
+      expect(overview.phaseItems).toEqual([{ phaseId: 'phase-1', taskId: 'active-task' }]);
+      expect(await harness.repository.overview.listProjectTaskStatuses('project-1')).toEqual([
+        expect.objectContaining({ status: 'todo' }),
+      ]);
     });
 
     it('returns project graph, overview membership, and tags as plain data', async () => {
@@ -239,7 +313,9 @@ export function describeGraphReportingRepositoryContract(
         started_at: '2026-09-01',
         target_date: '2026-09-30',
       }));
-      await harness.insert('tasks', task('task-1'));
+      await harness.insert('tasks', task('task-1', {
+        deleted_at: '2026-09-05T18:00:00.000Z',
+      }));
       await harness.insert('task_history_events', {
         task_id: 'task-1',
         event_type: 'baseline',
@@ -259,6 +335,12 @@ export function describeGraphReportingRepositoryContract(
       });
       expect(burn.scope).toMatchObject({ scope: 'project', scopeId: 'project-1' });
       expect(burn.candidateEvents.map(({ taskId }) => taskId)).toEqual(['task-1']);
+      expect(burn.tasks).toEqual([
+        expect.objectContaining({
+          id: 'task-1',
+          deletedAt: '2026-09-05T18:00:00.000Z',
+        }),
+      ]);
 
       await harness.insert('hub_projects', project('project-owned', {
         metadata: JSON.stringify({ universeClusterCreationToken: 'owner-token' }),
@@ -374,7 +456,7 @@ export function describeSqliteGraphReportingRepositoryContract(): void {
         status TEXT NOT NULL DEFAULT 'todo', local_disposition TEXT NOT NULL DEFAULT 'active',
         priority TEXT NOT NULL DEFAULT 'none', planning_horizon TEXT, due_date TEXT,
         push_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-        completed_at TEXT, recurrence_generated_from_task_id TEXT, parent_id TEXT,
+        completed_at TEXT, deleted_at TEXT, recurrence_generated_from_task_id TEXT, parent_id TEXT,
         depth INTEGER NOT NULL DEFAULT 0, is_checklist_item INTEGER NOT NULL DEFAULT 0,
         source_list_id TEXT, source_list_name TEXT, assignee TEXT, micro_status TEXT,
         status_reason TEXT, metadata TEXT NOT NULL DEFAULT '{}', sync_status TEXT NOT NULL DEFAULT 'synced',
@@ -392,6 +474,7 @@ export function describeSqliteGraphReportingRepositoryContract(): void {
       CREATE TABLE hub_projects (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
         color TEXT NOT NULL DEFAULT '#3b82f6', icon TEXT, icon_color TEXT,
+        appearance TEXT,
         source_bindings TEXT NOT NULL DEFAULT '[]', auto_include_rules TEXT NOT NULL DEFAULT '[]',
         kanban_columns TEXT NOT NULL DEFAULT '[]', default_view TEXT NOT NULL DEFAULT 'list',
         default_filters TEXT, status TEXT NOT NULL DEFAULT 'active', status_override TEXT,

@@ -16,7 +16,9 @@ import {
 import {
   planCompletedRecurringDeletions,
   planDuplicateDeletions,
+  planGitHubTransferOrphanDeletions,
   planOpenRecurringDeletions,
+  parseCleanupMetadata,
   type BugReportCommand,
   type BugReportResult,
   type CleanupTaskCandidate,
@@ -61,7 +63,8 @@ const connectorExportColumns = {
 };
 
 const CLEANUP_COLUMNS = `
-  id, title, source_list_id AS sourceListId,
+  id, source_id AS sourceId, connector_type AS connectorType, title,
+  source_list_id AS sourceListId,
   connector_instance_id AS connectorInstanceId, due_date AS dueDate,
   completed_at AS completedAt, updated_at AS updatedAt, metadata
 `;
@@ -75,6 +78,10 @@ export function createSqliteOperationalUtilityRepository(
   db: SqliteDb,
 ): OperationalUtilityPersistence {
   function deleteTaskCascade(taskId: string): void {
+    sqlite.prepare(`
+      DELETE FROM external_entity_bindings
+      WHERE binding_type = 'task' AND local_id = ?
+    `).run(taskId);
     sqlite.prepare('DELETE FROM task_tags WHERE task_id = ?').run(taskId);
     sqlite.prepare('DELETE FROM project_auto_include_exclusions WHERE task_id = ?').run(taskId);
     sqlite.prepare('DELETE FROM task_projects WHERE task_id = ?').run(taskId);
@@ -83,6 +90,12 @@ export function createSqliteOperationalUtilityRepository(
   }
 
   const runCleanup = sqlite.transaction((): MaintenanceCleanupResult => {
+    const transferredOrphans = sqlite.prepare(`
+      SELECT ${CLEANUP_COLUMNS} FROM tasks WHERE connector_type = 'github-issues'
+    `).all() as CleanupTaskCandidate[];
+    const transferredOrphanIds = planGitHubTransferOrphanDeletions(transferredOrphans);
+    for (const id of transferredOrphanIds) deleteTaskCascade(id);
+
     const duplicateGroups = sqlite.prepare(`
       SELECT source_id AS sourceId, connector_instance_id AS connectorInstanceId
       FROM tasks
@@ -91,7 +104,7 @@ export function createSqliteOperationalUtilityRepository(
       ORDER BY source_id, connector_instance_id
     `).all() as Array<{ sourceId: string; connectorInstanceId: string }>;
 
-    let tasksRemoved = 0;
+    let tasksRemoved = transferredOrphanIds.length;
     for (const group of duplicateGroups) {
       const rows = sqlite.prepare(`
         SELECT id, last_synced_at AS lastSyncedAt, updated_at AS updatedAt
@@ -178,6 +191,55 @@ export function createSqliteOperationalUtilityRepository(
       },
     },
     maintenance: {
+      async listGitHubTransferCandidates() {
+        const rows = sqlite.prepare(`
+          SELECT id, source_id AS sourceId,
+                 connector_instance_id AS connectorInstanceId, title, metadata
+          FROM tasks
+          WHERE connector_type = 'github-issues'
+            AND (connector_instance_id, title) IN (
+              SELECT connector_instance_id, title
+              FROM tasks
+              WHERE connector_type = 'github-issues'
+              GROUP BY connector_instance_id, title
+              HAVING COUNT(*) > 1
+            )
+          ORDER BY connector_instance_id, title, id
+          LIMIT 100
+        `).all() as Array<{
+          id: string;
+          sourceId: string;
+          connectorInstanceId: string;
+          title: string;
+          metadata: unknown;
+        }>;
+        return rows.map((row) => {
+          const metadata = parseCleanupMetadata(row.metadata);
+          return {
+            id: row.id,
+            sourceId: row.sourceId,
+            connectorInstanceId: row.connectorInstanceId,
+            title: row.title,
+            nodeId: typeof metadata?.nodeId === 'string' ? metadata.nodeId : null,
+          };
+        });
+      },
+      async deleteVerifiedGitHubTransferOrphans(taskIds) {
+        if (taskIds.length === 0) return 0;
+        return sqlite.transaction(() => {
+          let deleted = 0;
+          for (const taskId of taskIds) {
+            const exists = sqlite.prepare(`
+              SELECT 1 FROM tasks
+              WHERE id = ? AND connector_type = 'github-issues'
+            `).get(taskId);
+            if (!exists) continue;
+            deleteTaskCascade(taskId);
+            deleted++;
+          }
+          return deleted;
+        }).immediate();
+      },
       async runDuplicateCleanup() {
         return runCleanup.immediate();
       },

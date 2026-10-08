@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
+import { notifyTaskCompleted } from '@/lib/completion-sounds';
 import { motion, useReducedMotion } from 'motion/react';
 import {
   DndContext,
@@ -53,7 +54,7 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   BulkActionBar,
   BulkDispositionButtons,
@@ -67,6 +68,7 @@ import {
 } from '@/components/bulk-actions';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { BurnReportCard } from '@/components/projects/BurnReportCard';
+import { PhaseColorPicker } from '@/components/projects/PhaseColorPicker';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
 import {
   ViewDensityToggle,
@@ -95,6 +97,7 @@ import {
   getPhaseTaskStatusSummary,
   shouldCompactCompletedPhase,
 } from '@/lib/projects/phase-task-status';
+import { LARGE_PHASE_TASK_THRESHOLD } from '@/lib/projects/phase-reorganization';
 import {
   canEditTaskField,
   selectedTaskFieldBlockedReason,
@@ -140,9 +143,9 @@ import {
   filterProjectTasks,
   getConnectorIcon,
   getPhaseColor,
-  getPhaseStatusColor,
   getTaskStatusColor,
   getTimelineRange,
+  isUnassignedTaskDropTarget,
   toRgba,
 } from '../utils';
 import type {
@@ -151,6 +154,7 @@ import type {
   RequestConfirmation,
 } from './contracts';
 import { AIPlanControl } from './AIPlanControl';
+import { PhaseReorganizationTrigger } from './PhaseReorganizationTrigger';
 import { PlanTaskRow } from '../PlanTaskRow';
 import { useProjectTaskFilterOptions } from './useProjectTaskFilterOptions';
 
@@ -209,7 +213,7 @@ export function ProjectPhasesTab({
     projectId,
     reportRefreshKey,
     tasks,
-    taskToPhase,
+    unassignedTasks,
   } = useProjectPageData();
   const {
     hierarchyAnnouncement,
@@ -231,7 +235,7 @@ export function ProjectPhasesTab({
     openTaskNotes,
     selectedTaskId,
     setSelectedTaskId,
-    toggleTask,
+    selectTask,
   } = useProjectPageTaskInteractions();
   const prefersReducedMotion = useReducedMotion() ?? false;
 
@@ -411,12 +415,6 @@ export function ProjectPhasesTab({
     ]),
     tasks: tasks.map((task) => [task.id, task.status, task.updatedAt]),
   }), [phaseItemsByPhase, phases, tasks]);
-
-  // Tasks in the project that are not assigned to any phase
-  const unassignedTasks = useMemo(() => {
-    if (phases.length === 0) return [];
-    return tasks.filter((t) => !taskToPhase.has(t.id));
-  }, [tasks, taskToPhase, phases]);
 
   const visibleUnassignedTasks = useMemo(() => {
     return unassignedTasks.filter((task) => filteredPlanTaskIds.has(task.id));
@@ -618,8 +616,10 @@ export function ProjectPhasesTab({
     ))?.id ?? null;
     let targetPhaseId: string | null = null;
     let targetIndex = 0;
-    const droppedOnUnassigned = overStr === 'unassigned-drop'
-      || over.data.current?.type === 'unassigned-drop';
+    const droppedOnUnassigned = isUnassignedTaskDropTarget(
+      overStr,
+      over.data.current,
+    );
     if (droppedOnUnassigned) {
       if (!sourcePhaseId) return;
     } else if (overStr.startsWith('phase-drop:')) {
@@ -709,6 +709,11 @@ export function ProjectPhasesTab({
     }
 
     if (!startSavingPhase(phase.id)) return;
+    let renamePersisted = false;
+    setPhases((current) => current.map((entry) => (
+      entry.id === phase.id ? { ...entry, name: trimmed } : entry
+    )));
+
     try {
       const response = await fetch(`/api/project-phases/${phase.id}`, {
         method: 'PATCH',
@@ -720,10 +725,18 @@ export function ProjectPhasesTab({
         throw new Error(payload?.error || 'Failed to rename phase');
       }
 
+      renamePersisted = true;
       setPhases((current) => current.map((entry) => (entry.id === phase.id ? payload.phase! : entry)));
       await refreshProjectHierarchy();
       toast.success('Phase renamed');
     } catch (caughtError) {
+      if (!renamePersisted) {
+        setPhases((current) => current.map((entry) => (
+          entry.id === phase.id && entry.name === trimmed
+            ? { ...entry, name: phase.name }
+            : entry
+        )));
+      }
       toast.error(caughtError instanceof Error ? caughtError.message : 'Failed to rename phase');
     } finally {
       finishSavingPhase(phase.id);
@@ -1000,13 +1013,18 @@ export function ProjectPhasesTab({
           {/* Bulk action bar inside sticky header so it stays visible when scrolled */}
           {bulk.bulkMode && visiblePhaseViewMode === 'list' && (
             <div className="border-t border-[var(--border-subtle)]">
-              <BulkActionBar selectedCount={bulk.bulkSelected.size} onCancel={bulk.clearSelection}>
+              <BulkActionBar
+                selectedCount={bulk.bulkSelected.size}
+                taskIds={Array.from(bulk.bulkSelected)}
+                onCancel={bulk.clearSelection}
+              >
                 <button
                   disabled={Boolean(bulkStatusBlockedReason)}
                   title={bulkStatusBlockedReason}
                   onClick={async () => {
                     const ids = Array.from(bulk.bulkSelected);
                     const { failed } = await executeBulkOperation(ids, (id) => fetch(`/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }), `Completed ${ids.length} task${ids.length > 1 ? 's' : ''}`);
+                    if (failed.length < ids.length) notifyTaskCompleted();
                     if (failed.length === 0) {
                       setTasks((prev) => prev.map((t) => ids.includes(t.id) ? { ...t, status: 'done' as TaskStatus } : t));
                       bulk.clearSelection();
@@ -1212,8 +1230,25 @@ export function ProjectPhasesTab({
         </CardHeader>
 
         {/* AI Insights - inline hints based on phase data */}
-        {phases.length >= 2 && (() => {
-          const insights: Array<{ type: 'gap' | 'stale' | 'overlap'; message: string }> = [];
+        {phases.length > 0 && (() => {
+          const insights: Array<{
+            type: 'gap' | 'stale' | 'overlap' | 'large';
+            message: string;
+            phaseId?: string;
+            phaseName?: string;
+          }> = [];
+          const largePhases = phases.filter(
+            (phase) => (phaseEntries[phase.id] ?? []).length > LARGE_PHASE_TASK_THRESHOLD,
+          );
+          for (const largePhase of largePhases) {
+            const taskCount = (phaseEntries[largePhase.id] ?? []).length;
+            insights.push({
+              type: 'large',
+              message: `“${largePhase.name}” has ${taskCount} tasks and may be easier to manage if subdivided.`,
+              phaseId: largePhase.id,
+              phaseName: largePhase.name,
+            });
+          }
           const stalePhasesCount = phases.filter((p) => p.status === 'in_progress').length;
           if (stalePhasesCount > 2) {
             insights.push({ type: 'stale', message: `${stalePhasesCount} phases are marked in-progress simultaneously — consider focusing on fewer.` });
@@ -1241,7 +1276,15 @@ export function ProjectPhasesTab({
                 {insights.slice(0, 3).map((insight, i) => (
                   <div key={i} className="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
                     <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-purple-400 flex-shrink-0" />
-                    <span>{insight.message}</span>
+                    <span className="flex-1">{insight.message}</span>
+                    {insight.phaseId && insight.phaseName ? (
+                      <PhaseReorganizationTrigger
+                        phaseId={insight.phaseId}
+                        phaseName={insight.phaseName}
+                        proposalActions={proposalActions}
+                        compact
+                      />
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1329,6 +1372,13 @@ export function ProjectPhasesTab({
                               >
                                 <GripVertical size={14} />
                               </button>
+                              <PhaseColorPicker
+                                phaseName={phase.name}
+                                value={phase.color}
+                                fallbackColor={project.color}
+                                disabled={isPhaseMutationDisabled}
+                                onChange={(color) => handleUpdatePhaseField(phase.id, 'color', color)}
+                              />
                               <CheckCircle2 size={16} className="shrink-0 text-[var(--success)]" />
                               <span className="min-w-0 truncate text-sm font-medium text-[var(--text-secondary)]">
                                 {phase.name}
@@ -1374,14 +1424,22 @@ export function ProjectPhasesTab({
                             tabIndex={-1}
                             role="region"
                             aria-label={`${phase.name} phase`}
-                            className="overflow-visible rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] shadow-[0_1px_0_rgba(255,255,255,0.04),0_14px_32px_rgba(0,0,0,0.16)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
+                            className="@container overflow-visible rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] shadow-[0_1px_0_rgba(255,255,255,0.04),0_14px_32px_rgba(0,0,0,0.16)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
                             style={{ scrollMarginTop: stickyHeaderHeight + 24 }}
                           >
                             {/* ── Phase Header ── */}
                             <div className="relative rounded-t-[var(--radius-lg)] bg-[var(--surface-1)]">
-                              <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="flex min-w-0 gap-3">
-                                  <span className="mt-4 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: phaseColor }} aria-hidden="true" />
+                              <div className="flex flex-col gap-3 p-4 @4xl:flex-row @4xl:items-start @4xl:justify-between">
+                                <div className="flex min-w-0 flex-1 gap-2 sm:gap-3">
+                                  <div className="mt-1 shrink-0">
+                                    <PhaseColorPicker
+                                      phaseName={phase.name}
+                                      value={phase.color}
+                                      fallbackColor={project.color}
+                                      disabled={isPhaseMutationDisabled}
+                                      onChange={(color) => handleUpdatePhaseField(phase.id, 'color', color)}
+                                    />
+                                  </div>
                                   <button
                                     type="button"
                                     {...dragHandleProps}
@@ -1398,7 +1456,7 @@ export function ProjectPhasesTab({
                                   >
                                     {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
                                   </button>
-                                  <div className="min-w-0 space-y-2">
+                                  <div className="min-w-0 flex-1 space-y-2">
                                     <div className="flex flex-wrap items-center gap-2">
                                       {isEditing ? (
                                         <input
@@ -1422,7 +1480,7 @@ export function ProjectPhasesTab({
                                         <button
                                           type="button"
                                           disabled={isPhaseMutationDisabled}
-                                          className="text-left text-base font-semibold text-[var(--text-primary)] cursor-pointer hover:text-[var(--accent)] transition-colors disabled:pointer-events-none"
+                                          className="min-w-0 break-words text-left text-base font-semibold text-[var(--text-primary)] cursor-pointer hover:text-[var(--accent)] transition-colors disabled:pointer-events-none"
                                           onClick={() => {
                                             setEditingPhaseId(phase.id);
                                             setEditingPhaseName(phase.name);
@@ -1449,10 +1507,28 @@ export function ProjectPhasesTab({
                                         </Tooltip>
                                       ) : null}
                                       {/* Task count — read-only pill, visually distinct */}
-                                      <span className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
+                                      <span
+                                        className={cn(
+                                          'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium',
+                                          allEntries.length > LARGE_PHASE_TASK_THRESHOLD
+                                            ? 'bg-amber-500/10 text-amber-300'
+                                            : 'bg-[var(--surface-2)] text-[var(--text-secondary)]',
+                                        )}
+                                        title={allEntries.length > LARGE_PHASE_TASK_THRESHOLD
+                                          ? 'Large phases can be harder to scan and maintain.'
+                                          : undefined}
+                                      >
                                         <Layers3 size={11} />
                                         {hasPlanTaskFilters || !showCompletedTasks ? `${entries.length}/${allEntries.length}` : entries.length} {allEntries.length === 1 ? 'task' : 'tasks'}
+                                        {allEntries.length > LARGE_PHASE_TASK_THRESHOLD ? ' · Large phase' : ''}
                                       </span>
+                                      {allEntries.length > LARGE_PHASE_TASK_THRESHOLD ? (
+                                        <PhaseReorganizationTrigger
+                                          phaseId={phase.id}
+                                          phaseName={phase.name}
+                                          proposalActions={proposalActions}
+                                        />
+                                      ) : null}
                                       {/* Progress indicator */}
                                       {totalCount > 0 && (
                                         <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">
@@ -1504,21 +1580,23 @@ export function ProjectPhasesTab({
                                         className="w-full field-sizing-content resize-none rounded-md border border-[var(--border-strong)] bg-[var(--surface-1)] px-2 py-1 text-sm text-[var(--text-secondary)] outline-none"
                                       />
                                     ) : phase.description ? (
-                                      <div
-                                        className={cn('group/desc flex items-start gap-1.5', isPhaseMutationDisabled ? 'cursor-default' : 'cursor-pointer')}
+                                      <button
+                                        type="button"
+                                        className="group/desc flex max-w-[75ch] items-start gap-1.5 text-left disabled:cursor-default"
                                         onClick={() => {
                                           if (isPhaseMutationDisabled) return;
                                           setEditingPhaseDescId(phase.id);
                                           setEditingPhaseDesc(phase.description || '');
                                         }}
+                                        disabled={isPhaseMutationDisabled}
                                         title="Click to edit description"
-                                        aria-disabled={isPhaseMutationDisabled}
+                                        aria-label={`Edit ${phase.name} description`}
                                       >
-                                        <p className="text-sm text-[var(--text-secondary)] text-pretty whitespace-pre-wrap group-hover/desc:text-[var(--text-primary)] transition-colors">
+                                        <span className="line-clamp-2 whitespace-pre-wrap text-sm text-[var(--text-secondary)] text-pretty transition-colors group-hover/desc:text-[var(--text-primary)]">
                                           {phase.description}
-                                        </p>
+                                        </span>
                                         <PencilLine size={12} className="mt-0.5 shrink-0 text-[var(--text-tertiary)] opacity-0 group-hover/desc:opacity-100 transition-opacity" />
-                                      </div>
+                                      </button>
                                     ) : null}
                                     <div className="flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
                                       <label className="input-glow inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-2 py-1 cursor-pointer hover:bg-[var(--surface-2)] hover:border-[var(--accent-500)]/40" title="Click to edit estimated days">
@@ -1560,8 +1638,11 @@ export function ProjectPhasesTab({
                                   </div>
                                 </div>
 
-                                {/* Right-side actions — use flex-shrink-0 and no-wrap to prevent wrapping issues */}
-                                <div className="flex shrink-0 items-center gap-1.5">
+                                <div
+                                  role="group"
+                                  aria-label={`${phase.name} phase actions`}
+                                  className="grid w-full min-w-0 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 border-t border-[var(--border)] pt-3 @4xl:w-auto @4xl:grid-cols-[auto_minmax(10rem,14rem)_auto] @4xl:border-t-0 @4xl:pt-0"
+                                >
                                   <Tooltip content="Open progress report">
                                   <button
                                     type="button"
@@ -1585,7 +1666,7 @@ export function ProjectPhasesTab({
                                       const value = v || null;
                                       void handleUpdatePhaseField(phase.id, 'startAfterPhaseId', value);
                                     }}>
-                                    <SelectTrigger className={cn('inline-flex min-h-9 items-center rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-1)] px-3 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)]', BUTTON_TRANSITION)} title="Set dependency">
+                                    <SelectTrigger className={cn('inline-flex min-h-9 w-full min-w-0 items-center rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-1)] px-3 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)]', BUTTON_TRANSITION)} title="Set dependency">
                                       <Link2 size={14} className="mr-1.5 shrink-0 text-[var(--text-muted)]" />
                                       <SelectValue />
                                     </SelectTrigger>
@@ -1831,6 +1912,7 @@ export function ProjectPhasesTab({
           ) : visiblePhaseViewMode === 'assign' ? (
             <PhaseAssignView
               phases={phases}
+              projectColor={project.color}
               unassignedTasks={unassignedTasks}
               phaseEntries={phaseEntries}
               sensors={sensors}
@@ -1894,7 +1976,7 @@ export function ProjectPhasesTab({
                   </div>
 
                   {ganttRows.map((row) => {
-                    const phaseStatusColor = getPhaseStatusColor(row.phase.status);
+                    const phaseColor = getPhaseColor(row.phase, project);
                     const phaseOffset = differenceInCalendarDays(row.start, timelineRange.start) * timelineCellWidth;
                     const phaseWidth = row.durationDays * timelineCellWidth;
 
@@ -1902,7 +1984,7 @@ export function ProjectPhasesTab({
                       <div key={row.phase.id} className="flex border-b border-[var(--border-subtle)] last:border-b-0">
                         <div className="sticky left-0 z-10 w-[220px] shrink-0 border-r border-[var(--border)] bg-[var(--surface-0)] px-4 py-4">
                           <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: phaseStatusColor }} />
+                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: phaseColor }} />
                             <p className="truncate text-sm font-medium text-[var(--text-primary)]">{row.phase.name}</p>
                           </div>
                           <div className="mt-2 flex flex-wrap gap-2 text-[12px] text-[var(--text-tertiary)]">
@@ -1923,8 +2005,8 @@ export function ProjectPhasesTab({
                             style={{
                               left: phaseOffset,
                               width: Math.max(phaseWidth, 24),
-                              backgroundColor: toRgba(phaseStatusColor, 0.22),
-                              borderColor: toRgba(phaseStatusColor, 0.46),
+                              backgroundColor: toRgba(phaseColor, 0.22),
+                              borderColor: toRgba(phaseColor, 0.46),
                             }}
                             role="button"
                             tabIndex={0}
@@ -1965,7 +2047,7 @@ export function ProjectPhasesTab({
                                 tabIndex={0}
                                 title={`${taskBar.task.title} — ${TASK_STATUS_LABELS[taskBar.task.status]}`}
                                 aria-label={`Task: ${taskBar.task.title}, ${TASK_STATUS_LABELS[taskBar.task.status]}`}
-                                onClick={() => toggleTask(taskBar.task.id)}
+                                onClick={() => selectTask(taskBar.task.id)}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault();

@@ -13,6 +13,7 @@ export type SettingsSection =
   | 'contentTypes'
   | 'priorityEntities'
   | 'dashboard'
+  | 'contextThemes'
   | 'storage'
   | 'shortcuts'
   | 'notifications'
@@ -39,8 +40,9 @@ export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = {
   triageSources: 'Triage Sources',
   priorityEntities: 'Priority Entities',
   dashboard: 'Dashboard',
+  contextThemes: 'Context Themes',
   shortcuts: 'Taskbar Shortcuts',
-  ai: 'AI Provider',
+  ai: 'AI & Agents',
   storage: 'Storage & Cache',
   mode: 'App Mode',
   general: 'Other',
@@ -59,6 +61,13 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'Alertmanager', section: 'integrations', sectionLabel: 'Data Sources', keywords: ['homelab', 'prometheus', 'incident', 'webhook'] },
   { title: 'Notification enrichment', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['re-enrichment', 'ai enrichment'] },
   { title: 'Push Notifications', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['alerts', 'browser'] },
+  {
+    title: 'Connector Push Rules',
+    section: 'notifications',
+    sectionLabel: 'Data Sources',
+    target: 'Choose which connector events can interrupt you',
+    keywords: ['source alerts', 'notification types', 'minimum level', 'lock screen preview'],
+  },
   { title: 'Do Not Disturb', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['dnd', 'mute'] },
   { title: 'Scheduled Summaries', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['schedule', 'notification scheduler'] },
   { title: 'Morning Summary', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['digest'] },
@@ -78,12 +87,17 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'Priority Entities', section: 'priorityEntities', sectionLabel: 'Organization', keywords: ['smart score', 'people', 'projects'] },
 
   { title: 'Dashboard KPIs', section: 'dashboard', sectionLabel: 'Appearance', keywords: ['metrics', 'cards'] },
+  { title: 'Context Themes', section: 'contextThemes', sectionLabel: 'Appearance', keywords: ['project color', 'list color', 'backdrop', 'appearance', 'frame'] },
   { title: 'KPI Rotation', section: 'dashboard', sectionLabel: 'Appearance', target: 'Rotation', keywords: ['cycle', 'dashboard'] },
   { title: 'KPI Auto-surface', section: 'dashboard', sectionLabel: 'Appearance', target: 'Auto-surface', keywords: ['dashboard', 'automatic'] },
   { title: 'Taskbar Shortcuts', section: 'shortcuts', sectionLabel: 'Appearance', keywords: ['pwa', 'quick launch'] },
   { title: 'Launch Behavior', section: 'shortcuts', sectionLabel: 'Appearance', keywords: ['reuse window', 'new window'] },
 
-  { title: 'AI Provider', section: 'ai', sectionLabel: 'System', keywords: ['openai', 'ollama', 'azure'] },
+  { title: 'AI & Agents', section: 'ai', sectionLabel: 'System', keywords: ['openai', 'ollama', 'azure', 'external agents'] },
+  { title: 'Execution Destinations', section: 'ai', sectionLabel: 'System', keywords: ['delegate', 'delegation', 'agents', 'github cloud', 'paperclip', 'scout', 'pull queue', 'routes'] },
+  { title: 'Scout work pickup', section: 'ai', sectionLabel: 'System', target: 'Execution Destinations', keywords: ['scout', 'connector', 'delegation', 'scheduled pickup', 'external agent'] },
+  { title: 'GitHub Copilot Cloud', section: 'ai', sectionLabel: 'System', target: 'Execution Destinations', keywords: ['github cloud', 'copilot', 'agent tasks', 'delegate'] },
+  { title: 'Paperclip routes', section: 'ai', sectionLabel: 'System', target: 'Execution Destinations', keywords: ['agent', 'delegate', 'company', 'assignee'] },
   { title: 'AI Model', section: 'ai', sectionLabel: 'System', target: 'Model', keywords: ['llm'] },
   { title: 'AI Base URL', section: 'ai', sectionLabel: 'System', target: 'Base URL', keywords: ['endpoint', 'host'] },
   { title: 'AI sensitivity routing', section: 'ai', sectionLabel: 'System', target: 'Sensitivity routing policies', keywords: ['privacy', 'fallback', 'local only', 'restricted', 'bifrost'] },
@@ -109,8 +123,9 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'Timezone', section: 'general', sectionLabel: 'System', keywords: ['calendar', 'dates', 'schedule'] },
   { title: 'Completion animation', section: 'general', sectionLabel: 'System', keywords: ['particles', 'reduced motion'] },
   { title: 'Sync icon animation', section: 'general', sectionLabel: 'System', keywords: ['satellite', 'particles', 'alternating', 'random'] },
+  { title: 'Toast notifications', section: 'general', sectionLabel: 'System', keywords: ['mute', 'snooze', 'errors only', 'quiet', 'position', 'bottom left', 'top right'] },
   { title: 'Quick Add parsing', section: 'general', sectionLabel: 'System', keywords: ['nlp', 'dates', 'tokens', 'preserve text'] },
-  { title: 'Natural-language date suggestions', section: 'general', sectionLabel: 'System', target: 'Natural-language date suggestions', keywords: ['nlp', 'quick add', 'dates'] },
+  { title: 'Natural-language due dates', section: 'general', sectionLabel: 'System', target: 'Natural-language due dates', keywords: ['nlp', 'quick add', 'dates'] },
   { title: 'Preserve metadata tokens', section: 'general', sectionLabel: 'System', keywords: ['quick add', 'title', 'tokens'] },
   { title: 'App badge count', section: 'general', sectionLabel: 'System', keywords: ['icon', 'unread count'] },
   { title: 'Navigation badges', section: 'general', sectionLabel: 'System', target: 'Navigation tab badges', keywords: ['tabs', 'counts'] },

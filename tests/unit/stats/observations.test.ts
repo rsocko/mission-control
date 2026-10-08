@@ -15,7 +15,17 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       streak: { label: 'Streak', value: 3, unit: 'days' },
     },
     trends: [],
+    planAlignment: {
+      points: [],
+      totals: { committed: 0, plannedCompleted: 0, unplannedCompleted: 0, carryover: 0 },
+      planCoverage: 0,
+      commitmentRate: 0,
+    },
     sourceBreakdown: [],
+    taskBreakdown: {
+      byPriority: [],
+      byStatus: [],
+    },
     taskAge: [
       { label: '< 1 day', count: 2, minDays: 0, maxDays: 1 },
       { label: '1–7 days', count: 5, minDays: 1, maxDays: 7 },
@@ -40,6 +50,7 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       topTags: [],
     },
     projectActivity: [],
+    workActivity: { lists: [], tags: [], projects: [], sources: [] },
     routineHeatmap: [],
     delivery: {
       throughput: { interval: 'week', total: 0, averagePerInterval: 0, points: [] },
@@ -68,6 +79,15 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       unsupportedMeasures: '',
     },
     activityHeatmap: [],
+    productivity: {
+      periodStart: '2026-06-24',
+      periodEnd: '2026-07-23',
+      timeZone: 'UTC',
+      hourly: [],
+      weekdays: [],
+      timeliness: { onTime: 0, late: 0, withoutDueDate: 0, onTimeRate: null },
+      comparisons: [],
+    },
     flow: {
       start: '2026-01-01T00:00:00.000Z',
       end: '2026-01-08T00:00:00.000Z',

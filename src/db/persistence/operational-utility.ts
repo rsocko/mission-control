@@ -66,7 +66,22 @@ export interface MaintenanceCleanupResult {
   readonly openRecurringInstancesRemoved: number;
 }
 
+export interface GitHubTransferCleanupCandidate {
+  readonly id: string;
+  readonly sourceId: string;
+  readonly connectorInstanceId: string;
+  readonly title: string;
+  readonly nodeId: string | null;
+}
+
 export interface TaskMaintenanceRepository {
+  /**
+   * Lists GitHub rows that share an exact title within one connector. The API
+   * verifies each possible legacy route against GitHub before deleting it.
+   */
+  listGitHubTransferCandidates?(): Promise<readonly GitHubTransferCleanupCandidate[]>;
+  /** Deletes only still-existing GitHub rows after authoritative transfer verification. */
+  deleteVerifiedGitHubTransferOrphans?(taskIds: readonly string[]): Promise<number>;
   /**
    * Removes duplicate source rows and redundant recurring instances inside a
    * single backend transaction, deleting dependent rows before their tasks and
@@ -200,6 +215,8 @@ export interface OperationalUtilityPersistence {
  */
 export interface CleanupTaskCandidate {
   readonly id: string;
+  readonly sourceId: string;
+  readonly connectorType: string;
   readonly title: string | null;
   readonly sourceListId: string | null;
   readonly connectorInstanceId: string;
@@ -279,6 +296,52 @@ export function planDuplicateDeletions(
     .map((row) => row.id);
 }
 
+function canonicalGitHubIssueSourceId(metadata: unknown): string | null {
+  const parsed = parseCleanupMetadata(metadata);
+  if (typeof parsed?.url !== 'string') return null;
+  try {
+    const segments = new URL(parsed.url).pathname.split('/').filter(Boolean);
+    if (
+      segments.length !== 4
+      || segments[2].toLowerCase() !== 'issues'
+      || !/^[1-9]\d*$/.test(segments[3])
+    ) return null;
+    return `${segments[0]}/${segments[1]}:${segments[3]}`.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Removes legacy rows left behind by a GitHub repository transfer only when
+ * the metadata URL resolves to another row's exact canonical source route.
+ */
+export function planGitHubTransferOrphanDeletions(
+  tasks: readonly CleanupTaskCandidate[],
+): string[] {
+  const groups = new Map<string, Array<CleanupTaskCandidate & { canonicalSourceId: string }>>();
+  for (const task of tasks) {
+    if (task.connectorType !== 'github-issues') continue;
+    const canonicalSourceId = canonicalGitHubIssueSourceId(task.metadata);
+    if (!canonicalSourceId) continue;
+    const key = `${task.connectorInstanceId}\0${canonicalSourceId}`;
+    const candidate = { ...task, canonicalSourceId };
+    const group = groups.get(key);
+    if (group) group.push(candidate);
+    else groups.set(key, [candidate]);
+  }
+
+  return [...groups.values()].flatMap((group) => {
+    const canonical = group.filter(
+      (task) => task.sourceId.toLowerCase() === task.canonicalSourceId,
+    );
+    if (canonical.length !== 1) return [];
+    return group
+      .filter((task) => task.id !== canonical[0].id)
+      .map((task) => task.id);
+  });
+}
+
 /**
  * Ids to delete across completed recurring groups.
  * Winner: `completedAt ?? updatedAt` DESC, then `id` ASC.
@@ -316,4 +379,3 @@ export function planOpenRecurringDeletions(
     .slice(1)
     .map((task) => task.id));
 }
-

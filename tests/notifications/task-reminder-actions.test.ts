@@ -11,6 +11,7 @@ vi.mock('@/lib/semantic-index/publication-service', () => ({
 let db: typeof import('@/db').default;
 let schema: typeof import('@/db/schema');
 let POST: typeof import('@/app/api/notifications/[id]/actions/[actionId]/route').POST;
+let GET: typeof import('@/app/api/notifications/route').GET;
 let getRemindLaterTarget:
   typeof import('@/app/api/notifications/[id]/actions/[actionId]/route').getRemindLaterTarget;
 let eq: typeof import('drizzle-orm').eq;
@@ -24,6 +25,7 @@ beforeAll(async () => {
   ({ POST, getRemindLaterTarget } = await import(
     '@/app/api/notifications/[id]/actions/[actionId]/route'
   ));
+  ({ GET } = await import('@/app/api/notifications/route'));
   ({ eq } = await import('drizzle-orm'));
   await dbModule.initializeSqlitePersistenceComposition();
 });
@@ -62,6 +64,8 @@ function addReminder(actionType: 'remind_later' | 'complete_task' | 'dismiss_rem
     relatedTaskId: 'task-1',
     sourceState: 'active',
     disposition: 'inbox',
+    isActionable: true,
+    primaryActionId: `notification-1:${actionType}`,
     receivedAt: NOW,
     sortAt: NOW,
   }).run();
@@ -90,6 +94,23 @@ function postAction(
   });
 }
 
+function configurePersistentReminder() {
+  db.update(schema.tasks).set({
+    reminderAt: '2026-08-21T19:05:00.000Z',
+    reminderNagInterval: 5,
+    reminderNagStopAt: '2026-08-21T21:00:00.000Z',
+    reminderNagSeriesId: 'series-1',
+    reminderNagSequence: 1,
+  }).where(eq(schema.tasks.id, 'task-1')).run();
+  db.update(schema.notifications).set({
+    sourceId: 'task-reminder:series:series-1',
+    metadata: {
+      reminderNagSeriesId: 'series-1',
+      reminderNagSequence: 0,
+    },
+  }).where(eq(schema.notifications.id, 'notification-1')).run();
+}
+
 describe('task reminder actions', () => {
   it('computes tomorrow morning in the configured timezone', () => {
     expect(getRemindLaterTarget(
@@ -98,6 +119,103 @@ describe('task reminder actions', () => {
       'America/New_York',
       8,
     )).toBe('2026-08-22T12:00:00.000Z');
+  });
+
+  it('keeps notification history but removes task actions for a soft-deleted task', async () => {
+    addReminder('complete_task');
+    db.update(schema.tasks).set({ deletedAt: NOW })
+      .where(eq(schema.tasks.id, 'task-1')).run();
+
+    const response = await GET(new Request('http://localhost/api/notifications'));
+    const body = await response.json() as {
+      notifications: Array<Record<string, unknown>>;
+    };
+
+    expect(body.notifications).toContainEqual(expect.objectContaining({
+      id: 'notification-1',
+      relatedTaskId: 'task-1',
+      relatedTaskAvailability: 'unavailable',
+      isActionable: false,
+      primaryActionId: null,
+      actions: [],
+    }));
+  });
+
+  it('rejects a task-dependent action before dispatch when its task is unavailable', async () => {
+    addReminder('complete_task');
+    db.update(schema.tasks).set({ deletedAt: NOW })
+      .where(eq(schema.tasks.id, 'task-1')).run();
+
+    const response = await postAction('complete_task');
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'The related task is no longer available',
+    });
+  });
+
+  it('omits task navigation while preserving unrelated notification actions', async () => {
+    addReminder('complete_task');
+    db.insert(schema.notificationActions).values([
+      {
+        id: 'notification-1:view-task',
+        notificationId: 'notification-1',
+        actionType: 'navigate',
+        label: 'View task',
+        payload: { target: '/tasks?selected=task-1' },
+      },
+      {
+        id: 'notification-1:settings',
+        notificationId: 'notification-1',
+        actionType: 'navigate',
+        label: 'Open settings',
+        payload: { target: '/settings' },
+      },
+    ]).run();
+    db.update(schema.tasks).set({ deletedAt: NOW })
+      .where(eq(schema.tasks.id, 'task-1')).run();
+
+    const response = await GET(new Request('http://localhost/api/notifications'));
+    const body = await response.json() as {
+      notifications: Array<{ id: string; actions: Array<{ id: string }> }>;
+    };
+    const notification = body.notifications.find(item => item.id === 'notification-1');
+
+    expect(notification?.actions.map(action => action.id)).toEqual([
+      'notification-1:settings',
+    ]);
+  });
+
+  it('rejects task navigation for an unavailable association', async () => {
+    addReminder('complete_task');
+    db.insert(schema.notificationActions).values({
+      id: 'notification-1:view-task',
+      notificationId: 'notification-1',
+      actionType: 'navigate',
+      label: 'View task',
+      payload: { target: '/today?taskId=task-1' },
+    }).run();
+    db.update(schema.tasks).set({ deletedAt: NOW })
+      .where(eq(schema.tasks.id, 'task-1')).run();
+
+    const response = await POST(new Request(
+      'http://localhost/api/notifications/notification-1/actions/notification-1:view-task',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      },
+    ), {
+      params: Promise.resolve({
+        id: 'notification-1',
+        actionId: 'notification-1:view-task',
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'The related task is no longer available',
+    });
   });
 
   it('reschedules a fired reminder without discarding relative recurrence intent', async () => {
@@ -136,6 +254,20 @@ describe('task reminder actions', () => {
       .toBe('2026-08-22T15:00:00.000Z');
   });
 
+  it('reschedules the active persistent series while its next alert is pending', async () => {
+    addReminder('remind_later');
+    configurePersistentReminder();
+
+    expect((await postAction('remind_later', { duration: '15m' })).status).toBe(200);
+    expect(db.select().from(schema.tasks).where(eq(schema.tasks.id, 'task-1')).get())
+      .toMatchObject({
+        reminderNagInterval: 5,
+        reminderNagStopAt: '2026-08-21T21:00:00.000Z',
+        reminderNagSeriesId: 'series-1',
+        reminderNagSequence: 1,
+      });
+  });
+
   it('dismisses the reminder and clears all reminder intent', async () => {
     addReminder('dismiss_reminder');
 
@@ -146,10 +278,42 @@ describe('task reminder actions', () => {
         reminderRelative: null,
         reminderDueTime: null,
       });
+
     expect(db.select().from(schema.notifications)
       .where(eq(schema.notifications.id, 'notification-1')).get()).toMatchObject({
         disposition: 'dismissed',
         isActionable: false,
+      });
+  });
+
+  it('stops every future alert in a persistent series', async () => {
+    addReminder('dismiss_reminder');
+    configurePersistentReminder();
+
+    expect((await postAction('dismiss_reminder')).status).toBe(200);
+    expect(db.select().from(schema.tasks).where(eq(schema.tasks.id, 'task-1')).get())
+      .toMatchObject({
+        reminderAt: null,
+        reminderRelative: null,
+        reminderDueTime: null,
+        reminderNagInterval: null,
+        reminderNagStopAt: null,
+        reminderNagSeriesId: null,
+        reminderNagSequence: 0,
+      });
+  });
+
+  it('does not let a stale persistent notification stop a newer series', async () => {
+    addReminder('dismiss_reminder');
+    configurePersistentReminder();
+    db.update(schema.tasks).set({ reminderNagSeriesId: 'series-new' })
+      .where(eq(schema.tasks.id, 'task-1')).run();
+
+    expect((await postAction('dismiss_reminder')).status).toBe(409);
+    expect(db.select().from(schema.tasks).where(eq(schema.tasks.id, 'task-1')).get())
+      .toMatchObject({
+        reminderAt: '2026-08-21T19:05:00.000Z',
+        reminderNagSeriesId: 'series-new',
       });
   });
 

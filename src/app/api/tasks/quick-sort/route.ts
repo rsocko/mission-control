@@ -16,11 +16,14 @@ export type QuickSortOrder = TaskQuickSortOrder;
 const LIMIT = 50;
 
 /**
- * GET /api/tasks/quick-sort?mode=no_priority|quadrant|no_effort|no_tags|no_planning_horizon
+ * GET /api/tasks/quick-sort?mode=no_priority|quadrant|no_effort|no_tags|no_planning_horizon|no_project
  *    &counts=true                         (return badge counts only)
  *    &source=connectorType                (optional scope filter)
  *    &sourceList=sourceListName           (optional scope filter)
  *    &connectorId=connectorInstanceId     (optional scope filter)
+ *
+ * Queue entries, badge counts, and source choices all exclude soft-deleted tasks,
+ * matching task-detail visibility.
  *
  * Smart sort per mode:
  *   no_priority → most recent first (new items need priority urgently)
@@ -69,7 +72,7 @@ export async function GET(request: Request) {
     });
   }
 
-  if (!mode || !['no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon'].includes(mode)) {
+  if (!mode || !['no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon', 'no_project'].includes(mode)) {
     return NextResponse.json({ error: 'Invalid mode' }, { status: 400 });
   }
 

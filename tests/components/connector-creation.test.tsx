@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useConnectorCreation } from '@/app/settings/components/useConnectorCreation';
+import { ConnectorClassificationProvider } from '@/app/settings/components/ConnectorDataClassification';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -50,5 +51,38 @@ describe('useConnectorCreation', () => {
       await expect(result.current.create({ type: 'github-issues' })).rejects.toThrow('Network unavailable');
     });
     expect(result.current).toMatchObject({ status: 'error', error: 'Network unavailable' });
+  });
+
+  it('merges a stricter classification into connector settings', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 'github-primary' }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ));
+    const { result } = renderHook(() => useConnectorCreation(), {
+      wrapper: ({ children }) => (
+        <ConnectorClassificationProvider override="restricted">
+          {children}
+        </ConnectorClassificationProvider>
+      ),
+    });
+
+    await act(async () => {
+      await result.current.create({
+        type: 'github-issues',
+        settings: { repositories: ['octo/example'] },
+      });
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/connectors', expect.objectContaining({
+      body: JSON.stringify({
+        type: 'github-issues',
+        settings: {
+          repositories: ['octo/example'],
+          dataClassificationOverride: 'restricted',
+        },
+      }),
+    }));
   });
 });

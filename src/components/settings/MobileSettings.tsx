@@ -22,13 +22,15 @@ import { COMPLETION_ANIMATION_KEY, setCompletionAnimationEnabled } from '@/compo
 import { LocalSourceIcon } from '@/components/ui/LocalSourceIcon';
 import { CaptureDestinationSection } from '@/app/settings/components/CaptureSettingsSection';
 import { SectionCard, SectionLabel, Toggle } from '@/components/settings/SettingsPrimitives';
+import { ToastSettingsCard } from '@/components/settings/ToastSettingsCard';
+import { CompletionSoundSettingsCard } from '@/components/settings/CompletionSoundSettingsCard';
 import {
   DEFAULT_QUICK_ADD_PREFERENCES,
   getQuickAddPreferences,
   setQuickAddPreferences,
   type QuickAddPreferences,
 } from '@/lib/quick-add-preferences';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   getLatestConnectorSync,
   loadConnectorData,
@@ -264,13 +266,13 @@ export function MobileSettings({ onAddConnector }: { onAddConnector: () => void 
         </div>
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--border-subtle)]">
           <div className="flex-1 min-w-0 mr-3">
-            <p className="text-sm text-[var(--text-primary)]">Date Suggestions</p>
-            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Recognize trailing natural-language dates</p>
+            <p className="text-sm text-[var(--text-primary)]">Natural-language Due Dates</p>
+            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Apply trailing dates when creating a task</p>
           </div>
           <Toggle
             enabled={quickAddPreferences.naturalLanguageDates}
             onChange={(enabled) => updateQuickAddPreferences({ naturalLanguageDates: enabled })}
-            label="Natural-language date suggestions"
+            label="Natural-language due dates"
           />
         </div>
         <div className="flex items-center justify-between px-4 py-3.5">
@@ -286,6 +288,8 @@ export function MobileSettings({ onAddConnector }: { onAddConnector: () => void 
         </div>
       </SectionCard>
 
+      <CompletionSoundSettingsCard />
+      <ToastSettingsCard />
       <SectionLabel>Capture</SectionLabel>
       <CaptureDestinationSection mobile />
 
@@ -389,7 +393,7 @@ export function MobileSettings({ onAddConnector }: { onAddConnector: () => void 
           onClick={() => router.push('/settings/storage')}
         />
         <SettingsRow
-          label="AI Provider"
+          label="AI & Agents"
           onClick={() => router.push('/settings/ai-provider')}
           isLast
         />

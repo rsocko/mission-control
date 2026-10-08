@@ -96,7 +96,7 @@ export function useHistoryParamSelection(param: string) {
       const openedHere = existingDetail?.param === param
         && existingDetail.parentHref === parentHref
         && getAppHistorySnapshot().canGoBack;
-      if (openedHere && options?.history !== 'replace') {
+      if (openedHere && options?.history === 'back') {
         closingRef.current = true;
         window.history.back();
         return;

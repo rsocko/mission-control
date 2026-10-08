@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
 import { AnimatePresence, motion } from 'motion/react';
 import { AlertCircle, BarChart3, Bell, Brain, Calendar, Sparkles, Tags, Trash2, Users, Zap } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   Select,
   SelectTrigger,

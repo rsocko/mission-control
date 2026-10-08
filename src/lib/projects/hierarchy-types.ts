@@ -30,6 +30,23 @@ const taskPlacementSchema = z.object({
   item: storedPhaseItemSchema.optional(),
 });
 
+const projectPhaseSchema = z.object({
+  id: nonEmptyId,
+  projectId: nonEmptyId.nullable(),
+  name: z.string().trim().min(1),
+  description: z.string().nullable(),
+  status: z.enum(['pending', 'in_progress', 'completed']),
+  color: z.string().nullable(),
+  estimatedDays: z.number().nonnegative().nullable(),
+  targetStart: z.string().nullable(),
+  targetEnd: z.string().nullable(),
+  startAfterPhaseId: nonEmptyId.nullable(),
+  sortOrder: z.number().int().nonnegative(),
+  completedAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 export const reorderPhasesCommandSchema = z.object({
   type: z.literal('reorder_phases'),
   orderedPhaseIds: uniqueIds,
@@ -89,6 +106,15 @@ export const updatePhaseItemCommandSchema = z.object({
   updates: phaseItemUpdateSchema,
 });
 
+export const replacePhaseStructureCommandSchema = z.object({
+  type: z.literal('replace_phase_structure'),
+  phases: z.array(projectPhaseSchema),
+  placements: z.array(taskPlacementSchema).refine(
+    (placements) => new Set(placements.map((placement) => placement.taskId)).size === placements.length,
+    'Task IDs must be unique',
+  ),
+});
+
 export const projectHierarchyCommandSchema = z.discriminatedUnion('type', [
   reorderPhasesCommandSchema,
   moveTasksCommandSchema,
@@ -97,6 +123,7 @@ export const projectHierarchyCommandSchema = z.discriminatedUnion('type', [
   removeTasksCommandSchema,
   restoreProjectTasksCommandSchema,
   updatePhaseItemCommandSchema,
+  replacePhaseStructureCommandSchema,
 ]);
 
 export const projectHierarchyCommandRequestSchema = z.object({

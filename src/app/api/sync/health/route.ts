@@ -9,6 +9,7 @@ import { ApiErrors } from '@/lib/api-error';
 import { isPublicDemoMode } from '@/lib/public-demo';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 import { getConnectorRegistry } from '@/lib/connectors/registry-runtime';
+import { graphTodoTasksPath } from '@/lib/connectors/microsoft-todo/resource-paths';
 import type { ManagedConnectorRecord } from '@/db/persistence/connector-management';
 
 /**
@@ -74,7 +75,7 @@ async function fetchTaskCount(connector: IConnector, listSourceId: string): Prom
     if (!graphFetch) return null;
     // Fetch first page to count (Graph doesn't always support $count on tasks)
     // Use $select=id to minimize payload, and count the value array + follow pagination
-    const res: Response = await graphFetch(`/me/todo/lists/${encodeURIComponent(listSourceId)}/tasks?$top=200&$select=id`);
+    const res: Response = await graphFetch(`${graphTodoTasksPath(listSourceId)}?$top=200&$select=id`);
     if (!res.ok) return null;
     const data = await res.json();
     // If there's no nextLink, the count is the array length

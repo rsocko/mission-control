@@ -28,6 +28,8 @@ export interface MyDayItem {
   planningSignalCount?: number;
   connectorType: string;
   connectorInstanceId: string;
+  syncStatus?: string;
+  pushRetryCount?: number;
   sourceId?: string;
   sourceListId?: string | null;
   sourceListName: string | null;
@@ -53,6 +55,21 @@ export interface MyDayItem {
   localDisposition: LocalDisposition;
   taskSourceModel: TaskSourceModel;
   editPolicy: TaskEditPolicy;
+}
+
+export interface MyDayItemAddedEventDetail {
+  taskId: string;
+  editPolicy: TaskEditPolicy;
+  title?: string;
+  status?: string;
+  priority?: string;
+  dueDate?: string | null;
+  connectorType?: string;
+  connectorInstanceId?: string;
+  sourceId?: string | null;
+  sourceListName?: string | null;
+  localDisposition?: LocalDisposition;
+  taskSourceModel?: TaskSourceModel;
 }
 
 export interface ScheduledTask {

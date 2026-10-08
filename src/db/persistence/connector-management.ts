@@ -1,4 +1,5 @@
 import type { SourceListRecord } from './connector-execution';
+import type { ContextAppearance } from '@/types';
 
 export interface ManagedConnectorRecord {
   id: string;
@@ -29,6 +30,7 @@ export interface ConnectorOverview {
   }>;
   syncOutcomes: Array<{
     connectorId: string;
+    lastSyncAt: string;
     lastSyncedAt: string | null;
     success: boolean | null;
     error: string | null;
@@ -279,6 +281,7 @@ export interface ConnectorManagementPersistence {
     sourceListId: string;
     groupId?: string | null;
     hidden?: boolean;
+    appearance?: ContextAppearance | null;
   }): Promise<void>;
   applyLocalSourceListRename(input: {
     sourceListId: string;

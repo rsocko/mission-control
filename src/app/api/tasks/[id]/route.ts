@@ -39,6 +39,16 @@ import { resolveRelativeReminderMutation } from '@/lib/tasks/relative-reminder';
 import { computeRelativeReminderAt, isReminderRelativeRule } from '@/lib/tasks/relative-reminder';
 import { getCompletionAnchoredDueDate } from '@/lib/utils/recurrence';
 import {
+  canonicalizeLegacyRecurrence,
+  extractRecurrenceLocalTime,
+  readRecurrenceMetadata,
+  writeRecurrenceMetadata,
+} from '@/lib/recurrence/canonical';
+import {
+  applyRecurrenceEditorOptions,
+  getRecurrenceControlState,
+} from '@/lib/recurrence/editor';
+import {
   executeFencedGitHubTaskMutation,
   GitHubUnknownWriteOutcomeError,
 } from '@/lib/external-identities';
@@ -73,6 +83,23 @@ async function removeTaskSearch(taskId: string): Promise<void> {
 
 const taskWriteThroughQueues = new Map<string, Promise<void>>();
 
+function normalizeStoredRecurrence(value: string): string {
+  const match = value.trim().match(
+    /^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(?:;INTERVAL=(\d+))?$/i,
+  );
+  if (!match) return value;
+  const unit = match[1].toLowerCase();
+  const interval = match[2] ? Number(match[2]) : 1;
+  if (interval === 1) return unit;
+  const plural = {
+    daily: 'days',
+    weekly: 'weeks',
+    monthly: 'months',
+    yearly: 'years',
+  }[unit];
+  return `every ${interval} ${plural}`;
+}
+
 function enqueueTaskWriteThrough(taskId: string, write: () => Promise<void>): Promise<void> {
   const previous = taskWriteThroughQueues.get(taskId) ?? Promise.resolve();
   const queued = previous.catch(() => {}).then(write);
@@ -106,6 +133,8 @@ export async function PATCH(
     if (!writeContext) return ApiErrors.notFound('Task');
     const currentTask = writeContext.task;
     const currentSchedule = writeContext.schedule;
+    const parsedCurrentMetadata = parseTaskMetadataCompat(currentTask.metadata);
+    const currentCanonical = readRecurrenceMetadata(parsedCurrentMetadata.metadata);
     const requestedVersion = request.headers.get('x-expected-task-updated-at');
     if (requestedVersion && currentTask.updatedAt !== requestedVersion) {
       return NextResponse.json({
@@ -143,6 +172,25 @@ export async function PATCH(
     ) {
       return ApiErrors.badRequest(
         'Choose a recurrence interval before anchoring it to completion',
+      );
+    }
+    if (
+      (input.recurrenceSkipDates !== undefined || input.recurrenceCatchUp !== undefined)
+      && !(input.recurrence ?? currentSchedule?.recurrence)
+    ) {
+      return ApiErrors.badRequest('Choose a recurrence interval before setting recurrence options');
+    }
+    if (
+      parsed.fields.includes('recurrence')
+      && (
+        currentCanonical.status === 'invalid'
+        || currentCanonical.rule?.source.owner === 'connector'
+      )
+    ) {
+      return ApiErrors.forbidden(
+        currentCanonical.status === 'invalid'
+          ? 'This recurrence cannot be edited because its stored rule is invalid'
+          : 'This recurrence is owned by its provider and must be changed there',
       );
     }
     const [capabilities, connectorEnabled] = localIdentity
@@ -230,9 +278,15 @@ export async function PATCH(
       && currentTask.status !== input.status
       && !['done', 'cancelled'].includes(currentTask.status)
       && ['done', 'cancelled'].includes(input.status);
+    const resultingRecurrence = input.recurrence === undefined
+      ? currentSchedule?.recurrence ?? null
+      : input.recurrence;
+    const resultingRecurrenceMode = input.recurrence === null
+      ? 'schedule'
+      : input.recurrenceMode ?? currentSchedule?.recurrenceMode ?? 'schedule';
     const shouldReturnCompletionOccurrence = input.status === 'done'
-      && currentSchedule?.recurrenceMode === 'completion'
-      && Boolean(currentSchedule.recurrence)
+      && resultingRecurrenceMode === 'completion'
+      && Boolean(resultingRecurrence)
       && localIdentity;
 
     const updates: Record<string, unknown> = {};
@@ -279,10 +333,57 @@ export async function PATCH(
       }
       Object.assign(updates, reminderMutation.updates);
     }
+    const resultingReminderAt = updates.reminderAt !== undefined
+      ? updates.reminderAt as string | null
+      : currentTask.reminderAt;
+    const nagConfigurationChanged = input.reminderNagInterval !== undefined
+      || input.reminderNagStopAt !== undefined;
+    const reminderScheduleChanged = updates.reminderAt !== undefined
+      && updates.reminderAt !== currentTask.reminderAt;
+    if (input.reminderNagInterval !== undefined
+      && input.reminderNagInterval !== null
+      && !resultingReminderAt) {
+      return ApiErrors.badRequest('Set a reminder time before enabling Repeat until done');
+    }
+    if (!resultingReminderAt && (nagConfigurationChanged || reminderScheduleChanged)) {
+      updates.reminderNagInterval = null;
+      updates.reminderNagStopAt = null;
+      updates.reminderNagSeriesId = null;
+      updates.reminderNagSequence = 0;
+    } else if (
+      resultingReminderAt
+      && (nagConfigurationChanged || (reminderScheduleChanged && currentTask.reminderNagInterval))
+    ) {
+      const interval = input.reminderNagInterval !== undefined
+        ? input.reminderNagInterval
+        : currentTask.reminderNagInterval ?? null;
+      const stopAt = input.reminderNagStopAt !== undefined
+        ? input.reminderNagStopAt
+        : currentTask.reminderNagStopAt ?? null;
+      if (interval !== null && stopAt && Date.parse(stopAt) <= Date.parse(resultingReminderAt)) {
+        return ApiErrors.badRequest('Repeat-until-done stop time must be after the reminder');
+      }
+      const startsNewSeries = interval !== null
+        && (currentTask.reminderNagInterval === null || !currentTask.reminderNagSeriesId);
+      updates.reminderNagInterval = interval;
+      updates.reminderNagStopAt = interval === null ? null : stopAt;
+      updates.reminderNagSeriesId = interval === null
+        ? null
+        : startsNewSeries
+          ? randomUUID()
+          : currentTask.reminderNagSeriesId;
+      updates.reminderNagSequence = interval === null || startsNewSeries
+        ? 0
+        : currentTask.reminderNagSequence;
+    }
     if (input.status === 'done' || input.status === 'cancelled') {
       updates.microStatus = null;
       updates.snoozedUntil = null;
       updates.reminderAt = null;
+      updates.reminderNagInterval = null;
+      updates.reminderNagStopAt = null;
+      updates.reminderNagSeriesId = null;
+      updates.reminderNagSequence = 0;
       if (!currentSchedule?.recurrence) {
         updates.reminderRelative = null;
         updates.reminderDueTime = null;
@@ -312,15 +413,78 @@ export async function PATCH(
         };
       }
     }
-    if (input.recurrence !== undefined) {
-      const parsedMetadata = parseTaskMetadataCompat(currentTask.metadata);
+    if (
+      input.recurrence !== undefined
+      || input.recurrenceMode !== undefined
+      || input.recurrenceSkipDates !== undefined
+      || input.recurrenceCatchUp !== undefined
+      || (
+        input.dueDate !== undefined
+        && Boolean(currentSchedule?.recurrence)
+        && (
+          currentCanonical.rule?.source.owner === 'mission-control'
+          || localIdentity
+        )
+      )
+    ) {
+      const parsedMetadata = parsedCurrentMetadata;
       if (
-        !parsedMetadata.recoveredLegacy
+        input.recurrence !== undefined
+        && !parsedMetadata.recoveredLegacy
         && Object.prototype.hasOwnProperty.call(parsedMetadata.metadata, 'recurrence')
       ) {
         const metadata = { ...parsedMetadata.metadata };
         delete metadata.recurrence;
         updates.metadata = metadata;
+      }
+      const nextMetadata = (updates.metadata ?? parsedMetadata.metadata) as Record<string, unknown>;
+      const nextRecurrence = input.recurrence === undefined
+        ? currentSchedule?.recurrence ?? null
+        : input.recurrence;
+      if (nextRecurrence === null) {
+        updates.metadata = writeRecurrenceMetadata(nextMetadata, null);
+      } else {
+        try {
+          const baseRule = canonicalizeLegacyRecurrence({
+            recurrence: normalizeStoredRecurrence(nextRecurrence),
+            mode: input.recurrenceMode
+              ?? currentSchedule?.recurrenceMode
+              ?? 'schedule',
+            startDate: (
+              input.dueDate
+              ?? currentTask.dueDate
+              ?? currentSchedule?.scheduledDate
+              ?? getLocalToday()
+            ).slice(0, 10),
+            localTime: extractRecurrenceLocalTime(
+              input.dueDate ?? currentTask.dueDate,
+              getTimezone(),
+            ),
+            timezone: getTimezone(),
+            seriesIdentity: currentCanonical.rule?.series.identity ?? {
+              kind: 'mission-control',
+              stableId: currentTask.id,
+              ...(localIdentity
+                ? {}
+                : { connectorInstanceId: currentTask.connectorInstanceId }),
+            },
+            source: currentCanonical.rule?.source,
+          });
+          updates.metadata = writeRecurrenceMetadata(
+            nextMetadata,
+            applyRecurrenceEditorOptions(baseRule, {
+              skipDates: input.recurrenceSkipDates
+                ?? [...(currentCanonical.rule?.semantics.exceptions.skipDates ?? [])],
+              catchUp: input.recurrenceCatchUp
+                ?? currentCanonical.rule?.semantics.materialization.catchUp
+                ?? (baseRule.semantics.mode === 'completion' ? 'none' : 'latest'),
+            }),
+          );
+        } catch (error) {
+          return ApiErrors.badRequest(
+            error instanceof Error ? error.message : 'Invalid recurrence',
+          );
+        }
       }
     }
 
@@ -345,14 +509,42 @@ export async function PATCH(
 
     let recurrenceSuccessor: TaskMutationRequest['recurrenceSuccessor'];
     if (shouldReturnCompletionOccurrence) {
-      const recurrence = currentSchedule!.recurrence!;
+      const recurrence = normalizeStoredRecurrence(resultingRecurrence!);
       const nextTaskId = randomUUID();
       const recurrenceTimezone = getTimezone();
+      let successorRule;
+      try {
+        successorRule = readRecurrenceMetadata(
+          (updates.metadata ?? currentTask.metadata) as Record<string, unknown>,
+        ).rule ?? canonicalizeLegacyRecurrence({
+          recurrence,
+          mode: currentSchedule?.recurrenceMode ?? 'completion',
+          startDate: (
+            currentTask.dueDate
+            ?? currentSchedule?.scheduledDate
+            ?? getLocalToday()
+          ).slice(0, 10),
+          localTime: extractRecurrenceLocalTime(currentTask.dueDate, recurrenceTimezone),
+          timezone: recurrenceTimezone,
+          seriesIdentity: {
+            kind: 'mission-control',
+            stableId: currentTask.id,
+            ...(localIdentity
+              ? {}
+              : { connectorInstanceId: currentTask.connectorInstanceId }),
+          },
+        });
+      } catch (error) {
+        return ApiErrors.badRequest(
+          error instanceof Error ? error.message : 'Invalid recurrence',
+        );
+      }
       const includeCompletionTime = Boolean(
         currentTask.dueDate?.includes('T') || currentSchedule?.scheduledTime,
       );
+      const completionAnchor = currentTask.completedAt ?? now;
       const nextDueDate = getCompletionAnchoredDueDate(
-        now,
+        completionAnchor,
         recurrence,
         recurrenceTimezone,
         includeCompletionTime,
@@ -361,7 +553,7 @@ export async function PATCH(
         ? formatInTimeZone(nextDueDate, recurrenceTimezone, 'yyyy-MM-dd')
         : nextDueDate;
       const nextScheduledTime = includeCompletionTime
-        ? formatInTimeZone(now, recurrenceTimezone, 'HH:mm')
+        ? formatInTimeZone(nextDueDate, recurrenceTimezone, 'HH:mm')
         : null;
       const metadata = { ...parseTaskMetadataCompat(currentTask.metadata).metadata };
       delete metadata.workTodoDirtyFields;
@@ -385,6 +577,26 @@ export async function PATCH(
         scheduledDate: nextScheduledDate,
         scheduledTime: nextScheduledTime,
         reminderAt: nextReminderAt,
+        reminderNagInterval: nextReminderAt ? currentTask.reminderNagInterval ?? null : null,
+        reminderNagStopAt: nextReminderAt && currentTask.reminderNagStopAt && currentTask.reminderAt
+          ? new Date(
+              Date.parse(nextReminderAt)
+              + Math.max(0, Date.parse(currentTask.reminderNagStopAt) - Date.parse(currentTask.reminderAt)),
+            ).toISOString()
+          : null,
+        reminderNagSeriesId: nextReminderAt && currentTask.reminderNagInterval
+          ? randomUUID()
+          : null,
+        rule: successorRule,
+        occurrence: {
+          localDate: nextScheduledDate,
+          instant: nextDueDate.includes('T') ? new Date(nextDueDate).toISOString() : null,
+          occurrenceNumber: null,
+          anchor: {
+            kind: 'completion',
+            completedAt: completionAnchor,
+          },
+        },
         metadata,
       };
     }
@@ -514,6 +726,8 @@ export async function PATCH(
       || input.reminderAt !== undefined
       || input.reminderRelative !== undefined
       || input.reminderDueTime !== undefined
+      || input.reminderNagInterval !== undefined
+      || input.reminderNagStopAt !== undefined
       || input.status === 'done'
       || input.status === 'cancelled'
     );
@@ -527,6 +741,18 @@ export async function PATCH(
       reminderDueTime: updates.reminderDueTime !== undefined
         ? updates.reminderDueTime
         : currentTask.reminderDueTime ?? null,
+      reminderNagInterval: updates.reminderNagInterval !== undefined
+        ? updates.reminderNagInterval
+        : currentTask.reminderNagInterval,
+      reminderNagStopAt: updates.reminderNagStopAt !== undefined
+        ? updates.reminderNagStopAt
+        : currentTask.reminderNagStopAt,
+      reminderNagSeriesId: updates.reminderNagSeriesId !== undefined
+        ? updates.reminderNagSeriesId
+        : currentTask.reminderNagSeriesId,
+      reminderNagSequence: updates.reminderNagSequence !== undefined
+        ? updates.reminderNagSequence
+        : currentTask.reminderNagSequence,
     } : undefined;
 
     return NextResponse.json({
@@ -710,6 +936,8 @@ async function writeThrough(
         } else {
           throw new Error('Connector does not support task completion');
         }
+      } else if (updates.status === 'cancelled' && connector.cancelTask) {
+        await connector.cancelTask(claimedTask.sourceId);
       } else if (updates.status === 'cancelled' && connector.closeTaskWithReason) {
         const reason = updates.statusReason === 'duplicate' ? 'duplicate' : 'not_planned';
         await connector.closeTaskWithReason(claimedTask.sourceId, reason);
@@ -862,6 +1090,7 @@ export async function DELETE(
       return NextResponse.json({
         success: true,
         action: 'dismissed',
+        restorable: false,
         connectorType: task.connectorType,
         writeBack: 'none',
       });
@@ -889,6 +1118,7 @@ export async function DELETE(
       return NextResponse.json({
         success: true,
         action: 'cancelled',
+        restorable: false,
         connectorType: task.connectorType,
         writeBack: statusPolicy.mutation,
       });
@@ -924,6 +1154,7 @@ export async function DELETE(
       return NextResponse.json({
         success: true,
         action: willClose ? 'closed' : 'deleted',
+        restorable: false,
         connectorType: task.connectorType,
       });
     }
@@ -942,7 +1173,7 @@ export async function DELETE(
       }, { status: 409 });
     }
     await removeTaskSearch(id);
-    return NextResponse.json({ success: true, action: 'deleted' });
+    return NextResponse.json({ success: true, action: 'deleted', restorable: true });
   } catch (error) {
     return ApiErrors.internal('Failed to delete task', error);
   }
@@ -1027,6 +1258,7 @@ export async function GET(
     const legacyRecurrence = typeof legacyMetadata.metadata.recurrence === 'string'
       ? legacyMetadata.metadata.recurrence
       : null;
+    const parsedRecurrence = readRecurrenceMetadata(legacyMetadata.metadata);
     const localIdentity = task.sourceId.startsWith('local:') || task.connectorType === 'local';
     const [caps, connectorEnabled] = localIdentity
       ? [null, true] as const
@@ -1052,9 +1284,27 @@ export async function GET(
         estimatedDuration: detail.schedule?.estimatedDuration ?? null,
         recurrence: detail.schedule?.recurrence ?? legacyRecurrence,
         recurrenceMode: detail.schedule?.recurrenceMode ?? 'schedule',
+        recurrenceControl: parsedRecurrence.status === 'invalid'
+          || (
+            parsedRecurrence.status === 'legacy'
+            && Boolean(legacyRecurrence)
+            && !localIdentity
+          )
+          ? {
+              rule: null,
+              owner: 'provider',
+              support: 'unsupported',
+              reasons: parsedRecurrence.status === 'invalid'
+                ? [...parsedRecurrence.issues]
+                : ['legacy_provider_rule_not_canonical'],
+              timezone: getTimezone(),
+              localTime: null,
+            }
+          : getRecurrenceControlState(parsedRecurrence.rule, getTimezone()),
         tagIds: detail.tagIds,
         projectIds: detail.projectIds,
         subtasks: detail.subtasks,
+        subtaskOrderRevision: detail.subtaskOrderRevision,
         isInMyDay: detail.isInMyDay,
         taskSourceModel: editPolicy.sourceModel,
         editPolicy,

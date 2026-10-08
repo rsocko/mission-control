@@ -12,6 +12,7 @@ import {
   toasts,
   type ProjectPageHarness,
 } from './project-tab-fixtures';
+import { COLOR_PRESETS } from '@/lib/constants/colors';
 
 vi.mock('next/navigation', async () => (
   (await import('./project-tab-fixtures')).nextNavigationModule()
@@ -22,7 +23,7 @@ vi.mock('motion/react', async () => (
 vi.mock('@/components/ui/select', async () => (
   (await import('./project-tab-fixtures')).uiSelectModule()
 ));
-vi.mock('sonner', async () => (
+vi.mock('@/lib/toast', async () => (
   (await import('./project-tab-fixtures')).sonnerModule()
 ));
 vi.mock('@dnd-kit/core', async () => (
@@ -118,12 +119,40 @@ describe('project phases (Plan) tab', () => {
       .toBeInTheDocument();
 
     const build = phaseRegion('Build');
-    expect(within(build).getByText('Ship the first slice')).toBeInTheDocument();
+    const description = within(build).getByText('Ship the first slice');
+    expect(description).toHaveClass('line-clamp-2');
+    expect(description.closest('button')).toHaveAccessibleName('Edit Build description');
+    expect(within(build).getByRole('group', { name: 'Build phase actions' })).toHaveClass(
+      'w-full',
+      '@4xl:w-auto',
+    );
     expect(within(build).getByText('100%')).toBeInTheDocument();
 
     const unassigned = screen.getByRole('heading', { name: 'Unassigned Tasks' }).parentElement!;
     expect(within(unassigned).getByText('1')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Drag task to a phase' })).toBeInTheDocument();
+  });
+
+  it('flags oversized phases and opens a scoped structure review', async () => {
+    const largeTasks = Array.from({ length: 13 }, (_, index) => (
+      makeTask(`task-${index}`, { title: `Task ${index + 1}` })
+    ));
+    harness = installProjectPageHarness({
+      project: { name: 'Large Plan' },
+      phases: [makePhase('phase-large', { name: 'Launch', sortOrder: 0 })],
+      phaseItems: {
+        'phase-large': largeTasks.map((task, index) => (
+          makePhaseItem('phase-large', task.id, index)
+        )),
+      },
+      tasks: largeTasks,
+    });
+    await renderProjectTab('Plan');
+
+    const phase = await screen.findByRole('region', { name: 'Launch phase' });
+    expect(within(phase).getByText(/13 tasks · Large phase/)).toBeInTheDocument();
+    fireEvent.click(within(phase).getByRole('button', { name: 'Review structure' }));
+    expect(await screen.findByRole('dialog', { name: 'Review “Launch”' })).toBeInTheDocument();
   });
 
   it('keeps task detail open when a Plan list row is double-clicked', async () => {
@@ -139,6 +168,22 @@ describe('project phases (Plan) tab', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 350));
     expect(screen.getByTestId('task-detail-task-alpha')).toBeInTheDocument();
+  });
+
+  it('removes a completed task from its phase when completion starts in task detail', async () => {
+    await renderProjectTab('Plan');
+
+    const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
+    fireEvent.click(within(discovery).getByText('Alpha migration'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Complete task from detail' }));
+
+    await waitFor(() => {
+      expect(within(discovery).getByRole('button', { name: 'Completed' })).toBeInTheDocument();
+      expect(within(discovery).getByText('100%')).toBeInTheDocument();
+    }, { timeout: 2_000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide completed tasks' }));
+    expect(within(discovery).queryByText('Alpha migration')).not.toBeInTheDocument();
+    expect(harness.requestsFor('/api/tasks/task-alpha', 'PATCH')).toHaveLength(1);
   });
 
   it('opens the expanded Notes dialog from a Plan list row', async () => {
@@ -175,6 +220,47 @@ describe('project phases (Plan) tab', () => {
     fireEvent.click(screen.getByRole('button', { name: /^list$/i }));
     expect(await screen.findByRole('region', { name: 'Discovery phase' })).toBeInTheDocument();
     expect(screen.queryByRole('toolbar', { name: 'Bulk actions' })).not.toBeInTheDocument();
+  });
+
+  it('shows an assignment rename in the list while the save is pending', async () => {
+    await renderProjectTab('Plan');
+    await screen.findByRole('region', { name: 'Discovery phase' });
+    const releaseRename = harness.holdOnce('/api/project-phases/phase-discovery');
+
+    fireEvent.click(screen.getByRole('button', { name: /^assign$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discovery' }));
+    const editor = screen.getByRole('textbox', { name: 'Rename Discovery' });
+    fireEvent.change(editor, { target: { value: 'Research' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    fireEvent.click(screen.getByRole('button', { name: /^list$/i }));
+    expect(await screen.findByRole('region', { name: 'Research phase' })).toBeInTheDocument();
+
+    releaseRename();
+    await waitFor(() => {
+      expect(phaseRequests(harness, 'PATCH').map((request) => request.body))
+        .toContainEqual({ name: 'Research' });
+    });
+  });
+
+  it('restores the previous phase name when an assignment rename fails', async () => {
+    await renderProjectTab('Plan');
+    await screen.findByRole('region', { name: 'Discovery phase' });
+    harness.failOnce('/api/project-phases/phase-discovery', {
+      method: 'PATCH',
+      error: 'Rename failed',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^assign$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discovery' }));
+    const editor = screen.getByRole('textbox', { name: 'Rename Discovery' });
+    fireEvent.change(editor, { target: { value: 'Research' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: /^list$/i }));
+
+    expect(await screen.findByRole('region', { name: 'Discovery phase' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Research phase' })).not.toBeInTheDocument();
+    expect(toasts).toContainEqual({ level: 'error', message: 'Rename failed' });
   });
 
   it('creates the first phase from the empty state and opens it for renaming', async () => {
@@ -250,6 +336,50 @@ describe('project phases (Plan) tab', () => {
     expect(screen.getByRole('button', { name: 'Build' })).toBeInTheDocument();
     expect(phaseRequests(harness, 'PATCH').map((request) => request.body))
       .not.toContainEqual({ name: 'Abandoned' });
+  });
+
+  it('changes a phase color and can restore the project color fallback', async () => {
+    await renderProjectTab('Plan');
+    const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
+
+    fireEvent.click(within(discovery).getByRole('button', { name: 'Change Discovery color' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Set Discovery color to Violet' }));
+
+    await waitFor(() => {
+      expect(phaseRequests(harness, 'PATCH').map((request) => request.body))
+        .toContainEqual({ color: COLOR_PRESETS[1] });
+    });
+
+    fireEvent.click(within(phaseRegion('Discovery')).getByRole('button', { name: 'Change Discovery color' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use project color' }));
+
+    await waitFor(() => {
+      expect(phaseRequests(harness, 'PATCH').map((request) => request.body))
+        .toContainEqual({ color: null });
+    });
+  });
+
+  it('uses the phase color for Gantt labels and bars', async () => {
+    harness = installProjectPageHarness({
+      project: { name: 'Plan Project' },
+      phases: [
+        makePhase('phase-design', {
+          name: 'Design',
+          color: COLOR_PRESETS[2],
+          estimatedDays: 3,
+        }),
+      ],
+      tasks: [],
+    });
+    await renderProjectTab('Plan');
+
+    fireEvent.click(screen.getByRole('button', { name: /^gantt$/i }));
+    const phaseBar = await screen.findByRole('button', { name: 'Phase: Design, Pending' });
+
+    expect(phaseBar).toHaveStyle({
+      backgroundColor: 'rgba(236, 72, 153, 0.22)',
+      borderColor: 'rgba(236, 72, 153, 0.46)',
+    });
   });
 
   it('saves phase description, estimate, and schedule edits', async () => {

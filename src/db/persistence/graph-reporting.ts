@@ -246,6 +246,15 @@ export interface ProjectsOverviewRows {
   projects: OverviewProjectRow[];
   memberships: Array<{ projectId: string; taskId: string }>;
   tasks: OverviewTaskRow[];
+  phases: Array<{
+    id: string;
+    projectId: string;
+    name: string;
+    status: string;
+    color: string | null;
+    sortOrder: number;
+  }>;
+  phaseItems: Array<{ phaseId: string; taskId: string }>;
   tags: Array<{
     projectId: string;
     id: string;
@@ -294,11 +303,16 @@ export interface BurnReportRows {
     scheduleEnd: string | null;
   } | null;
   candidateEvents: BurnHistoryEvent[];
+  currentScopeTaskIds: string[];
   tasks: Array<{
     id: string;
     title: string;
+    status: string;
+    effort: number | null;
+    localDisposition: string;
     createdAt: string;
     completedAt: string | null;
+    deletedAt: string | null;
   }>;
 }
 

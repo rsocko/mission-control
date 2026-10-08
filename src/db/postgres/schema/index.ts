@@ -12,6 +12,10 @@ export {
   workTodoBridgeState,
   workTodoListDeltaState,
   workTodoOutboundChanges,
+  rymessageActionV2FeedState,
+  rymessageActionV2Projections,
+  rymessageActionV2Receipts,
+  rymessageActionV2OutboundMutations,
   syncLog,
   syncJobs,
   connectorOperationLeases,
@@ -43,6 +47,8 @@ export {
 // Tasks, tags, scoring, routines
 export {
   tasks,
+  taskRecurrenceOccurrences,
+  taskRecurrenceBackfillDecisions,
   taskReminderOccurrences,
   taskSchedules,
   tags,
@@ -69,6 +75,7 @@ export {
   quickSortOperations,
   taskAttachments,
   taskLinkedSources,
+  taskTimeActivities,
 } from './tasks';
 
 // Triage
@@ -221,6 +228,7 @@ export {
   agentDispatches,
   agentDispatchAttempts,
   agentDispatchEvents,
+  agentDispatchActions,
   EXTERNAL_AGENT_TYPES,
   EXTERNAL_AGENT_TRANSPORTS,
   EXTERNAL_AGENT_LOCALITIES,

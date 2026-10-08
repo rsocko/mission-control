@@ -50,7 +50,9 @@ export function useDashboardUiState() {
   const [expandedSourceLists, setExpandedSourceLists] = useState<Set<string>>(new Set());
   const [tagSearch, setTagSearch] = useState('');
   const [tagsExpanded, setTagsExpanded] = useState(false);
-  const [detailMode, setDetailMode] = useState<'panel' | 'dialog' | 'workspace'>('panel');
+  const [detailMode, setDetailMode] = useState<'panel' | 'dialog' | 'workspace'>(
+    selectedTaskId ? 'dialog' : 'panel',
+  );
   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
   const [addTaskInitialDest, setAddTaskInitialDest] = useState<DashboardTaskDestination | null>(null);
   const [addTaskInitialListId, setAddTaskInitialListId] = useState<string>();
@@ -133,7 +135,7 @@ export function useDashboardUiState() {
     setAddTaskInitialDest,
     setAddTaskInitialListId,
     toggleSection,
-  }), [setSidebarExpanded, setSidebarMode, toggleSection]);
+  }), [setSelectedTaskId, setSidebarExpanded, setSidebarMode, toggleSection]);
 
   return { state, actions, listRef, lastClickedIndexRef };
 }

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Moon, Calendar, Check, SkipForward } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useViewMode } from '@/lib/hooks/useViewMode';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
@@ -169,7 +169,6 @@ export function CalmMode() {
     });
 
     if (outcome === 'completed') {
-      window.dispatchEvent(new CustomEvent('mc:task-completed'));
     } else if (outcome === 'failed') {
       toast.error('Failed to complete task');
     }

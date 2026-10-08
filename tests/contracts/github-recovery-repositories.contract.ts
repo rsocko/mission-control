@@ -246,6 +246,7 @@ export function describeGitHubRecoveryRepositoriesContract(
         repositoryEntityId: 'entity-source-repo',
         repositoryStableId: 'R_source',
         localId: 'list-source',
+        bindingState: 'active',
       });
       expect(await harness.repositories.bulkTransfer.getRepositoryBinding(
         fixture.connectorInstanceId,
@@ -272,6 +273,7 @@ export function describeGitHubRecoveryRepositoriesContract(
         issueStableId: 'I_seven',
         issueNumber: 7,
         repositoryEntityId: 'entity-source-repo',
+        bindingState: 'active',
       }]);
       expect(await harness.repositories.transfer.listIssuePlanRows(
         fixture.connectorInstanceId,
@@ -332,6 +334,46 @@ export function describeGitHubRecoveryRepositoriesContract(
       expect(await harness.readTask('task-7')).toMatchObject({
         sourceId: 'acme/target:31',
         sourceListId: 'acme/target',
+      });
+      expect(await harness.connectorEnabled(fixture.connectorInstanceId)).toBe(true);
+    });
+
+    it('rebinds a native transfer when GitHub returns a successor issue identity', async () => {
+      const harness = await createHarness();
+      const fixture = baseFixture('recovery-contract');
+      await harness.seed(fixture);
+
+      const result = await harness.repositories.transfer.applyNativeTransferRouting({
+        connectorInstanceId: fixture.connectorInstanceId,
+        taskId: 'task-7',
+        issueEntityId: 'entity-issue-7',
+        legacySourceId: 'acme/source:7',
+        newSourceId: 'acme/target:31',
+        targetRepository: 'acme/target',
+        targetRepositoryEntityId: 'entity-target-repo',
+        identity: {
+          provider: 'github',
+          hostKey: 'github.com',
+          entityType: 'issue',
+          stableId: 'I_successor',
+        },
+        locator: { owner: 'acme', repository: 'target', issueNumber: 31 },
+        observedAt: NOW,
+        now: NOW,
+        refreshMetadata: () => ({ issueNumber: 31, nodeId: 'I_successor' }),
+      });
+
+      expect(result).toEqual({ outcome: 'applied' });
+      expect(await harness.readTask('task-7')).toMatchObject({
+        sourceId: 'acme/target:31',
+        sourceListId: 'acme/target',
+      });
+      await expect(harness.repositories.transfer.readTaskTransferBinding(
+        fixture.connectorInstanceId,
+        'task-7',
+      )).resolves.toMatchObject({
+        sourceId: 'acme/target:31',
+        stableId: 'I_successor',
       });
       expect(await harness.connectorEnabled(fixture.connectorInstanceId)).toBe(true);
     });

@@ -2,7 +2,7 @@ import type {
   HubProject,
   ProjectPhase as CanonicalProjectPhase,
   ProjectPhaseItem as CanonicalProjectPhaseItem,
-  ProjectHealth,
+  ProjectPulse,
   ProjectStatus,
   SourceBinding,
   TaskPriority,
@@ -12,7 +12,7 @@ import type { TaskListItemDto } from '@/types/api';
 
 type ProjectDetailDomainFields = Pick<
   HubProject,
-  'id' | 'name' | 'color' | 'sortOrder' | 'metadata' | 'createdAt' | 'updatedAt'
+  'id' | 'name' | 'color' | 'appearance' | 'sortOrder' | 'metadata' | 'createdAt' | 'updatedAt'
 >;
 
 export type ProjectDetailViewModel = ProjectDetailDomainFields & {
@@ -65,10 +65,7 @@ export interface ProgressSummary {
   percentComplete: number;
 }
 
-export interface HealthSummary {
-  health: ProjectHealth;
-  message: string;
-}
+export type HealthSummary = ProjectPulse;
 
 export interface PhaseTaskEntry {
   item: ProjectPhaseItemViewModel;

@@ -8,6 +8,15 @@ import { TaskDocumentPreviewSection } from '@/components/task-detail/TaskDocumen
 import { TaskSourceActionsSection } from '@/components/task-detail/TaskSourceActionsSection';
 import { TaskDetailFooter, TaskMobileActionBar } from '@/components/task-detail/TaskDetailFooter';
 import { TaskDuplicatesSection } from '@/components/task-detail/TaskDuplicatesSection';
+import { TaskStatusField } from '@/components/task-detail/TaskPropertiesSection';
+import { toast } from '@/lib/toast';
+
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
+}));
 
 vi.mock('@/components/task-detail/DuplicateTaskPreview', () => ({
   DuplicateTaskPreview: ({ candidate }: { candidate: { title: string } }) => <div>{candidate.title}</div>,
@@ -18,6 +27,7 @@ function renderWithTooltips(ui: React.ReactElement) {
 }
 
 const headerProps = {
+  taskId: 'task-42',
   mode: 'panel' as const,
   iconSrc: null,
   connectorType: 'github-issues',
@@ -45,6 +55,7 @@ describe('TaskDetailHeader', () => {
     expect(screen.getByText('GH-42')).toBeInTheDocument();
     expect(screen.getByText('Updated today')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Rewrite the importer' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delegate task' })).not.toBeInTheDocument();
   });
 
   it('starts title editing from the heading and closes from the header', () => {
@@ -59,6 +70,23 @@ describe('TaskDetailHeader', () => {
 
     expect(onTitleEditStart).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('copies the canonical task link', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    window.history.replaceState({}, '', '/all-tasks?taskId=task-42');
+
+    renderWithTooltips(<TaskDetailHeader {...headerProps} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy task link' }));
+
+    await vi.waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/tasks/task-42`);
+      expect(toast.success).toHaveBeenCalledWith('Task link copied');
+    });
   });
 
   it('commits on Enter and cancels on Escape while editing', () => {
@@ -114,6 +142,40 @@ describe('TaskDetailHeader', () => {
   });
 });
 
+describe('TaskStatusField', () => {
+  it('keeps a closed status reason inside the status card at narrow widths', () => {
+    render(
+      <TaskStatusField
+        status="cancelled"
+        statusReason="not_planned"
+        microStatus={null}
+        connectorType="github-issues"
+        canEditStatus
+        canEditMicroStatus
+        onStatusChange={vi.fn()}
+        onComplete={vi.fn()}
+        showMicroStatusPicker={false}
+        onToggleMicroStatusPicker={vi.fn()}
+        onMicroStatusChange={vi.fn()}
+        microStatusSuggestion={null}
+        onRequestMicroStatusSuggestion={vi.fn()}
+        onDismissMicroStatusSuggestion={vi.fn()}
+        showCloseReasonPicker={false}
+        onCloseWithReason={vi.fn()}
+        onCancelCloseReason={vi.fn()}
+      />,
+    );
+
+    const statusTrigger = screen.getByRole('combobox', { name: 'Task status' });
+    const statusReason = screen.getByText('Not Planned');
+
+    expect(statusTrigger.parentElement).toHaveClass('flex-wrap', 'min-w-0');
+    expect(statusTrigger).toHaveClass('flex-1', 'basis-28', 'min-w-0', 'max-w-full');
+    expect(statusReason).toHaveClass('max-w-full', 'whitespace-normal', 'break-words');
+    expect(statusTrigger.closest('.rounded-xl')).toContainElement(statusReason);
+  });
+});
+
 const tagsProps = {
   mode: 'panel' as const,
   tags: [{ id: 'tag-1', name: 'urgent', slug: 'urgent', color: null }],
@@ -139,6 +201,7 @@ describe('TaskTagsSection', () => {
     const onRemoveTag = vi.fn();
     renderWithTooltips(<TaskTagsSection {...tagsProps} onRemoveTag={onRemoveTag} />);
 
+    expect(screen.getByRole('heading', { name: 'Tags' })).toHaveClass('text-[var(--text-heading)]');
     fireEvent.click(screen.getByRole('button', { name: 'Remove tag urgent' }));
 
     expect(onRemoveTag).toHaveBeenCalledWith('tag-1');
@@ -386,9 +449,19 @@ describe('TaskSourceActionsSection', () => {
 
     expect(onDelete).toHaveBeenCalledOnce();
     expect(onOpenMoveDialog).toHaveBeenCalledOnce();
-    expect(screen.getByRole('link', { name: /Open in GitHub/ })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Move source' })).toHaveClass(
+      'bg-[var(--accent-600)]',
+      'text-white',
+    );
+    const deepLink = screen.getByRole('link', { name: /Open in GitHub/ });
+    expect(deepLink).toHaveAttribute(
       'href',
       'https://github.com/acme/repo/issues/7',
+    );
+    expect(deepLink).toHaveClass('border-[var(--border)]', 'text-[var(--text-secondary)]');
+    expect(screen.getByRole('button', { name: 'Delete task' })).not.toHaveClass(
+      'border-red-500/20',
+      'bg-red-500/5',
     );
   });
 

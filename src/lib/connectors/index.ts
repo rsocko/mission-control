@@ -21,6 +21,7 @@ import { microsoftTodoFactory } from './microsoft-todo';
 import { financeManagerFactory } from './monarch-money';
 import { outlookCalendarFactory } from './outlook-calendar';
 import { outlookEmailFactory } from './outlook-email';
+import { paperclipFactory } from './paperclip';
 import { ryMessageFactory } from './rymessage';
 import { scoutFactory } from './scout';
 import { workTodoBridgeFactory } from './work-todo';
@@ -129,10 +130,12 @@ export interface IConnector {
   /** Mark a task as complete */
   completeTask?(sourceId: string): Promise<void>;
 
+  /** Represent a local cancellation using the closest non-destructive source state. */
+  cancelTask?(sourceId: string): Promise<void>;
+
   /** Close a task with a specific reason (e.g. not_planned, duplicate) */
   closeTaskWithReason?(sourceId: string, reason: 'completed' | 'not_planned' | 'duplicate'): Promise<void>;
 
-  /** Delete a task */
   /** Delete a task */
   deleteTask?(sourceId: string): Promise<void>;
 
@@ -156,6 +159,9 @@ export interface IConnector {
 
   /** Update a sub-task/checklist item */
   updateSubTask?(parentSourceId: string, subTaskSourceId: string, updates: Partial<TaskItem>): Promise<void>;
+
+  /** Reorder all direct sub-tasks under a parent. */
+  reorderSubTasks?(parentSourceId: string, orderedSubTaskSourceIds: readonly string[]): Promise<void>;
 
   /** Add a tag/label to a task in the source system */
   addTagToTask?(sourceId: string, tagName: string): Promise<void>;
@@ -202,6 +208,11 @@ export interface IConnector {
     sourceId: string,
     targetSourceListId: string,
   ): Promise<TransferIdentityRefresh>;
+
+  /** Resolve a task route through the source's authenticated canonical read path. */
+  resolveTaskIdentity?(
+    sourceId: string,
+  ): Promise<{ sourceId: string; stableId: string }>;
 
   // 📎 Attachments (optional based on capabilities.attachments) ────────
 
@@ -269,6 +280,7 @@ export function registerDefaultConnectorFactories(): void {
   connectorRegistry.registerFactory('github-issues', githubIssuesFactory);
   connectorRegistry.registerFactory('outlook-calendar', outlookCalendarFactory);
   connectorRegistry.registerFactory('outlook-email', outlookEmailFactory);
+  connectorRegistry.registerFactory('paperclip', paperclipFactory);
   connectorRegistry.registerFactory('rymessage', ryMessageFactory);
   connectorRegistry.registerFactory('finance-manager', financeManagerFactory);
   connectorRegistry.registerFactory('monarch-money', financeManagerFactory);

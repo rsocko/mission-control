@@ -30,21 +30,18 @@ export async function register() {
     registerScheduledPushHandlers,
     scheduledSummariesEnabled,
   } = await import('@/lib/push/scheduler');
-  const { resolveDatabaseBackend } = await import('@/db/runtime-backend');
-  if (resolveDatabaseBackend() === 'sqlite') {
-    const {
-      triggerMorningNotification,
-      triggerTriageNudge,
-      triggerCarryForwardReminder,
-      triggerHomeAssistantUpdateSummaries,
-    } = await import('@/lib/push/triggers');
-    registerScheduledPushHandlers({
-      triggerMorningNotification,
-      triggerTriageNudge,
-      triggerCarryForwardReminder,
-      triggerHomeAssistantUpdateSummaries,
-    });
-  }
+  const {
+    triggerMorningNotification,
+    triggerTriageNudge,
+    triggerCarryForwardReminder,
+    triggerHomeAssistantUpdateSummaries,
+  } = await import('@/lib/push/triggers');
+  registerScheduledPushHandlers({
+    triggerMorningNotification,
+    triggerTriageNudge,
+    triggerCarryForwardReminder,
+    triggerHomeAssistantUpdateSummaries,
+  });
   const { isPublicDemoMode } = await import('@/lib/public-demo');
   if (isPublicDemoMode()) {
     try {
@@ -153,6 +150,18 @@ export async function register() {
       syncLogger.info('Instrumentation: inline task reminder scheduler initialized');
     } catch (err) {
       syncLogger.warn({ err }, 'Instrumentation: task reminder scheduler init failed (non-fatal)');
+    }
+    try {
+      const { taskDeletionRetentionScheduler } = await import(
+        '@/lib/tasks/deletion-retention'
+      );
+      await taskDeletionRetentionScheduler.start();
+      syncLogger.info('Instrumentation: task deletion retention scheduler initialized');
+    } catch (err) {
+      syncLogger.warn(
+        { err },
+        'Instrumentation: task deletion retention scheduler init failed (non-fatal)',
+      );
     }
   }
   markRuntimeReady();

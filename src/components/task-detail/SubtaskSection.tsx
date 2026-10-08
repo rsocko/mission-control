@@ -1,8 +1,26 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
-import { Plus, CheckCircle2, Circle, Trash2, ArrowUpFromLine, Sparkles } from 'lucide-react';
-import { toast } from 'sonner';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { Plus, CheckCircle2, Circle, Trash2, ArrowUpFromLine, Sparkles, GripVertical } from 'lucide-react';
+import { toast } from '@/lib/toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import dynamic from 'next/dynamic';
 
@@ -18,6 +36,7 @@ export interface Subtask {
   sourceId?: string;
   connectorType?: string;
   effort?: number | null;
+  siblingOrder?: number | null;
 }
 
 export interface SubtaskSectionProps {
@@ -35,6 +54,48 @@ export interface SubtaskSectionProps {
   canCreateSubtasks?: boolean;
   /** Called after a subtask is promoted to a standalone task. */
   onSubtaskPromoted?: (subtaskId: string) => void;
+  /** Revision used to reject stale reorder requests. */
+  orderRevision?: number;
+}
+
+function SortableSubtaskRow({
+  subtask,
+  disabled,
+  children,
+}: {
+  subtask: Subtask;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: subtask.id,
+    disabled,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.55 : 1,
+      }}
+      className="flex items-center gap-2 group py-0.5"
+    >
+      {!disabled && (
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          aria-label={`Reorder "${subtask.title}"`}
+          title="Reorder subtask"
+          className="shrink-0 cursor-grab touch-none text-[var(--text-muted)] opacity-60 transition-opacity hover:opacity-100 focus:opacity-100 active:cursor-grabbing"
+        >
+          <GripVertical size={13} aria-hidden="true" />
+        </button>
+      )}
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -49,11 +110,14 @@ export function SubtaskSection({
   canEdit = true,
   canCreateSubtasks = canEdit,
   onSubtaskPromoted,
+  orderRevision = 0,
 }: SubtaskSectionProps) {
   const [newTitle, setNewTitle] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [showAiBreakdown, setShowAiBreakdown] = useState(false);
+  const currentOrderRevisionRef = useRef(orderRevision);
+  const reorderInFlightRef = useRef(false);
   const editInputRef = useRef<HTMLInputElement>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -63,6 +127,61 @@ export function SubtaskSection({
     variant: 'danger' | 'warning';
     onConfirm: () => void;
   }>({ open: false, title: '', message: '', confirmLabel: '', variant: 'danger', onConfirm: () => {} });
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  useEffect(() => {
+    currentOrderRevisionRef.current = orderRevision;
+  }, [orderRevision]);
+
+  const reorderSubtasks = useCallback(async (event: DragEndEvent) => {
+    if (
+      reorderInFlightRef.current
+      || !event.over
+      || event.active.id === event.over.id
+    ) return;
+    const oldIndex = subtasks.findIndex((subtask) => subtask.id === event.active.id);
+    const newIndex = subtasks.findIndex((subtask) => subtask.id === event.over!.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    const previous = subtasks;
+    const reordered = arrayMove(subtasks, oldIndex, newIndex);
+    let authoritativeSubtasks: Subtask[] | null = null;
+    reorderInFlightRef.current = true;
+    onSubtasksChange(reordered);
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/subtasks`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderedChildIds: reordered.map((subtask) => subtask.id),
+          expectedRevision: currentOrderRevisionRef.current,
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as {
+        revision?: number;
+        subtasks?: Subtask[];
+        error?: string;
+      };
+      if (typeof data.revision === 'number') {
+        currentOrderRevisionRef.current = data.revision;
+      }
+      if (Array.isArray(data.subtasks)) {
+        authoritativeSubtasks = data.subtasks;
+      }
+      if (!response.ok || typeof data.revision !== 'number') {
+        throw new Error(data.error || 'Failed to reorder subtasks');
+      }
+    } catch (error) {
+      onSubtasksChange(authoritativeSubtasks ?? previous);
+      toast.error(error instanceof Error ? error.message : 'Failed to reorder subtasks');
+    } finally {
+      reorderInFlightRef.current = false;
+    }
+  }, [onSubtasksChange, subtasks, taskId]);
 
   const toggleSubtask = useCallback(async (subtaskId: string, currentStatus: string) => {
     const newStatus = currentStatus === 'done' ? 'todo' : 'done';
@@ -184,10 +303,20 @@ export function SubtaskSection({
   return (
     <>
       <div className="space-y-1">
-        {subtasks.map((st) => (
-          <div
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={(event) => { void reorderSubtasks(event); }}
+        >
+          <SortableContext
+            items={subtasks.map((subtask) => subtask.id)}
+            strategy={verticalListSortingStrategy}
+          >
+          {subtasks.map((st) => (
+          <SortableSubtaskRow
             key={st.id}
-            className="flex items-center gap-2 group py-0.5"
+            subtask={st}
+            disabled={!canEdit || subtasks.length < 2}
           >
             <button
               type="button"
@@ -252,13 +381,14 @@ export function SubtaskSection({
                 </button>
               </>
             )}
-          </div>
+          </SortableSubtaskRow>
         ))}
+          </SortableContext>
+        </DndContext>
 
-        {/* Add subtask input */}
         {canCreateSubtasks && (
-          <div className="flex items-center gap-2 pt-1">
-            <Plus size={14} className="shrink-0 text-[var(--text-muted)]" />
+          <div className="input-glow mt-2 flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2.5">
+            <Plus size={14} className="shrink-0 text-[var(--accent-400)]" />
             <input
               type="text"
               value={newTitle}
@@ -270,7 +400,7 @@ export function SubtaskSection({
                 }
               }}
               placeholder="Add subtask…"
-              className="flex-1 text-xs bg-transparent text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+              className="min-w-0 flex-1 bg-transparent text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
             />
           </div>
         )}
@@ -281,10 +411,10 @@ export function SubtaskSection({
             onClick={() => setShowAiBreakdown(true)}
             disabled={showAiBreakdown}
             title="Suggest subtasks with AI"
-            className="mt-1 flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium text-violet-300 hover:bg-violet-500/10 disabled:cursor-not-allowed disabled:text-[var(--text-muted)] disabled:opacity-60"
+            className="mt-1 flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Sparkles size={12} aria-hidden="true" />
-            AI breakdown
+            Suggest subtasks with AI
           </button>
         )}
 

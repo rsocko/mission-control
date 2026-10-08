@@ -10,6 +10,7 @@ import type {
   TaskItem,
   TaskSourceModel,
 } from '@/types';
+import type { TaskDelegationSummary } from '@/lib/external-agents/task-delegation';
 
 export type TaskTagDto = Pick<Tag, 'id' | 'name' | 'slug'> & {
   type: string;
@@ -60,6 +61,10 @@ export type TaskListItemDto = TaskListDomainFields & {
   reminderAt?: string | null;
   reminderRelative?: ReminderRelativeRule | null;
   reminderDueTime?: string | null;
+  reminderNagInterval?: 1 | 5 | 15 | null;
+  reminderNagStopAt?: string | null;
+  reminderNagSeriesId?: string | null;
+  reminderNagSequence?: number;
   hubProjectIds?: string[];
   projectPhaseMemberships?: Array<{
     projectId: string;
@@ -70,6 +75,9 @@ export type TaskListItemDto = TaskListDomainFields & {
   linkedSourceCount?: number;
   hasDescription: boolean;
   editPolicy: TaskEditPolicy;
+  syncStatus?: string;
+  pushRetryCount?: number;
+  delegation?: TaskDelegationSummary | null;
 };
 
 export interface TaskListStatsDto {
@@ -83,8 +91,10 @@ export interface TaskListStatsDto {
   myDay: number;
   recentlyCreated: number;
   recentlyClosed: number;
+  recurring: number;
   waiting: number;
   inbox: number;
+  delegated?: number;
 }
 
 export interface TaskListResponseDto {
@@ -93,12 +103,16 @@ export interface TaskListResponseDto {
   stats: TaskListStatsDto;
   hasMore: boolean;
   sourceCounts: Record<string, number>;
+  facetCounts: {
+    priorities: Record<string, number>;
+    statuses: Record<string, number>;
+  };
   availableTags: TaskTagDto[];
 }
 
 type HubProjectSummaryFields = Pick<
   HubProject,
-  'id' | 'name' | 'color'
+  'id' | 'name' | 'color' | 'appearance'
 >;
 
 export type KanbanColumnDto = Pick<KanbanColumn, 'id' | 'name' | 'color'> &

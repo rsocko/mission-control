@@ -24,6 +24,9 @@ import {
 export interface SearchFilters {
   source?: string;
   status?: string;
+  notificationKind?: 'triage' | 'notes';
+  dateFrom?: string;
+  dueBefore?: string;
   excludeDone?: boolean;
   universeEligible?: boolean;
   excludeConnectorInstanceIds?: string[];

@@ -13,16 +13,18 @@ import type {
 import { decodeLenientJsonArray } from './value-codecs';
 import type { ProjectPhase, ProjectPhaseItem } from '@/types';
 import { createSqliteAIProjectOrganizationExtensions } from './sqlite-ai-workflow-repository';
+import { normalizeContextAppearance } from '@/lib/context-appearance';
 
 interface ProjectRow extends Omit<
   ProjectOrganizationProject,
-  'sourceBindings' | 'autoIncludeRules' | 'kanbanColumns' | 'defaultFilters' | 'metadata' | 'hidden'
+  'sourceBindings' | 'autoIncludeRules' | 'kanbanColumns' | 'defaultFilters' | 'metadata' | 'appearance' | 'hidden'
 > {
   sourceBindings: string;
   autoIncludeRules: string;
   kanbanColumns: string;
   defaultFilters: string | null;
   metadata: string;
+  appearance: string | null;
   hidden: number;
 }
 
@@ -39,7 +41,7 @@ interface SourceListRow extends Omit<ListOrganizationSourceList, 'hidden'> {
 }
 
 const PROJECT_COLUMNS = `
-  id, name, description, color, icon, icon_color AS iconColor,
+  id, name, description, color, icon, icon_color AS iconColor, appearance,
   source_bindings AS sourceBindings, auto_include_rules AS autoIncludeRules,
   kanban_columns AS kanbanColumns, default_view AS defaultView,
   default_filters AS defaultFilters, status, status_override AS statusOverride,
@@ -70,6 +72,7 @@ const SOURCE_LIST_COLUMNS = `
   sort_order AS sortOrder, hidden,
   last_known_remote_name AS lastKnownRemoteName,
   user_display_name AS userDisplayName, icon, icon_color AS iconColor
+  , appearance
 `;
 
 const PROJECT_UPDATE_COLUMNS: Record<
@@ -81,6 +84,7 @@ const PROJECT_UPDATE_COLUMNS: Record<
   color: 'color',
   icon: 'icon',
   iconColor: 'icon_color',
+  appearance: 'appearance',
   sourceBindings: 'source_bindings',
   autoIncludeRules: 'auto_include_rules',
   kanbanColumns: 'kanban_columns',
@@ -133,6 +137,7 @@ function projectFromRow(row: ProjectRow): ProjectOrganizationProject {
       ? null
       : parseJson<Record<string, unknown>>(row.defaultFilters),
     metadata: parseJson<Record<string, unknown>>(row.metadata),
+    appearance: normalizeContextAppearance(row.appearance === null ? null : parseJson(row.appearance)),
   };
 }
 
@@ -145,7 +150,13 @@ function phaseItemFromRow(row: PhaseItemRow): ProjectPhaseItem {
 }
 
 function sourceListFromRow(row: SourceListRow): ListOrganizationSourceList {
-  return { ...row, hidden: row.hidden !== 0 };
+  return {
+    ...row,
+    hidden: row.hidden !== 0,
+    appearance: normalizeContextAppearance(
+      typeof row.appearance === 'string' ? parseJson(row.appearance) : row.appearance,
+    ),
+  };
 }
 
 function sqliteValue(key: string, value: unknown): unknown {
@@ -155,6 +166,7 @@ function sqliteValue(key: string, value: unknown): unknown {
     || key === 'kanbanColumns'
     || key === 'defaultFilters'
     || key === 'metadata'
+    || key === 'appearance'
   ) {
     return value === null ? null : JSON.stringify(value);
   }
@@ -231,12 +243,12 @@ export function createSqliteProjectAdministrationRepository(
     async createProject(project) {
       sqlite.prepare(`
         INSERT INTO hub_projects (
-          id, name, description, color, icon, icon_color, source_bindings,
+          id, name, description, color, icon, icon_color, appearance, source_bindings,
           auto_include_rules, kanban_columns, default_view, default_filters,
           status, status_override, hidden, category, target_date, started_at,
           completed_at, sort_order, hierarchy_revision, metadata, created_at, updated_at
         ) VALUES (
-          @id, @name, @description, @color, @icon, @iconColor, @sourceBindings,
+          @id, @name, @description, @color, @icon, @iconColor, @appearance, @sourceBindings,
           @autoIncludeRules, @kanbanColumns, @defaultView, @defaultFilters,
           @status, @statusOverride, @hidden, @category, @targetDate, @startedAt,
           @completedAt, @sortOrder, @hierarchyRevision, @metadata, @createdAt, @updatedAt
@@ -244,6 +256,7 @@ export function createSqliteProjectAdministrationRepository(
       `).run({
         ...project,
         hidden: project.hidden ? 1 : 0,
+        appearance: project.appearance == null ? null : JSON.stringify(project.appearance),
         sourceBindings: JSON.stringify(project.sourceBindings),
         autoIncludeRules: JSON.stringify(project.autoIncludeRules),
         kanbanColumns: JSON.stringify(project.kanbanColumns),

@@ -30,10 +30,9 @@ const compositeControlSources = [
   ['src/components/bulk-actions/BulkMoveDropdown.tsx', 1],
   ['src/components/bulk-actions/BulkMoveToSourceButton.tsx', 1],
   ['src/components/bulk-actions/BulkTagDropdown.tsx', 1],
-  ['src/components/layout/MobileDrawer.tsx', 1],
   ['src/components/mobile/MobileSearchScreen.tsx', 1],
   ['src/components/projects/TaskPickerDialog.tsx', 1],
-  ['src/components/quick-sort/QuickSortActions.tsx', 1],
+  ['src/components/quick-sort/QuickSortActions.tsx', 2],
   ['src/components/quick-sort/ScopeFilter.tsx', 1],
   ['src/components/reset/ResetView.tsx', 2],
   ['src/components/search/SearchCommand.tsx', 1],
@@ -43,6 +42,7 @@ const compositeControlSources = [
   ['src/components/task-detail/TaskTagsSection.tsx', 1],
   ['src/components/task-list/TaskContextMenu.tsx', 1],
   ['src/components/ui/icon-picker/IconPicker.tsx', 1],
+  ['src/components/ui/SearchInput.tsx', 1],
 ] as const;
 
 describe('text-entry focus glow policy', () => {

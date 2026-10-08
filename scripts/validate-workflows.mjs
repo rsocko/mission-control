@@ -148,9 +148,15 @@ for (const file of workflowFiles) {
     /\$\{\{(?:(?!\}\})[\s\S])*\bsecrets\b/iu,
     `${file} must not reference protected secrets`,
   );
+  assert.equal(
+    workflow.env?.NPM_CONFIG_REGISTRY,
+    'https://registry.npmjs.org/',
+    `${file} must use the public npm registry instead of inheriting developer machine configuration`,
+  );
   validatePermissions(workflow.permissions, file);
 
   const handlesPullRequests = 'pull_request' in workflow.on;
+  const controlsDemoEnvironment = file === 'control-demo-environment.yml';
   hasPullRequestWorkflow ||= handlesPullRequests;
   const hasWritePermissions = Object.values(workflow.jobs ?? {}).some((job) =>
     Object.values(job.permissions ?? {}).includes('write'),
@@ -185,29 +191,35 @@ for (const file of workflowFiles) {
       'ci.yml must expose a manual trigger for the pgvector benchmark',
     );
     const changes = workflow.jobs?.changes;
-    const impeccableWorker = workflow.jobs?.['impeccable-worker'];
-    const impeccableResult = workflow.jobs?.impeccable;
-    const lintWorker = workflow.jobs?.['lint-worker'];
-    const productionBuildWorker = workflow.jobs?.['production-build-worker'];
-    const lintResult = workflow.jobs?.lint;
-    const productionBuildResult = workflow.jobs?.['production-build'];
+    const impeccable = workflow.jobs?.impeccable;
+    const lint = workflow.jobs?.lint;
+    const productionBuild = workflow.jobs?.['production-build'];
     const workflowPolicyResult = workflow.jobs?.['workflow-policy'];
     const workerRuntimeResult = workflow.jobs?.['worker-runtime'];
     const shards = workflow.jobs?.['unit-test-shards'];
     const unitTestsResult = workflow.jobs?.['unit-tests'];
-    const postgresRouteSentinelWorker = workflow.jobs?.['postgres-route-sentinel-worker'];
-    const postgresRouteSentinelResult = workflow.jobs?.['postgres-route-sentinel'];
+    const postgresRouteSentinel = workflow.jobs?.['postgres-route-sentinel'];
     const postgresIntegrationShards = workflow.jobs?.['postgres-integration-shards'];
     const postgresIntegrationResult = workflow.jobs?.['postgres-integration'];
     const expensiveStepCondition = "needs.changes.outputs.docs_only != 'true'";
     assert.ok(
-      changes && impeccableWorker && impeccableResult && lintWorker &&
-        productionBuildWorker && lintResult && productionBuildResult &&
-        workflowPolicyResult && workerRuntimeResult && shards && unitTestsResult &&
-        postgresRouteSentinelWorker && postgresRouteSentinelResult &&
+      changes && impeccable && lint && productionBuild && workflowPolicyResult &&
+        workerRuntimeResult && shards && unitTestsResult && postgresRouteSentinel &&
         postgresIntegrationShards && postgresIntegrationResult,
-      'ci.yml must classify changes, isolate expensive workers, and expose every required check',
+      'ci.yml must classify changes, minimize runner fan-out, and expose every required check',
     );
+    for (const redundantJob of [
+      'impeccable-worker',
+      'lint-worker',
+      'production-build-worker',
+      'postgres-route-sentinel-worker',
+    ]) {
+      assert.equal(
+        workflow.jobs?.[redundantJob],
+        undefined,
+        `ci.yml must not allocate the redundant ${redundantJob} runner`,
+      );
+    }
     assert.equal(changes.name, 'Classify changes', 'change classification must retain its stable name');
     assert.deepEqual(
       changes.outputs,
@@ -247,65 +259,56 @@ for (const file of workflowFiles) {
         `Impeccable change classification must include configured live target ${target}`,
       );
     }
-    assert.deepEqual(
-      impeccableWorker.needs,
-      ['changes'],
-      'Impeccable worker must depend on change classification',
-    );
-    for (const invariant of [
-      'always()',
-      "needs.changes.result != 'success'",
-      "needs.changes.outputs.impeccable_changed != 'false'",
-    ]) {
-      assert.ok(
-        impeccableWorker.if.includes(invariant),
-        `Impeccable worker must enforce ${invariant}`,
-      );
-    }
-    assert.equal(
-      impeccableWorker.name,
-      'Impeccable integration worker',
-      'Impeccable worker must not claim the required check name',
-    );
+    assert.deepEqual(impeccable.needs, ['changes'], 'Impeccable must depend on change classification');
+    assert.equal(impeccable.if, 'always()', 'Impeccable must retain its required check context');
+    assert.equal(impeccable.name, 'Impeccable integration', 'Impeccable must retain its required name');
     assert.ok(
-      impeccableWorker.steps?.some((step) => step.run === 'node scripts/validate-impeccable.mjs'),
+      impeccable.steps?.some((step) =>
+        step.run === 'node scripts/validate-impeccable.mjs' &&
+        step.if.includes("needs.changes.result != 'success'") &&
+        step.if.includes("needs.changes.outputs.impeccable_changed != 'false'")
+      ),
       'Impeccable validation must run directly without installing dependencies',
     );
     assert.equal(
-      impeccableWorker.steps?.some((step) =>
+      impeccable.steps?.some((step) =>
         step.run === 'npm ci --no-audit --no-fund' ||
         step.uses?.startsWith('actions/cache/')
       ),
       false,
       'Impeccable validation must not restore dependencies or npm caches',
     );
-    assert.deepEqual(lintWorker.needs, ['changes'], 'lint worker must depend on change classification');
+    for (const [jobName, job] of Object.entries({ lint, 'production-build': productionBuild })) {
+      assert.deepEqual(job.needs, ['changes'], `${jobName} must depend on change classification`);
+      assert.equal(job.if, 'always()', `${jobName} must retain its required check context`);
+      const install = job.steps?.find((step) => step.run === 'npm ci --no-audit --no-fund');
+      assert.ok(
+        install?.if?.includes("needs.changes.result != 'success'") &&
+        install.if.includes(expensiveStepCondition),
+        `${jobName} must skip dependency installation for documentation-only changes`,
+      );
+    }
     for (const [name, command] of [
       ['Verify Generic Graph vendor snapshot', 'npm run vendor:verify'],
       ['Test Generic Graph vendor tooling', 'npm run test:vendor'],
     ]) {
-      const step = lintWorker.steps?.find((candidate) => candidate.name === name);
+      const step = lint.steps?.find((candidate) => candidate.name === name);
       assert.equal(step?.run, command, `${name} must run the repository-owned command`);
       assert.ok(
         step?.if?.includes("needs.changes.outputs.vendor_changed != 'false'"),
         `${name} must use the fail-closed vendor classification`,
       );
     }
-    assert.deepEqual(
-      productionBuildWorker.needs,
-      ['changes'],
-      'production build worker must depend on change classification',
-    );
     assert.deepEqual(shards.needs, ['changes'], 'unit-test shards must depend on change classification');
     assert.deepEqual(
-      postgresRouteSentinelWorker.needs,
+      postgresRouteSentinel.needs,
       ['changes'],
-      'PostgreSQL route sentinel worker must depend on change classification',
+      'PostgreSQL route sentinel must depend on change classification',
     );
     assert.equal(
-      postgresRouteSentinelWorker.name,
-      'PostgreSQL route sentinel worker',
-      'PostgreSQL route sentinel worker must not claim the required check name',
+      postgresRouteSentinel.name,
+      'PostgreSQL route sentinel',
+      'PostgreSQL route sentinel must retain its stable check name',
     );
     for (const invariant of [
       'always()',
@@ -313,11 +316,11 @@ for (const file of workflowFiles) {
       expensiveStepCondition,
     ]) {
       assert.ok(
-        postgresRouteSentinelWorker.if.includes(invariant),
-        `PostgreSQL route sentinel worker must enforce ${invariant}`,
+        postgresRouteSentinel.if.includes(invariant),
+        `PostgreSQL route sentinel must enforce ${invariant}`,
       );
     }
-    const postgresRouteSentinelStep = postgresRouteSentinelWorker.steps?.find(
+    const postgresRouteSentinelStep = postgresRouteSentinel.steps?.find(
       (step) => step.name === 'Enforce PostgreSQL route sentinel',
     );
     assert.equal(
@@ -331,18 +334,14 @@ for (const file of workflowFiles) {
       'PostgreSQL route sentinel must use its dependency-free npm script',
     );
     assert.equal(
-      postgresRouteSentinelWorker.steps?.some((step) =>
+      postgresRouteSentinel.steps?.some((step) =>
         step.run === 'npm ci --no-audit --no-fund' ||
         step.uses?.startsWith('actions/cache/')
       ),
       false,
       'PostgreSQL route sentinel must not restore dependencies or npm caches',
     );
-    for (const [jobName, job] of Object.entries({
-      'lint-worker': lintWorker,
-      'production-build-worker': productionBuildWorker,
-      'unit-test-shards': shards,
-    })) {
+    for (const [jobName, job] of Object.entries({ 'unit-test-shards': shards })) {
       for (const invariant of [
         'always()',
         "needs.changes.result != 'success'",
@@ -369,7 +368,7 @@ for (const file of workflowFiles) {
     );
     assert.equal(
       postgresIntegrationShards.name,
-      'PostgreSQL integration worker (${{ matrix.shard }}/3)',
+      'PostgreSQL integration worker (${{ matrix.shard }}/4)',
       'PostgreSQL integration shards must not claim the required check name',
     );
     for (const invariant of [
@@ -384,8 +383,8 @@ for (const file of workflowFiles) {
     }
     assert.deepEqual(
       postgresIntegrationShards.strategy?.matrix?.shard,
-      [1, 2, 3],
-      'ci.yml must run three PostgreSQL integration shards',
+      [1, 2, 3, 4],
+      'ci.yml must run four PostgreSQL integration shards',
     );
     assert.equal(
       postgresIntegrationShards.strategy?.['fail-fast'],
@@ -433,7 +432,7 @@ for (const file of workflowFiles) {
       postgresIntegrationTests?.run,
       `set -euo pipefail
 mapfile -t test_files < <(
-  node scripts/select-postgres-integration-shard.mjs "\${{ matrix.shard }}" 3
+  node scripts/select-postgres-integration-shard.mjs "\${{ matrix.shard }}" 4
 )
 test "\${#test_files[@]}" -gt 0
 npm test -- --run --no-file-parallelism "\${test_files[@]}"
@@ -443,7 +442,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     const postgresTestFiles = (await readdir(path.resolve('tests', 'db')))
       .filter((testFile) => /^postgres-.*\.integration\.test\.ts$/u.test(testFile))
       .sort();
-    const postgresTestShards = partitionPostgresIntegrationTests(postgresTestFiles, 3);
+    const postgresTestShards = partitionPostgresIntegrationTests(postgresTestFiles, 4);
     assert.ok(
       postgresTestShards.every((testFiles) => testFiles.length > 0),
       'Every PostgreSQL integration shard must contain tests',
@@ -483,7 +482,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     assert.equal(
       pgvectorContainer?.if,
-      "github.event_name == 'workflow_dispatch' && matrix.shard == 2",
+      "github.event_name == 'workflow_dispatch' && matrix.shard == 3",
       'PostgreSQL container discovery must run only with the manual benchmark',
     );
     assert.equal(
@@ -493,7 +492,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     assert.equal(
       pgvectorBenchmark?.if,
-      "github.event_name == 'workflow_dispatch' && matrix.shard == 2",
+      "github.event_name == 'workflow_dispatch' && matrix.shard == 3",
       'The pgvector benchmark must run only on a light shard of manually dispatched CI',
     );
     assert.equal(
@@ -505,7 +504,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
       pgvectorBenchmark?.env?.MC_BENCHMARK_POSTGRES_URL,
       'pgvector benchmark must receive a dedicated database URL',
     );
-    const workflowPolicy = lintWorker.steps?.find((step) => step.name === 'Validate workflow policy');
+    const workflowPolicy = lint.steps?.find((step) => step.name === 'Validate workflow policy');
     assert.ok(workflowPolicy, 'lint validation must include the workflow policy check');
     for (const invariant of [
       "needs.changes.result != 'success'",
@@ -515,14 +514,14 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     }
     assert.equal(workflowPolicy.run, 'npm run ci:workflows', 'workflow policy validation must use its npm script');
     assert.ok(
-      lintWorker.steps?.some((step) => step.run === 'npm run lint'),
-      'lint worker must run the repository linter',
+      lint.steps?.some((step) => step.run === 'npm run lint'),
+      'lint check must run the repository linter',
     );
     assert.ok(
-      productionBuildWorker.steps?.some((step) => step.run === 'npm run build'),
-      'production build worker must run the production build',
+      productionBuild.steps?.some((step) => step.run === 'npm run build'),
+      'production build check must run the production build',
     );
-    const workerSmoke = productionBuildWorker.steps?.find(
+    const workerSmoke = productionBuild.steps?.find(
       (step) => step.name === 'Smoke-test production worker runtime',
     );
     assert.ok(workerSmoke, 'production validation must smoke-test the packaged worker runtime');
@@ -538,79 +537,48 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
       'unit-test shards must partition the Vitest suite',
     );
 
-    const requiredGates = {
-      impeccable: {
-        job: impeccableResult,
-        name: 'Impeccable integration',
-        needs: ['changes', 'impeccable-worker'],
-        workerResult: '${{ needs.impeccable-worker.result }}',
-        decisionEnv: 'CHANGE_REQUIRED',
-        decisionValue: '${{ needs.changes.outputs.impeccable_changed }}',
-      },
-      lint: {
-        job: lintResult,
-        name: 'Lint',
-        needs: ['changes', 'lint-worker'],
-        workerResult: '${{ needs.lint-worker.result }}',
-        decisionEnv: 'DOCS_ONLY',
-        decisionValue: '${{ needs.changes.outputs.docs_only }}',
-      },
-      'production-build': {
-        job: productionBuildResult,
-        name: 'Production build',
-        needs: ['changes', 'production-build-worker'],
-        workerResult: '${{ needs.production-build-worker.result }}',
-        decisionEnv: 'DOCS_ONLY',
-        decisionValue: '${{ needs.changes.outputs.docs_only }}',
-      },
+    const aggregateGates = {
       'workflow-policy': {
         job: workflowPolicyResult,
         name: 'Workflow policy',
-        needs: ['changes', 'lint-worker'],
-        workerResult: '${{ needs.lint-worker.result }}',
-        decisionEnv: 'DOCS_ONLY',
-        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+        needs: ['changes', 'lint'],
+        resultEnv: 'VALIDATION_RESULT',
+        resultValue: '${{ needs.lint.result }}',
       },
       'worker-runtime': {
         job: workerRuntimeResult,
         name: 'Worker runtime',
-        needs: ['changes', 'production-build-worker'],
-        workerResult: '${{ needs.production-build-worker.result }}',
-        decisionEnv: 'DOCS_ONLY',
-        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+        needs: ['changes', 'production-build'],
+        resultEnv: 'VALIDATION_RESULT',
+        resultValue: '${{ needs.production-build.result }}',
       },
       'unit-tests': {
         job: unitTestsResult,
         name: 'Unit tests',
         needs: ['changes', 'unit-test-shards'],
-        workerResult: '${{ needs.unit-test-shards.result }}',
-        decisionEnv: 'DOCS_ONLY',
-        decisionValue: '${{ needs.changes.outputs.docs_only }}',
-      },
-      'postgres-route-sentinel': {
-        job: postgresRouteSentinelResult,
-        name: 'PostgreSQL route sentinel',
-        needs: ['changes', 'postgres-route-sentinel-worker'],
-        workerResult: '${{ needs.postgres-route-sentinel-worker.result }}',
-        decisionEnv: 'DOCS_ONLY',
-        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+        resultEnv: 'WORKER_RESULT',
+        resultValue: '${{ needs.unit-test-shards.result }}',
       },
       'postgres-integration': {
         job: postgresIntegrationResult,
         name: 'PostgreSQL integration',
         needs: ['changes', 'postgres-integration-shards'],
-        workerResult: '${{ needs.postgres-integration-shards.result }}',
-        decisionEnv: 'DOCS_ONLY',
-        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+        resultEnv: 'WORKER_RESULT',
+        resultValue: '${{ needs.postgres-integration-shards.result }}',
       },
     };
     assert.deepEqual(
-      Object.values(requiredGates).map(({ name }) => name).sort(),
+      [
+        impeccable.name,
+        lint.name,
+        productionBuild.name,
+        workflowPolicyResult.name,
+        workerRuntimeResult.name,
+        unitTestsResult.name,
+      ].sort(),
       [
         'Impeccable integration',
         'Lint',
-        'PostgreSQL integration',
-        'PostgreSQL route sentinel',
         'Production build',
         'Unit tests',
         'Worker runtime',
@@ -618,10 +586,10 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
       ],
       'ci.yml must preserve every active ruleset context',
     );
-    for (const [jobName, gate] of Object.entries(requiredGates)) {
-      assert.equal(gate.job.name, gate.name, `${jobName} must retain its required check name`);
+    for (const [jobName, gate] of Object.entries(aggregateGates)) {
+      assert.equal(gate.job.name, gate.name, `${jobName} must retain its stable check name`);
       assert.equal(gate.job.if, 'always()', `${jobName} must materialize after skipped or failed needs`);
-      assert.deepEqual(gate.job.needs, gate.needs, `${jobName} must depend on classification and its worker`);
+      assert.deepEqual(gate.job.needs, gate.needs, `${jobName} must depend on classification and its validation`);
       assert.equal(gate.job.steps?.length, 1, `${jobName} must remain a cheap summary gate`);
       const [step] = gate.job.steps;
       assert.equal(
@@ -629,18 +597,16 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
         '${{ needs.changes.result }}',
         `${jobName} must fail closed when classification fails`,
       );
-      assert.equal(step.env?.WORKER_RESULT, gate.workerResult, `${jobName} must inspect its worker result`);
       assert.equal(
-        step.env?.[gate.decisionEnv],
-        gate.decisionValue,
-        `${jobName} must use the classifier to decide whether a worker was required`,
+        step.env?.[gate.resultEnv],
+        gate.resultValue,
+        `${jobName} must inspect its validation result`,
       );
       for (const invariant of [
         'if [[ "${CLASSIFICATION_RESULT}" != "success" ]]',
         'exit 1',
-        `case "\${${gate.decisionEnv}}" in`,
-        'test "${WORKER_RESULT}" = "success"',
-        'test "${WORKER_RESULT}" = "skipped"',
+        'case "${DOCS_ONLY}" in',
+        `test "\${${gate.resultEnv}}" = "success"`,
         '*) echo "Invalid ',
       ]) {
         assert.ok(step.run.includes(invariant), `${jobName} gate must enforce ${invariant}`);
@@ -650,14 +616,12 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
       if (
         jobName === 'changes' ||
-        jobName === 'impeccable-worker' ||
         jobName === 'impeccable' ||
         jobName === 'lint' ||
         jobName === 'production-build' ||
         jobName === 'workflow-policy' ||
         jobName === 'worker-runtime' ||
         jobName === 'unit-tests' ||
-        jobName === 'postgres-route-sentinel-worker' ||
         jobName === 'postgres-route-sentinel' ||
         jobName === 'postgres-integration'
       ) continue;
@@ -671,7 +635,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
       );
     }
     const cacheSaves =
-      lintWorker.steps?.filter((step) =>
+      lint.steps?.filter((step) =>
         step.uses?.startsWith('actions/cache/save@')
       ) ?? [];
     assert.equal(cacheSaves.length, 1, 'ci.yml must use one designated npm cache writer');
@@ -701,7 +665,17 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
   }
 
-  if (hasWritePermissions) {
+  if (controlsDemoEnvironment) {
+    const control = workflow.jobs?.control;
+    assert.deepEqual(
+      control?.permissions,
+      { contents: 'read', 'id-token': 'write' },
+      `${file} control job must limit its token to Azure OIDC`,
+    );
+    assert.equal(control.environment, 'demo', `${file} control job must use the demo environment`);
+  }
+
+  if (hasWritePermissions && !controlsDemoEnvironment) {
     assert.ok(!('push' in workflow.on), `${file} must not publish directly from a push event`);
     assert.ok(!('pull_request' in workflow.on), `${file} must not publish from pull requests`);
     assert.deepEqual(
@@ -870,7 +844,10 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
       `${file} action references must use a full commit SHA`,
     );
     const action = uses.slice(0, uses.indexOf('@'));
-    assert.ok(allowedActions.has(action), `${file} uses action ${action}, which is not allowlisted`);
+    assert.ok(
+      allowedActions.has(action),
+      `${file} uses action ${action}, which is not allowlisted`,
+    );
   }
 }
 

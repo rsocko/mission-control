@@ -419,16 +419,23 @@ export function taskDetailPanelModule() {
     TaskDetailPanel: ({
       taskId,
       onClose,
+      onComplete,
       notesOpenRequest,
     }: {
       taskId: string;
       onClose: () => void;
+      onComplete?: () => void | Promise<void>;
       notesOpenRequest?: { taskId: string; mode: 'read' | 'edit' } | null;
     }) => (
       <aside aria-label="Task detail" data-testid={`task-detail-${taskId}`}>
         <p>Detail for {taskId}</p>
         {notesOpenRequest?.taskId === taskId ? (
           <div role="dialog" aria-label="Notes" data-mode={notesOpenRequest.mode} />
+        ) : null}
+        {onComplete ? (
+          <button type="button" onClick={() => { void onComplete(); }}>
+            Complete task from detail
+          </button>
         ) : null}
         <button type="button" onClick={onClose}>Close task detail</button>
       </aside>
@@ -813,6 +820,18 @@ export function installProjectPageHarness(
         }
         break;
       }
+      case 'replace_phase_structure': {
+        phases.splice(0, phases.length, ...command.phases);
+        for (const phaseId of Object.keys(phaseItemsByPhase)) {
+          phaseItemsByPhase[phaseId] = [];
+        }
+        for (const placement of command.placements) {
+          if (placement.phaseId) {
+            attachTasks([placement.taskId], placement.phaseId, placement.index);
+          }
+        }
+        break;
+      }
     }
 
     return {
@@ -1100,7 +1119,7 @@ export function installProjectPageHarness(
 export type ProjectTabName = 'Overview' | 'Plan' | 'Project Tasks' | 'Settings';
 
 export function tabButtonName(tab: ProjectTabName) {
-  return new RegExp(`^${tab}( \\(\\d+\\))?$`);
+  return new RegExp(`^${tab}( \\(\\d+\\))?( \\d+ unphased tasks?)?$`);
 }
 
 export async function projectPageElement(

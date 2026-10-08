@@ -1054,18 +1054,18 @@ export function describeTaskOrganizationRepositoryContract(
           id: 'task-1',
           connectorType: 'microsoft-todo',
           connectorInstanceId: 'todo-1',
-          sourceId: 'list-a:task-1',
-          sourceListId: 'list-a',
+          sourceId: 'AQMk/source+=:AAMk/task+=',
+          sourceListId: 'AQMk/source+=',
         }]);
       });
 
       it('reads the move context', async () => {
         expect(await organization.getTaskMoveToListContext('task-1')).toEqual({
           id: 'task-1',
-          sourceId: 'list-a:task-1',
+          sourceId: 'AQMk/source+=:AAMk/task+=',
           connectorType: 'microsoft-todo',
           connectorInstanceId: 'todo-1',
-          sourceListId: 'list-a',
+          sourceListId: 'AQMk/source+=',
         });
         expect(await organization.getTaskMoveToListContext('ghost')).toBeNull();
       });
@@ -1073,26 +1073,26 @@ export function describeTaskOrganizationRepositoryContract(
       it('finalizes a move that changed the source id', async () => {
         await organization.finalizeTaskMoveToList({
           taskId: 'task-1',
-          sourceListId: 'list-b',
-          sourceId: 'list-b:task-1',
+          sourceListId: 'AQMk/target+=',
+          sourceId: 'AQMk/target+=:created/task-id',
           updatedAt: '2026-09-03T09:00:00.000Z',
         });
         expect(await harness.getTaskSource('task-1')).toEqual({
-          sourceListId: 'list-b',
-          sourceId: 'list-b:task-1',
+          sourceListId: 'AQMk/target+=',
+          sourceId: 'AQMk/target+=:created/task-id',
         });
       });
 
       it('keeps the existing source id when the move did not change it', async () => {
         await organization.finalizeTaskMoveToList({
           taskId: 'task-1',
-          sourceListId: 'list-b',
+          sourceListId: 'AQMk/target+=',
           sourceId: null,
           updatedAt: '2026-09-03T09:00:00.000Z',
         });
         expect(await harness.getTaskSource('task-1')).toEqual({
-          sourceListId: 'list-b',
-          sourceId: 'list-a:task-1',
+          sourceListId: 'AQMk/target+=',
+          sourceId: 'AQMk/source+=:AAMk/task+=',
         });
       });
     });

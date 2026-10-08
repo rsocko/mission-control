@@ -53,13 +53,13 @@ describe('SQLite daily-planning adapter', () => {
           INSERT INTO tasks (
             id, source_id, connector_type, connector_instance_id, title, description,
             status, local_disposition, priority, planning_horizon, due_date, push_count,
-            created_at, updated_at, completed_at, parent_id, depth, is_checklist_item,
+            created_at, updated_at, completed_at, deleted_at, parent_id, depth, is_checklist_item,
             source_list_id, source_list_name, assignee, micro_status, status_reason,
             metadata, sync_status, last_synced_at
           ) VALUES (
             @id, @sourceId, @connectorType, @connectorInstanceId, @title, @description,
             @status, @localDisposition, @priority, @planningHorizon, @dueDate, @pushCount,
-            @createdAt, @updatedAt, @completedAt, @parentId, @depth, 0,
+            @createdAt, @updatedAt, @completedAt, @deletedAt, @parentId, @depth, 0,
             @sourceListId, @sourceListName, NULL, @microStatus, NULL,
             '{}', 'synced', @updatedAt
           )
@@ -81,6 +81,7 @@ describe('SQLite daily-planning adapter', () => {
             createdAt: task.createdAt ?? '2026-09-04T12:00:00.000Z',
             updatedAt: task.updatedAt ?? '2026-09-04T12:00:00.000Z',
             completedAt: task.completedAt ?? null,
+            deletedAt: task.deletedAt ?? null,
             parentId: task.parentId ?? null,
             depth: task.depth ?? 0,
             sourceListId: task.sourceListId ?? null,

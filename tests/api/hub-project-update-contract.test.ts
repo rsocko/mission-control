@@ -51,6 +51,7 @@ describe('hub project PATCH route contract', () => {
   it.each([
     ['unknown fields', { unsupported: true }],
     ['invalid field values', { color: 'blue' }],
+    ['invalid appearance', { appearance: { strength: 'loud', backdrop: 'aurora' } }],
     ['empty updates', {}],
   ])('rejects %s identically from both PATCH routes', async (_label, updates) => {
     const [collectionResponse, itemResponse] = await Promise.all([
@@ -74,6 +75,11 @@ describe('hub project PATCH route contract', () => {
         statusMapping: ['todo'],
       }],
       metadata: { owner: 'team' },
+      appearance: {
+        strength: 'canvas',
+        backdrop: 'ridge',
+        accentColor: '#14b8a6',
+      },
     };
 
     const collectionResponse = await callCollectionPatch({

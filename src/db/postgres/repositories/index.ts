@@ -21,6 +21,7 @@ import { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-re
 import { createPostgresGitHubProjectRepositories } from './github-project-repositories';
 import { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
 import { createPostgresWorkTodoRepositories } from './work-todo-repositories';
+import { createPostgresRyMessageActionRepository } from './rymessage-action-repository';
 import { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
 import { createPostgresFinanceConnectionRecoveryPersistence } from './finance-recovery-repository';
 import { createPostgresFinanceOperatorPersistence } from './finance-operator-repository';
@@ -77,6 +78,7 @@ export { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-re
 export { createPostgresGitHubProjectRepositories } from './github-project-repositories';
 export { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
 export { createPostgresWorkTodoRepositories } from './work-todo-repositories';
+export { createPostgresRyMessageActionRepository } from './rymessage-action-repository';
 export { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
 export { createPostgresFinanceConnectionRecoveryPersistence } from './finance-recovery-repository';
 export { createPostgresFinanceOperatorPersistence } from './finance-operator-repository';
@@ -172,15 +174,16 @@ export function createPostgresGitHubWorkerRepositories(
 
 /**
  * Builds the Layer 4 non-finance connector-state composition atomically.
- * Rymessage and OWL (`document-intelligence`) have no member here because they
- * own no worker persistence table; their durable state is generic connector
- * settings plus the Layer 2 list/task/tag/notification ports.
+ * RyMessage owns its durable canonical ActionV2 reconciliation state here.
+ * OWL (`document-intelligence`) has no member because its durable state is
+ * generic connector settings plus the Layer 2 list/task/tag/notification ports.
  */
 export function createPostgresNonFinanceConnectorStateRepositories(
   pool: Pool,
 ): NonFinanceConnectorStateRepositories {
   return {
     workTodo: createPostgresWorkTodoRepositories(pool),
+    rymessageActions: createPostgresRyMessageActionRepository(pool),
   };
 }
 

@@ -59,7 +59,9 @@ describe('View in Graph collection surfaces', () => {
 
   it('opens a saved view in Graph without applying it to Dashboard', () => {
     const applyView = vi.fn();
+    const applyQuickFilter = vi.fn();
     const editView = vi.fn();
+    const startNewQuickFilter = vi.fn();
     const originContext = serializeTaskFilterContext(
       normalizeTaskFilterContext({ tagSlugs: ['current'] }),
     );
@@ -78,6 +80,13 @@ describe('View in Graph collection surfaces', () => {
             icon: 'pin',
             filters: { tag: 'planning' },
           }],
+          savedQuickFilters: [{
+            id: 'triage',
+            name: 'Needs triage',
+            icon: 'lucide:list-filter',
+            iconColor: '#22c55e',
+            filters: { query: 'tag:triage' },
+          }],
           allSourceCounts: {},
           loading: false,
         }}
@@ -92,6 +101,7 @@ describe('View in Graph collection surfaces', () => {
           statusFilter: [],
           hiddenQuickFilters: [],
           quickFilterVisibility: {},
+          activeSavedQuickFilterId: null,
         }}
         sidebar={{
           sidebarExpanded: false,
@@ -123,6 +133,11 @@ describe('View in Graph collection surfaces', () => {
           applyView,
           editView,
           deleteView: vi.fn(),
+          startNewQuickFilter,
+          applyQuickFilter,
+          clearSavedQuickFilter: vi.fn(),
+          editQuickFilter: vi.fn(),
+          deleteQuickFilter: vi.fn(),
           setQuickFilterVisibility: vi.fn(),
         }}
         computed={{
@@ -134,7 +149,12 @@ describe('View in Graph collection surfaces', () => {
     );
 
     expect(screen.getByRole('img', { name: 'lucide:pin' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'lucide:list-filter' })).toBeInTheDocument();
     expect(screen.queryByText('pin')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save current filters as a quick filter' }));
+    expect(startNewQuickFilter).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'lucide:list-filter Needs triage' }));
+    expect(applyQuickFilter).toHaveBeenCalledWith(expect.objectContaining({ id: 'triage' }));
     fireEvent.click(screen.getByRole('button', { name: 'Edit Planning' }));
     expect(editView).toHaveBeenCalledWith(expect.objectContaining({ id: 'planning' }));
     const graphLink = screen.getByRole('link', { name: 'View Planning in Graph' });

@@ -76,7 +76,7 @@ export function TaskTagsSection({
       mode === 'workspace' && 'col-start-1 row-start-4',
     )}>
       <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2.5">
-        <h3 className="flex items-center gap-2 text-xs font-semibold text-[var(--text-secondary)]"><Tag size={13} />Tags</h3>
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--text-heading)]"><Tag size={14} className="text-[var(--text-tertiary)]" />Tags</h3>
         <Tooltip content="Suggested tags are not available yet">
           <button type="button" disabled className="flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-xs text-violet-300 opacity-60">
             <Sparkles size={12} />Suggest

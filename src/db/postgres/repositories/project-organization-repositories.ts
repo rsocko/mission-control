@@ -12,6 +12,7 @@ import type {
 } from '@/db/persistence/project-organization';
 import type { ProjectPhase, ProjectPhaseItem } from '@/types';
 import { createPostgresAIProjectOrganizationExtensions } from './ai-workflow-repository';
+import { normalizeContextAppearance } from '@/lib/context-appearance';
 
 const MAX_TRANSACTION_ATTEMPTS = 3;
 const LIST_ORGANIZATION_LOCK = 'list-organization';
@@ -25,7 +26,7 @@ type PhaseItemRow = ProjectPhaseItem;
 type SourceListRow = ListOrganizationSourceList;
 
 const PROJECT_COLUMNS = `
-  id, name, description, color, icon, icon_color AS "iconColor",
+  id, name, description, color, icon, icon_color AS "iconColor", appearance,
   source_bindings AS "sourceBindings", auto_include_rules AS "autoIncludeRules",
   kanban_columns AS "kanbanColumns", default_view AS "defaultView",
   default_filters AS "defaultFilters", status, status_override AS "statusOverride",
@@ -55,7 +56,7 @@ const SOURCE_LIST_COLUMNS = `
   well_known_list_name AS "wellKnownListName", group_id AS "groupId",
   sort_order AS "sortOrder", hidden,
   last_known_remote_name AS "lastKnownRemoteName",
-  user_display_name AS "userDisplayName", icon, icon_color AS "iconColor"
+  user_display_name AS "userDisplayName", icon, icon_color AS "iconColor", appearance
 `;
 
 const PROJECT_UPDATE_COLUMNS: Record<
@@ -67,6 +68,7 @@ const PROJECT_UPDATE_COLUMNS: Record<
   color: 'color',
   icon: 'icon',
   iconColor: 'icon_color',
+  appearance: 'appearance',
   sourceBindings: 'source_bindings',
   autoIncludeRules: 'auto_include_rules',
   kanbanColumns: 'kanban_columns',
@@ -110,6 +112,7 @@ const JSON_FIELDS = new Set([
   'kanbanColumns',
   'defaultFilters',
   'metadata',
+  'appearance',
 ]);
 
 async function query<T extends QueryResultRow>(
@@ -222,6 +225,7 @@ function projectFromRow(row: ProjectRow): ProjectOrganizationProject {
     kanbanColumns: Array.isArray(row.kanbanColumns) ? row.kanbanColumns : [],
     defaultFilters: row.defaultFilters ?? null,
     metadata: row.metadata ?? {},
+    appearance: normalizeContextAppearance(row.appearance),
   };
 }
 
@@ -310,14 +314,14 @@ export function createPostgresProjectAdministrationRepository(
       await withMutationTransaction(pool, [project.id], async (client) => {
         await client.query(`
           INSERT INTO hub_projects (
-            id, name, description, color, icon, icon_color, source_bindings,
+            id, name, description, color, icon, icon_color, appearance, source_bindings,
             auto_include_rules, kanban_columns, default_view, default_filters,
             status, status_override, hidden, category, target_date, started_at,
             completed_at, sort_order, hierarchy_revision, metadata, created_at, updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10,
-            $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-            $21::jsonb, $22, $23
+            $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11,
+            $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+            $22::jsonb, $23, $24
           )
         `, [
           project.id,
@@ -326,6 +330,7 @@ export function createPostgresProjectAdministrationRepository(
           project.color,
           project.icon,
           project.iconColor,
+          project.appearance == null ? null : JSON.stringify(project.appearance),
           JSON.stringify(project.sourceBindings),
           JSON.stringify(project.autoIncludeRules),
           JSON.stringify(project.kanbanColumns),

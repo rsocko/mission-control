@@ -1,0 +1,87 @@
+import { describe, expect, it } from 'vitest';
+import {
+  DEFAULT_CONTEXT_THEME_PREFERENCES,
+  normalizeContextAppearance,
+  normalizeContextThemePreferences,
+  resolveContextAppearance,
+} from '@/lib/context-appearance';
+import { getContextThemeSurfaceStyle } from '@/components/context-theme/ContextThemeSurface';
+
+describe('context appearance', () => {
+  it('uses distinct project and list defaults', () => {
+    expect(resolveContextAppearance({ kind: 'project', accentColor: '#123456' })).toEqual({
+      strength: 'frame',
+      backdrop: 'none',
+      accentColor: '#123456',
+    });
+    expect(resolveContextAppearance({ kind: 'list', accentColor: '#654321' })).toEqual({
+      strength: 'atmosphere',
+      backdrop: 'aurora',
+      accentColor: '#654321',
+    });
+  });
+
+  it('lets a context override strength, backdrop, and accent', () => {
+    expect(resolveContextAppearance({
+      kind: 'project',
+      accentColor: '#123456',
+      override: {
+        strength: 'canvas',
+        backdrop: 'ridge',
+        accentColor: '#abcdef',
+      },
+    })).toEqual({
+      strength: 'canvas',
+      backdrop: 'ridge',
+      accentColor: '#abcdef',
+    });
+  });
+
+  it('suppresses backdrops for restrained strengths and global opt-out', () => {
+    expect(resolveContextAppearance({
+      kind: 'list',
+      override: { strength: 'whisper', backdrop: 'nebula' },
+    }).backdrop).toBe('none');
+
+    expect(resolveContextAppearance({
+      kind: 'list',
+      override: { strength: 'canvas', backdrop: 'nebula' },
+      preferences: { ...DEFAULT_CONTEXT_THEME_PREFERENCES, backdropsEnabled: false },
+    }).backdrop).toBe('none');
+  });
+
+  it('rejects malformed stored values and fills partial preference records', () => {
+    expect(normalizeContextAppearance({ strength: 'loud', backdrop: 'nebula' })).toBeNull();
+    expect(normalizeContextThemePreferences({ projectStrength: 'whisper' })).toEqual({
+      ...DEFAULT_CONTEXT_THEME_PREFERENCES,
+      projectStrength: 'whisper',
+    });
+  });
+
+  it('tints solid surfaces when no backdrop is selected', () => {
+    const style = getContextThemeSurfaceStyle({
+      strength: 'frame',
+      backdrop: 'none',
+      accentColor: '#10b981',
+    }) as Record<string, string>;
+
+    expect(style['--surface-1']).toContain('var(--context-accent)');
+    expect(style['--surface-1']).not.toContain('transparent');
+    expect(style['--context-header']).toContain('var(--context-accent)');
+    expect(style.boxShadow).toBe(
+      'inset 0 0 0 4px color-mix(in srgb, var(--context-accent) 72%, transparent)',
+    );
+  });
+
+  it('uses translucent surfaces when a backdrop is visible', () => {
+    const style = getContextThemeSurfaceStyle({
+      strength: 'canvas',
+      backdrop: 'aurora',
+      accentColor: '#10b981',
+    }) as Record<string, string>;
+
+    expect(style['--surface-0']).toContain('transparent');
+    expect(style['--surface-1']).toContain('transparent');
+    expect(style.boxShadow).toBeUndefined();
+  });
+});

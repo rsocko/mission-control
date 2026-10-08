@@ -15,7 +15,6 @@ const POSTGRES_GUARDED_DYNAMIC_IMPORTERS = new Set([
   'src/lib/semantic-index/embedding-provider.ts',
   'src/lib/connectors/github-issues/backup-verifier.ts',
   'src/lib/connectors/monarch-money/index.ts',
-  'src/lib/connectors/rymessage/rymessage-client.ts',
   'src/lib/search/fts.ts',
   'src/lib/semantic-index/publication.ts',
   'src/lib/semantic-index/repository-facade.ts',
@@ -34,7 +33,6 @@ const POSTGRES_GUARDED_DYNAMIC_BARRELS = new Set([
   '@/lib/semantic-index/runtime',
 ]);
 const POSTGRES_BACKEND_GUARDED_DYNAMIC_EDGES = new Set([
-  'src/lib/connectors/monarch-money/index.ts -> ./attribution-service',
   'src/lib/connectors/monarch-money/index.ts -> ./snapshot-sync',
   'src/lib/semantic-index/embedding-provider.ts -> @/lib/search/embedding-request',
   'src/lib/semantic-index/publication.ts -> ./config',
@@ -205,7 +203,7 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     expect(guardedEdges).not.toContain(
       'src/lib/ai/durable-runs/runtime.ts -> ./sqlite-adapter',
     );
-    expect(guardedEdges).toContain(
+    expect(guardedEdges).not.toContain(
       'src/lib/connectors/monarch-money/index.ts -> ./attribution-service',
     );
     expect(guardedEdges).toContain(
@@ -246,15 +244,11 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     expect(configuredTriageSqliteEdges.filter((edge) =>
       !POSTGRES_GUARDED_DYNAMIC_IMPORTERS.has(edge.split(' -> ')[0])
     )).toEqual([]);
-    expect(monarchClient.match(/MC_DATABASE_BACKEND === 'postgres'/g)).toHaveLength(1);
-    const attributionFailure = monarchClient.indexOf(
-      'Legacy finance attribution write-back is unavailable',
-    );
+    expect(monarchClient).not.toContain("MC_DATABASE_BACKEND === 'postgres'");
+    expect(monarchClient).not.toContain('Legacy finance attribution write-back is unavailable');
     expect(monarchClient).not.toContain('Legacy finance category write-back is unavailable');
-    expect(attributionFailure).toBeGreaterThan(-1);
     expect(monarchClient).toContain("import('./snapshot-sync')");
-    expect(attributionFailure)
-      .toBeLessThan(monarchClient.indexOf("import('./attribution-service')"));
+    expect(monarchClient).toContain("import('./attribution-service')");
   });
 
   it('keeps producer capability validation out of the native worker registry', () => {

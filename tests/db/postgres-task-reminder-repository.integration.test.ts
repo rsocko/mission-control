@@ -79,7 +79,8 @@ async function createHarness(): Promise<TaskReminderContractHarness> {
           'invalid-local', 'invalid-calendar',
           'future-offset', 'due-offset', 'due-z', 'rescheduled',
           'completed', 'deleted', 'race', 'one-shot', 'crashed-final',
-          'ready-after-crash', 'postgres-smoke'
+          'ready-after-crash', 'postgres-smoke', 'soft-deleted-reminder',
+          'deleted-connector-reminder', 'connector-delete-race-task'
         )
       `);
       await currentPool().query(`
@@ -89,8 +90,13 @@ async function createHarness(): Promise<TaskReminderContractHarness> {
           'invalid-local', 'invalid-calendar',
           'future-offset', 'due-offset', 'due-z', 'rescheduled',
           'completed', 'deleted', 'race', 'one-shot', 'crashed-final',
-          'ready-after-crash', 'postgres-smoke'
+          'ready-after-crash', 'postgres-smoke', 'soft-deleted-reminder',
+          'deleted-connector-reminder', 'connector-delete-race-task'
         )
+      `);
+      await currentPool().query(`
+        DELETE FROM connector_configs
+        WHERE id IN ('deleted-reminder-connector', 'connector-delete-race')
       `);
       await currentPool().query(`
         DELETE FROM push_subscriptions WHERE id = 'postgres-reminder-web'
@@ -110,17 +116,19 @@ async function createHarness(): Promise<TaskReminderContractHarness> {
           INSERT INTO tasks (
             id, source_id, connector_type, connector_instance_id, title, status,
             priority, reminder_at, reminder_relative, reminder_due_time,
-            created_at, updated_at, last_synced_at
-          ) VALUES ($1, $2, 'local', 'local', $3, $4, 'none', $5, $6, $7, $8, $8, $8)
+            deleted_at, created_at, updated_at, last_synced_at
+          ) VALUES ($1, $2, 'local', $3, $4, $5, 'none', $6, $7, $8, $9, $10, $10, $10)
         `,
         [
           input.id,
           `local:${input.id}`,
+          input.connectorInstanceId ?? 'local',
           `Task ${input.id}`,
           input.status ?? 'todo',
           input.reminderAt,
           input.reminderRelative ?? null,
           input.reminderDueTime ?? null,
+          input.deletedAt ?? null,
           now,
         ],
       );
@@ -133,6 +141,25 @@ async function createHarness(): Promise<TaskReminderContractHarness> {
           [input.id, input.recurrence],
         );
       }
+    },
+    async seedConnector(id, deletedAt = null) {
+      const now = TASK_REMINDER_BASE_TIME.toISOString();
+      await currentPool().query(
+        `
+          INSERT INTO connector_configs (
+            id, type, name, enabled, sync_mode, capabilities, credentials,
+            settings, synced_lists, created_at, updated_at, deleted_at
+          ) VALUES ($1, 'test', $1, true, 'poll', '{}'::jsonb, '{}'::jsonb,
+                    '{}'::jsonb, '[]'::jsonb, $2, $2, $3)
+        `,
+        [id, now, deletedAt],
+      );
+    },
+    async setConnectorDeleted(id, deletedAt) {
+      await currentPool().query(
+        `UPDATE connector_configs SET deleted_at = $1 WHERE id = $2`,
+        [deletedAt, id],
+      );
     },
     async seedOccurrence(input) {
       const now = TASK_REMINDER_BASE_TIME.toISOString();

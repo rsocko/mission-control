@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Maximize2, Minimize2, Search, Table2 } from 'lucide-react';
+import { AlertTriangle, Maximize2, Minimize2, Search, Table2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
@@ -49,6 +49,7 @@ interface MatrixScatterProps {
 const QUADRANTS: Record<MatrixAxisMode, [string, string, string, string]> = {
   'priority-urgency': ['Schedule', 'Do first', 'Eliminate', 'Delegate'],
   'priority-effort': ['Quick wins', 'Strategic', 'Fill work', 'Reconsider'],
+  'priority-horizon': ['Later work', 'Near-term work', 'Backlog', 'Next up'],
 };
 
 const QUADRANT_COLORS: Record<MatrixAxisMode, Array<{ background: string; text: string }>> = {
@@ -60,11 +61,35 @@ const QUADRANT_COLORS: Record<MatrixAxisMode, Array<{ background: string; text: 
   ],
   'priority-effort': [
     { background: 'rgba(16, 185, 129, 0.07)', text: '#6ee7b7' },
-    { background: 'rgba(139, 92, 246, 0.07)', text: '#c4b5fd' },
+    { background: 'color-mix(in srgb, var(--color-violet-400) 7%, transparent)', text: 'var(--color-violet-400)' },
     { background: 'rgba(100, 116, 139, 0.04)', text: '#94a3b8' },
     { background: 'rgba(245, 158, 11, 0.06)', text: '#fcd34d' },
   ],
+  'priority-horizon': [
+    { background: 'rgba(100, 116, 139, 0.05)', text: '#94a3b8' },
+    { background: 'color-mix(in srgb, var(--color-violet-400) 6%, transparent)', text: 'var(--color-violet-400)' },
+    { background: 'rgba(59, 130, 246, 0.07)', text: '#93c5fd' },
+    { background: 'rgba(16, 185, 129, 0.07)', text: '#6ee7b7' },
+  ],
 };
+
+const HORIZON_LANES = [
+  { label: 'Someday', left: 0, colorIndex: 0 },
+  { label: 'Later', left: 25, colorIndex: 1 },
+  { label: 'Soon', left: 50, colorIndex: 2 },
+  { label: 'Next', left: 75, colorIndex: 3 },
+] as const;
+
+const FALLBACK_TAG_COLORS = [
+  '#8b5cf6',
+  '#06b6d4',
+  '#f97316',
+  '#ec4899',
+  '#84cc16',
+  '#14b8a6',
+  '#eab308',
+  '#6366f1',
+] as const;
 
 const PRIORITY_RANK: Record<string, number> = {
   none: 0,
@@ -111,6 +136,33 @@ function projectNames(task: Task, projects: Map<string, HubProject>): string[] {
     .filter((name): name is string => Boolean(name));
 }
 
+function stableColorIndex(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % FALLBACK_TAG_COLORS.length;
+}
+
+function tagColor(tag: Task['tags'][number]): string {
+  return tag.color || FALLBACK_TAG_COLORS[stableColorIndex(tag.id || tag.slug)];
+}
+
+function tagColors(task: Task): string[] {
+  const colors = [...task.tags]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map(tagColor);
+  if (colors.length <= 4) return colors;
+  return [...colors.slice(0, 3), '#64748b'];
+}
+
+function tagNames(task: Task): string[] {
+  return [...task.tags]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((tag) => tag.name);
+}
+
 function pieSlicePath(radius: number, start: number, end: number): string {
   const startPoint = {
     x: radius + radius * Math.cos(start),
@@ -141,15 +193,13 @@ function taskColor(
       ? PLANNING_HORIZON_VISUALS[item.task.planningHorizon].color
       : 'var(--text-tertiary)';
   }
+  if (mode === 'tag') return tagColors(item.task)[0] ?? '#64748b';
   return projectColors(item.task, projects)[0] ?? '#64748b';
 }
 
 function formatTimingSignal(item: ProjectedMatrixTask): string {
   if (item.urgencyState === 'invalid') return 'Invalid due date';
-  if (item.urgencyState === 'none') return 'No due date or horizon';
-  if (item.urgencyState === 'horizon' && item.task.planningHorizon) {
-    return `${PLANNING_HORIZON_LABELS[item.task.planningHorizon]} horizon`;
-  }
+  if (item.urgencyState === 'none') return 'No due date';
   if (item.urgencyState === 'overdue') return `${Math.abs(item.daysUntilDue ?? 0)}d overdue`;
   if (item.urgencyState === 'today') return 'Due today';
   return `Due in ${item.daysUntilDue}d`;
@@ -187,19 +237,32 @@ function Mark({
   const { diameter, missing } = markerDiameter(item.task, item.urgency, sizeMode);
   const missingEncoding = missing
     || (colorMode === 'urgency' && item.urgency === null)
-    || (colorMode === 'planning-horizon' && !item.task.planningHorizon);
+    || (colorMode === 'planning-horizon' && !item.task.planningHorizon)
+    || (colorMode === 'tag' && item.task.tags.length === 0);
   const radius = (diameter * densityScale) / 2;
-  const colors = colorMode === 'project' ? projectColors(item.task, projects) : [];
+  const colors = colorMode === 'project'
+    ? projectColors(item.task, projects)
+    : colorMode === 'tag'
+      ? tagColors(item.task)
+      : [];
   const names = projectNames(item.task, projects);
+  const tags = tagNames(item.task);
   const accessibleName = [
     item.task.title,
     `${priorityLabel(item.task.priority)} priority`,
     formatTimingSignal(item),
     `Effort ${item.task.effort ?? 'needs data'}`,
+    item.task.planningHorizon
+      ? `Horizon ${PLANNING_HORIZON_LABELS[item.task.planningHorizon]}`
+      : 'Horizon not set',
     `Smart Score ${item.task.smartScore ?? 'needs data'}`,
     `Status ${item.task.status.replaceAll('_', ' ')}`,
     names.length ? `Projects ${names.join(', ')}` : 'No project',
-  ].join(', ');
+    tags.length ? `Tags ${tags.join(', ')}` : 'No tags',
+    item.timingConflict
+      ? `${item.timingConflict.label}. ${item.timingConflict.detail}`
+      : null,
+  ].filter(Boolean).join(', ');
 
   const activateFromKeyboard = (event: KeyboardEvent<SVGGElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -242,6 +305,21 @@ function Mark({
       )}
       {item.urgencyState === 'overdue' && (
         <circle r={radius + 2} fill="none" stroke="#ef4444" strokeWidth={1.5} />
+      )}
+      {item.timingConflict && (
+        <g transform={`translate(${radius + 1} ${-radius - 1})`} aria-hidden="true">
+          <path d="M 0 -5 L 5 4 L -5 4 Z" fill="#f59e0b" stroke="var(--surface-0)" strokeWidth="1" />
+          <text
+            x="0"
+            y="2.5"
+            textAnchor="middle"
+            fill="#111827"
+            fontSize="7"
+            fontWeight="800"
+          >
+            !
+          </text>
+        </g>
       )}
       <circle
         r={radius}
@@ -293,7 +371,7 @@ function TaskTable({
     const valueFor = (task: Task, key: SortKey): string | number => {
       if (key === 'title') return task.title.toLocaleLowerCase();
       if (key === 'priority') return PRIORITY_RANK[task.priority] ?? -1;
-      if (key === 'urgency') return urgencyScore(task.dueDate, today, task.planningHorizon ?? null).value ?? -1;
+      if (key === 'urgency') return urgencyScore(task.dueDate, today).value ?? -1;
       if (key === 'dueDate') return task.dueDate ?? '9999-12-31';
       if (key === 'planningHorizon') return HORIZON_RANK[task.planningHorizon ?? ''] ?? 0;
       if (key === 'effort') return task.effort ?? -1;
@@ -354,7 +432,7 @@ function TaskTable({
         </thead>
         <tbody className="divide-y divide-[var(--border)]">
           {pageTasks.map((task) => {
-            const urgency = urgencyScore(task.dueDate, today, task.planningHorizon ?? null).value;
+            const urgency = urgencyScore(task.dueDate, today).value;
             const names = projectNames(task, projects);
             return (
               <tr key={task.id} className="bg-[var(--surface-1)] hover:bg-[var(--surface-2)]">
@@ -497,15 +575,33 @@ export function MatrixScatter({
     () => [...new Map([
       ...projection.needsData.missingPriority,
       ...projection.needsData.missingEffort,
-      ...projection.needsData.missingPlanningSignal,
+      ...(matrixAxisMode === 'priority-horizon' ? projection.needsData.missingHorizon : []),
       ...projection.needsData.invalidDueDate,
     ].map((task) => [task.id, task])).values()],
-    [projection.needsData],
+    [matrixAxisMode, projection.needsData],
   );
   const [upperLeft, upperRight, lowerLeft, lowerRight] = QUADRANTS[matrixAxisMode];
   const quadrantColors = QUADRANT_COLORS[matrixAxisMode];
   const xThreshold = matrixAxisMode === 'priority-effort' ? 62.5 : 50;
+  const horizonMode = matrixAxisMode === 'priority-horizon';
   const showTable = isMobile && matrixMobileView === 'table' && !fullscreen;
+  const tagLegend = useMemo(() => {
+    const counts = new Map<string, { id: string; name: string; color: string; count: number }>();
+    for (const task of tasks) {
+      for (const tag of task.tags) {
+        const current = counts.get(tag.id);
+        counts.set(tag.id, {
+          id: tag.id,
+          name: tag.name,
+          color: tagColor(tag),
+          count: (current?.count ?? 0) + 1,
+        });
+      }
+    }
+    return [...counts.values()]
+      .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name))
+      .slice(0, 8);
+  }, [tasks]);
 
   useEffect(() => {
     const query = window.matchMedia('(max-width: 767px)');
@@ -570,6 +666,7 @@ export function MatrixScatter({
             <SelectContent>
               <SelectItem value="priority-urgency">Importance x Urgency</SelectItem>
               <SelectItem value="priority-effort">Importance x Effort</SelectItem>
+              <SelectItem value="priority-horizon">Importance x Horizon</SelectItem>
             </SelectContent>
           </Select>
         </label>
@@ -605,6 +702,7 @@ export function MatrixScatter({
               <SelectItem value="status">Status</SelectItem>
               <SelectItem value="priority">Priority</SelectItem>
               <SelectItem value="planning-horizon">Horizon</SelectItem>
+              <SelectItem value="tag">Tag</SelectItem>
             </SelectContent>
           </Select>
         </label>
@@ -653,11 +751,8 @@ export function MatrixScatter({
         {projection.needsData.missingEffort.length > 0 && (
           <span>{projection.needsData.missingEffort.length} missing effort</span>
         )}
-        {projection.horizonFallback.length > 0 && (
-          <span>{projection.horizonFallback.length} using horizon</span>
-        )}
-        {projection.needsData.missingPlanningSignal.length > 0 && (
-          <span>{projection.needsData.missingPlanningSignal.length} missing date and horizon</span>
+        {horizonMode && projection.needsData.missingHorizon.length > 0 && (
+          <span>{projection.needsData.missingHorizon.length} missing Horizon</span>
         )}
         {projection.needsData.invalidDueDate.length > 0 && (
           <span>{projection.needsData.invalidDueDate.length} invalid due date</span>
@@ -668,6 +763,23 @@ export function MatrixScatter({
           </span>
         )}
       </div>
+
+      {matrixColorMode === 'tag' && (
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-tertiary)]"
+          aria-label="Tag color legend"
+        >
+          <span className="font-medium text-[var(--text-secondary)]">Tag color</span>
+          {tagLegend.map((tag) => (
+            <span key={tag.id} className="inline-flex items-center gap-1">
+              <span className="size-2 rounded-full" style={{ backgroundColor: tag.color }} aria-hidden="true" />
+              {tag.name}
+            </span>
+          ))}
+          {tagLegend.length === 0 && <span>No tagged tasks in this view</span>}
+          <span>Multi-tag tasks use segmented marks</span>
+        </div>
+      )}
 
       <p className="sr-only" aria-live="polite">
         {projection.tasks.length} {projection.tasks.length === 1 ? 'task' : 'tasks'} plotted.{' '}
@@ -683,64 +795,111 @@ export function MatrixScatter({
               ref={containerRef}
               className="relative h-[clamp(420px,62vh,720px)] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--border-strong)] bg-[var(--surface-1)]"
             >
-              <div
-                className="pointer-events-none absolute left-0 top-0"
-                style={{
-                  width: `${xThreshold}%`,
-                  height: '37.5%',
-                  background: quadrantColors[0].background,
-                }}
-              />
-              <div
-                className="pointer-events-none absolute right-0 top-0"
-                style={{
-                  width: `${100 - xThreshold}%`,
-                  height: '37.5%',
-                  background: quadrantColors[1].background,
-                }}
-              />
-              <div
-                className="pointer-events-none absolute bottom-0 left-0"
-                style={{
-                  width: `${xThreshold}%`,
-                  height: '62.5%',
-                  background: quadrantColors[2].background,
-                }}
-              />
-              <div
-                className="pointer-events-none absolute bottom-0 right-0"
-                style={{
-                  width: `${100 - xThreshold}%`,
-                  height: '62.5%',
-                  background: quadrantColors[3].background,
-                }}
-              />
-              <div
-                className="pointer-events-none absolute inset-y-0 border-l border-dashed border-[var(--border-strong)]"
-                style={{ left: `${xThreshold}%` }}
-              />
+              {horizonMode ? (
+                <>
+                  {HORIZON_LANES.map((lane) => (
+                    <div
+                      key={lane.label}
+                      className="pointer-events-none absolute inset-y-0"
+                      style={{
+                        left: `${lane.left}%`,
+                        width: '25%',
+                        background: quadrantColors[lane.colorIndex].background,
+                      }}
+                    />
+                  ))}
+                  {[25, 50, 75].map((left) => (
+                    <div
+                      key={left}
+                      className="pointer-events-none absolute inset-y-0 border-l border-dashed border-[var(--border-strong)]"
+                      style={{ left: `${left}%` }}
+                    />
+                  ))}
+                  {HORIZON_LANES.map((lane) => (
+                    <span
+                      key={lane.label}
+                      className="pointer-events-none absolute top-2 z-10 -translate-x-1/2 rounded-md bg-[var(--surface-0)]/80 px-2 py-1 text-xs font-semibold shadow-sm"
+                      style={{
+                        left: `${lane.left + 12.5}%`,
+                        color: quadrantColors[lane.colorIndex].text,
+                      }}
+                    >
+                      {lane.label}
+                    </span>
+                  ))}
+                </>
+              ) : (
+                <>
+                  <div
+                    className="pointer-events-none absolute left-0 top-0"
+                    style={{
+                      width: `${xThreshold}%`,
+                      height: '37.5%',
+                      background: quadrantColors[0].background,
+                    }}
+                  />
+                  <div
+                    className="pointer-events-none absolute right-0 top-0"
+                    style={{
+                      width: `${100 - xThreshold}%`,
+                      height: '37.5%',
+                      background: quadrantColors[1].background,
+                    }}
+                  />
+                  <div
+                    className="pointer-events-none absolute bottom-0 left-0"
+                    style={{
+                      width: `${xThreshold}%`,
+                      height: '62.5%',
+                      background: quadrantColors[2].background,
+                    }}
+                  />
+                  <div
+                    className="pointer-events-none absolute bottom-0 right-0"
+                    style={{
+                      width: `${100 - xThreshold}%`,
+                      height: '62.5%',
+                      background: quadrantColors[3].background,
+                    }}
+                  />
+                  <div
+                    className="pointer-events-none absolute inset-y-0 border-l border-dashed border-[var(--border-strong)]"
+                    style={{ left: `${xThreshold}%` }}
+                  />
+                  {[
+                    [upperLeft, 'left-12 top-2', quadrantColors[0].text],
+                    [upperRight, 'right-3 top-2', quadrantColors[1].text],
+                    [lowerLeft, 'bottom-7 left-3', quadrantColors[2].text],
+                    [lowerRight, 'bottom-7 right-3', quadrantColors[3].text],
+                  ].map(([label, position, color]) => (
+                    <span
+                      key={label}
+                      className={`pointer-events-none absolute z-10 rounded-md bg-[var(--surface-0)]/80 px-2 py-1 text-xs font-semibold shadow-sm ${position}`}
+                      style={{ color }}
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </>
+              )}
               <div className="pointer-events-none absolute inset-x-0 top-[37.5%] border-t border-dashed border-[var(--border-strong)]" />
-              {[
-                [upperLeft, 'left-12 top-2', quadrantColors[0].text],
-                [upperRight, 'right-3 top-2', quadrantColors[1].text],
-                [lowerLeft, 'bottom-7 left-3', quadrantColors[2].text],
-                [lowerRight, 'bottom-7 right-3', quadrantColors[3].text],
-              ].map(([label, position, color]) => (
-                <span
-                  key={label}
-                  className={`pointer-events-none absolute z-10 rounded-md bg-[var(--surface-0)]/80 px-2 py-1 text-xs font-semibold shadow-sm ${position}`}
-                  style={{ color }}
-                >
-                  {label}
-                </span>
-              ))}
-              <span className="absolute left-2 top-1/2 z-10 -translate-y-1/2 -rotate-90 text-[10px] uppercase tracking-widest text-[var(--text-tertiary)]">Importance</span>
-              <span className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 text-[10px] uppercase tracking-widest text-[var(--text-tertiary)]">
-                {matrixAxisMode === 'priority-effort' ? 'Effort' : 'Urgency'}
+              <span className="absolute left-2 top-1/2 z-10 -translate-y-1/2 -rotate-90 text-xs uppercase tracking-widest text-[var(--text-tertiary)]">Importance</span>
+              <span className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 text-xs uppercase tracking-widest text-[var(--text-tertiary)]">
+                {matrixAxisMode === 'priority-effort'
+                  ? 'Effort'
+                  : matrixAxisMode === 'priority-horizon'
+                    ? 'Horizon'
+                    : 'Urgency'}
               </span>
               <svg
                 role="group"
-                aria-label={`${matrixAxisMode === 'priority-effort' ? 'Importance by effort' : 'Importance by urgency'} scatter plot`}
+                aria-label={`Importance by ${
+                  matrixAxisMode === 'priority-effort'
+                    ? 'effort'
+                    : matrixAxisMode === 'priority-horizon'
+                      ? 'Horizon'
+                      : 'urgency'
+                } scatter plot`}
                 viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
                 className="absolute inset-0 h-full w-full overflow-visible"
               >
@@ -844,8 +1003,16 @@ export function MatrixScatter({
                 >
                   <p className="truncate font-semibold text-[var(--text-primary)]">{hovered.task.title}</p>
                   <p className="mt-1 text-[var(--text-secondary)]">
-                    {priorityLabel(hovered.task.priority)} · {formatTimingSignal(hovered)} · Effort {hovered.task.effort ?? '—'}
+                    {priorityLabel(hovered.task.priority)} · {formatTimingSignal(hovered)} · Horizon{' '}
+                    {hovered.task.planningHorizon
+                      ? PLANNING_HORIZON_LABELS[hovered.task.planningHorizon]
+                      : 'not set'} · Effort {hovered.task.effort ?? '—'}
                   </p>
+                  {hovered.timingConflict && (
+                    <p className="mt-1 font-medium text-amber-300">
+                      {hovered.timingConflict.label}: {hovered.timingConflict.detail}
+                    </p>
+                  )}
                   <p className="mt-1 truncate text-[var(--text-tertiary)]">
                     {projectNames(hovered.task, projectMap).join(', ') || 'No project'} · Score {hovered.task.smartScore ?? '—'} · {hovered.task.status.replaceAll('_', ' ')}
                   </p>
@@ -946,6 +1113,38 @@ export function MatrixScatter({
         </Dialog.Portal>
       </Dialog.Root>
 
+      {projection.timingConflicts.length > 0 && (
+        <details className="rounded-[var(--radius-lg)] border border-amber-500/30 bg-amber-500/[0.04]">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-amber-200">
+            <span className="inline-flex items-center gap-2">
+              <AlertTriangle size={15} aria-hidden="true" />
+              Timing conflicts ({projection.timingConflicts.length})
+            </span>
+          </summary>
+          <div className="divide-y divide-amber-500/15 border-t border-amber-500/20">
+            {projection.timingConflicts.map((item) => (
+              <button
+                key={item.task.id}
+                type="button"
+                aria-label={`Review ${item.task.title}`}
+                className="flex w-full items-start justify-between gap-4 px-3 py-2.5 text-left hover:bg-amber-500/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400"
+                onClick={() => onSelectTask(item.task)}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-[var(--text-primary)]">
+                    {item.task.title}
+                  </span>
+                  <span className="block text-xs text-[var(--text-tertiary)]">
+                    {item.conflict.detail}
+                  </span>
+                </span>
+                <span className="shrink-0 text-xs font-medium text-amber-300">Review task</span>
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
+
       {needsDataTasks.length > 0 && (
         <details className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)]">
           <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-[var(--text-secondary)]">
@@ -955,7 +1154,9 @@ export function MatrixScatter({
             {([
               ['Missing priority', projection.needsData.missingPriority],
               ['Missing effort', projection.needsData.missingEffort],
-              ['Missing date and horizon', projection.needsData.missingPlanningSignal],
+              ...(horizonMode
+                ? [['Missing Horizon', projection.needsData.missingHorizon] as [string, Task[]]]
+                : []),
               ['Invalid due date', projection.needsData.invalidDueDate],
             ] satisfies Array<[string, Task[]]>).map(([label, groupTasks]) => {
               if (!groupTasks.length) return null;

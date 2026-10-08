@@ -28,13 +28,50 @@ describe('notifications sidebar', () => {
       />,
     );
 
-    const urgent = screen.getByRole('button', { name: 'Urgent' });
+    const urgent = screen.getByRole('button', { name: 'Urgent 0' });
     expect(urgent.querySelector('.lucide-triangle-alert')).toHaveStyle({ color: '#ef4444' });
     expect(urgent.querySelector('.rounded-full')).not.toBeInTheDocument();
+    expect(urgent).toBeDisabled();
 
     const headsUp = screen.getByRole('button', { name: 'Heads Up 4' });
     expect(headsUp.querySelector('.lucide-bell-ring')).toHaveStyle({ color: '#3b82f6' });
     expect(headsUp.querySelector('.rounded-full')).not.toBeInTheDocument();
+  });
+
+  it('shows contextual zero counts as unavailable instead of advertising empty results', () => {
+    const setLevelFilter = vi.fn();
+    render(
+      <NotificationsSidebar
+        hook={{
+          facets: {
+            level: { action_needed: 15, heads_up: 473, fyi: 106 },
+            category: {},
+            source: { rymessage: 594 },
+            sourceAccount: [],
+            notificationType: [
+              { key: 'rymessage.companion-action', label: 'rymessage.companion-action', count: 594 },
+            ],
+            state: { unread: 500, read: 94, dismissed: 0 },
+            merchant: [],
+            dateRange: { any: 594, today: 12, week: 120, month: 400 },
+          },
+          filters: { ...DEFAULT_NOTIFICATION_QUERY, source: 'rymessage' },
+          setLevelFilter,
+          setSourceFilter: vi.fn(),
+          setSourceAccountFilter: vi.fn(),
+          setNotificationTypeFilter: vi.fn(),
+          setStateFilter: vi.fn(),
+          setDateRangeFilter: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getAllByRole('button', { name: 'All 594' })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Urgent 0' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Action Center 594' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Today 12' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Urgent 0' }));
+    expect(setLevelFilter).not.toHaveBeenCalled();
   });
 
   it('nests instances under the active source and shows contextual types', () => {
@@ -121,5 +158,40 @@ describe('notifications sidebar', () => {
     expect(source.compareDocumentPosition(level) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(level.compareDocumentPosition(type) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(type.compareDocumentPosition(savedViews) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows semantic and legacy RyMessage type labels without changing their keys', () => {
+    const setNotificationTypeFilter = vi.fn();
+    render(
+      <NotificationsSidebar
+        hook={{
+          facets: {
+            level: { fyi: 2 },
+            category: {},
+            source: { rymessage: 3 },
+            sourceAccount: [],
+            notificationType: [
+              { key: 'rymessage.companion-action', label: 'rymessage.companion-action', count: 2 },
+              { key: 'rymessage.needs-reply', label: 'rymessage.needs-reply', count: 1 },
+            ],
+            state: {},
+            merchant: [],
+          },
+          filters: { ...DEFAULT_NOTIFICATION_QUERY, source: 'rymessage' },
+          setLevelFilter: vi.fn(),
+          setSourceFilter: vi.fn(),
+          setSourceAccountFilter: vi.fn(),
+          setNotificationTypeFilter,
+          setStateFilter: vi.fn(),
+          setDateRangeFilter: vi.fn(),
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Action Center 2' }));
+    expect(setNotificationTypeFilter).toHaveBeenCalledWith('rymessage.companion-action');
+    fireEvent.click(screen.getByRole('button', { name: 'Needs Reply 1' }));
+    expect(setNotificationTypeFilter).toHaveBeenCalledWith('rymessage.needs-reply');
+    expect(screen.queryByText('Rymessage.companion Action')).not.toBeInTheDocument();
   });
 });

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { SaveTemplateModal } from '@/components/add-task';
 import type { TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import {
@@ -28,7 +28,9 @@ import { dashboardKeys } from '@/lib/hooks/useDashboardQueries';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
 import type { DashboardProjectViewModel as HubProject, ListGroup } from '@/types/dashboard';
 import { extractRecurrenceFromMetadata, getNextRecurringDate } from '@/lib/utils/recurrence';
-import type { SuggestionTask } from '@/components/today/types';
+import type { MyDayItemAddedEventDetail, SuggestionTask } from '@/components/today/types';
+import { createOptimisticMyDayItem } from '@/lib/utils/my-day-view';
+import { TASKS_REFRESH_REQUESTED_EVENT } from '@/lib/tasks/task-refresh-events';
 
 export default function TodayPage() {
   const { progress: syncProgress } = useSyncStream();
@@ -44,14 +46,20 @@ export default function TodayPage() {
   async function completeSelectedTask(taskId: string) {
     if (items.some((item) => item.taskId === taskId)) {
       if (await actions.completeTask(taskId)) {
-        setSelectedTaskId((current) => current === taskId ? null : current);
+        setSelectedTaskId(
+          (current) => current === taskId ? null : current,
+          { history: 'replace' },
+        );
       }
     } else if (await actions.completeTask(taskId, {
       title: selectedSuggestion?.title || 'Task',
       status: selectedSuggestion?.status || 'todo',
       editPolicy: selectedSuggestion?.editPolicy,
     })) {
-      setSelectedTaskId((current) => current === taskId ? null : current);
+      setSelectedTaskId(
+        (current) => current === taskId ? null : current,
+        { history: 'replace' },
+      );
     }
   }
   const taskSelection = useTaskSelection({
@@ -199,40 +207,27 @@ export default function TodayPage() {
     };
   }, [handleTaskAdded]);
 
+  useEffect(() => {
+    const listener = () => { void fetchData({ skipSync: true }); };
+    window.addEventListener(TASKS_REFRESH_REQUESTED_EVENT, listener);
+    return () => window.removeEventListener(TASKS_REFRESH_REQUESTED_EVENT, listener);
+  }, [fetchData]);
+
   // Optimistic insert: immediately show newly added My Day tasks without waiting for refetch
   useEffect(() => {
     const listener = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
+      const detail = (e as CustomEvent<Partial<MyDayItemAddedEventDetail>>).detail;
       if (!detail?.taskId) return;
       setItems((prev) => {
         if (prev.some((item) => item.taskId === detail.taskId)) return prev;
-        const optimisticItem = {
-          id: `optimistic-${detail.taskId}`,
-          taskId: detail.taskId,
-          order: prev.length + 1,
-          isAutoIncluded: false,
-          addedAt: new Date().toISOString(),
-          title: detail.title || 'New task',
-          status: detail.status || 'todo',
-          priority: detail.priority || 'none',
-          dueDate: detail.dueDate || null,
-          connectorType: detail.connectorType || 'local',
-          connectorInstanceId: 'local',
-          sourceListName: detail.sourceListName || null,
-          createdAt: new Date().toISOString(),
-          completedAt: null,
-          tags: [],
-          hasDescription: false,
-          localDisposition: detail.localDisposition || 'active',
-          taskSourceModel: detail.taskSourceModel || detail.editPolicy?.sourceModel || 'mc-owned',
-          editPolicy: detail.editPolicy,
-        };
-        return [...prev, optimisticItem];
+        const optimisticItem = createOptimisticMyDayItem(detail, prev.length + 1);
+        return optimisticItem ? [...prev, optimisticItem] : prev;
       });
+      if (!detail.editPolicy) void fetchData({ skipSync: true });
     };
     window.addEventListener('mission-control:my-day-item-added', listener);
     return () => window.removeEventListener('mission-control:my-day-item-added', listener);
-  }, [setItems]);
+  }, [fetchData, setItems]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden sm:flex-row">
@@ -308,7 +303,6 @@ export default function TodayPage() {
             else taskSelection.handleTaskClick(taskId);
           },
           doubleClickTask: taskSelection.handleTaskDoubleClick,
-          cancelPendingTaskSelection: taskSelection.cancelPendingDeselect,
         }}
         focus={{
           showTimer: actions.showTimer,
@@ -338,8 +332,11 @@ export default function TodayPage() {
         <div className="hidden min-w-0 shrink sm:flex">
           <TaskDetailPanel
             taskId={selectedTaskId}
-            onClose={() => {
-              setSelectedTaskId(null);
+            onClose={(reason) => {
+              setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              );
               setPendingMoveDialogTaskId(null);
               setNotesOpenRequest(null);
             }}
@@ -357,7 +354,7 @@ export default function TodayPage() {
             onComplete={() => completeSelectedTask(selectedTaskId)}
             onDelete={() => {
               void actions.deleteTask(selectedTaskId, selectedSuggestion ? { title: selectedSuggestion.title, editPolicy: selectedSuggestion.editPolicy } : undefined);
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
             }}
             autoOpenMoveDialog={pendingMoveDialogTaskId === selectedTaskId}
             onMoveDialogDismissed={() => setPendingMoveDialogTaskId(null)}
@@ -370,8 +367,11 @@ export default function TodayPage() {
         <div className="hidden sm:block">
           <TaskDetailPanel
             taskId={selectedTaskId}
-            onClose={() => {
-              setSelectedTaskId(null);
+            onClose={(reason) => {
+              setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              );
               setPendingMoveDialogTaskId(null);
               setNotesOpenRequest(null);
             }}
@@ -389,7 +389,7 @@ export default function TodayPage() {
             onComplete={() => completeSelectedTask(selectedTaskId)}
             onDelete={() => {
               void actions.deleteTask(selectedTaskId, selectedSuggestion ? { title: selectedSuggestion.title, editPolicy: selectedSuggestion.editPolicy } : undefined);
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
             }}
             autoOpenMoveDialog={pendingMoveDialogTaskId === selectedTaskId}
             onMoveDialogDismissed={() => setPendingMoveDialogTaskId(null)}
@@ -410,7 +410,13 @@ export default function TodayPage() {
           <TaskDetailPanel
             taskId={selectedTaskId}
             mode="mobile"
-            onClose={() => { setSelectedTaskId(null); setPendingMoveDialogTaskId(null); }}
+            onClose={(reason) => {
+              setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              );
+              setPendingMoveDialogTaskId(null);
+            }}
             onUpdate={handleTaskDetailUpdate}
             availableTags={selectedTask?.tags}
             onSubtaskCountChange={(done, total) => {
@@ -425,14 +431,14 @@ export default function TodayPage() {
               } else {
                 void actions.addToDay(selectedTaskId);
               }
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
             }}
             sourceLists={sourceLists}
             onMoveToList={(targetListId) => actions.moveTaskToList(selectedTaskId, targetListId)}
             onComplete={() => completeSelectedTask(selectedTaskId)}
             onDelete={() => {
               void actions.deleteTask(selectedTaskId, selectedSuggestion ? { title: selectedSuggestion.title, editPolicy: selectedSuggestion.editPolicy } : undefined);
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
             }}
             autoOpenMoveDialog={pendingMoveDialogTaskId === selectedTaskId}
             onMoveDialogDismissed={() => setPendingMoveDialogTaskId(null)}
@@ -455,13 +461,10 @@ export default function TodayPage() {
         }}
         completingIds={actions.completingIds}
         onSelectTask={(taskId) => {
-          const isClosing = selectedTaskId === taskId;
           setDetailSurface('desktop');
           setDetailMode('panel');
-          taskSelection.toggleTask(taskId);
-          if (!isClosing) {
-            setSelectedSuggestionContext(suggestionTasks.find((task) => task.id === taskId) || null);
-          }
+          taskSelection.selectTask(taskId);
+          setSelectedSuggestionContext(suggestionTasks.find((task) => task.id === taskId) || null);
         }}
         getContextMenuActions={getSuggestionContextMenuActions}
         sourceLists={sourceLists}

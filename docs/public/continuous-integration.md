@@ -6,7 +6,7 @@ policy, lint, run unit tests, smoke-test the worker runtime, and build the
 production application. Fork pull requests use a read-only `GITHUB_TOKEN`,
 receive no protected secrets, and cannot publish a container.
 
-The live PostgreSQL integration suite runs across three isolated database shards
+The live PostgreSQL integration suite runs across four isolated database shards
 and reports through a stable aggregate status check. A deterministic
 runtime-weighted partition keeps the long packaged-runtime tests on separate
 workers while assigning new files automatically. Test files remain serial within
@@ -19,6 +19,11 @@ Changes limited to `docs/**` or the standard root documentation files
 `PRODUCT.md`, `SECURITY.md`, and `SUPPORT.md`) still report every required
 status check but skip dependency installation, lint, tests, and builds. Empty,
 mixed, or unclassifiable change sets fail closed and run the complete suite.
+Single-runner validations report directly through their required check names,
+avoiding a second runner allocation after the work completes. Lightweight
+aggregate jobs remain only where one required context summarizes shared work:
+sharded test suites, workflow policy within lint, and the worker-runtime smoke
+test within the production build.
 
 CI restores npm's content-addressed download cache on every run. Only the
 successful workflow-policy job on `main` may save a cache, so parallel jobs do

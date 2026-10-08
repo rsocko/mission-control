@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import type {
   AgentDispatchDetail,
   AgentDispatchRecord,
@@ -11,6 +11,7 @@ import { ExternalAgentError } from '@/lib/external-agents/errors';
 import type {
   DispatchEventInput,
   DispatchFinalizeInput,
+  DispatchOutputRefreshInput,
   DispatchResultPersistenceInput,
   ExternalAgentControlPersistence,
   ExternalAgentCreateRecord,
@@ -30,7 +31,8 @@ const ACTIVE_RESULT = new Set<AgentDispatchStatus>([
 const AGENT_COLUMNS = `
   id, name, type, transport, execution_locality AS executionLocality,
   description, endpoint, auth_type AS authType,
-  auth_credential_ref AS authCredentialRef, capabilities,
+  auth_credential_ref AS authCredentialRef, provider_config AS providerConfig,
+  capabilities,
   input_format AS inputFormat, output_format AS outputFormat,
   inbound_webhook_id AS inboundWebhookId, data_policy AS dataPolicy,
   enabled, created_at AS createdAt, updated_at AS updatedAt,
@@ -66,6 +68,7 @@ function agentFromRow(row: Row): ExternalAgentRecord {
   return {
     ...(row as unknown as ExternalAgentRecord),
     enabled: Boolean(row.enabled),
+    providerConfig: json(row.providerConfig, {}),
     capabilities: json(row.capabilities, {}),
     dataPolicy: json(row.dataPolicy, {
       allowedClassifications: [],
@@ -126,6 +129,22 @@ function insertEvent(
   );
 }
 
+function enqueueAction(
+  sqlite: Database.Database,
+  dispatchId: string,
+  action: 'submit' | 'reconcile' | 'cancel',
+  priority: number,
+  now: string,
+): void {
+  sqlite.prepare(`
+    INSERT INTO agent_dispatch_actions (
+      id, dispatch_id, action, status, priority, available_at,
+      attempt_count, created_at, updated_at
+    ) VALUES (?, ?, ?, 'pending', ?, ?, 0, ?, ?)
+    ON CONFLICT(dispatch_id, action) DO NOTHING
+  `).run(randomUUID(), dispatchId, action, priority, now, now, now);
+}
+
 function state(sqlite: Database.Database, id: string): AgentDispatchRecord | null {
   const row = sqlite.prepare(`SELECT ${DISPATCH_COLUMNS} FROM agent_dispatches WHERE id = ?`)
     .get(id) as Row | undefined;
@@ -163,6 +182,7 @@ function destinationMatches(
     && current.endpoint === expected.endpoint
     && current.authType === expected.authType
     && current.authCredentialRef === expected.authCredentialRef
+    && canonical(current.providerConfig) === canonical(expected.providerConfig)
     && current.inboundWebhookId === expected.inboundWebhookId
     && canonical(current.capabilities) === canonical(expected.capabilities)
     && canonical(current.dataPolicy) === canonical(expected.dataPolicy)
@@ -279,6 +299,7 @@ function agentValues(record: ExternalAgentCreateRecord | ExternalAgentUpdateReco
     record.endpoint,
     record.authType,
     record.authCredentialRef,
+    JSON.stringify(record.providerConfig),
     JSON.stringify(record.capabilities),
     record.inputFormat,
     record.outputFormat,
@@ -309,33 +330,55 @@ export function createSqliteExternalAgentControlRepository(
       `).get(id) as Row | undefined;
       return row ? agentFromRow(row) : null;
     },
-    async create(record) {
+    async getCredential(id) {
+      const row = sqlite.prepare(`
+        SELECT auth_credential AS credential
+        FROM external_agents
+        WHERE id = ? AND deleted_at IS NULL
+      `).get(id) as { credential: string | null } | undefined;
+      return row?.credential ?? null;
+    },
+    async create(record, credential = null) {
       sqlite.transaction(() => {
         assertProtectedInboundWebhook(sqlite, record.inboundWebhookId);
         sqlite.prepare(`
           INSERT INTO external_agents (
             id, name, type, transport, execution_locality, description, endpoint,
-            auth_type, auth_credential_ref, capabilities, input_format, output_format,
+            auth_type, auth_credential_ref, auth_credential, provider_config, capabilities,
+            input_format, output_format,
             inbound_webhook_id, data_policy, enabled, created_at, updated_at, deleted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(record.id, ...agentValues(record).slice(0, 14), record.createdAt,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(record.id, ...agentValues(record).slice(0, 8), credential,
+          ...agentValues(record).slice(8, 15), record.createdAt,
           record.updatedAt, record.deletedAt);
       }).immediate();
       return (await registry.get(record.id, true))!;
     },
-    async update(id, record) {
-      sqlite.transaction(() => {
+    async update(id, record, credential, expectedScoutOnboardingStatus) {
+      const changed = sqlite.transaction(() => {
         assertProtectedInboundWebhook(sqlite, record.inboundWebhookId);
-        sqlite.prepare(`
+        return sqlite.prepare(`
           UPDATE external_agents SET
             name = ?, type = ?, transport = ?, execution_locality = ?,
             description = ?, endpoint = ?, auth_type = ?, auth_credential_ref = ?,
-            capabilities = ?, input_format = ?, output_format = ?,
+            auth_credential = CASE WHEN ? THEN ? ELSE auth_credential END,
+            provider_config = ?, capabilities = ?, input_format = ?, output_format = ?,
             inbound_webhook_id = ?, data_policy = ?, enabled = ?,
             updated_at = ?, deleted_at = ?
           WHERE id = ? AND deleted_at IS NULL
-        `).run(...agentValues(record), id);
+            ${expectedScoutOnboardingStatus
+              ? `AND json_extract(provider_config, '$.scout.onboarding.status') = ?`
+              : ''}
+        `).run(
+          ...agentValues(record).slice(0, 8),
+          credential !== undefined ? 1 : 0,
+          credential ?? null,
+          ...agentValues(record).slice(8),
+          id,
+          ...(expectedScoutOnboardingStatus ? [expectedScoutOnboardingStatus] : []),
+        ).changes;
       }).immediate();
+      if (changed !== 1) return null;
       return registry.get(id);
     },
     async softDelete(id, now) {
@@ -366,20 +409,76 @@ export function createSqliteExternalAgentControlRepository(
       }
       const taskRows = ids.size
         ? sqlite.prepare(`
-            SELECT id, title, description, priority, status,
-                   connector_type AS connectorType
+            SELECT id, source_id AS sourceId,
+                   json_extract(metadata, '$.url') AS sourceUrl,
+                   title, description, priority, status,
+                   connector_type AS connectorType,
+                   connector_instance_id AS connectorInstanceId,
+                   due_date AS dueDate, effort,
+                   assignee, micro_status AS microStatus,
+                   planning_horizon AS planningHorizon,
+                   source_list_name AS sourceListName,
+                   sibling_order AS siblingOrder, depth,
+                   is_checklist_item AS isChecklistItem
             FROM tasks WHERE id IN (${[...ids].map(() => '?').join(', ')})
             ORDER BY id
           `).all(...ids) as AgentPayloadSnapshot['tasks']
         : [];
+      const subtaskRows = ids.size
+        ? sqlite.prepare(`
+            WITH RECURSIVE hierarchy (
+              rootId, id, sourceId, sourceUrl, connectorType, connectorInstanceId,
+              title, description,
+              priority, status, dueDate, effort, assignee, microStatus,
+              planningHorizon, sourceListName, siblingOrder, depth, isChecklistItem,
+              treeOrder
+            ) AS (
+              SELECT id, id, source_id, json_extract(metadata, '$.url'),
+                     connector_type, connector_instance_id, title, description,
+                     priority, status, due_date,
+                     effort, assignee, micro_status, planning_horizon,
+                     source_list_name, sibling_order, depth, is_checklist_item, ''
+              FROM tasks
+              WHERE id IN (${[...ids].map(() => '?').join(', ')})
+              UNION ALL
+              SELECT h.rootId, t.id, t.source_id, json_extract(t.metadata, '$.url'),
+                     t.connector_type, t.connector_instance_id, t.title, t.description,
+                     t.priority, t.status,
+                     t.due_date, t.effort, t.assignee, t.micro_status,
+                     t.planning_horizon, t.source_list_name, t.sibling_order, t.depth,
+                     t.is_checklist_item,
+                     h.treeOrder || '/' || printf(
+                       '%020d:%s',
+                       COALESCE(t.sibling_order, 2147483647),
+                       t.id
+                     )
+              FROM tasks t
+              INNER JOIN hierarchy h ON t.parent_id = h.id
+              WHERE t.deleted_at IS NULL
+            )
+            SELECT rootId, id, sourceId, sourceUrl, connectorType, connectorInstanceId,
+                   title, description,
+                   priority, status, dueDate, effort, assignee, microStatus,
+                   planningHorizon, sourceListName, siblingOrder, depth, isChecklistItem
+            FROM hierarchy
+            WHERE id != rootId
+            ORDER BY rootId, treeOrder
+          `).all(...ids) as Array<
+            AgentPayloadSnapshot['tasks'][number]['subtasks'][number] & { rootId: string }
+          >
+        : [];
       const tagsByTask = new Map<string, string[]>();
-      if (taskRows.length) {
+      const contentIds = [
+        ...taskRows.map(({ id }) => id),
+        ...subtaskRows.map(({ id }) => id),
+      ];
+      if (contentIds.length) {
         const tagRows = sqlite.prepare(`
           SELECT tt.task_id AS taskId, t.name
           FROM task_tags tt INNER JOIN tags t ON t.id = tt.tag_id
-          WHERE tt.task_id IN (${taskRows.map(() => '?').join(', ')})
+          WHERE tt.task_id IN (${contentIds.map(() => '?').join(', ')})
           ORDER BY tt.task_id, t.name
-        `).all(...taskRows.map(({ id }) => id)) as Array<{ taskId: string; name: string }>;
+        `).all(...contentIds) as Array<{ taskId: string; name: string }>;
         for (const row of tagRows) {
           tagsByTask.set(row.taskId, [...(tagsByTask.get(row.taskId) ?? []), row.name]);
         }
@@ -410,7 +509,21 @@ export function createSqliteExternalAgentControlRepository(
       }
         return {
           project,
-          tasks: taskRows.map((task) => ({ ...task, tags: tagsByTask.get(task.id) ?? [] })),
+          tasks: taskRows.map((task) => ({
+            ...task,
+            isChecklistItem: Boolean(task.isChecklistItem),
+            tags: tagsByTask.get(task.id) ?? [],
+            subtasks: subtaskRows
+              .filter(({ rootId }) => rootId === task.id)
+              .map(({ rootId, ...subtask }) => {
+                void rootId;
+                return {
+                  ...subtask,
+                  isChecklistItem: Boolean(subtask.isChecklistItem),
+                  tags: tagsByTask.get(subtask.id) ?? [],
+                };
+              }),
+          })),
           phases: phaseRows.map(({ id, ...phase }) => ({
             ...phase,
             taskIds: itemsByPhase.get(id) ?? [],
@@ -457,12 +570,46 @@ export function createSqliteExternalAgentControlRepository(
         predicates.push('external_agent_id = ?');
         values.push(options.agentId);
       }
+      if (options.taskIds?.length) {
+        predicates.push(`
+          EXISTS (
+            SELECT 1 FROM json_each(agent_dispatches.scope, '$.taskIds')
+            WHERE json_each.value IN (${options.taskIds.map(() => '?').join(', ')})
+          )
+        `);
+        values.push(...options.taskIds);
+      }
       values.push(Math.min(Math.max(options.limit ?? 100, 1), 500));
       const rows = sqlite.prepare(`
         SELECT ${DISPATCH_COLUMNS} FROM agent_dispatches
         ${predicates.length ? `WHERE ${predicates.join(' AND ')}` : ''}
         ORDER BY created_at DESC LIMIT ?
       `).all(...values) as Row[];
+      return rows.map(dispatchFromRow);
+    },
+    async listLatestByTaskIds(taskIds) {
+      const unique = [...new Set(taskIds)];
+      if (!unique.length) return [];
+      const values = unique.map(() => '(?)').join(', ');
+      const rows = sqlite.prepare(`
+        WITH requested(task_id) AS (VALUES ${values}),
+        ranked AS (
+          SELECT
+            ad.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY requested.task_id
+              ORDER BY ad.created_at DESC, ad.id DESC
+            ) AS task_rank
+          FROM requested
+          CROSS JOIN agent_dispatches ad
+          INNER JOIN json_each(ad.scope, '$.taskIds') scoped_task
+            ON scoped_task.value = requested.task_id
+        )
+        SELECT ${DISPATCH_COLUMNS}
+        FROM ranked
+        WHERE task_rank = 1
+        ORDER BY created_at DESC, id DESC
+      `).all(...unique) as Row[];
       return rows.map(dispatchFromRow);
     },
     async findPreview(agentId, idempotencyKey) {
@@ -480,6 +627,28 @@ export function createSqliteExternalAgentControlRepository(
           { id: string; previewHash: string } | undefined;
         if (duplicate) {
           return { ...duplicate, created: false };
+        }
+        if (record.idempotencyKey.startsWith('task-delegation:')) {
+          const taskIds = record.scope.taskIds ?? [];
+          const active = taskIds.length
+            ? sqlite.prepare(`
+              SELECT ad.id
+              FROM agent_dispatches ad, json_each(ad.scope, '$.taskIds') task
+              WHERE ad.status IN (
+                'needs_confirmation', 'queued', 'claimed', 'in_progress',
+                'waiting_for_user'
+              )
+                AND task.value IN (${taskIds.map(() => '?').join(', ')})
+              LIMIT 1
+            `).get(...taskIds) as { id: string } | undefined
+            : undefined;
+          if (active) {
+            throw new ExternalAgentError(
+              'Task already has an active delegation',
+              'CONFLICT',
+              409,
+            );
+          }
         }
         sqlite.prepare(`
           INSERT INTO agent_dispatches (
@@ -558,6 +727,7 @@ export function createSqliteExternalAgentControlRepository(
           },
           createdAt: input.now,
         });
+        enqueueAction(sqlite, input.id, 'submit', 50, input.now);
         return true;
       }).immediate();
     },
@@ -652,7 +822,7 @@ export function createSqliteExternalAgentControlRepository(
           expireOne(sqlite, current, input.now);
           return 'expired' as const;
         }
-        const terminal = input.status === 'completed' || input.status === 'failed';
+        const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
         const updated = sqlite.prepare(`
           UPDATE agent_dispatches SET
             status = ?, provider_task_id = COALESCE(?, provider_task_id),
@@ -711,8 +881,13 @@ export function createSqliteExternalAgentControlRepository(
           SELECT id FROM agent_dispatches
           WHERE external_agent_id = ? AND transport = 'pull' AND status = 'queued'
             AND available_at <= ? AND cancel_requested_at IS NULL
+            ${input.dispatchId ? 'AND id = ?' : ''}
           ORDER BY created_at ASC, id ASC LIMIT 1
-        `).get(input.agentId, input.now) as { id: string } | undefined;
+        `).get(...(
+          input.dispatchId
+            ? [input.agentId, input.now, input.dispatchId]
+            : [input.agentId, input.now]
+        )) as { id: string } | undefined;
         if (!candidate) return null;
         const current = state(sqlite, candidate.id)!;
         const attempt = current.attemptCount + 1;
@@ -760,7 +935,12 @@ export function createSqliteExternalAgentControlRepository(
           dispatchId: candidate.id,
           attempt,
           leaseExpiresAt: input.leaseExpiresAt,
-          payload: current.payloadPreview,
+          payload: current.providerDetail?.resumeContext
+            ? {
+              ...current.payloadPreview,
+              resumeContext: current.providerDetail.resumeContext,
+            }
+            : current.payloadPreview,
         };
       }).immediate();
     },
@@ -779,7 +959,13 @@ export function createSqliteExternalAgentControlRepository(
             401,
           );
         }
-        if (TERMINAL.has(current.status)) {
+        const updatesCompletedProviderTask = current.status === 'completed'
+          && input.authorization.agentAuthenticated
+          && input.authorization.allowCompletedProviderTaskUpdate
+          && current.providerTaskId !== null
+          && input.providerTaskId === current.providerTaskId
+          && input.status !== 'completed';
+        if (TERMINAL.has(current.status) && !updatesCompletedProviderTask) {
           if (current.resultDigest === input.digest) {
             return { duplicate: true, status: current.status };
           }
@@ -789,11 +975,15 @@ export function createSqliteExternalAgentControlRepository(
             409,
           );
         }
-        if (current.deadlineAt && current.deadlineAt <= input.now) {
+        if (
+          !updatesCompletedProviderTask
+          && current.deadlineAt
+          && current.deadlineAt <= input.now
+        ) {
           expireOne(sqlite, current, input.now);
           return { duplicate: false, status: 'timed_out' as const, expired: true };
         }
-        if (!ACTIVE_RESULT.has(current.status)) {
+        if (!ACTIVE_RESULT.has(current.status) && !updatesCompletedProviderTask) {
           throw new ExternalAgentError(
             `Dispatch cannot accept results while ${current.status}`,
             'INVALID_TRANSITION',
@@ -812,18 +1002,24 @@ export function createSqliteExternalAgentControlRepository(
             );
           }
         }
-        const terminal = input.status === 'completed' || input.status === 'failed';
+        const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
+        const waiting = input.status === 'waiting_for_user';
         const updated = sqlite.prepare(`
           UPDATE agent_dispatches SET
             status = ?, provider_task_id = COALESCE(?, provider_task_id),
             provider_detail = COALESCE(?, provider_detail),
             result = COALESCE(?, result), result_digest = ?,
-            result_status = CASE WHEN ? = 'completed' THEN 'pending_review' ELSE result_status END,
+            result_status = CASE
+              WHEN ? = 'completed' THEN 'pending_review'
+              WHEN ? THEN NULL
+              ELSE result_status
+            END,
             error_message = ?,
             github_pull_request_url = COALESCE(?, github_pull_request_url),
             repository = COALESCE(?, repository), base_ref = COALESCE(?, base_ref),
             branch_ref = COALESCE(?, branch_ref), commit_sha = COALESCE(?, commit_sha),
             checks = COALESCE(?, checks), artifacts = COALESCE(?, artifacts),
+            claim_token_hash = CASE WHEN ? THEN NULL ELSE claim_token_hash END,
             lease_expires_at = CASE WHEN ? THEN NULL ELSE ? END,
             completed_at = CASE WHEN ? THEN ? ELSE NULL END, updated_at = ?
           WHERE id = ? AND status = ?
@@ -831,11 +1027,14 @@ export function createSqliteExternalAgentControlRepository(
           input.status, input.providerTaskId ?? null,
           input.providerDetail ? JSON.stringify(input.providerDetail) : null,
           input.result ? JSON.stringify(input.result) : null, input.digest,
-          input.status, input.errorMessage, input.pullRequestUrl, input.repository,
+          input.status, updatesCompletedProviderTask ? 1 : 0,
+          input.errorMessage, input.pullRequestUrl, input.repository,
           input.baseRef, input.branchRef, input.commitSha,
           input.checks ? JSON.stringify(input.checks) : null,
           input.artifacts ? JSON.stringify(input.artifacts) : null,
-          terminal ? 1 : 0, input.leaseExpiresAt, terminal ? 1 : 0, input.now,
+          waiting ? 1 : 0,
+          terminal || waiting ? 1 : 0, input.leaseExpiresAt,
+          terminal ? 1 : 0, input.now,
           input.now, input.dispatchId, current.status,
         );
         if (updated.changes !== 1) {
@@ -862,12 +1061,44 @@ export function createSqliteExternalAgentControlRepository(
             providerState: input.providerState,
             providerTaskId: input.providerTaskId,
             resultDigest: input.digest,
+            ...(input.providerDetail?.interaction
+              ? { interaction: input.providerDetail.interaction }
+              : {}),
           },
           createdAt: input.now,
         });
         return { duplicate: false, status: input.status };
       }).immediate();
     },
+
+    async refreshOutput(input: DispatchOutputRefreshInput) {
+      const updated = sqlite.prepare(`
+        UPDATE agent_dispatches SET
+          provider_detail = ?,
+          github_pull_request_url = COALESCE(?, github_pull_request_url),
+          branch_ref = COALESCE(?, branch_ref),
+          commit_sha = COALESCE(?, commit_sha),
+          updated_at = ?
+        WHERE id = ? AND status = 'completed'
+      `).run(
+        JSON.stringify(input.providerDetail),
+        input.pullRequestUrl ?? null,
+        input.branchRef ?? null,
+        input.commitSha ?? null,
+        input.now,
+        input.id,
+      );
+      if (updated.changes === 1) {
+        sqlite.prepare(`
+          UPDATE agent_dispatch_attempts SET provider_detail = ?
+          WHERE dispatch_id = ? AND attempt_number = (
+            SELECT attempt_count FROM agent_dispatches WHERE id = ?
+          )
+        `).run(JSON.stringify(input.providerDetail), input.id, input.id);
+      }
+      return updated.changes === 1;
+    },
+
     async cancel(id, now) {
       return sqlite.transaction(() => {
         const current = state(sqlite, id);
@@ -943,6 +1174,7 @@ export function createSqliteExternalAgentControlRepository(
           },
           createdAt: input.now,
         });
+        enqueueAction(sqlite, input.id, 'submit', 50, input.now);
       }).immediate();
     },
     async markWaiting(id, detail, now) {
@@ -957,9 +1189,11 @@ export function createSqliteExternalAgentControlRepository(
           );
         }
         const updated = sqlite.prepare(`
-          UPDATE agent_dispatches SET status = 'waiting_for_user', updated_at = ?
+          UPDATE agent_dispatches
+          SET status = 'waiting_for_user', provider_detail = ?,
+              claim_token_hash = NULL, lease_expires_at = NULL, updated_at = ?
           WHERE id = ? AND status = ?
-        `).run(now, id, current.status);
+        `).run(JSON.stringify(detail), now, id, current.status);
         if (updated.changes !== 1) {
           throw new ExternalAgentError('Dispatch changed concurrently', 'CONFLICT', 409);
         }
@@ -974,6 +1208,86 @@ export function createSqliteExternalAgentControlRepository(
           detail,
           createdAt: now,
         });
+      }).immediate();
+    },
+    async resolveInteraction(input) {
+      sqlite.transaction(() => {
+        const current = state(sqlite, input.id);
+        const interaction = current?.providerDetail?.interaction;
+        if (
+          !current
+          || current.status !== 'waiting_for_user'
+          || !interaction
+          || typeof interaction !== 'object'
+          || Array.isArray(interaction)
+          || (interaction as Record<string, unknown>).id !== input.interactionId
+          || (interaction as Record<string, unknown>).status !== 'pending'
+        ) {
+          throw new ExternalAgentError(
+            'Dispatch has no matching pending interaction',
+            'INVALID_TRANSITION',
+            409,
+          );
+        }
+        const resolved = {
+          ...(interaction as Record<string, unknown>),
+          status: input.outcome,
+          resolvedAt: input.now,
+          ...(input.answer ? { answer: input.answer } : {}),
+        };
+        const resumesSameDispatch = (
+          interaction as Record<string, unknown>
+        ).continuationPolicy !== 'require_new_dispatch';
+        const providerDetail = {
+          ...current.providerDetail,
+          interaction: resolved,
+          ...(resumesSameDispatch
+            ? {
+              resumeContext: {
+                reason: 'interaction_resolved',
+                interactionId: input.interactionId,
+                outcome: input.outcome,
+                ...(input.answer ? { answer: input.answer } : {}),
+              },
+            }
+            : {}),
+        };
+        const updated = sqlite.prepare(`
+          UPDATE agent_dispatches
+          SET status = ?, provider_detail = ?, available_at = ?,
+              claim_token_hash = NULL, lease_expires_at = NULL,
+              completed_at = ?, error_message = ?, updated_at = ?
+          WHERE id = ? AND status = 'waiting_for_user'
+        `).run(
+          resumesSameDispatch ? 'queued' : 'cancelled',
+          JSON.stringify(providerDetail),
+          input.now,
+          resumesSameDispatch ? null : input.now,
+          resumesSameDispatch ? null : 'Interaction resolved; a new dispatch is required',
+          input.now,
+          input.id,
+        );
+        if (updated.changes !== 1) {
+          throw new ExternalAgentError('Dispatch changed concurrently', 'CONFLICT', 409);
+        }
+        sqlite.prepare(`
+          UPDATE agent_dispatch_attempts
+          SET status = 'interaction_resolved', completed_at = ?
+          WHERE dispatch_id = ? AND attempt_number = ?
+        `).run(input.now, input.id, current.attemptCount);
+        insertEvent(sqlite, input.id, {
+          eventType: 'interaction_resolved',
+          fromStatus: 'waiting_for_user',
+          toStatus: resumesSameDispatch ? 'queued' : 'cancelled',
+          detail: {
+            interactionId: input.interactionId,
+            outcome: input.outcome,
+          },
+          createdAt: input.now,
+        });
+        if (resumesSameDispatch) {
+          enqueueAction(sqlite, input.id, 'submit', 50, input.now);
+        }
       }).immediate();
     },
     async expire(now) {
@@ -1043,5 +1357,65 @@ export function createSqliteExternalAgentControlRepository(
     },
   };
 
-  return { registry, payloads, dispatches };
+  const actions: ExternalAgentControlPersistence['actions'] = {
+    async enqueue(input) {
+      const before = sqlite.prepare(
+        'SELECT 1 FROM agent_dispatch_actions WHERE dispatch_id = ? AND action = ?',
+      ).get(input.dispatchId, input.action);
+      enqueueAction(sqlite, input.dispatchId, input.action, input.priority, input.now);
+      return !before;
+    },
+    async claimNext(input) {
+      return sqlite.transaction(() => {
+        const row = sqlite.prepare(`
+          SELECT id, dispatch_id AS dispatchId, action,
+                 attempt_count AS attemptCount
+          FROM agent_dispatch_actions
+          WHERE (status = 'pending' AND available_at <= ?)
+             OR (status = 'processing' AND lease_expires_at <= ?)
+          ORDER BY priority DESC, created_at ASC
+          LIMIT 1
+        `).get(input.now, input.now) as Row | undefined;
+        if (!row) return null;
+        const updated = sqlite.prepare(`
+          UPDATE agent_dispatch_actions
+          SET status = 'processing', attempt_count = attempt_count + 1,
+              lease_owner = ?, lease_expires_at = ?, updated_at = ?
+          WHERE id = ? AND (
+            status = 'pending'
+            OR (status = 'processing' AND lease_expires_at <= ?)
+          )
+        `).run(
+          input.owner, input.leaseExpiresAt, input.now, row.id, input.now,
+        );
+        if (updated.changes !== 1) return null;
+        return {
+          id: String(row.id),
+          dispatchId: String(row.dispatchId),
+          action: row.action as 'submit' | 'reconcile' | 'cancel',
+          attemptCount: Number(row.attemptCount) + 1,
+          leaseOwner: input.owner,
+          leaseExpiresAt: input.leaseExpiresAt,
+        };
+      }).immediate();
+    },
+    async complete(input) {
+      return sqlite.prepare(`
+        DELETE FROM agent_dispatch_actions
+        WHERE id = ? AND status = 'processing' AND lease_owner = ?
+      `).run(input.id, input.owner).changes === 1;
+    },
+    async fail(input) {
+      return sqlite.prepare(`
+        UPDATE agent_dispatch_actions
+        SET status = 'pending', available_at = ?, lease_owner = NULL,
+            lease_expires_at = NULL, last_error = ?, updated_at = ?
+        WHERE id = ? AND status = 'processing' AND lease_owner = ?
+      `).run(
+        input.availableAt, input.error, input.now, input.id, input.owner,
+      ).changes === 1;
+    },
+  };
+
+  return { registry, payloads, dispatches, actions };
 }

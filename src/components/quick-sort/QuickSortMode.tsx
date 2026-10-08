@@ -12,12 +12,13 @@ import {
   Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import ModeSelector from './ModeSelector';
 import OrderSelector from './OrderSelector';
 import ScopeFilter from './ScopeFilter';
 import QuickSortCard from './QuickSortCard';
 import QuickSortActions, {
+  type ProjectOption,
   type QuadrantChoice,
   type TagOption,
 } from './QuickSortActions';
@@ -30,6 +31,7 @@ import { useIsMobile } from '@/lib/hooks/useIsMobile';
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import { getLocalToday } from '@/lib/utils/client-date';
+import { notifyTaskCompleted } from '@/lib/completion-sounds';
 import type {
   QuickSortOrder,
   QuickSortQueueMode,
@@ -51,6 +53,7 @@ const MODE_LABELS: Record<QuickSortQueueMode, string> = {
   no_effort: 'Estimate Effort',
   no_tags: 'Add Tags',
   no_planning_horizon: 'Set Horizon',
+  no_project: 'Add to Project',
 };
 
 const EFFORT_LABELS: Record<number, string> = { 1: 'XS', 2: 'S', 3: 'M', 4: 'L', 5: 'XL' };
@@ -76,6 +79,7 @@ async function applyQuickSortOperation(input: {
   contextKey: string;
   queueIndex: number;
   patch: Record<string, unknown>;
+  assignment?: { projectId: string; phaseId?: string | null };
   logModes?: QuickSortQueueMode[];
   aiAccepted?: boolean;
 }) {
@@ -96,6 +100,8 @@ export default function QuickSortMode() {
   const [busy, setBusy] = useState(false);
   const [allTags, setAllTags] = useState<TagOption[]>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
   const [scopeFilter, setScopeFilter] = useState<QuickSortScopeFilter>({});
   const [order, setOrder] = useState<QuickSortOrder>('smart');
   const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
@@ -147,6 +153,7 @@ export default function QuickSortMode() {
     label,
     logModes,
     acceptedAI = false,
+    assignment,
   }: {
     task: QuickSortQueueTask;
     patch: Record<string, unknown>;
@@ -155,6 +162,7 @@ export default function QuickSortMode() {
     label: string;
     logModes?: QuickSortQueueMode[];
     acceptedAI?: boolean;
+    assignment?: { projectId: string; phaseId?: string | null };
   }) => {
     if (pendingTaskIdsRef.current.has(task.id)) {
       throw new Error('This Quick Sort action is already in progress');
@@ -173,6 +181,7 @@ export default function QuickSortMode() {
         contextKey: historyContextKey,
         queueIndex,
         patch,
+        assignment,
         logModes,
         aiAccepted: acceptedAI,
       });
@@ -258,7 +267,7 @@ export default function QuickSortMode() {
     if (busy) return;
     setOrder(nextMode === 'no_planning_horizon' ? 'priority' : 'smart');
     setMode(nextMode);
-    setSelectedTaskId(null);
+    setSelectedTaskId(null, { history: 'replace' });
   }, [busy]);
 
   // Fetch tags once when entering no_tags mode
@@ -272,6 +281,32 @@ export default function QuickSortMode() {
         .finally(() => setTagsLoading(false));
     }
   }, [mode, allTags.length]);
+
+  useEffect(() => {
+    if (mode !== 'no_project' || projects.length > 0) return;
+    setProjectsLoading(true);
+    fetch('/api/projects-overview')
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Failed to load projects');
+        return response.json();
+      })
+      .then((data: {
+        categories?: Array<{ projects?: ProjectOption[] }>;
+        uncategorized?: ProjectOption[];
+      }) => {
+        const allProjects = [
+          ...(data.categories ?? []).flatMap((category) => category.projects ?? []),
+          ...(data.uncategorized ?? []),
+        ];
+        setProjects(
+          allProjects
+            .filter((project) => project.status !== 'completed')
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        );
+      })
+      .catch(() => toast.error('Failed to load projects'))
+      .finally(() => setProjectsLoading(false));
+  }, [mode, projects.length]);
 
   // The top 3 visible tasks (for stack display)
   const stackTasks = tasks.slice(0, 3);
@@ -342,6 +377,7 @@ export default function QuickSortMode() {
           action: 'applied',
           label: localDisposition === 'handled' ? 'Mark handled' : 'Dismiss',
         });
+        notifyTaskCompleted();
         dismiss(topTask.id);
         refreshCounts();
         setSessionSorted((count) => count + 1);
@@ -553,6 +589,37 @@ export default function QuickSortMode() {
     [topTask, busy, dismiss, refreshCounts, runOperation]
   );
 
+  const handleApplyProject = useCallback(
+    async (projectId: string, projectName: string, phaseId?: string, phaseName?: string) => {
+      if (!topTask || busy) return;
+      setBusy(true);
+      try {
+        await runOperation({
+          task: topTask,
+          patch: {},
+          assignment: { projectId, phaseId: phaseId ?? null },
+          operationMode: 'no_project',
+          action: 'applied',
+          label: phaseName ? `Assign to ${projectName} / ${phaseName}` : `Assign to ${projectName}`,
+        });
+        dismiss(topTask.id);
+        refreshCounts();
+        setStatsKey((key) => key + 1);
+        setSessionSorted((count) => count + 1);
+        toast.success(
+          phaseName
+            ? `Assigned to ${projectName} · ${phaseName}`
+            : `Assigned to ${projectName}`,
+        );
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to assign project');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, dismiss, refreshCounts, runOperation, topTask],
+  );
+
   const handleMarkDone = useCallback(
     async () => {
       if (!topTask || !mode || busy) return;
@@ -598,7 +665,7 @@ export default function QuickSortMode() {
 
     if (resolvesCurrentQueue) {
       dismiss(selectedTaskId);
-      setSelectedTaskId(null);
+      setSelectedTaskId(null, { history: 'replace' });
       return;
     }
 
@@ -704,7 +771,7 @@ export default function QuickSortMode() {
 
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
-      const fieldByMode: Record<QuickSortQueueMode, TaskField> = {
+      const fieldByMode: Partial<Record<QuickSortQueueMode, TaskField>> = {
         no_priority: 'priority',
         quadrant: 'priority',
         no_effort: 'effort',
@@ -712,6 +779,7 @@ export default function QuickSortMode() {
         no_planning_horizon: 'planningHorizon',
       };
       const modeField = fieldByMode[mode];
+      if (!modeField) return;
       if (!canEditTaskField(task.editPolicy, modeField)) {
         toast.error(taskFieldBlockedReason(task.editPolicy, modeField));
         return;
@@ -775,11 +843,11 @@ export default function QuickSortMode() {
     [suggestions, tasks, mode, busy, dismiss, refreshCounts, recordRecentTag, runOperation]
   );
 
-  const hasAnySuggestion = mode !== 'quadrant' && !!(
+  const hasAnySuggestion = mode !== 'quadrant' && mode !== 'no_project' && !!(
     topSuggestion
     && (topSuggestion.priority || topSuggestion.effort || topSuggestion.tags.length > 0)
   );
-  const hasFocusedSuggestion = mode !== 'quadrant' && !!(
+  const hasFocusedSuggestion = mode !== 'quadrant' && mode !== 'no_project' && !!(
     topSuggestion
     && (
       (mode === 'no_priority' && topSuggestion.priority)
@@ -1188,7 +1256,10 @@ export default function QuickSortMode() {
                         onApplyEffort={handleApplyEffort}
                         onApplyTag={handleApplyTag}
                         onApplyPlanningHorizon={handleApplyPlanningHorizon}
+                        onApplyProject={handleApplyProject}
                         allTags={allTags}
+                        projects={projects}
+                        projectsLoading={projectsLoading}
                         tagsLoading={tagsLoading}
                         recentTagIds={recentTagIds}
                         busy={busy}
@@ -1204,7 +1275,10 @@ export default function QuickSortMode() {
             <TaskDetailPanel
               taskId={selectedTaskId}
               mode="panel"
-              onClose={() => setSelectedTaskId(null)}
+              onClose={(reason) => setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              )}
               onUpdate={handleTaskDetailUpdate}
               minPanelWidth={320}
               focusPanelOnMount
@@ -1222,7 +1296,10 @@ export default function QuickSortMode() {
                 <TaskDetailPanel
                   taskId={selectedTaskId}
                   mode="mobile"
-                  onClose={() => setSelectedTaskId(null)}
+                  onClose={(reason) => setSelectedTaskId(
+                    null,
+                    reason === 'task-removed' ? { history: 'replace' } : undefined,
+                  )}
                   onUpdate={handleTaskDetailUpdate}
                   focusPanelOnMount
                 />

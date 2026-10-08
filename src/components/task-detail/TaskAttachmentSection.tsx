@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Paperclip, Trash2, Image, FileText, File, Loader2, Download } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Tooltip } from '@/components/ui/Tooltip';
 import {
   attachmentContentUrl,
@@ -124,7 +124,7 @@ export function TaskAttachmentSection({ taskId, canEdit, supportsAttachments, co
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">
+        <h3 className="text-sm font-semibold text-[var(--text-heading)]">
           Attachments
           {attachments.length > 0 && (
             <span className="ml-1 text-[var(--text-tertiary)]">({attachments.length})</span>

@@ -50,6 +50,141 @@ afterEach(() => {
 });
 
 describe('notification provider registry', () => {
+  it('presents rich RyMessage context and durable source actions', async () => {
+    registerDefaultNotificationProviders();
+    const resolved = resolveNotificationProvider(notification({
+      connectorType: 'rymessage',
+      connectorInstanceId: 'rymessage-1',
+      title: 'Send the revised estimate',
+      body: 'Please send the revised estimate by Friday.',
+      category: 'social',
+      metadata: {
+        contract: 'companion-action-v2',
+        actionId: '00000000-0000-4000-8000-000000000001',
+        revision: 7,
+        lifecycleRevision: 6,
+        senderDisplayName: 'Avery Chen',
+        conversationTitle: 'Launch planning',
+        messageExcerpt: 'Can you send the revised estimate by Friday?',
+        details: 'Include the updated vendor lead times.',
+        actionType: 'follow-up',
+        category: 'work',
+        direction: 'received',
+        recommendation: 'create-task',
+        priority: 'high',
+        confidenceScore: 0.92,
+        classificationReason: 'Direct request with a deadline.',
+        derivationMethod: 'ai',
+        classificationModel: 'action-model',
+        derivationVersion: '3',
+        lifecycle: 'visible',
+        linkedTaskCount: 1,
+        activeLinkedTaskCount: 1,
+        linkedRelationIds: ['relation-1'],
+        taskMaterializations: [{
+          relationId: 'relation-1',
+          state: 'linked',
+          providerLabel: 'Microsoft To Do',
+          title: 'Send the revised estimate',
+          status: 'in-progress',
+          availability: 'live',
+          openUrl: 'https://to-do.office.com/tasks/id/1',
+        }],
+      },
+    }));
+
+    expect(resolved?.presentation.presentation).toMatchObject({
+      sourceName: 'RyMessage Action Center',
+      subtitle: 'Avery Chen · Launch planning',
+      metadataChips: [
+        { label: 'Type', value: 'Work' },
+        { label: 'Direction', value: 'Received' },
+        { label: 'State', value: 'Visible' },
+      ],
+      richContent: {
+        primaryText: 'Include the updated vendor lead times.',
+        secondaryText: 'Recommendation: Create Task',
+      },
+    });
+    expect(resolved?.presentation.presentation?.richContent?.stats).toEqual(
+      expect.arrayContaining([
+        { label: 'Confidence', value: '92%', tone: 'success' },
+        { label: 'Tasks', value: '1 linked', tone: 'success' },
+      ]),
+    );
+    expect(resolved?.presentation.presentation?.richContent?.footerText)
+      .toContain('Direct request with a deadline.');
+    expect(resolved?.presentation.actions?.map(action => action.actionType)).toEqual([
+      'rymessage_promote',
+      'rymessage_unlink',
+      'rymessage_mark_handled',
+      'rymessage_dismiss',
+    ]);
+
+    await expect(executeNotificationProviderAction({
+      notification: {
+        id: 'rymessage-notification',
+        sourceId: 'rymessage:companion:rymessage-1:action-1',
+        connectorType: 'rymessage',
+        connectorInstanceId: 'rymessage-1',
+        title: 'Send the revised estimate',
+        body: null,
+        category: 'social',
+        navigationTarget: null,
+        metadata: {},
+        presentation: {},
+      },
+      action: {
+        id: 'dismiss-action',
+        notificationId: 'rymessage-notification',
+        actionType: 'rymessage_dismiss',
+        payload: {},
+      },
+      payload: {},
+      input: {},
+    })).resolves.toEqual({
+      state: 'dismissed',
+      result: { type: 'rymessage_dismiss', queued: true },
+    });
+  });
+
+  it('gives legacy RyMessage actions a useful action-type subtitle', () => {
+    registerDefaultNotificationProviders();
+    const resolved = resolveNotificationProvider(notification({
+      connectorType: 'rymessage',
+      connectorInstanceId: 'rymessage-1',
+      title: 'Reply to Casey',
+      body: undefined,
+      category: 'social',
+      metadata: {
+        contract: 'companion-action-v2',
+        actionId: '00000000-0000-4000-8000-000000000001',
+        revision: 1,
+        actionType: 'waiting-on-reply',
+        confidenceClass: 'high',
+        confidenceScore: 0.88,
+        lifecycle: 'visible',
+        sourceKind: 'message',
+      },
+    }));
+
+    expect(resolved?.presentation.presentation).toMatchObject({
+      sourceName: 'RyMessage Action Center',
+      subtitle: 'Waiting on reply',
+      metadataChips: [
+        { label: 'Type', value: 'Waiting On Reply' },
+        { label: 'State', value: 'Visible' },
+      ],
+      richContent: {
+        primaryText: undefined,
+        stats: expect.arrayContaining([
+          { label: 'Confidence', value: '88%', tone: 'success' },
+          { label: 'Lifecycle', value: 'Visible', tone: 'info' },
+        ]),
+      },
+    });
+  });
+
   it('lets a source define signatures, presentation, and CTAs', () => {
     registerNotificationProvider({
       sourceType: 'test-source',
@@ -255,6 +390,94 @@ describe('notification provider registry', () => {
     expect(resolved?.presentation.actions?.[0].label).toBe('Review PR');
     expect(resolved?.presentation.actions?.[0].payload).toEqual({
       url: 'https://github.com/acme/repo/pull/42',
+    });
+  });
+
+  it('presents Paperclip approvals as human-readable decision cards', () => {
+    registerDefaultNotificationProviders();
+    const resolved = resolveNotificationProvider(notification({
+      connectorType: 'paperclip',
+      templateKey: 'paperclip_approval',
+      title: 'Paperclip approval: request_board_approval',
+      body: 'Company: Clip Joint\nType: request_board_approval',
+      actionUrl: 'https://paperclip.example.test/approvals/approval-1',
+      metadata: {
+        approvalId: 'approval-1',
+        companyId: 'company-1',
+        companyName: 'Clip Joint',
+        requester: 'Research agent',
+        approvalType: 'request_board_approval',
+        risk: 'high',
+        issueId: 'CLIA-11',
+        summary: 'Verify the approval card before enabling production work.',
+      },
+    }));
+
+    expect(resolved?.presentation).toMatchObject({
+      title: 'Board approval requested',
+      body: null,
+      presentation: {
+        sourceName: 'Paperclip',
+        subtitle: 'Clip Joint · Pending approval',
+        metadataChips: [
+          { label: 'Issue', value: 'CLIA-11' },
+          { label: 'Requested by', value: 'Research agent' },
+        ],
+        richContent: {
+          primaryText: 'Verify the approval card before enabling production work.',
+          stats: [
+            { label: 'Type', value: 'Board approval' },
+            { label: 'Risk', value: 'High', tone: 'danger' },
+          ],
+        },
+      },
+    });
+    expect(resolved?.presentation.actions?.map(action => ({
+      type: action.actionType,
+      label: action.label,
+      confirmation: action.requiresConfirmation,
+    }))).toEqual([
+      { type: 'paperclip_approve', label: 'Approve', confirmation: true },
+      { type: 'paperclip_reject', label: 'Reject', confirmation: true },
+      { type: 'open_url', label: 'Review in Paperclip', confirmation: undefined },
+    ]);
+  });
+
+  it('cleans up Paperclip attention metadata instead of rendering raw identifiers', () => {
+    registerDefaultNotificationProviders();
+    const resolved = resolveNotificationProvider(notification({
+      connectorType: 'paperclip',
+      templateKey: 'paperclip_attention',
+      title: 'Sample notification',
+      body: 'Type: issue_thread_interaction\nDetail: request_changes',
+      actionUrl: 'https://paperclip.example.test/issues/CLIA-11',
+      metadata: {
+        companyName: 'Clip Joint',
+        sourceKind: 'issue_thread_interaction',
+        detailKind: 'request_changes',
+        identifier: 'CLIA-11',
+        summary: 'Review the proposed plan.',
+        whyNow: 'A teammate is waiting for your decision.',
+        decisionLabels: ['approve', 'request_changes'],
+      },
+    }));
+
+    expect(resolved?.presentation.body).toBeNull();
+    expect(resolved?.presentation.presentation).toMatchObject({
+      subtitle: 'Clip Joint · Issue Thread Interaction',
+      metadataChips: [
+        { label: 'Issue', value: 'CLIA-11' },
+        { label: 'Detail', value: 'Request Changes' },
+      ],
+      richContent: {
+        primaryText: 'Review the proposed plan.',
+        secondaryText: 'A teammate is waiting for your decision.',
+        stats: [{
+          label: 'Decisions',
+          value: 'Approve · Request Changes',
+          tone: 'info',
+        }],
+      },
     });
   });
 

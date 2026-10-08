@@ -65,4 +65,35 @@ describe('parseTaskPatchInput', () => {
       reminderDueTime: '25:00',
     }).success).toBe(false);
   });
+
+  it('accepts only supported persistent reminder intervals', () => {
+    expect(parseTaskPatchInput({
+      reminderNagInterval: 5,
+      reminderNagStopAt: '2026-09-01T12:00:00-04:00',
+    })).toMatchObject({
+      success: true,
+      input: {
+        reminderNagInterval: 5,
+        reminderNagStopAt: '2026-09-01T16:00:00.000Z',
+      },
+      fields: ['reminderAt'],
+    });
+    expect(parseTaskPatchInput({ reminderNagInterval: 2 }).success).toBe(false);
+  });
+
+  it('maps validated recurrence options to recurrence policy', () => {
+    expect(parseTaskPatchInput({
+      recurrenceSkipDates: ['2026-09-28'],
+      recurrenceCatchUp: 'none',
+    })).toMatchObject({
+      success: true,
+      fields: ['recurrence'],
+    });
+    expect(parseTaskPatchInput({
+      recurrenceSkipDates: ['September 28'],
+    }).success).toBe(false);
+    expect(parseTaskPatchInput({
+      recurrenceCatchUp: 'all',
+    }).success).toBe(false);
+  });
 });

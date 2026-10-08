@@ -7,6 +7,7 @@ import {
   desc,
   eq,
   inArray,
+  isNull,
   notInArray,
   or,
   sql,
@@ -76,6 +77,7 @@ const graphPhaseColumns = {
 
 function visibleTaskCondition() {
   return and(
+    isNull(tasks.deletedAt),
     sql`${tasks.connectorInstanceId} NOT IN (
       SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
       WHERE ${connectorConfigs.deletedAt} IS NOT NULL
@@ -306,6 +308,7 @@ export function createSqliteGraphReportingRepository(
               eq(neighbor.id, taskDependencies.taskId),
             ),
           )).where(and(
+            sql`${neighbor.deletedAt} IS NULL`,
             sql`${neighbor.connectorInstanceId} NOT IN (
               SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
               WHERE ${connectorConfigs.deletedAt} IS NOT NULL
@@ -372,7 +375,10 @@ export function createSqliteGraphReportingRepository(
             connectorType: tasks.connectorType,
             sourceId: tasks.sourceId,
             metadata: tasks.metadata,
-          }).from(tasks).where(inArray(tasks.id, ids)).orderBy(asc(tasks.id)),
+          }).from(tasks).where(and(
+            inArray(tasks.id, ids),
+            visibleTaskCondition(),
+          )).orderBy(asc(tasks.id)),
           db.select({
             taskId: taskProjects.taskId,
             projectId: taskProjects.projectId,
@@ -421,7 +427,10 @@ export function createSqliteGraphReportingRepository(
           microStatus: tasks.microStatus,
         }).from(taskProjects)
           .innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
-          .where(eq(taskProjects.projectId, projectId))
+          .where(and(
+            eq(taskProjects.projectId, projectId),
+            isNull(tasks.deletedAt),
+          ))
           .orderBy(asc(tasks.id));
         const phaseIds = phases.map(({ id }) => id);
         const phaseItems = phaseIds.length
@@ -429,7 +438,11 @@ export function createSqliteGraphReportingRepository(
               phaseId: projectPhaseItems.phaseId,
               taskId: projectPhaseItems.taskId,
             }).from(projectPhaseItems)
-              .where(inArray(projectPhaseItems.phaseId, phaseIds))
+              .innerJoin(tasks, eq(projectPhaseItems.taskId, tasks.id))
+              .where(and(
+                inArray(projectPhaseItems.phaseId, phaseIds),
+                isNull(tasks.deletedAt),
+              ))
               .orderBy(
                 asc(projectPhaseItems.phaseId),
                 asc(projectPhaseItems.sortOrder),
@@ -572,12 +585,17 @@ export function createSqliteGraphReportingRepository(
         const projects = await db.select().from(hubProjects)
           .where(eq(hubProjects.hidden, false))
           .orderBy(asc(hubProjects.name), asc(hubProjects.id));
-        if (!projects.length) return { projects: [], memberships: [], tasks: [], tags: [] };
+        if (!projects.length) return { projects: [], memberships: [], tasks: [], phases: [], phaseItems: [], tags: [] };
         const projectIds = projects.map(({ id }) => id);
         const memberships = await db.select({
           projectId: taskProjects.projectId,
           taskId: taskProjects.taskId,
-        }).from(taskProjects).where(inArray(taskProjects.projectId, projectIds))
+        }).from(taskProjects)
+          .innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
+          .where(and(
+            inArray(taskProjects.projectId, projectIds),
+            isNull(tasks.deletedAt),
+          ))
           .orderBy(asc(taskProjects.projectId), asc(taskProjects.taskId));
         const taskIds = [...new Set(memberships.map(({ taskId }) => taskId))];
         const taskRows = taskIds.length
@@ -590,6 +608,30 @@ export function createSqliteGraphReportingRepository(
               updatedAt: tasks.updatedAt,
               completedAt: tasks.completedAt,
             }).from(tasks).where(inArray(tasks.id, taskIds)).orderBy(asc(tasks.id))
+          : [];
+        const phaseRows = await db.select({
+          id: projectPhases.id,
+          projectId: projectPhases.projectId,
+          name: projectPhases.name,
+          status: projectPhases.status,
+          color: projectPhases.color,
+          sortOrder: projectPhases.sortOrder,
+        }).from(projectPhases)
+          .where(inArray(projectPhases.projectId, projectIds))
+          .orderBy(asc(projectPhases.projectId), asc(projectPhases.sortOrder), asc(projectPhases.id));
+        const phaseIds = phaseRows.map(({ id }) => id);
+        const phaseItemRows = phaseIds.length
+          ? await db.select({
+              phaseId: projectPhaseItems.phaseId,
+              taskId: projectPhaseItems.taskId,
+            }).from(projectPhaseItems)
+              .innerJoin(tasks, eq(projectPhaseItems.taskId, tasks.id))
+              .where(and(
+                inArray(projectPhaseItems.phaseId, phaseIds),
+                eq(projectPhaseItems.isProposed, false),
+                isNull(tasks.deletedAt),
+              ))
+              .orderBy(asc(projectPhaseItems.phaseId), asc(projectPhaseItems.sortOrder), asc(projectPhaseItems.id))
           : [];
         const tagRows = await db.select({
           projectId: projectTags.projectId,
@@ -615,6 +657,8 @@ export function createSqliteGraphReportingRepository(
           })),
           memberships,
           tasks: taskRows,
+          phases: phaseRows.map(phase => ({ ...phase, projectId: phase.projectId! })),
+          phaseItems: phaseItemRows,
           tags: tagRows,
         };
       },
@@ -625,7 +669,10 @@ export function createSqliteGraphReportingRepository(
           parentId: tasks.parentId,
         }).from(taskProjects)
           .innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
-          .where(eq(taskProjects.projectId, projectId))
+          .where(and(
+            eq(taskProjects.projectId, projectId),
+            isNull(tasks.deletedAt),
+          ))
           .orderBy(asc(tasks.id));
       },
     },
@@ -637,7 +684,9 @@ export function createSqliteGraphReportingRepository(
           startedAt: hubProjects.startedAt,
           targetDate: hubProjects.targetDate,
         }).from(hubProjects).where(eq(hubProjects.id, input.projectId)).limit(1);
-        if (!project) return { scope: null, candidateEvents: [], tasks: [] };
+        if (!project) {
+          return { scope: null, candidateEvents: [], currentScopeTaskIds: [], tasks: [] };
+        }
         let scope: 'project' | 'phase' = 'project';
         let scopeId = project.id;
         let scopeName = project.name;
@@ -653,7 +702,9 @@ export function createSqliteGraphReportingRepository(
             eq(projectPhases.id, input.phaseId),
             eq(projectPhases.projectId, input.projectId),
           )).limit(1);
-          if (!phase) return { scope: null, candidateEvents: [], tasks: [] };
+          if (!phase) {
+            return { scope: null, candidateEvents: [], currentScopeTaskIds: [], tasks: [] };
+          }
           scope = 'phase';
           scopeId = phase.id;
           scopeName = phase.name;
@@ -677,13 +728,23 @@ export function createSqliteGraphReportingRepository(
             )`,
           ),
         ));
-        const taskIds = [...new Set(candidateRows
+        const currentScopeRows = scope === 'project'
+          ? await db.select({ taskId: taskProjects.taskId }).from(taskProjects)
+              .where(eq(taskProjects.projectId, scopeId))
+          : await db.select({ taskId: projectPhaseItems.taskId }).from(projectPhaseItems)
+              .where(eq(projectPhaseItems.phaseId, scopeId));
+        const currentScopeTaskIds = currentScopeRows.map(({ taskId }) => taskId);
+        const taskIds = [...new Set([
+          ...candidateRows
           .filter((row) => row.eventType !== 'baseline' || baselineHasScope(row.newValue, scope, scopeId))
-          .map(({ taskId }) => taskId))];
+          .map(({ taskId }) => taskId),
+          ...currentScopeTaskIds,
+        ])];
         if (!taskIds.length) {
           return {
             scope: { projectId: project.id, scope, scopeId, scopeName, scheduleStart, scheduleEnd },
             candidateEvents: [],
+            currentScopeTaskIds: [],
             tasks: [],
           };
         }
@@ -707,13 +768,18 @@ export function createSqliteGraphReportingRepository(
           db.select({
             id: tasks.id,
             title: tasks.title,
+            status: tasks.status,
+            effort: tasks.effort,
+            localDisposition: tasks.localDisposition,
             createdAt: tasks.createdAt,
             completedAt: tasks.completedAt,
+            deletedAt: tasks.deletedAt,
           }).from(tasks).where(inArray(tasks.id, taskIds)).orderBy(asc(tasks.id)),
         ]);
         return {
           scope: { projectId: project.id, scope, scopeId, scopeName, scheduleStart, scheduleEnd },
           candidateEvents: eventRows.map(normalizeHistoryEvent),
+          currentScopeTaskIds,
           tasks: taskRows,
         };
       },

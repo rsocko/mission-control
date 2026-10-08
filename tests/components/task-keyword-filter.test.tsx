@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
@@ -7,9 +7,9 @@ import {
   normalizeTaskFilterContext,
   type TaskFilterContext,
 } from '@/lib/task-filter-context';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: Object.assign(vi.fn(), { dismiss: vi.fn() }),
 }));
 
@@ -38,6 +38,26 @@ describe('TaskKeywordFilter applied sidebar filters', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('loads agent filter options only when requested', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      agents: [{ id: 'copilot-cloud', name: 'GitHub Copilot', type: 'copilot-cloud' }],
+    }), { status: 200 }));
+
+    render(<TaskKeywordFilter {...defaultProps} />);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Filter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Agent' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /GitHub Copilot/ })).toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith('/api/external-agents', {
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it('allows the unfiltered All Sources view to be saved', () => {

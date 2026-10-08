@@ -8,6 +8,7 @@ import {
   primaryKey,
 } from 'drizzle-orm/sqlite-core';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
+import type { ContextAppearance } from '@/types';
 import type { tasks } from './tasks';
 
 // ─── CONNECTOR CONFIGS ──────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ export const sourceLists = sqliteTable('source_lists', {
   userDisplayName: text('user_display_name'),
   icon: text('icon'),
   iconColor: text('icon_color'),
+  appearance: text('appearance', { mode: 'json' }).$type<ContextAppearance>(),
 });
 
 // ─── WORK MICROSOFT TO DO BRIDGE ────────────────────────────────────────────
@@ -124,6 +126,93 @@ export const workTodoOutboundChanges = sqliteTable('work_todo_outbound_changes',
   index('idx_work_todo_change_task').on(table.taskId),
 ]);
 
+// ─── RYMESSAGE COMPANION ACTION FEED ───────────────────────────────────────
+
+export const rymessageActionV2FeedState = sqliteTable('rymessage_action_v2_feed_state', {
+  connectorId: text('connector_id')
+    .primaryKey()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  feedId: text('feed_id'),
+  cursor: text('cursor'),
+  recoveryGeneration: integer('recovery_generation').notNull().default(0),
+  recoveryRequired: integer('recovery_required', { mode: 'boolean' }).notNull().default(true),
+  fullSyncGeneration: text('full_sync_generation'),
+  lastSyncedAt: text('last_synced_at'),
+  lastError: text('last_error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const rymessageActionV2Projections = sqliteTable('rymessage_action_v2_projections', {
+  connectorId: text('connector_id')
+    .notNull()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  actionId: text('action_id').notNull(),
+  sourceId: text('source_id').notNull(),
+  revision: integer('revision').notNull(),
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>(),
+  payloadDigest: text('payload_digest').notNull(),
+  lastEventId: text('last_event_id').notNull(),
+  lastOperationId: text('last_operation_id').notNull(),
+  lastSeenGeneration: text('last_seen_generation'),
+  tombstonedAt: text('tombstoned_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.connectorId, table.actionId] }),
+  uniqueIndex('idx_rymessage_action_v2_source').on(table.connectorId, table.sourceId),
+]);
+
+export const rymessageActionV2Receipts = sqliteTable('rymessage_action_v2_receipts', {
+  connectorId: text('connector_id')
+    .notNull()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  eventId: text('event_id').notNull(),
+  operationId: text('operation_id').notNull(),
+  actionId: text('action_id').notNull(),
+  aggregateRevision: integer('aggregate_revision').notNull(),
+  payloadDigest: text('payload_digest').notNull(),
+  outcome: text('outcome').notNull(),
+  receivedAt: text('received_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.connectorId, table.eventId] }),
+  index('idx_rymessage_action_v2_receipt_retention').on(table.connectorId, table.receivedAt),
+]);
+
+export const rymessageActionV2OutboundMutations = sqliteTable(
+  'rymessage_action_v2_outbound_mutations',
+  {
+    connectorId: text('connector_id')
+      .notNull()
+      .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+    operationId: text('operation_id').notNull(),
+    actionId: text('action_id').notNull(),
+    mutation: text('mutation', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    mutationDigest: text('mutation_digest').notNull(),
+    status: text('status')
+      .$type<'pending' | 'leased' | 'retry' | 'succeeded' | 'conflict' | 'dead-letter'>()
+      .notNull()
+      .default('pending'),
+    leaseId: text('lease_id'),
+    leaseExpiresAt: text('lease_expires_at'),
+    availableAt: text('available_at').notNull(),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    receipt: text('receipt', { mode: 'json' }).$type<Record<string, unknown>>(),
+    lastErrorCode: text('last_error_code'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectorId, table.operationId] }),
+    index('idx_rymessage_action_v2_mutation_ready').on(
+      table.connectorId,
+      table.status,
+      table.availableAt,
+      table.leaseExpiresAt,
+    ),
+  ],
+);
+
 // ─── SYNC LOG ───────────────────────────────────────────────────────────────
 
 export const syncLog = sqliteTable('sync_log', {
@@ -143,7 +232,7 @@ export const syncLog = sqliteTable('sync_log', {
   durationMs: integer('duration_ms'),
   jobId: text('job_id'),
   trigger: text('trigger')
-    .$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>(),
+    .$type<'manual' | 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>(),
   scheduledFor: text('scheduled_for'),
   startedAt: text('started_at'),
   attempt: integer('attempt'),
@@ -163,7 +252,7 @@ export const syncJobs = sqliteTable('sync_jobs', {
   connectorId: text('connector_id').notNull(),
   full: integer('full', { mode: 'boolean' }).notNull().default(false),
   source: text('source')
-    .$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>()
+    .$type<'manual' | 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>()
     .notNull(),
   status: text('status')
     .$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'>()

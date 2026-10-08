@@ -6,6 +6,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Pool, PoolClient } from 'pg';
 
 vi.unmock('drizzle-orm');
 import type {
@@ -29,6 +30,27 @@ let workerPersistence: Awaited<ReturnType<
   typeof import('@/lib/persistence/worker-runtime').getWorkerPersistenceRepositories
 >>;
 let planningMarkerStartedAt: string | null = null;
+
+async function withSuppressedTaskHistory<T>(
+  pool: Pool,
+  work: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT set_config('mission_control.suppress_task_history', 'on', true)`,
+    );
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 async function waitFor(
   assertion: () => void | Promise<void>,
@@ -195,18 +217,26 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           'DELETE FROM semantic_index_identities WHERE model = $1',
           [`${prefix}:embedding`],
         );
-        await pool.query('DELETE FROM task_history_events WHERE task_id LIKE $1', [`${prefix}%`]);
-        if (planningMarkerStartedAt) {
-          await pool.query(
-            `DELETE FROM task_history_events
-             WHERE task_id = '__planning-signal-finalizer__'
-               AND event_type = 'planning_signal_finalized'
-               AND recorded_at >= $1`,
-            [planningMarkerStartedAt],
-          );
-        }
         await pool.query('DELETE FROM my_day_items WHERE task_id LIKE $1', [`${prefix}%`]);
-        await pool.query('DELETE FROM task_projects WHERE project_id = $1', [`${prefix}:project`]);
+        await withSuppressedTaskHistory(pool, async (client) => {
+          await client.query(
+            'DELETE FROM task_history_events WHERE task_id LIKE $1',
+            [`${prefix}%`],
+          );
+          if (planningMarkerStartedAt) {
+            await client.query(
+              `DELETE FROM task_history_events
+               WHERE task_id = '__planning-signal-finalizer__'
+                 AND event_type = 'planning_signal_finalized'
+                 AND recorded_at >= $1`,
+              [planningMarkerStartedAt],
+            );
+          }
+          await client.query(
+            'DELETE FROM task_projects WHERE project_id = $1',
+            [`${prefix}:project`],
+          );
+        });
         await pool.query(
           'DELETE FROM project_auto_include_exclusions WHERE project_id = $1',
           [`${prefix}:project`],
@@ -602,13 +632,13 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         provenance: 'whole-worker-test',
       });
       expect(planning).toBe(true);
-      await pool.query(
+      await withSuppressedTaskHistory(pool, (client) => client.query(
         `DELETE FROM task_history_events
          WHERE task_id = '__planning-signal-finalizer__'
            AND event_type = 'planning_signal_finalized'
            AND recorded_at >= $1`,
         [new Date(Date.now() - 10 * 60_000).toISOString()],
-      );
+      ));
 
       const syncJobs = await (
         await import('@/lib/sync/job-runtime')

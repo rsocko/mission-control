@@ -10,6 +10,7 @@ import {
 
 const PUSH_DELIVERY_SETTING_KEY = 'push_delivery_enabled';
 const SCHEDULED_SUMMARIES_SETTING_KEY = 'scheduled_summaries_enabled';
+const PERSISTENT_REMINDERS_SETTING_KEY = 'persistent_reminders_enabled';
 
 interface PushPreferencesRow {
   morning_enabled: number;
@@ -119,6 +120,13 @@ export function createSqliteNotificationPushRepository(
       JSON.stringify(pushDeliveryEnabled),
       input.updatedAt,
     );
+    if (input.persistentRemindersEnabled !== undefined) {
+      upsertSetting.run(
+        PERSISTENT_REMINDERS_SETTING_KEY,
+        JSON.stringify(input.persistentRemindersEnabled),
+        input.updatedAt,
+      );
+    }
   });
 
   return {
@@ -128,6 +136,13 @@ export function createSqliteNotificationPushRepository(
 
     async getPushDeliveryEnabled() {
       const row = readSetting.get(PUSH_DELIVERY_SETTING_KEY) as { value: unknown } | undefined;
+      return row ? parseStoredBooleanSetting(parseSqliteJson(row.value)) : true;
+    },
+
+    async getPersistentRemindersEnabled() {
+      const row = readSetting.get(PERSISTENT_REMINDERS_SETTING_KEY) as
+        | { value: unknown }
+        | undefined;
       return row ? parseStoredBooleanSetting(parseSqliteJson(row.value)) : true;
     },
 

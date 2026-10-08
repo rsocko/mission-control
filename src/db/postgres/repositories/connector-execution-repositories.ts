@@ -385,11 +385,7 @@ async function assertGenericTaskMutationSupported(
   client: Client,
   taskId: string,
 ): Promise<void> {
-  const task = await getTask(client, taskId, true);
-  if (!task) return;
-  if (task.connectorType === 'github-issues') {
-    throw new UnsupportedConnectorExecutionError('GitHub identity-backed deletion or retention');
-  }
+  await assertGenericTaskDeletionSupported(client, taskId);
   const [unsupported] = await query<{
     dependencies: string;
     projects: string;
@@ -416,6 +412,17 @@ async function assertGenericTaskMutationSupported(
     throw new UnsupportedConnectorExecutionError(
       'identity, dependency, or project relationship mutation',
     );
+  }
+}
+
+async function assertGenericTaskDeletionSupported(
+  client: Client,
+  taskId: string,
+): Promise<void> {
+  const task = await getTask(client, taskId, true);
+  if (!task) return;
+  if (task.connectorType === 'github-issues') {
+    throw new UnsupportedConnectorExecutionError('GitHub identity-backed deletion or retention');
   }
 }
 
@@ -731,8 +738,12 @@ async function preflightGitHubRecovery(
   }
 }
 
-async function deleteTaskRows(client: Client, taskId: string): Promise<void> {
-  await cleanupTaskAssociations(client, [taskId]);
+async function deleteTaskRows(
+  client: Client,
+  taskId: string,
+  options: { preserveIdentityBinding?: boolean } = {},
+): Promise<void> {
+  await cleanupTaskAssociations(client, [taskId], options);
   await client.query(
     `
       WITH RECURSIVE descendants(id, depth, path) AS (
@@ -1266,6 +1277,87 @@ async function ingestNotification(
         ],
       );
     }
+  } else if (currentDisposition === 'inbox') {
+    const pending = await query<{
+      id: string;
+      actionType: string;
+      createdBy: string;
+    }>(
+      client,
+      `
+        SELECT id, action_type AS "actionType", created_by AS "createdBy"
+        FROM notification_actions
+        WHERE notification_id = $1 AND execution_state = 'pending'
+        ORDER BY sort_order, id
+      `,
+      [stored.id],
+    );
+    const consumed = new Set<string>();
+    let primaryActionId: string | null = null;
+
+    for (const action of command.actions) {
+      const match = pending.find(candidate => (
+        !consumed.has(candidate.id)
+        && candidate.actionType === action.actionType
+        && candidate.createdBy === action.createdBy
+      ));
+      const actionId = match?.id ?? action.id;
+      consumed.add(actionId);
+      await client.query(
+        `
+          INSERT INTO notification_actions (
+            id, notification_id, action_type, label, icon, variant, is_primary,
+            sort_order, payload, opens_external, requires_confirmation, created_by
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+          )
+          ON CONFLICT(id) DO UPDATE SET
+            action_type = EXCLUDED.action_type,
+            label = EXCLUDED.label,
+            icon = EXCLUDED.icon,
+            variant = EXCLUDED.variant,
+            is_primary = EXCLUDED.is_primary,
+            sort_order = EXCLUDED.sort_order,
+            payload = EXCLUDED.payload,
+            opens_external = EXCLUDED.opens_external,
+            requires_confirmation = EXCLUDED.requires_confirmation,
+            created_by = EXCLUDED.created_by
+          WHERE notification_actions.notification_id = EXCLUDED.notification_id
+            AND notification_actions.execution_state = 'pending'
+        `,
+        [
+          actionId,
+          stored.id,
+          action.actionType,
+          action.label,
+          action.icon ?? null,
+          action.variant,
+          action.isPrimary,
+          action.sortOrder,
+          action.payload,
+          action.opensExternal,
+          action.requiresConfirmation,
+          action.createdBy,
+        ],
+      );
+      if (action.isPrimary) primaryActionId = actionId;
+    }
+
+    const ownedCreators = new Set(command.actions.map(action => action.createdBy));
+    for (const stale of pending) {
+      if (
+        consumed.has(stale.id)
+        || (stale.createdBy !== 'connector' && !ownedCreators.has(stale.createdBy))
+      ) continue;
+      await client.query(
+        `DELETE FROM notification_actions WHERE id = $1 AND execution_state = 'pending'`,
+        [stale.id],
+      );
+    }
+    await client.query(
+      'UPDATE notifications SET primary_action_id = $1 WHERE id = $2',
+      [primaryActionId, stored.id],
+    );
   }
   if (command.enrichment) {
     await client.query(
@@ -2440,7 +2532,7 @@ export function createPostgresConnectorExecutionRepositories(
               githubFence?.bindingRevision ?? null,
             ],
           );
-          await deleteTaskRows(client, taskId);
+          await deleteTaskRows(client, taskId, { preserveIdentityBinding: true });
           return { snapshotId, taskTitle: task.title, sourceId: task.sourceId };
         });
       },
@@ -3198,7 +3290,7 @@ export function createPostgresConnectorExecutionRepositories(
             [taskId],
           );
           for (const task of ids) {
-            await assertGenericTaskMutationSupported(client, task.id);
+            await assertGenericTaskDeletionSupported(client, task.id);
           }
           for (const task of ids) await deleteTaskRows(client, task.id);
         });
@@ -3232,6 +3324,7 @@ export function createPostgresConnectorExecutionRepositories(
       assertConnectorSupported(connector) {
         if (
           connector.syncDomainData
+          && connector.type !== 'rymessage'
           && !normalizeFinanceProviderAlias(connector.type)
         ) {
           throw new UnsupportedConnectorExecutionError('connector-owned domain state');

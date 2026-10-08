@@ -7,6 +7,8 @@ import { getTableConfig as getSqliteTableConfig } from 'drizzle-orm/sqlite-core'
 import { describe, expect, it } from 'vitest';
 import * as postgresSchema from '@/db/postgres/schema';
 import * as sqliteSchema from '@/db/schema';
+import { taskTimeActivities as postgresTaskTimeActivities } from '@/db/postgres/schema/tasks';
+import { taskTimeActivities as sqliteTaskTimeActivities } from '@/db/schema/tasks';
 
 function exportedTables(schema: Record<string, unknown>) {
   return Object.fromEntries(
@@ -40,11 +42,28 @@ function sharedTables(schema: Record<string, unknown>) {
 }
 
 describe('PostgreSQL schema', () => {
+  it('keeps task time activity columns, indexes, foreign keys, and checks in parity', () => {
+    const sqliteColumns = Object.values(getTableColumns(sqliteTaskTimeActivities))
+      .map((column) => [column.name, column.notNull, column.hasDefault]);
+    const postgresColumns = Object.values(getTableColumns(postgresTaskTimeActivities))
+      .map((column) => [column.name, column.notNull, column.hasDefault]);
+    expect(postgresColumns).toEqual(sqliteColumns);
+
+    const sqlite = getSqliteTableConfig(sqliteTaskTimeActivities);
+    const postgres = getPostgresTableConfig(postgresTaskTimeActivities);
+    expect(postgres.indexes.map((index) => [index.config.name, index.config.unique]))
+      .toEqual(sqlite.indexes.map((index) => [index.config.name, index.config.unique]));
+    expect(postgres.checks.map((check) => check.name))
+      .toEqual(sqlite.checks.map((check) => check.name));
+    expect(postgres.foreignKeys[0]?.onDelete).toBe('cascade');
+    expect(sqlite.foreignKeys[0]?.onDelete).toBe('cascade');
+  });
+
   it('has a table and column equivalent for every SQLite schema export', () => {
     const sqliteTables = exportedTables(sqliteSchema);
     const postgresTables = sharedTables(postgresSchema);
 
-    expect(Object.keys(postgresTables)).toHaveLength(163);
+    expect(Object.keys(postgresTables)).toHaveLength(171);
     expect(Object.keys(postgresTables).sort()).toEqual(Object.keys(sqliteTables).sort());
 
     for (const [exportName, sqliteTable] of Object.entries(sqliteTables)) {
@@ -142,6 +161,9 @@ describe('PostgreSQL schema', () => {
     expect(postgresSchema.taskHistoryEvents.id.columnType).toBe('PgSerial');
     expect(postgresSchema.tasks.createdAt.columnType).toBe('PgText');
     expect(postgresSchema.financeTransactions.tags.columnType).toBe('PgJsonb');
+    expect(postgresSchema.externalAgents.providerConfig.columnType).toBe('PgJsonb');
+    expect(postgresSchema.externalAgents.providerConfig.notNull).toBe(true);
+    expect(postgresSchema.externalAgents.providerConfig.default).toEqual({});
   });
 
   it('preserves representative keys, cascades, checks, and critical indexes', () => {
@@ -255,7 +277,11 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(7);
+    expect(migrations).toHaveLength(24);
+    expect(migrations).toContain('0020_paperclip_provider_config.sql');
+    expect(migrations).toContain('0021_tough_arachne.sql');
+    expect(migrations).toContain('0022_exotic_ben_urich.sql');
+    expect(migrations).toContain('0023_external_agent_worker_actions.sql');
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
@@ -271,6 +297,39 @@ describe('PostgreSQL schema', () => {
     expect(sql).toContain('"search_vector" "tsvector" GENERATED ALWAYS AS');
     expect(sql).toContain('USING gin ("search_vector")');
     expect(sql).not.toContain('AUTOINCREMENT');
+
+    const persistentRemindersSql = readFileSync(
+      resolve(migrationDirectory, '0010_certain_warhawk.sql'),
+      'utf8',
+    );
+    expect(persistentRemindersSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "reminder_nag_interval" integer',
+    );
+    expect(persistentRemindersSql).toContain(
+      'CREATE INDEX "idx_task_reminder_occurrences_series_sequence"',
+    );
+
+    const recurringOccurrenceSql = readFileSync(
+      resolve(migrationDirectory, '0011_recurring_occurrence_identity.sql'),
+      'utf8',
+    );
+    expect(recurringOccurrenceSql).toContain(
+      'CREATE TABLE IF NOT EXISTS "task_recurrence_occurrences"',
+    );
+    expect(recurringOccurrenceSql).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "idx_task_recurrence_occurrences_identity"',
+    );
+
+    const orphanBindingCleanupSql = readFileSync(
+      resolve(migrationDirectory, '0019_cleanup_orphan_external_bindings.sql'),
+      'utf8',
+    );
+    expect(orphanBindingCleanupSql).toContain(
+      `WHERE "binding_type" = 'task'`,
+    );
+    expect(orphanBindingCleanupSql).toContain(
+      `"tasks"."connector_instance_id" = "external_entity_bindings"."connector_instance_id"`,
+    );
 
     const enrichmentSql = readFileSync(resolve(migrationDirectory, migrations[1]), 'utf8');
     expect(enrichmentSql).toContain('CREATE TABLE "notification_enrichment_jobs"');
@@ -342,6 +401,37 @@ describe('PostgreSQL schema', () => {
     const sourceHealthSql = readFileSync(resolve(migrationDirectory, migrations[5]), 'utf8');
     expect(sourceHealthSql).toContain(
       'ALTER TABLE "source_lists" ADD COLUMN "health_status" text',
+    );
+
+    const taskSoftDeleteSql = readFileSync(resolve(migrationDirectory, migrations[7]), 'utf8');
+    expect(taskSoftDeleteSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "deleted_at" text',
+    );
+    expect(taskSoftDeleteSql).toContain(
+      'CREATE INDEX "idx_tasks_deleted_at" ON "tasks"',
+    );
+    const subtaskOrderingSql = readFileSync(
+      resolve(migrationDirectory, migrations[8]),
+      'utf8',
+    );
+    expect(subtaskOrderingSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "sibling_order" integer',
+    );
+    expect(subtaskOrderingSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "subtask_order_revision" integer DEFAULT 0 NOT NULL',
+    );
+    expect(subtaskOrderingSql).toContain(
+      'CREATE INDEX "idx_tasks_parent_sibling_order" ON "tasks" USING btree ("parent_id","sibling_order")',
+    );
+    const contextAppearanceSql = readFileSync(
+      resolve(migrationDirectory, migrations[9]),
+      'utf8',
+    );
+    expect(contextAppearanceSql).toContain(
+      'ALTER TABLE "hub_projects" ADD COLUMN "appearance" jsonb',
+    );
+    expect(contextAppearanceSql).toContain(
+      'ALTER TABLE "source_lists" ADD COLUMN "appearance" jsonb',
     );
     expect(sourceHealthSql).toContain(
       'ALTER TABLE "source_lists" ADD COLUMN "health_error" text',

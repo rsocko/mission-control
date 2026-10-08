@@ -1,16 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { toast } from 'sonner';
-import { Circle, ListChecks, Loader2, X } from 'lucide-react';
+import { toast } from '@/lib/toast';
+import { Circle, Info, ListChecks, Loader2, X } from 'lucide-react';
 import { SubtaskSection } from './SubtaskSection';
 import { TaskRelationshipsSection } from './TaskRelationshipsSection';
 import { useImagePasteHandler } from './TaskAttachmentSection';
 import { LinkedSourcesSection } from './LinkedSourcesSection';
 import { TaskMoveDialog } from './TaskMoveDialog';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Tooltip } from '@/components/ui/Tooltip';
 import type { TaskField } from '@/types';
 import {
   canEditTaskField,
@@ -40,16 +41,20 @@ import { TaskProjectAssignmentSection } from './TaskProjectAssignmentSection';
 import { TaskPlanningSection } from './TaskPlanningSection';
 import { TaskDuplicatesSection } from './TaskDuplicatesSection';
 import { TaskSourceActionsSection } from './TaskSourceActionsSection';
+import { TaskConnectorSyncState } from '@/components/task-list/TaskConnectorSyncState';
 import { TaskDocumentPreviewSection } from './TaskDocumentPreviewSection';
 import { TaskAttachmentCard } from './TaskAttachmentCard';
 import { OwlTaskActions } from './OwlTaskActions';
 import { TaskDetailFooter, TaskMobileActionBar } from './TaskDetailFooter';
+import { TaskDelegationSection } from './TaskDelegationSection';
 import { toggleMarkdownCheckbox } from './TaskDetailMarkdown';
 import { useTaskDetailData } from './useTaskDetailData';
 import { useTaskDetailMutations, type TaskConfirmRequest } from './useTaskDetailMutations';
 import { parseTaskMetadata } from './task-detail-types';
+import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 import type {
   TaskConfirmDialogState,
+  TaskDetailCloseReason,
   TaskDetailPanelProps,
 } from './task-detail-types';
 
@@ -59,6 +64,7 @@ export type {
   Subtask,
   TagConnectorCaps,
   TaskDetail,
+  TaskDetailCloseReason,
   TaskDetailMode,
   TaskDetailPanelProps,
   TaskFieldUpdate,
@@ -143,6 +149,7 @@ export function TaskDetailPanel({
     connectorCaps,
     supportsAttachments,
     supportsSubtasks,
+    supportsSubtaskOrderWrite,
     extraTags,
     setExtraTags,
     potentialDuplicates,
@@ -581,6 +588,10 @@ export function TaskDetailPanel({
     ? task.recurrence ?? 'none'
     : parsedMetadata?.recurrence ?? 'none';
   const supportsRecurrence = task ? RECURRENCE_CONNECTORS.includes(task.connectorType) : false;
+  const recurrenceOptions = useMemo<RecurrenceEditorOptions>(() => ({
+    skipDates: [...(task?.recurrenceControl?.rule?.semantics.exceptions.skipDates ?? [])],
+    catchUp: task?.recurrenceControl?.rule?.semantics.materialization.catchUp ?? 'latest',
+  }), [task?.recurrenceControl?.rule]);
 
   // Pre-compute the next recurring date for the "Skip to current" action.
   // Only defined when the task is overdue and has a recurrence set.
@@ -750,6 +761,7 @@ export function TaskDetailPanel({
         mode === 'workspace' && 'grid max-w-[1320px] grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(380px,1.35fr)] items-start gap-5 p-7',
       )}>
         <TaskDetailHeader
+          taskId={task.id}
           mode={mode}
           iconSrc={iconSrc ?? null}
           connectorType={task.connectorType}
@@ -775,6 +787,23 @@ export function TaskDetailPanel({
           onModeChange={onModeChange}
         />
 
+        <TaskConnectorSyncState
+          taskId={task.id}
+          taskStatus={task.status}
+          syncStatus={task.syncStatus}
+          connectorType={task.connectorType}
+          connectorInstanceId={task.connectorInstanceId}
+          pushRetryCount={task.pushRetryCount}
+          onRetryComplete={() => onUpdate?.()}
+        />
+
+        <TaskDelegationSection
+          key={`delegation-${task.id}`}
+          taskId={task.id}
+          taskTitle={task.title}
+          mode={mode}
+        />
+
         {mode === 'panel' && task.subtasks && task.subtasks.length > 0 && (() => {
           const completedSubtasks = task.subtasks.filter((subtask) => subtask.status === 'done').length;
           return (
@@ -782,7 +811,7 @@ export function TaskDetailPanel({
               type="button"
               onClick={jumpToSubtasks}
               aria-label={`Jump to subtasks, ${completedSubtasks} of ${task.subtasks.length} complete`}
-              className="order-0 -mt-1 flex w-fit items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-0)]/55 px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]"
+              className="order-0 -mt-1 flex w-fit items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-0)]/55 px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]"
             >
               <ListChecks size={12} aria-hidden="true" />
               Subtasks {completedSubtasks}/{task.subtasks.length}
@@ -876,6 +905,7 @@ export function TaskDetailPanel({
 
         <TaskNotesSection
           mode={mode}
+          taskId={task.id}
           description={task.description}
           descValue={descValue}
           editingDesc={editingDesc}
@@ -940,6 +970,8 @@ export function TaskDetailPanel({
           reminderAt={task.reminderAt ?? null}
           reminderRelative={task.reminderRelative ?? null}
           reminderDueTime={task.reminderDueTime ?? null}
+          reminderNagInterval={task.reminderNagInterval ?? null}
+          reminderNagStopAt={task.reminderNagStopAt ?? null}
           reminderTimezone={task.reminderTimezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone}
           dueDate={taskDueDateOnly}
           reminderSaving={mutations.reminderSaving}
@@ -954,8 +986,12 @@ export function TaskDetailPanel({
           canEditRecurrence={canEditRecurrence}
           recurrenceBlockedReason={blockedReason('recurrence')}
           recurrenceSaveLabel={saveLabel('recurrence')}
+          recurrenceControl={task.recurrenceControl}
+          recurrenceOptions={recurrenceOptions}
+          recurrenceOptionsSaving={mutations.recurrenceOptionsSaving}
           onRecurrenceChange={(recurrence) => { void mutations.handleRecurrenceChange(recurrence); }}
           onRecurrenceModeChange={(recurrenceMode) => { void mutations.handleRecurrenceModeChange(recurrenceMode); }}
+          onRecurrenceOptionsChange={(options) => { void mutations.handleRecurrenceOptionsChange(options); }}
           skipToCurrentDate={skipToCurrentDate}
           skippingToCurrent={mutations.skippingToCurrent}
           canEditDueDate={canEditDueDate}
@@ -964,34 +1000,55 @@ export function TaskDetailPanel({
         />
 
         <section ref={mode === 'panel' ? subtasksSectionRef : undefined} className={cn(
-          'rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3',
+          'overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-0)]/45',
           (mode === 'panel' || mode === 'mobile') && 'order-5',
           mode === 'dialog' && 'col-start-1 row-start-5',
           mode === 'workspace' && 'col-start-1 row-start-5',
         )}>
-          <div className="flex items-center gap-2 mb-2">
-            <ListChecks size={13} className="text-[var(--text-muted)]" />
+          <div className="flex min-h-11 items-center gap-2 border-b border-[var(--border-subtle)] px-3">
+            <ListChecks size={14} className="text-[var(--text-tertiary)]" />
             <h3
               ref={mode === 'panel' ? subtasksHeadingRef : undefined}
               tabIndex={mode === 'panel' ? -1 : undefined}
+              aria-label={task.subtasks?.length
+                ? `Subtasks (${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length})`
+                : 'Subtasks'}
               className={cn(
-                'text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide',
+                'text-sm font-semibold text-[var(--text-heading)]',
                 mode === 'panel' && 'rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]',
               )}
             >
               Subtasks
-              {task.subtasks && task.subtasks.length > 0 && ` (${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length})`}
             </h3>
+            <span className="ml-auto rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] font-medium tabular-nums text-[var(--text-muted)]">
+              {task.subtasks?.length
+                ? `${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length}`
+                : '0 tasks'}
+            </span>
+            {canManageSubtasks && !supportsSubtaskOrderWrite && (task.subtasks?.length ?? 0) > 1 && (
+              <Tooltip content="Subtask order is saved in Mission Control only.">
+                <button
+                  type="button"
+                  aria-label="Subtask order is saved in Mission Control only"
+                  className="rounded-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                >
+                  <Info size={12} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            )}
           </div>
-          <SubtaskSection
-            key={task.id}
-            taskId={task.id}
-            subtasks={task.subtasks || []}
-            onSubtasksChange={handleSubtasksChange}
-            onUpdate={onUpdate}
-            canEdit={canManageSubtasks}
-            canCreateSubtasks={canManageSubtasks}
-          />
+          <div className="p-3">
+            <SubtaskSection
+              key={task.id}
+              taskId={task.id}
+              subtasks={task.subtasks || []}
+              onSubtasksChange={handleSubtasksChange}
+              onUpdate={onUpdate}
+              canEdit={canManageSubtasks}
+              canCreateSubtasks={canManageSubtasks}
+              orderRevision={task.subtaskOrderRevision ?? 0}
+            />
+          </div>
         </section>
 
         {/* Relationships and cross-connector provenance */}
@@ -1101,6 +1158,7 @@ export function TaskDetailPanel({
           <AnimatePresence>
             {notesExpanded && (
               <TaskNotesDialog
+                taskId={task.id}
                 taskTitle={task.title}
                 description={task.description}
                 descValue={descValue}

@@ -1,6 +1,6 @@
-import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { getAsyncAIProviderConfiguration } from '@/lib/ai/provider-runtime';
+import { isTrustedMutationRequest } from '@/lib/api/trusted-request';
 import {
   generateIdeationExpansion,
   ideationExpansionRequestSchema,
@@ -39,29 +39,8 @@ async function readBoundedJson(request: Request): Promise<unknown> {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
-function safeEqual(value: string, expected: string): boolean {
-  const valueBytes = Buffer.from(value);
-  const expectedBytes = Buffer.from(expected);
-  return valueBytes.length === expectedBytes.length && timingSafeEqual(valueBytes, expectedBytes);
-}
-
 export function isAuthorizedIdeationExpansionRequest(request: Request): boolean {
-  const expectedKey = process.env.MC_API_KEY;
-  const headerKey = request.headers.get('x-mc-api-key');
-  const authorization = request.headers.get('authorization');
-  const bearerKey = authorization?.startsWith('Bearer ')
-    ? authorization.slice('Bearer '.length).trim()
-    : null;
-
-  if (expectedKey) {
-    return Boolean(
-      (headerKey && safeEqual(headerKey, expectedKey))
-      || (bearerKey && safeEqual(bearerKey, expectedKey)),
-    );
-  }
-
-  return request.headers.get('sec-fetch-site') === 'same-origin'
-    && request.headers.get('origin') === new URL(request.url).origin;
+  return isTrustedMutationRequest(request);
 }
 
 export async function POST(request: Request) {

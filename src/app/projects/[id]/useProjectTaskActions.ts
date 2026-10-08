@@ -3,11 +3,12 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type Dispatch,
   type SetStateAction,
 } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type {
   HubProject,
   TaskContextMenuActions,
@@ -72,6 +73,14 @@ export function useProjectTaskActions({
 }: UseProjectTaskActionsOptions) {
   const { completingIds, runTaskCompletion } = useTaskCompletion();
   const [myDayTaskIds, setMyDayTaskIds] = useState<Set<string>>(new Set());
+  const fieldMutationVersionsRef = useRef<Record<string, number>>({});
+
+  const beginFieldMutation = (taskId: string, field: 'priority' | 'status' | 'dueDate') => {
+    const key = `${taskId}:${field}`;
+    const version = (fieldMutationVersionsRef.current[key] ?? 0) + 1;
+    fieldMutationVersionsRef.current[key] = version;
+    return { key, version };
+  };
 
   useEffect(() => {
     fetch('/api/my-day')
@@ -138,7 +147,13 @@ export function useProjectTaskActions({
     taskId: string,
     priority: string,
   ) => {
-    if (!requireEditableTask(taskId, 'priority')) return;
+    const task = requireEditableTask(taskId, 'priority');
+    if (!task) return;
+    const nextPriority = priority as TaskPriority;
+    const mutation = beginFieldMutation(taskId, 'priority');
+    setTasks((current) => current.map((candidate) => (
+      candidate.id === taskId ? { ...candidate, priority: nextPriority } : candidate
+    )));
     try {
       const response = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -147,12 +162,14 @@ export function useProjectTaskActions({
       });
       if (!response.ok) throw new Error('Failed to set priority');
       notifyTaskChanged(taskId);
-      setTasks((current) => current.map((task) => (
-        task.id === taskId
-          ? { ...task, priority: priority as TaskPriority }
-          : task
-      )));
     } catch {
+      if (fieldMutationVersionsRef.current[mutation.key] === mutation.version) {
+        setTasks((current) => current.map((candidate) => (
+          candidate.id === taskId && candidate.priority === nextPriority
+            ? { ...candidate, priority: task.priority }
+            : candidate
+        )));
+      }
       toast.error('Failed to set priority');
     }
   }, [requireEditableTask, setTasks]);
@@ -161,7 +178,17 @@ export function useProjectTaskActions({
     taskId: string,
     status: string,
   ) => {
-    if (!requireEditableTask(taskId, 'status')) return;
+    if (status === 'done') {
+      await handleCompleteTask(taskId);
+      return;
+    }
+    const task = requireEditableTask(taskId, 'status');
+    if (!task) return;
+    const nextStatus = status as TaskStatus;
+    const mutation = beginFieldMutation(taskId, 'status');
+    setTasks((current) => current.map((candidate) => (
+      candidate.id === taskId ? { ...candidate, status: nextStatus } : candidate
+    )));
     try {
       const response = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -170,21 +197,29 @@ export function useProjectTaskActions({
       });
       if (!response.ok) throw new Error('Failed to set status');
       notifyTaskChanged(taskId);
-      setTasks((current) => current.map((task) => (
-        task.id === taskId
-          ? { ...task, status: status as TaskStatus }
-          : task
-      )));
     } catch {
+      if (fieldMutationVersionsRef.current[mutation.key] === mutation.version) {
+        setTasks((current) => current.map((candidate) => (
+          candidate.id === taskId && candidate.status === nextStatus
+            ? { ...candidate, status: task.status }
+            : candidate
+        )));
+      }
       toast.error('Failed to set status');
     }
-  }, [requireEditableTask, setTasks]);
+  }, [handleCompleteTask, requireEditableTask, setTasks]);
 
   const handleSetTaskDueDate = useCallback(async (
     taskId: string,
     date: string,
   ) => {
-    if (!requireEditableTask(taskId, 'dueDate')) return;
+    const task = requireEditableTask(taskId, 'dueDate');
+    if (!task) return;
+    const nextDueDate = date || null;
+    const mutation = beginFieldMutation(taskId, 'dueDate');
+    setTasks((current) => current.map((candidate) => (
+      candidate.id === taskId ? { ...candidate, dueDate: nextDueDate } : candidate
+    )));
     try {
       const response = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -193,10 +228,14 @@ export function useProjectTaskActions({
       });
       if (!response.ok) throw new Error('Failed to set due date');
       notifyTaskChanged(taskId);
-      setTasks((current) => current.map((task) => (
-        task.id === taskId ? { ...task, dueDate: date || null } : task
-      )));
     } catch {
+      if (fieldMutationVersionsRef.current[mutation.key] === mutation.version) {
+        setTasks((current) => current.map((candidate) => (
+          candidate.id === taskId && candidate.dueDate === nextDueDate
+            ? { ...candidate, dueDate: task.dueDate }
+            : candidate
+        )));
+      }
       toast.error('Failed to set due date');
     }
   }, [requireEditableTask, setTasks]);

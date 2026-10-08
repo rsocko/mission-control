@@ -71,9 +71,9 @@ export const publicRateLimitPolicies: readonly RateLimitPolicy[] = [
   { name: 'inbound-webhook', limit: 60, windowMs: 60_000 },
   { name: 'connector-webhook', limit: 120, windowMs: 60_000 },
   { name: 'n8n-webhook', limit: 60, windowMs: 60_000 },
-  { name: 'rymessage-webhook', limit: 60, windowMs: 60_000 },
   { name: 'scout-ingest', limit: 60, windowMs: 60_000 },
   { name: 'work-todo-ingest', limit: 60, windowMs: 60_000 },
+  { name: 'scout-worker-onboarding', limit: 30, windowMs: 60_000 },
 ];
 
 export function getPublicRateLimitPolicy(pathname: string, method: string) {
@@ -85,11 +85,9 @@ export function getPublicRateLimitPolicy(pathname: string, method: string) {
   }
   if (/^\/api\/webhooks\/[^/]+$/.test(pathname)) return publicRateLimitPolicies[3];
   if (pathname === '/api/integrations/n8n/webhook' && method === 'POST') return publicRateLimitPolicies[4];
-  if (pathname === '/api/integrations/rymessage' && (method === 'POST' || method === 'GET')) {
-    return publicRateLimitPolicies[5];
-  }
-  if (pathname === '/api/scout/ingest' && method === 'POST') return publicRateLimitPolicies[6];
-  if (pathname === '/api/work-todo/ingest' && method === 'POST') return publicRateLimitPolicies[7];
+  if (pathname === '/api/scout/ingest' && method === 'POST') return publicRateLimitPolicies[5];
+  if (pathname === '/api/work-todo/ingest' && method === 'POST') return publicRateLimitPolicies[6];
+  if (pathname === '/api/scout/worker/onboarding') return publicRateLimitPolicies[7];
   return undefined;
 }
 

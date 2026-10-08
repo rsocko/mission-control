@@ -112,6 +112,32 @@ describe('Quick Add submission planning', () => {
 });
 
 describe('Quick Add task creation', () => {
+  it('applies a recognized trailing date and removes it from the saved title', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-02T12:00:00'));
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse({ id: 'task-1', editPolicy: editableTaskPolicy })
+    );
+
+    try {
+      await createQuickAddTask({ fetcher }, {
+        task: task('Fix Solar Panels tomorrow'),
+        destination: localDestination,
+        resolvedDestination: { requiresSelection: false },
+        addToMyDay: false,
+        contextProject: null,
+        contextProjectActive: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({
+      title: 'Fix Solar Panels',
+      dueDate: '2026-10-03',
+    });
+  });
+
   it('merges defaults into the task request and applies the contextual project', async () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
       jsonResponse({ id: 'task-1', editPolicy: editableTaskPolicy })
@@ -201,9 +227,100 @@ describe('Quick Add task creation', () => {
       sourceListName: 'Inbox',
     }));
   });
+
+  it('adds only explicitly starred tasks to My Day in a mixed batch', async () => {
+    let taskSequence = 0;
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url === '/api/tasks') {
+        taskSequence++;
+        return jsonResponse({ id: `task-${taskSequence}`, editPolicy: editableTaskPolicy });
+      }
+      if (url === '/api/my-day') return jsonResponse({});
+      return jsonResponse({}, 404);
+    });
+    const plan = planQuickAddSubmission({
+      input: '',
+      pendingTasks: [task('Today *'), task('Later')],
+      destination: localDestination,
+      projectsLoadState: 'ready',
+    });
+
+    await submitQuickAdd({ fetcher, getToday: () => '2026-09-17' }, {
+      plan,
+      destination: localDestination,
+      addToMyDay: false,
+      contextProject: null,
+      contextProjectActive: false,
+    });
+
+    const myDayCalls = fetcher.mock.calls.filter(([input]) => String(input) === '/api/my-day');
+    expect(myDayCalls).toHaveLength(1);
+    expect(JSON.parse(String(myDayCalls[0][1]?.body))).toEqual({
+      taskId: 'task-1',
+      date: '2026-09-17',
+    });
+    const taskBodies = fetcher.mock.calls
+      .filter(([input]) => String(input) === '/api/tasks')
+      .map(([, init]) => JSON.parse(String(init?.body)) as { title: string });
+    expect(taskBodies.map(({ title }) => title)).toEqual(['Today', 'Later']);
+  });
 });
 
 describe('Quick Add orchestration', () => {
+  it('persists supported subtask metadata without stripping unsupported tokens', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-02T12:00:00'));
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      if (String(input) === '/api/tasks') {
+        return jsonResponse({ id: 'parent-1', editPolicy: editableTaskPolicy });
+      }
+      if (String(input) === '/api/tasks/parent-1/subtasks') {
+        return jsonResponse({
+          subtask: { id: 'subtask-1' },
+          editPolicy: editableTaskPolicy,
+        });
+      }
+      if (String(input) === '/api/my-day') return jsonResponse({});
+      return jsonResponse({}, 404);
+    });
+    const plan = planQuickAddSubmission({
+      input: '',
+      pendingTasks: [
+        task('Parent'),
+        task('Child #ops daily tomorrow !high ~soon ^3 *', 0),
+      ],
+      destination: localDestination,
+      projectsLoadState: 'ready',
+    });
+
+    try {
+      await submitQuickAdd({ fetcher, getToday: () => '2026-10-02' }, {
+        plan,
+        destination: localDestination,
+        addToMyDay: false,
+        contextProject: null,
+        contextProjectActive: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const subtaskCall = fetcher.mock.calls.find(([input]) =>
+      String(input) === '/api/tasks/parent-1/subtasks'
+    );
+    expect(JSON.parse(String(subtaskCall?.[1]?.body))).toEqual({
+      title: 'Child #ops daily',
+      priority: 'high',
+      planningHorizon: 'soon',
+      dueDate: '2026-10-03',
+      effort: 3,
+    });
+    expect(fetcher).toHaveBeenCalledWith('/api/my-day', expect.objectContaining({
+      body: JSON.stringify({ taskId: 'subtask-1', date: '2026-10-02' }),
+    }));
+  });
+
   it('creates parents before their subtasks and returns notification metadata', async () => {
     const calls: string[] = [];
     const fetcher = vi.fn<typeof fetch>(async (input) => {
@@ -414,6 +531,7 @@ describe('Quick Add follow-up workflows', () => {
             { id: 'tag-1', name: 'Release', confidence: 0.9 },
             { id: 'tag-2', name: 'Maybe', confidence: 0.1 },
           ],
+          projects: [],
         },
       },
     }));
@@ -423,11 +541,13 @@ describe('Quick Add follow-up workflows', () => {
       priority: { value: 'high', confidence: 0.8, reason: 'urgent' },
       effort: null,
       tags: [{ id: 'tag-1', name: 'Release', confidence: 0.9 }],
+      projects: [],
     });
     expect(mergeQuickAddSuggestions({
       priority: null,
       effort: null,
       tags: [{ id: 'other-id', name: 'release', confidence: 0.7 }],
+      projects: [],
     }, fetched)).toEqual(fetched);
   });
 });

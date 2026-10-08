@@ -104,11 +104,13 @@ describe('connector support derivation', () => {
       connectorCaps: null,
       supportsAttachments: true,
       supportsSubtasks: true,
+      supportsSubtaskOrderWrite: true,
     });
     expect(deriveConnectorSupport(undefined, false)).toEqual({
       connectorCaps: null,
       supportsAttachments: false,
       supportsSubtasks: false,
+      supportsSubtaskOrderWrite: false,
     });
   });
 
@@ -117,6 +119,7 @@ describe('connector support derivation', () => {
       connectorCaps: { tagWriteBack: true, tagCreationMode: 'freeform', tagScope: 'global' },
       supportsAttachments: true,
       supportsSubtasks: false,
+      supportsSubtaskOrderWrite: false,
     });
   });
 
@@ -124,7 +127,7 @@ describe('connector support derivation', () => {
     stubFetch(() => jsonResponse({
       taskDestinations: [
         { id: 'other', capabilities: { attachments: true } },
-        { id: 'inst-1', capabilities: { tagCreationMode: 'predefined', tagScope: 'per-list', subtasks: true } },
+        { id: 'inst-1', capabilities: { tagCreationMode: 'predefined', tagScope: 'per-list', subtasks: true, subtaskOrderWrite: true } },
       ],
     }));
 
@@ -132,6 +135,7 @@ describe('connector support derivation', () => {
       connectorCaps: { tagWriteBack: false, tagCreationMode: 'predefined', tagScope: 'per-list' },
       supportsAttachments: false,
       supportsSubtasks: true,
+      supportsSubtaskOrderWrite: true,
     });
   });
 });

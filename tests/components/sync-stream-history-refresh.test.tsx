@@ -8,7 +8,7 @@ const { toastMock, toastError } = vi.hoisted(() => ({
   toastMock: vi.fn(),
   toastError: vi.fn(),
 }));
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: Object.assign(toastMock, { error: toastError }),
 }));
 

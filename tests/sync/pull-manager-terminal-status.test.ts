@@ -553,6 +553,50 @@ describe('pull-manager terminal status sync', () => {
     expect(result.updated).toBe(0);
   });
 
+  it('preserves a Microsoft To Do cancellation represented remotely as completed', async () => {
+    mockExistingTasks.push(makeExistingTask({
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-1',
+      sourceId: 'list-1:task-1',
+      status: 'cancelled',
+      statusReason: 'not_planned',
+    }));
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: true,
+      sync: true,
+      subtasks: true,
+      lists: true,
+      tags: true,
+      tagWriteBack: true,
+      taskFieldProfile: {
+        statusReason: { authority: 'source', writeBack: 'direct' },
+      },
+    };
+
+    const result = await upsertTasks(
+      'todo-1',
+      { ...mockConnector, type: 'microsoft-todo' },
+      [makeRemoteTask({
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-1',
+        sourceId: 'list-1:task-1',
+        status: 'done',
+      })],
+      false,
+      [],
+    );
+
+    expect(result.updated).toBe(1);
+    expect(mockUpdateSets).toContainEqual(
+      expect.objectContaining({
+        status: 'cancelled',
+        statusReason: 'not_planned',
+      }),
+    );
+  });
+
   it('forces terminal sync even when task is pending_push', async () => {
     mockExistingTasks.push(makeExistingTask({
       status: 'in_progress',

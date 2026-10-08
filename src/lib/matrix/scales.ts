@@ -1,9 +1,9 @@
 import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 import type { PlanningHorizon } from '@/types';
 
-export type MatrixAxisMode = 'priority-urgency' | 'priority-effort';
+export type MatrixAxisMode = 'priority-urgency' | 'priority-effort' | 'priority-horizon';
 export type MatrixSizeMode = 'smart-score' | 'effort' | 'urgency' | 'uniform';
-export type MatrixColorMode = 'project' | 'urgency' | 'status' | 'priority' | 'planning-horizon';
+export type MatrixColorMode = 'project' | 'urgency' | 'status' | 'priority' | 'planning-horizon' | 'tag';
 export type MatrixMobileView = 'table' | 'matrix';
 
 export interface MatrixPaginationCursor {
@@ -14,16 +14,21 @@ export interface MatrixPaginationCursor {
 export interface UrgencyResult {
   value: number | null;
   daysUntilDue: number | null;
-  state: 'invalid' | 'none' | 'overdue' | 'today' | 'future' | 'horizon';
-  source: 'due-date' | 'planning-horizon' | 'none';
-  planningHorizon: PlanningHorizon | null;
+  state: 'invalid' | 'none' | 'overdue' | 'today' | 'future';
+  source: 'due-date' | 'none';
 }
 
-const PLANNING_HORIZON_URGENCY: Record<PlanningHorizon, number> = {
-  next: 85,
-  soon: 55,
-  later: 25,
-  someday: 5,
+export interface MatrixTimingConflict {
+  kind: 'deadline-sooner-than-horizon' | 'deadline-later-than-horizon';
+  label: string;
+  detail: string;
+}
+
+const PLANNING_HORIZON_POSITION: Record<PlanningHorizon, number> = {
+  someday: 12.5,
+  later: 37.5,
+  soon: 62.5,
+  next: 87.5,
 };
 
 const URGENCY_ANCHORS = [
@@ -71,24 +76,13 @@ export function priorityLabel(priority: string): string {
 export function urgencyScore(
   dueDate: string | null,
   today: string,
-  planningHorizon: PlanningHorizon | null = null,
 ): UrgencyResult {
   if (!dueDate) {
-    if (planningHorizon) {
-      return {
-        value: PLANNING_HORIZON_URGENCY[planningHorizon],
-        daysUntilDue: null,
-        state: 'horizon',
-        source: 'planning-horizon',
-        planningHorizon,
-      };
-    }
     return {
       value: 0,
       daysUntilDue: null,
       state: 'none',
       source: 'none',
-      planningHorizon: null,
     };
   }
   const due = dayNumber(dueDate);
@@ -99,19 +93,18 @@ export function urgencyScore(
       daysUntilDue: null,
       state: 'invalid',
       source: 'due-date',
-      planningHorizon,
     };
   }
 
   const daysUntilDue = due - current;
   if (daysUntilDue < 0) {
-    return { value: 100, daysUntilDue, state: 'overdue', source: 'due-date', planningHorizon };
+    return { value: 100, daysUntilDue, state: 'overdue', source: 'due-date' };
   }
   if (daysUntilDue === 0) {
-    return { value: 95, daysUntilDue, state: 'today', source: 'due-date', planningHorizon };
+    return { value: 95, daysUntilDue, state: 'today', source: 'due-date' };
   }
   if (daysUntilDue >= 90) {
-    return { value: 5, daysUntilDue, state: 'future', source: 'due-date', planningHorizon };
+    return { value: 5, daysUntilDue, state: 'future', source: 'due-date' };
   }
 
   for (let index = 1; index < URGENCY_ANCHORS.length; index += 1) {
@@ -124,12 +117,48 @@ export function urgencyScore(
         daysUntilDue,
         state: 'future',
         source: 'due-date',
-        planningHorizon,
       };
     }
   }
 
-  return { value: 5, daysUntilDue, state: 'future', source: 'due-date', planningHorizon };
+  return { value: 5, daysUntilDue, state: 'future', source: 'due-date' };
+}
+
+export function horizonPosition(planningHorizon: PlanningHorizon | null | undefined): number | null {
+  return planningHorizon ? PLANNING_HORIZON_POSITION[planningHorizon] : null;
+}
+
+export function timingConflict(
+  planningHorizon: PlanningHorizon | null | undefined,
+  urgency: UrgencyResult,
+): MatrixTimingConflict | null {
+  if (!planningHorizon || urgency.daysUntilDue === null || urgency.state === 'invalid') return null;
+
+  if (
+    (planningHorizon === 'later' || planningHorizon === 'someday')
+    && urgency.daysUntilDue <= 3
+  ) {
+    const timing = urgency.daysUntilDue < 0
+      ? `${Math.abs(urgency.daysUntilDue)} days overdue`
+      : urgency.daysUntilDue === 0
+        ? 'due today'
+        : `due in ${urgency.daysUntilDue} days`;
+    return {
+      kind: 'deadline-sooner-than-horizon',
+      label: 'Deadline sooner than Horizon',
+      detail: `${planningHorizon === 'later' ? 'Later' : 'Someday'} Horizon, but ${timing}.`,
+    };
+  }
+
+  if (planningHorizon === 'next' && urgency.daysUntilDue >= 30) {
+    return {
+      kind: 'deadline-later-than-horizon',
+      label: 'Deadline later than Horizon',
+      detail: `Next Horizon, but due in ${urgency.daysUntilDue} days.`,
+    };
+  }
+
+  return null;
 }
 
 export function effortPosition(effort: number | null | undefined): number | null {

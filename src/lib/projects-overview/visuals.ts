@@ -11,6 +11,7 @@ export interface PortfolioVisualProject {
     completedTasks: number;
     percentComplete: number;
     health: ProjectHealth;
+    lastActivity?: string;
   };
 }
 
@@ -38,6 +39,11 @@ export function buildCategoryPortfolioRows(
   const groups = uncategorized.length > 0
     ? [...categories, { category: 'Uncategorized', projects: uncategorized }]
     : categories;
+  const sourceGroup = new Map(groups.map(group => [group.category, group.projects]));
+  const latestActivity = (category: string) => Math.max(
+    0,
+    ...(sourceGroup.get(category) ?? []).map(project => Date.parse(project.progress.lastActivity ?? '') || 0),
+  );
 
   return groups
     .filter(group => group.projects.length > 0)
@@ -57,7 +63,14 @@ export function buildCategoryPortfolioRows(
         },
       };
     })
-    .sort((a, b) => b.projectCount - a.projectCount || a.category.localeCompare(b.category));
+    .sort((a, b) => {
+      const aAttention = a.health.at_risk + a.health.behind;
+      const bAttention = b.health.at_risk + b.health.behind;
+      return bAttention - aAttention
+        || latestActivity(b.category) - latestActivity(a.category)
+        || b.projectCount - a.projectCount
+        || a.category.localeCompare(b.category);
+    });
 }
 
 function parseTargetDate(value: string): Date | null {

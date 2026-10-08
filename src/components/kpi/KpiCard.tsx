@@ -3,7 +3,8 @@
 import { motion } from 'motion/react';
 import {
   ClipboardList, AlertTriangle, CalendarDays, Bell, Sun, Flame,
-  CheckCircle2, RefreshCw, Zap, TrendingUp, Inbox,
+  CheckCircle2, RefreshCw, Zap, TrendingUp, Inbox, FileText,
+  UserRoundCheck, Telescope, CircleHelp, Pin,
 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { statCardVariants } from '@/lib/motion';
@@ -11,7 +12,8 @@ import type { KpiCardDefinition, KpiCardData } from '@/lib/kpi/registry';
 
 const ICON_MAP: Record<string, React.ComponentType<{ size: number }>> = {
   ClipboardList, AlertTriangle, CalendarDays, Bell, Sun, Flame,
-  CheckCircle2, RefreshCw, Zap, TrendingUp, Inbox,
+  CheckCircle2, RefreshCw, Zap, TrendingUp, Inbox, FileText,
+  UserRoundCheck, Telescope, CircleHelp,
 };
 
 const ACCENT_CLASSES: Record<string, { border: string; value: string; icon: string; bar: string; dot: string }> = {
@@ -64,6 +66,34 @@ const ACCENT_CLASSES: Record<string, { border: string; value: string; icon: stri
     bar: 'bg-purple-400',
     dot: 'bg-purple-400',
   },
+  indigo: {
+    border: 'border-indigo-800/40',
+    value: 'text-indigo-400',
+    icon: 'text-indigo-400 bg-indigo-900/20',
+    bar: 'bg-indigo-400',
+    dot: 'bg-indigo-400',
+  },
+  pink: {
+    border: 'border-pink-800/40',
+    value: 'text-pink-400',
+    icon: 'text-pink-400 bg-pink-900/20',
+    bar: 'bg-pink-400',
+    dot: 'bg-pink-400',
+  },
+  emerald: {
+    border: 'border-emerald-800/40',
+    value: 'text-emerald-400',
+    icon: 'text-emerald-400 bg-emerald-900/20',
+    bar: 'bg-emerald-400',
+    dot: 'bg-emerald-400',
+  },
+  slate: {
+    border: 'border-slate-700/40',
+    value: 'text-slate-300',
+    icon: 'text-slate-300 bg-slate-800/40',
+    bar: 'bg-slate-400',
+    dot: 'bg-slate-400',
+  },
 };
 
 const DEFAULT_ACCENT = {
@@ -74,7 +104,7 @@ const DEFAULT_ACCENT = {
   dot: 'bg-[var(--text-tertiary)]',
 };
 
-function getAccent(accentKey: string | undefined, value?: number) {
+function getAccent(accentKey: string | undefined) {
   if (!accentKey) return DEFAULT_ACCENT;
   // For counter types, dim accent when value is 0
   return ACCENT_CLASSES[accentKey] || DEFAULT_ACCENT;
@@ -242,6 +272,8 @@ interface KpiCardProps {
   data: KpiCardData;
   onClick?: () => void;
   active?: boolean;
+  /** Indicates the card is fixed in a visible slot rather than rotating. */
+  pinned?: boolean;
   /** Compact mode — hides subtitle text (used when 6 cards are shown on smaller screens) */
   compact?: boolean;
   /** Inline mode — compact metric for a shared operational summary bar */
@@ -262,9 +294,9 @@ function formatInlineValue(definition: KpiCardDefinition, data: KpiCardData) {
   }
 }
 
-export function KpiCard({ definition, data, onClick, active, compact, inline }: KpiCardProps) {
+export function KpiCard({ definition, data, onClick, active, pinned, compact, inline }: KpiCardProps) {
   const effectiveAccent = data.accent || (data.value > 0 ? definition.accent : undefined);
-  const accentClasses = getAccent(effectiveAccent, data.value);
+  const accentClasses = getAccent(effectiveAccent);
   const IconComponent = ICON_MAP[definition.icon];
   const isClickable = !!onClick;
   const subtitle = data.subtitle || definition.subtitle;
@@ -287,6 +319,7 @@ export function KpiCard({ definition, data, onClick, active, compact, inline }: 
         } : undefined}
         role={isClickable ? 'button' : undefined}
         tabIndex={isClickable ? 0 : undefined}
+        aria-pressed={isClickable && active ? true : undefined}
         whileTap={isClickable ? { scale: 0.98 } : undefined}
       >
         {IconComponent && (
@@ -295,7 +328,10 @@ export function KpiCard({ definition, data, onClick, active, compact, inline }: 
           </span>
         )}
         <span className="min-w-0">
-          <span className="block truncate text-xs text-[var(--text-muted)]">{definition.label}</span>
+          <span className="flex min-w-0 items-center gap-1 text-xs text-[var(--text-muted)]">
+            <span className="truncate">{definition.label}</span>
+            {pinned && <Pin size={10} className="shrink-0" aria-label="Pinned" />}
+          </span>
           <span className={`block text-base font-semibold tabular-nums ${accentClasses.value}`}>
             {formatInlineValue(definition, data)}
           </span>
@@ -311,12 +347,22 @@ export function KpiCard({ definition, data, onClick, active, compact, inline }: 
       } ${isClickable ? 'cursor-pointer hover:bg-[var(--surface-2)] transition-colors duration-150' : ''}`}
       variants={statCardVariants}
       onClick={onClick}
+      onKeyDown={isClickable ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick?.();
+        }
+      } : undefined}
+      role={isClickable ? 'button' : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      aria-pressed={isClickable && active ? true : undefined}
       whileTap={isClickable ? { scale: 0.96 } : undefined}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p className="text-sm text-[var(--text-tertiary)] truncate">{definition.label}</p>
+            {pinned && <Pin size={11} className="shrink-0 text-[var(--text-muted)]" aria-label="Pinned" />}
             {IconComponent && (
               <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${accentClasses.icon}`}>
                 <IconComponent size={12} />

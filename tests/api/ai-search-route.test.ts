@@ -4,10 +4,14 @@ const mocks = vi.hoisted(() => ({
   calls: [] as string[],
   getSearchStatus: vi.fn(),
   listDeletedIds: vi.fn(),
+  searchFTSFacets: vi.fn(),
   searchWithBranches: vi.fn(),
 }));
 
 vi.mock('@/lib/search/semantic', () => mocks);
+vi.mock('@/lib/search/fts', () => ({
+  searchFTSFacets: mocks.searchFTSFacets,
+}));
 vi.mock('@/lib/persistence/runtime', () => ({
   getCorePersistenceRepositories: () => ({
     connectors: { listDeletedIds: mocks.listDeletedIds },
@@ -21,9 +25,11 @@ describe('AI search route', () => {
   beforeEach(() => {
     mocks.getSearchStatus.mockReset();
     mocks.listDeletedIds.mockReset();
+    mocks.searchFTSFacets.mockReset();
     mocks.searchWithBranches.mockReset();
     mocks.calls.length = 0;
     mocks.listDeletedIds.mockResolvedValue(['deleted-connector']);
+    mocks.searchFTSFacets.mockResolvedValue({ sources: [], statuses: [] });
     mocks.getSearchStatus.mockResolvedValue({
       available: true,
       enabled: true,
@@ -112,6 +118,71 @@ describe('AI search route', () => {
         excludeDone: true,
       },
     );
+    expect(mocks.searchFTSFacets).toHaveBeenCalledWith('urgent', {
+      type: 'all',
+      mode: 'keyword',
+      limit: 20,
+      source: 'Project Alpha',
+      status: 'in_progress',
+      excludeDone: true,
+    });
+  });
+
+  it('returns authoritative keyword facets independently of the limited results', async () => {
+    mocks.searchWithBranches.mockResolvedValue({
+      results: [{ type: 'task', id: 'top-result' }],
+      branches: {},
+    });
+    mocks.searchFTSFacets.mockResolvedValue({
+      sources: [
+        { value: 'Top project', count: 30 },
+        { value: 'Lower-ranked project', count: 2 },
+      ],
+      statuses: [{ value: 'todo', count: 32 }],
+    });
+
+    const { GET } = await import('@/app/api/ai/search/route');
+    const response = await GET(new Request(
+      'http://localhost/api/ai/search?q=planning&mode=keyword&limit=1',
+    ));
+    const body = await response.json();
+
+    expect(body.results).toHaveLength(1);
+    expect(body.facets).toEqual({
+      sources: [
+        { value: 'Top project', count: 30 },
+        { value: 'Lower-ranked project', count: 2 },
+      ],
+      statuses: [{ value: 'todo', count: 32 }],
+    });
+  });
+
+  it('translates date presets into authoritative search bounds', async () => {
+    mocks.searchWithBranches.mockResolvedValue({ results: [], branches: {} });
+    const { GET } = await import('@/app/api/ai/search/route');
+
+    await GET(new Request(
+      'http://localhost/api/ai/search?q=urgent&type=notifications&mode=keyword&notificationKind=notes&date=7d',
+    ));
+
+    expect(mocks.searchWithBranches).toHaveBeenCalledWith(
+      'urgent',
+      expect.objectContaining({
+        type: 'notifications',
+        notificationKind: 'notes',
+        dateFrom: expect.any(String),
+      }),
+    );
+  });
+
+  it('rejects an unsupported date preset', async () => {
+    const { GET } = await import('@/app/api/ai/search/route');
+    const response = await GET(new Request(
+      'http://localhost/api/ai/search?q=urgent&mode=keyword&date=tomorrow',
+    ));
+
+    expect(response.status).toBe(400);
+    expect(mocks.searchWithBranches).not.toHaveBeenCalled();
   });
 
   it('derives the Universe visibility scope before searching', async () => {

@@ -54,7 +54,7 @@ import {
   NavigationRailMorph,
 } from '@/components/layout/NavigationBadge';
 import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
-import type { SyncProgress } from '@/lib/hooks/useSyncStream';
+import { initialProgress, type SyncProgress } from '@/lib/hooks/useSyncStream';
 import {
   EMPTY_NAVIGATION_COUNTS,
   type NavigationCounts,
@@ -162,6 +162,7 @@ interface NavRailProps {
   counts?: NavigationCounts;
   syncStatus?: ConnectorHealthInfo[];
   syncProgress?: SyncProgress;
+  syncProgresses?: SyncProgress[];
   onSyncConnector?: (connectorId: string) => void;
   showSyncBanner?: boolean;
   onShowSyncBannerChange?: (show: boolean) => void;
@@ -179,6 +180,7 @@ export function NavRail({
   counts = EMPTY_NAVIGATION_COUNTS,
   syncStatus = [],
   syncProgress,
+  syncProgresses = [],
   onSyncConnector,
   showSyncBanner = true,
   onShowSyncBannerChange,
@@ -212,12 +214,11 @@ export function NavRail({
   const brandSubtitle = isAiActive ? 'Houston: working' : 'Houston: standing by';
   const activeSyncStatus = syncStatus.filter((status) => status.status !== 'disabled');
   const showSyncStatusControl = isSyncing || activeSyncStatus.length > 0;
-  const syncPercent = syncProgress && syncProgress.totalLists > 0
-    ? Math.min(100, Math.round((syncProgress.listIndex / syncProgress.totalLists) * 100))
-    : 0;
-  const syncedTasks = syncProgress
-    ? syncProgress.parentTasks || syncProgress.totalTasks
-    : 0;
+  const displayedSyncProgresses = syncProgresses.length > 0
+    ? syncProgresses
+    : syncProgress?.isSyncing
+      ? [syncProgress]
+      : [];
   const layoutSignature = [
     features?.aiEnabled,
     features?.financeEnabled,
@@ -477,73 +478,99 @@ export function NavRail({
           {isSyncing && (
             <span className="flex items-center gap-1 text-xs text-blue-400">
               <RefreshCw size={10} className="animate-spin" />
-              Syncing…
+              {displayedSyncProgresses.length > 1
+                ? `${displayedSyncProgresses.length} syncing…`
+                : 'Syncing…'}
             </span>
           )}
         </div>
         {isSyncing && (
           <div
-            className="-mx-3 mb-3 border-y border-blue-400/15 bg-blue-400/[0.06] px-3 py-3"
+            className="-mx-3 mb-3 space-y-3 border-y border-blue-400/15 bg-blue-400/[0.06] px-3 py-3"
             aria-live="polite"
           >
-            <div className="flex items-start gap-2.5">
-              <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-blue-400/10 text-blue-400">
-                <RefreshCw size={14} className="animate-spin" aria-hidden="true" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-[var(--text-primary)]">
-                  {syncProgress?.connectorName || 'Preparing next source'}
-                </p>
-                <p className="mt-0.5 truncate text-xs text-[var(--text-secondary)]">
-                  {!syncProgress?.phase
-                    ? 'Waiting for sync details…'
-                    : syncProgress.phase === 'push'
-                      ? 'Pushing local changes…'
-                      : syncProgress.phase === 'lists'
-                        ? 'Discovering lists…'
-                        : syncProgress.currentList || 'Loading tasks…'}
-                </p>
-              </div>
-            </div>
-
-            {syncProgress && syncProgress.totalLists > 0 && (
-              <div className="mt-3">
-                <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--text-tertiary)]">
-                  <span>
-                    List {syncProgress.listIndex.toLocaleString()} of {syncProgress.totalLists.toLocaleString()}
-                  </span>
-                  <span className="tabular-nums">{syncPercent}%</span>
-                </div>
+            {(displayedSyncProgresses.length > 0
+              ? displayedSyncProgresses
+              : [{ ...initialProgress, isSyncing: true }]
+            ).map((connectorProgress, index) => {
+              const percent = connectorProgress.totalLists > 0
+                ? Math.min(
+                    100,
+                    Math.round(
+                      (connectorProgress.listIndex / connectorProgress.totalLists) * 100,
+                    ),
+                  )
+                : 0;
+              const syncedTasks = connectorProgress.parentTasks || connectorProgress.totalTasks;
+              const progressLabel = connectorProgress.connectorName || 'Preparing next source';
+              return (
                 <div
-                  role="progressbar"
-                  aria-label="Sync progress"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={syncPercent}
-                  className="h-1 overflow-hidden rounded-full bg-[var(--surface-3)]"
+                  key={connectorProgress.connectorId ?? `pending-${index}`}
+                  className={cn(index > 0 && 'border-t border-blue-400/15 pt-3')}
                 >
-                  <div
-                    className="h-full rounded-full bg-blue-400 transition-[width] duration-300"
-                    style={{ width: `${syncPercent}%` }}
-                  />
-                </div>
-              </div>
-            )}
+                  <div className="flex items-start gap-2.5">
+                    <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-blue-400/10 text-blue-400">
+                      <RefreshCw size={14} className="animate-spin" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                        {progressLabel}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-[var(--text-secondary)]">
+                        {!connectorProgress.phase
+                          ? 'Waiting for sync details…'
+                          : connectorProgress.phase === 'push'
+                            ? 'Pushing local changes…'
+                            : connectorProgress.phase === 'lists'
+                              ? 'Discovering lists…'
+                              : connectorProgress.currentList || 'Loading tasks…'}
+                      </p>
+                    </div>
+                  </div>
 
-            {syncProgress && (syncedTasks > 0 || syncProgress.subtasks > 0) && (
-              <p className="mt-2 text-xs tabular-nums text-[var(--text-tertiary)]">
-                {syncedTasks.toLocaleString()} tasks synced
-                {syncProgress.subtasks > 0 && (
-                  <> · {syncProgress.subtasks.toLocaleString()} subtasks</>
-                )}
-              </p>
-            )}
+                  {connectorProgress.totalLists > 0 && (
+                    <div className="mt-3">
+                      <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--text-tertiary)]">
+                        <span>
+                          List {connectorProgress.listIndex.toLocaleString()} of{' '}
+                          {connectorProgress.totalLists.toLocaleString()}
+                        </span>
+                        <span className="tabular-nums">{percent}%</span>
+                      </div>
+                      <div
+                        role="progressbar"
+                        aria-label={`${progressLabel} sync progress`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={percent}
+                        className="h-1 overflow-hidden rounded-full bg-[var(--surface-3)]"
+                      >
+                        <div
+                          className="h-full rounded-full bg-blue-400 transition-[width] duration-300"
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {(syncedTasks > 0 || connectorProgress.subtasks > 0) && (
+                    <p className="mt-2 text-xs tabular-nums text-[var(--text-tertiary)]">
+                      {syncedTasks.toLocaleString()} tasks synced
+                      {connectorProgress.subtasks > 0 && (
+                        <> · {connectorProgress.subtasks.toLocaleString()} subtasks</>
+                      )}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
         <div className="max-h-56 space-y-2 overflow-y-auto">
           {activeSyncStatus.map((status) => {
             const isHealthy = status.status === 'healthy';
-            const isThisConnectorSyncing = isSyncing && syncProgress?.connectorId === status.id;
+            const isThisConnectorSyncing = isSyncing
+              && displayedSyncProgresses.some((item) => item.connectorId === status.id);
             return (
               <div key={status.id} className="flex items-center justify-between gap-2 text-xs">
                 <div className="flex min-w-0 items-center gap-1.5">

@@ -16,6 +16,7 @@ function renderNavRail({
   syncStatus = [],
   counts,
   syncProgress,
+  syncProgresses,
   onSyncConnector,
   showSyncBanner,
   onShowSyncBannerChange,
@@ -25,6 +26,7 @@ function renderNavRail({
   syncStatus?: ConnectorHealthInfo[];
   counts?: NavigationCounts;
   syncProgress?: SyncProgress;
+  syncProgresses?: SyncProgress[];
   onSyncConnector?: (connectorId: string) => void;
   showSyncBanner?: boolean;
   onShowSyncBannerChange?: (show: boolean) => void;
@@ -38,6 +40,7 @@ function renderNavRail({
         syncStatus={syncStatus}
         counts={counts}
         syncProgress={syncProgress}
+        syncProgresses={syncProgresses}
         onSyncConnector={onSyncConnector}
         showSyncBanner={showSyncBanner}
         onShowSyncBannerChange={onShowSyncBannerChange}
@@ -467,12 +470,59 @@ describe('NavRail', () => {
     expect(screen.getByText('Work')).toBeInTheDocument();
     expect(screen.getByText('List 2 of 5')).toBeInTheDocument();
     expect(screen.getByText('40 tasks synced · 8 subtasks')).toBeInTheDocument();
-    expect(screen.getByRole('progressbar', { name: 'Sync progress' })).toHaveAttribute('aria-valuenow', '40');
+    expect(screen.getByRole('progressbar', { name: 'Microsoft To Do sync progress' })).toHaveAttribute('aria-valuenow', '40');
     expect(screen.getByText('Local')).toBeInTheDocument();
     expect(screen.getByText('Never')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('switch', { name: 'Show top sync progress bar' }));
     expect(onShowSyncBannerChange).toHaveBeenCalledWith(false);
+  });
+
+  it('keeps concurrent connector progress and metadata paired', () => {
+    renderNavRail({
+      isSyncing: true,
+      syncProgresses: [
+        {
+          ...initialProgress,
+          isSyncing: true,
+          connectorId: 'todo-1',
+          connectorName: 'Microsoft To Do',
+          phase: 'tasks',
+          currentList: 'Work',
+          listIndex: 60,
+          totalLists: 96,
+          parentTasks: 2718,
+          subtasks: 3037,
+        },
+        {
+          ...initialProgress,
+          isSyncing: true,
+          connectorId: 'paperclip-1',
+          connectorName: 'Paperclip',
+          phase: 'tasks',
+          currentList: 'All companies',
+          listIndex: 2,
+          totalLists: 4,
+          parentTasks: 24,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync status' }));
+
+    expect(screen.getByText('2 syncing…')).toBeInTheDocument();
+    expect(screen.getByText('Microsoft To Do')).toBeInTheDocument();
+    expect(screen.getByText('Work')).toBeInTheDocument();
+    expect(screen.getByText('List 60 of 96')).toBeInTheDocument();
+    expect(screen.getByText('2,718 tasks synced · 3,037 subtasks')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Microsoft To Do sync progress' }))
+      .toHaveAttribute('aria-valuenow', '63');
+    expect(screen.getByText('Paperclip')).toBeInTheDocument();
+    expect(screen.getByText('All companies')).toBeInTheDocument();
+    expect(screen.getByText('List 2 of 4')).toBeInTheDocument();
+    expect(screen.getByText('24 tasks synced')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Paperclip sync progress' }))
+      .toHaveAttribute('aria-valuenow', '50');
   });
 
   it('triggers an incremental sync for an individual connector', () => {

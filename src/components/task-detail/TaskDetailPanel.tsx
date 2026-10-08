@@ -9,6 +9,7 @@ import { SubtaskSection } from './SubtaskSection';
 import { TaskRelationshipsSection } from './TaskRelationshipsSection';
 import { useImagePasteHandler } from './TaskAttachmentSection';
 import { LinkedSourcesSection } from './LinkedSourcesSection';
+import { GitHubPullRequests } from './GitHubPullRequests';
 import { TaskMoveDialog } from './TaskMoveDialog';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -1114,6 +1115,8 @@ export function TaskDetailPanel({
                 });
               }}
             />
+          ) : task.connectorType === 'github-issues' && /^[^/:]+\/[^/:]+:[1-9]\d*$/.test(task.sourceId ?? '') ? (
+            <GitHubPullRequests key={task.id} taskId={task.id} />
           ) : undefined}
         />
 

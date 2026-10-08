@@ -457,6 +457,14 @@ describe('NavRail', () => {
           message: 'Healthy',
           lastSyncAt: undefined,
         },
+        {
+          id: 'paperclip-1',
+          type: 'paperclip',
+          name: 'Paperclip — All companies',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: undefined,
+        },
       ],
     });
 
@@ -472,7 +480,11 @@ describe('NavRail', () => {
     expect(screen.getByText('40 tasks synced · 8 subtasks')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: 'Microsoft To Do sync progress' })).toHaveAttribute('aria-valuenow', '40');
     expect(screen.getByText('Local')).toBeInTheDocument();
-    expect(screen.getByText('Never')).toBeInTheDocument();
+    expect(screen.getByAltText('Paperclip — All companies')).toHaveAttribute(
+      'src',
+      '/icons/connectors/paperclip.svg',
+    );
+    expect(screen.getAllByText('Never')).toHaveLength(2);
 
     fireEvent.click(screen.getByRole('switch', { name: 'Show top sync progress bar' }));
     expect(onShowSyncBannerChange).toHaveBeenCalledWith(false);

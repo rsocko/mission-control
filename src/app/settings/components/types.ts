@@ -1,5 +1,6 @@
 // Shared types and constants for settings components
 import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
+import { PAPERCLIP_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
 import {
   isSourceListSelected,
   normalizeSyncedLists,
@@ -246,7 +247,7 @@ export const CONNECTOR_ICONS: Record<string, string> = {
   'outlook-email': '/icons/connectors/outlook.svg',
   'rymessage': '/icons/connectors/rymessage.svg',
   'scout': 'dash:microsoft-copilot',
-  'paperclip': '/icons/connectors/paperclip.svg',
+  'paperclip': PAPERCLIP_CONNECTOR_ICON_PATH,
   finance: '/icons/connectors/tyrion.svg',
   'finance-manager': '/icons/connectors/tyrion.svg',
   'monarch-money': '/icons/connectors/tyrion.svg',

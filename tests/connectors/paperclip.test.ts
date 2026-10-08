@@ -27,7 +27,7 @@ function connectorConfig(): ConnectorConfig {
     pollIntervalMinutes: 5,
     capabilities: {
       read: true,
-      write: false,
+      write: true,
       delete: false,
       sync: true,
       subtasks: false,
@@ -133,6 +133,71 @@ describe('Paperclip approvals connector', () => {
     expect(await connector.fetchNotifications()).toEqual([]);
     expect(await connector.getActiveAlertSourceIds()).toEqual([]);
     expect(fetcher).toHaveBeenCalledTimes(8);
+    await connector.dispose();
+  });
+
+  it('submits approval decisions with an optional note and verifies authoritative state', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe('/api/approvals/approval-1/approve');
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        decisionNote: 'Approved for the pilot.',
+      });
+      return Response.json({
+        id: 'approval-1',
+        companyId: 'company-1',
+        status: 'approved',
+      });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const connector = new PaperclipConnector();
+    await connector.initialize(connectorConfig());
+
+    await expect(connector.executeApprovalDecision(
+      'approve',
+      { approvalId: 'approval-1', companyId: 'company-1' },
+      { decisionNote: 'Approved for the pilot.' },
+    )).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await connector.dispose();
+  });
+
+  it('rejects a stale approval decision when Paperclip returns another state', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      id: 'approval-1',
+      companyId: 'company-1',
+      status: 'rejected',
+    })));
+    const connector = new PaperclipConnector();
+    await connector.initialize(connectorConfig());
+
+    await expect(connector.executeApprovalDecision(
+      'approve',
+      { approvalId: 'approval-1', companyId: 'company-1' },
+      {},
+    )).rejects.toMatchObject({
+      code: 'PROVIDER_CONFLICT',
+      status: 409,
+    });
+    await connector.dispose();
+  });
+
+  it('rejects oversized decision notes before calling Paperclip', async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const connector = new PaperclipConnector();
+    await connector.initialize(connectorConfig());
+
+    await expect(connector.executeApprovalDecision(
+      'reject',
+      { approvalId: 'approval-1', companyId: 'company-1' },
+      { decisionNote: 'x'.repeat(1001) },
+    )).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      status: 422,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
     await connector.dispose();
   });
 

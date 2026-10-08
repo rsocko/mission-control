@@ -11,6 +11,7 @@ import {
   registerDefaultNotificationProviders,
 } from '@/lib/notifications/providers';
 import { executeHomeAssistantProviderAction } from '@/lib/notifications/providers/home-assistant-action';
+import { executePaperclipProviderAction } from '@/lib/notifications/providers/paperclip-action';
 import { syncLogger } from '@/lib/logger';
 import { queueCompanionActionMutation } from '@/lib/connectors/rymessage/companion-action-service';
 import { stableCompanionOperationId } from '@/lib/connectors/rymessage/operation-id';
@@ -24,6 +25,10 @@ const HOME_ASSISTANT_MUTATING_ACTIONS = new Set([
   'dismiss_persistent_notification',
   'restart_home_assistant',
   'ignore_repair',
+]);
+const PAPERCLIP_MUTATING_ACTIONS = new Set([
+  'paperclip_approve',
+  'paperclip_reject',
 ]);
 type RemindLaterDuration = typeof REMIND_LATER_DURATIONS[number];
 
@@ -62,7 +67,7 @@ function parseActionPayload(value: unknown): Record<string, unknown> {
   return asRecord(JSON.parse(value));
 }
 
-async function queueHomeAssistantReconciliation(
+async function queueProviderReconciliation(
   connectorId: string,
   notificationId: string,
 ): Promise<void> {
@@ -74,7 +79,7 @@ async function queueHomeAssistantReconciliation(
       err: error,
       connectorId,
       notificationId,
-    }, 'Failed to queue Home Assistant action reconciliation');
+    }, 'Failed to queue provider action reconciliation');
   }
 }
 
@@ -104,8 +109,13 @@ export async function POST(
     if (isUnavailableTaskAction(notification, { ...action, payload })) {
       return ApiErrors.conflict('The related task is no longer available');
     }
-    const requiresProviderClaim = notification.connectorType === 'home-assistant'
-      && HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType);
+    const requiresProviderClaim = (
+      notification.connectorType === 'home-assistant'
+      && HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType)
+    ) || (
+      notification.connectorType === 'paperclip'
+      && PAPERCLIP_MUTATING_ACTIONS.has(action.actionType)
+    );
     if (requiresProviderClaim) {
       const claimed = await persistence.claimProviderAction({
         notificationId: id,
@@ -115,7 +125,7 @@ export async function POST(
       });
       if (!claimed) {
         return NextResponse.json(
-          { success: false, error: 'This Home Assistant action is already being processed' },
+          { success: false, error: 'This provider action is already being processed' },
           { status: 409 },
         );
       }
@@ -183,6 +193,8 @@ export async function POST(
       };
       providerResult = notification.connectorType === 'home-assistant'
         ? await executeHomeAssistantProviderAction(context)
+        : notification.connectorType === 'paperclip'
+          ? await executePaperclipProviderAction(context)
         : await executeNotificationProviderAction(context);
     } catch (error) {
       if (requiresProviderClaim) {
@@ -235,10 +247,13 @@ export async function POST(
         });
       }
       if (
-        HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType)
+        (
+          HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType)
+          || PAPERCLIP_MUTATING_ACTIONS.has(action.actionType)
+        )
         && notification.connectorInstanceId
       ) {
-        await queueHomeAssistantReconciliation(notification.connectorInstanceId, id);
+        await queueProviderReconciliation(notification.connectorInstanceId, id);
       }
       return NextResponse.json({ success: true, result: providerResult.result });
     }
@@ -248,7 +263,7 @@ export async function POST(
         claimedAt: now,
         now: new Date().toISOString(),
         success: false,
-        error: 'Home Assistant provider declined the action',
+        error: 'Notification provider declined the action',
       });
     }
 

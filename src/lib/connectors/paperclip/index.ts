@@ -17,6 +17,7 @@ import { redactPushText } from '@/lib/notifications/push-text';
 import { ExternalAgentError } from '@/lib/external-agents/errors';
 import { getExternalAgentControlPersistence } from '@/lib/external-agents/persistence';
 import {
+  decidePaperclipApproval,
   discoverPaperclip,
   listPaperclipApprovalIssues,
   listPaperclipApprovals,
@@ -24,7 +25,10 @@ import {
   type PaperclipAttentionItem,
   type PaperclipIssue,
   type PaperclipApproval,
+  type PaperclipApprovalDecision,
 } from '@/lib/external-agents/paperclip';
+
+export type PaperclipNotificationAction = PaperclipApprovalDecision;
 
 interface PaperclipConnectorSettings {
   apiOrigin: string;
@@ -71,7 +75,7 @@ const PAPERCLIP_NOTIFICATION_TYPES: readonly ConnectorNotificationTypeDefinition
 
 const CONNECTOR_CAPABILITIES: ConnectorCapabilities = {
   read: true,
-  write: false,
+  write: true,
   delete: false,
   sync: true,
   subtasks: false,
@@ -532,6 +536,42 @@ export class PaperclipConnector implements IConnector {
 
   async *fetchTasks(): AsyncGenerator<TaskItem[], void, unknown> {
     yield [];
+  }
+
+  async executeApprovalDecision(
+    decision: PaperclipNotificationAction,
+    metadata: Record<string, unknown>,
+    input: Record<string, unknown>,
+  ): Promise<void> {
+    const settings = this.requireSettings();
+    const approvalId = boundedText(metadata.approvalId, 160);
+    const companyId = boundedText(metadata.companyId, 160);
+    if (!approvalId || !companyId) {
+      throw new ExternalAgentError(
+        'The stored Paperclip approval target is incomplete',
+        'PROVIDER_CONFLICT',
+        409,
+      );
+    }
+    const rawDecisionNote = typeof input.decisionNote === 'string'
+      ? input.decisionNote.trim()
+      : '';
+    if (rawDecisionNote.length > 1000) {
+      throw new ExternalAgentError(
+        'Paperclip decision notes must be 1000 characters or fewer',
+        'VALIDATION_ERROR',
+        422,
+      );
+    }
+    await decidePaperclipApproval({
+      endpoint: settings.apiOrigin,
+      credential: this.credential,
+    }, {
+      approvalId,
+      companyId,
+      decision,
+      ...(rawDecisionNote ? { decisionNote: rawDecisionNote } : {}),
+    });
   }
 
   async fetchNotifications(): Promise<InboundNotification[]> {

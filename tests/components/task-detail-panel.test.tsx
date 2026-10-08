@@ -1287,6 +1287,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
       ] });
       if (url === '/api/projects/project-1/hierarchy') return json({ hierarchy: projectHierarchy });
       if (url === '/api/connectors') return json({ connectors: [] });
+      if (url === '/api/tasks/task-1/pull-requests') return json({ pullRequests: [], hasMore: false });
       if (url.includes('detect-duplicates')) return json({ duplicates: [] });
       return json({});
     }));

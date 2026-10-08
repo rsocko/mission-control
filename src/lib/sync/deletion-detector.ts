@@ -11,6 +11,7 @@ import type {
 } from '@/lib/external-identities/stable-identity-types';
 import type { DeletionCandidateRecord } from '@/db/persistence/connector-execution';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { removeTaskFromSearch } from './search-indexer';
 
 /** Subset of task fields needed by deletion detection */
 export interface DeletionDetectionTask {
@@ -48,6 +49,78 @@ function yieldToEventLoop(): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, 0));
 }
 
+export async function applyExplicitDeletions(
+  connectorId: string,
+  deletedSourceIds: ReadonlySet<string>,
+  audit: SyncAuditEntry[],
+  prefetchedLocalTasks?: DeletionDetectionTask[],
+): Promise<{ removed: number; protected: number }> {
+  if (deletedSourceIds.size === 0) return { removed: 0, protected: 0 };
+  const execution = (await getWorkerPersistenceRepositories()).execution;
+  const localTasks = prefetchedLocalTasks
+    ?? (await execution.pulls.listTasks(connectorId)).map((task) => ({
+      id: task.id,
+      sourceId: task.sourceId,
+      sourceListId: task.sourceListId,
+      syncStatus: task.syncStatus,
+      status: task.status,
+      title: task.title,
+      isChecklistItem: task.isChecklistItem,
+      parentId: task.parentId,
+      metadata: task.metadata,
+    }));
+  const localBySourceId = new Map(localTasks.map((task) => [task.sourceId, task]));
+  let removed = 0;
+  let protectedCount = 0;
+
+  for (const sourceId of deletedSourceIds) {
+    const local = localBySourceId.get(sourceId);
+    if (!local) continue;
+    if (
+      local.sourceId.startsWith('local:')
+      || local.syncStatus === 'pending_push'
+      || local.syncStatus === 'push_error'
+      || (local.isChecklistItem && local.sourceId === local.id)
+    ) {
+      protectedCount++;
+      audit.push({
+        action: 'protected',
+        taskId: local.id,
+        taskTitle: local.title,
+        taskSourceId: local.sourceId,
+        reason: `Explicit source deletion deferred because local changes are ${local.syncStatus ?? 'not synchronized'}`,
+      });
+      continue;
+    }
+
+    const archived = await archiveAndDeleteTask(
+      local.id,
+      'Explicit deletion tombstone received from source',
+    );
+    if (!archived) continue;
+    removed++;
+    await execution.deletions.clearCandidate(connectorId, local.sourceId);
+    try {
+      await removeTaskFromSearch(local.id);
+    } catch (error) {
+      syncLogger.error(
+        { err: error, connectorId, taskId: local.id },
+        'Explicitly deleted task committed but search cleanup failed',
+      );
+    }
+    audit.push({
+      action: 'removed',
+      taskId: local.id,
+      taskTitle: archived.taskTitle,
+      taskSourceId: archived.sourceId,
+      deletionSnapshotId: archived.snapshotId,
+      reason: 'Explicit deletion tombstone received from source',
+    });
+  }
+
+  return { removed, protected: protectedCount };
+}
+
 /**
  * Detects tasks that exist locally but no longer on the remote.
  * Applies safety rules to prevent accidental data loss.
@@ -68,6 +141,7 @@ export async function detectDeletions(
   if (remoteSourceIds.size === 0 && !identityOptions.identityRuntime) {
     return { removed: 0, localOnlyProtected: 0 };
   }
+
   const execution = (await getWorkerPersistenceRepositories()).execution;
 
   const localTasks = prefetchedLocalTasks

@@ -13,7 +13,7 @@ import { syncLogger } from '@/lib/logger';
 import { syncEventBus } from './events';
 import { indexTasksForSearchBatch } from './search-indexer';
 import type { SearchableTask } from './search-indexer';
-import { detectDeletions } from './deletion-detector';
+import { applyExplicitDeletions, detectDeletions } from './deletion-detector';
 import { archiveAndDeleteTask } from './deletion-recovery';
 import {
   getRecurringSeriesKey,
@@ -863,6 +863,28 @@ export async function upsertTasks(
   }
 
   // ─── DELETION DETECTION ─────────────────────────────────────────
+  const explicitDeletedSourceIds = new Set(connector.getDeletedTaskSourceIds?.() ?? []);
+  if (explicitDeletedSourceIds.size > 0) {
+    const explicitDeletionResult = await applyExplicitDeletions(
+      connectorId,
+      explicitDeletedSourceIds,
+      audit,
+      Array.from(existingBySourceId.values()).map(row => ({
+        id: row.id,
+        sourceId: row.sourceId,
+        sourceListId: row.sourceListId,
+        syncStatus: row.syncStatus,
+        status: row.status,
+        title: row.title,
+        isChecklistItem: row.isChecklistItem,
+        parentId: row.parentId,
+        metadata: row.metadata,
+      })),
+    );
+    removed += explicitDeletionResult.removed;
+    localOnlyProtected += explicitDeletionResult.protected;
+  }
+
   // Only run deletion detection during full syncs. During incremental syncs,
   // remoteSourceIds only contains recently-changed tasks, so comparing against
   // all local tasks would incorrectly flag thousands of items as "protected".

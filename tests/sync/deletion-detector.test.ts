@@ -134,4 +134,57 @@ describe('deletion detector source ownership', () => {
     expect(result).toEqual({ removed: 0, localOnlyProtected: 25 });
     expect(timerFired).toBe(true);
   });
+
+  it('applies explicit source tombstones immediately while protecting pending edits', async () => {
+    const [{ default: db }, schema, { applyExplicitDeletions }, { eq }] = await Promise.all([
+      importInitializedSqliteDatabase(),
+      import('@/db/schema'),
+      import('@/lib/sync/deletion-detector'),
+      import('drizzle-orm'),
+    ]);
+    const connectorId = 'explicit-tombstone-connector';
+    const now = '2026-10-07T00:00:00.000Z';
+    await db.insert(schema.tasks).values([
+      {
+        id: 'deleted-task',
+        sourceId: 'list-1:deleted-task',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: connectorId,
+        title: 'Box of orzo',
+        status: 'todo',
+        syncStatus: 'synced',
+        createdAt: now,
+        updatedAt: now,
+        lastSyncedAt: now,
+      },
+      {
+        id: 'pending-task',
+        sourceId: 'list-1:pending-task',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: connectorId,
+        title: 'Pending edit',
+        status: 'todo',
+        syncStatus: 'pending_push',
+        createdAt: now,
+        updatedAt: now,
+        lastSyncedAt: now,
+      },
+    ]);
+    const audit: SyncAuditEntry[] = [];
+
+    const result = await applyExplicitDeletions(
+      connectorId,
+      new Set(['list-1:deleted-task', 'list-1:pending-task']),
+      audit,
+    );
+
+    expect(result).toEqual({ removed: 1, protected: 1 });
+    expect(await db.select().from(schema.tasks).where(
+      eq(schema.tasks.connectorInstanceId, connectorId),
+    )).toEqual([expect.objectContaining({ id: 'pending-task' })]);
+    expect(audit).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'removed', taskSourceId: 'list-1:deleted-task' }),
+      expect.objectContaining({ action: 'protected', taskSourceId: 'list-1:pending-task' }),
+    ]));
+  });
 });

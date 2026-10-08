@@ -12,6 +12,7 @@ import {
   type WorkTodoAckResult,
   type WorkTodoBridgePersistence,
   type WorkTodoBridgeStatus,
+  type ConnectorTaskDeltaPersistence,
   type WorkTodoCapabilityProfile,
   type WorkTodoChangeOperation,
   type WorkTodoIngestCommand,
@@ -41,6 +42,46 @@ import {
 import { deleteTasksWithCanonicalCleanup } from './task-deletion';
 
 type Client = Pool | PoolClient;
+
+export function createPostgresConnectorTaskDeltaRepository(
+  pool: Pool,
+): ConnectorTaskDeltaPersistence {
+  return {
+    async list(connectorId) {
+      return query<{ listSourceId: string; deltaLink: string }>(
+        pool,
+        `SELECT list_source_id AS "listSourceId", delta_link AS "deltaLink"
+         FROM work_todo_list_delta_state
+         WHERE connector_id = $1 AND delta_link IS NOT NULL
+         ORDER BY list_source_id`,
+        [connectorId],
+      );
+    },
+
+    async replace(input) {
+      await transaction(pool, async (client) => {
+        for (const checkpoint of input.checkpoints) {
+          await client.query(
+            `INSERT INTO work_todo_list_delta_state (
+               connector_id, list_source_id, delta_link, updated_at
+             ) VALUES ($1, $2, $3, $4)
+             ON CONFLICT(connector_id, list_source_id) DO UPDATE SET
+               delta_link = EXCLUDED.delta_link,
+               updated_at = EXCLUDED.updated_at`,
+            [input.connectorId, checkpoint.listSourceId, checkpoint.deltaLink, input.now],
+          );
+        }
+        if (input.removedListSourceIds.length > 0) {
+          await client.query(
+            `DELETE FROM work_todo_list_delta_state
+             WHERE connector_id = $1 AND list_source_id = ANY($2::text[])`,
+            [input.connectorId, [...input.removedListSourceIds]],
+          );
+        }
+      });
+    },
+  };
+}
 
 async function query<T extends QueryResultRow>(
   client: Client,

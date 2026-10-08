@@ -5,6 +5,10 @@ const clients = vi.hoisted(() => ({
   microsoft: null as Record<string, ReturnType<typeof vi.fn>> | null,
   github: null as Record<string, unknown> | null,
 }));
+const taskDelta = vi.hoisted(() => ({
+  checkpoints: new Map<string, string>(),
+  replace: vi.fn(),
+}));
 
 vi.mock('@/db', () => ({
   default: {
@@ -16,6 +20,23 @@ vi.mock('@/db', () => ({
 vi.mock('@/db/schema', () => ({
   connectorConfigs: { id: 'id' },
   sourceLists: { connectorInstanceId: 'connectorInstanceId' },
+}));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    connectorState: {
+      taskDelta: {
+        list: vi.fn(async () => [...taskDelta.checkpoints].map(([listSourceId, deltaLink]) => ({
+          listSourceId,
+          deltaLink,
+        }))),
+        replace: taskDelta.replace,
+      },
+    },
+    execution: {
+      lists: { list: vi.fn(async () => []) },
+    },
+  })),
 }));
 
 vi.mock('crypto', async (importOriginal) => ({
@@ -107,6 +128,7 @@ function githubIssue(number: number, title: string) {
 describe('connector task page streams', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    taskDelta.checkpoints.clear();
   });
 
   it('prefetches the next Microsoft Todo Graph page without accumulating the list', async () => {
@@ -118,7 +140,10 @@ describe('connector task page streams', () => {
         return new Response(JSON.stringify({ value: [] }));
       }
       if (url.includes('cursor=page-2')) {
-        return new Response(JSON.stringify({ value: [graphTask('task-2', 'Second page')] }));
+        return new Response(JSON.stringify({
+          value: [graphTask('task-2', 'Second page')],
+          '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=next',
+        }));
       }
       return new Response(JSON.stringify({
         value: [graphTask('task-1', 'First page')],
@@ -140,11 +165,15 @@ describe('connector task page streams', () => {
     expect(graphFetch.mock.calls.some(([url]) => (
       String(url).includes('$expand=checklistItems,linkedResources')
     ))).toBe(true);
-    expect(graphFetch.mock.calls.filter(([url]) => String(url).includes('/tasks?'))).toHaveLength(2);
+    expect(graphFetch.mock.calls.filter(([url]) => (
+      String(url).includes('/tasks/delta') || String(url).includes('cursor=page-2')
+    ))).toHaveLength(2);
 
     const second = await iterator.next();
     expect(second.value?.map(task => task.title)).toEqual(['Second page']);
-    expect(graphFetch.mock.calls.filter(([url]) => String(url).includes('/tasks?'))).toHaveLength(2);
+    expect(graphFetch.mock.calls.filter(([url]) => (
+      String(url).includes('/tasks/delta') || String(url).includes('cursor=page-2')
+    ))).toHaveLength(2);
     await iterator.return();
   });
 
@@ -171,6 +200,7 @@ describe('connector task page streams', () => {
       }
       return Response.json({
         value: [{ ...graphTask('flagged-task', 'Follow up'), linkedResources: [] }],
+        '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/todo/lists/flagged-emails/tasks/delta?$deltatoken=next',
       });
     });
     clients.microsoft = { graphFetch, substrateFetch: vi.fn() };
@@ -194,6 +224,82 @@ describe('connector task page streams', () => {
     await iterator.return();
   });
 
+  it('consumes deletion tombstones and commits the next delta link only after persistence', async () => {
+    const previousDeltaLink = 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=previous';
+    const nextDeltaLink = 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=next';
+    taskDelta.checkpoints.set('list-1', previousDeltaLink);
+    const graphFetch = vi.fn(async (url: string) => {
+      if (url === '/me/todo/lists?$top=100') {
+        return Response.json({ value: [{ id: 'list-1', displayName: 'Shared groceries' }] });
+      }
+      if (url.includes('$deltatoken=previous')) {
+        return Response.json({
+          value: [{ id: 'deleted-task', '@removed': { reason: 'deleted' } }],
+          '@odata.deltaLink': nextDeltaLink,
+        });
+      }
+      throw new Error(`Unexpected Graph request: ${url}`);
+    });
+    clients.microsoft = { graphFetch, substrateFetch: vi.fn() };
+
+    const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
+    const connector = new MicrosoftTodoConnector();
+    await connector.initialize(config('todo-delta', 'microsoft-todo', {}));
+
+    for await (const page of connector.fetchTasks(new Date('2026-08-01T00:00:00Z'))) {
+      expect(page).toEqual([]);
+    }
+
+    expect(connector.getDeletedTaskSourceIds()).toEqual(['list-1:deleted-task']);
+    expect(taskDelta.replace).not.toHaveBeenCalled();
+
+    await connector.commitTaskFetch();
+
+    expect(taskDelta.replace).toHaveBeenCalledWith({
+      connectorId: 'todo-delta',
+      checkpoints: [{ listSourceId: 'list-1', deltaLink: nextDeltaLink }],
+      removedListSourceIds: [],
+      now: expect.any(String),
+    });
+    expect(connector.getDeletedTaskSourceIds()).toEqual([]);
+  });
+
+  it('rebuilds only the affected list when its delta checkpoint expires', async () => {
+    taskDelta.checkpoints.set(
+      'list-1',
+      'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=expired',
+    );
+    const graphFetch = vi.fn(async (url: string) => {
+      if (url === '/me/todo/lists?$top=100') {
+        return Response.json({ value: [{ id: 'list-1', displayName: 'Tasks' }] });
+      }
+      if (url.includes('$deltatoken=expired')) {
+        return new Response(null, { status: 410 });
+      }
+      if (url.includes('/tasks/delta?')) {
+        return Response.json({
+          value: [graphTask('current-task', 'Current task')],
+          '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=fresh',
+        });
+      }
+      throw new Error(`Unexpected Graph request: ${url}`);
+    });
+    clients.microsoft = { graphFetch, substrateFetch: vi.fn() };
+
+    const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
+    const connector = new MicrosoftTodoConnector();
+    await connector.initialize(config('todo-expired', 'microsoft-todo', {}));
+
+    const titles: string[] = [];
+    for await (const page of connector.fetchTasks(new Date('2026-08-01T00:00:00Z'))) {
+      titles.push(...page.map((task) => task.title));
+    }
+
+    expect(titles).toContain('Current task');
+    expect(graphFetch.mock.calls.some(([url]) => String(url).includes('$deltatoken=expired'))).toBe(true);
+    expect(graphFetch.mock.calls.some(([url]) => String(url).includes('/tasks/delta?'))).toBe(true);
+  });
+
   it('keeps only the latest completed recurring occurrence across pages and passes', async () => {
     const graphFetch = vi.fn(async (url: string) => {
       if (url === '/me/todo/lists?$top=100') {
@@ -206,9 +312,10 @@ describe('connector task page streams', () => {
             completedDateTime: { dateTime: '2026-08-05T09:00:00Z', timeZone: 'UTC' },
             checklistItems: [{ id: 'new-child', displayName: 'New child', isChecked: true }],
           })],
+          '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=completed',
         }));
       }
-      if (url.includes("status eq 'completed'")) {
+      if (url.includes('/tasks/delta')) {
         return new Response(JSON.stringify({
           value: [recurringGraphTask('old-completed', 'Daily review', {
             status: 'completed',
@@ -227,7 +334,6 @@ describe('connector task page streams', () => {
     await connector.initialize(config('todo-completed', 'microsoft-todo', {}));
 
     const iterator = connector.fetchTasks();
-    await iterator.next();
     await iterator.next();
     await iterator.next();
     const selected = await iterator.next();
@@ -253,6 +359,7 @@ describe('connector task page streams', () => {
             dueDateTime: { dateTime: '2099-01-10T00:00:00', timeZone: 'UTC' },
             lastModifiedDateTime: '2026-08-03T00:00:00Z',
           })],
+          '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=open',
         }));
       }
       return new Response(JSON.stringify({

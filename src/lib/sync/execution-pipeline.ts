@@ -626,6 +626,7 @@ export class SyncExecutionPipeline {
       tasksAdded += upsertResult.added;
       tasksUpdated += upsertResult.updated;
       tasksRemoved += upsertResult.removed;
+      await connector.commitTaskFetch?.();
       const localOnlyProtected = upsertResult.localOnlyProtected;
       const remoteSourceIds = upsertResult.remoteSourceIds ?? new Set<string>();
       if (upsertResult.identityBlocked > 0) {

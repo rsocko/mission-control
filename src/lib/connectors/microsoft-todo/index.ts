@@ -38,6 +38,7 @@ import { removeMicrosoftTodoTitleTag } from './title-tags';
 import type {
   GraphChecklistItem,
   GraphLinkedResource,
+  GraphRemovedTodoTask,
   GraphTodoList,
   GraphTodoTask,
   MicrosoftTodoConfig,
@@ -118,6 +119,9 @@ export class MicrosoftTodoConnector implements IConnector {
   private config: ConnectorConfig | null = null;
   private accessToken: string = '';
   private deltaToken: string | null = null;
+  private taskDeltaLinks = new Map<string, string>();
+  private pendingTaskDeltaLinks = new Map<string, string>();
+  private deletedTaskSourceIds = new Set<string>();
   private client!: GraphClient;
 
   async initialize(config: ConnectorConfig): Promise<void> {
@@ -162,6 +166,9 @@ export class MicrosoftTodoConnector implements IConnector {
   async dispose(): Promise<void> {
     this.config = null;
     this.accessToken = '';
+    this.taskDeltaLinks.clear();
+    this.pendingTaskDeltaLinks.clear();
+    this.deletedTaskSourceIds.clear();
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {
@@ -308,6 +315,15 @@ export class MicrosoftTodoConnector implements IConnector {
 
   async *fetchTasks(since?: Date): AsyncGenerator<TaskItem[], void, unknown> {
     connectorLogger.info({ since: since?.toISOString() ?? null }, 'Starting Microsoft Todo task fetch');
+    const taskDelta = (await getWorkerPersistenceRepositories()).connectorState.taskDelta;
+    this.taskDeltaLinks = new Map(
+      (await taskDelta.list(this.id)).map((checkpoint) => [
+        checkpoint.listSourceId,
+        checkpoint.deltaLink,
+      ]),
+    );
+    this.pendingTaskDeltaLinks.clear();
+    this.deletedTaskSourceIds.clear();
     const lists = await this.getListsToSync();
     const fetchedListIds = new Set(lists.map(l => l.id));
     let taskCount = 0;
@@ -365,14 +381,32 @@ export class MicrosoftTodoConnector implements IConnector {
     list: GraphTodoList,
     since?: Date,
   ): AsyncGenerator<TaskItem[], void, unknown> {
-    try {
-      yield* this.fetchTasksFromList(list.id, list.displayName, since, list.wellKnownListName);
-    } catch (err) {
-      connectorLogger.error({ err, listName: list.displayName }, 'Failed to fetch tasks from list');
-    }
+    yield* this.fetchTasksFromList(list.id, list.displayName, since, list.wellKnownListName);
   }
 
   async fetchNotifications(_since?: Date): Promise<InboundNotification[]> { return []; }
+
+  getDeletedTaskSourceIds(): readonly string[] {
+    return [...this.deletedTaskSourceIds];
+  }
+
+  async commitTaskFetch(): Promise<void> {
+    if (this.pendingTaskDeltaLinks.size === 0) return;
+    await (await getWorkerPersistenceRepositories()).connectorState.taskDelta.replace({
+      connectorId: this.id,
+      checkpoints: [...this.pendingTaskDeltaLinks].map(([listSourceId, deltaLink]) => ({
+        listSourceId,
+        deltaLink,
+      })),
+      removedListSourceIds: [],
+      now: new Date().toISOString(),
+    });
+    for (const [listSourceId, deltaLink] of this.pendingTaskDeltaLinks) {
+      this.taskDeltaLinks.set(listSourceId, deltaLink);
+    }
+    this.pendingTaskDeltaLinks.clear();
+    this.deletedTaskSourceIds.clear();
+  }
 
   async createTask(task: Partial<TaskItem>): Promise<TaskItem> {
     const listId = task.sourceListId || await this.getDefaultListId();
@@ -901,106 +935,123 @@ export class MicrosoftTodoConnector implements IConnector {
     since?: Date,
     wellKnownListName?: string,
   ): AsyncGenerator<TaskItem[], void, unknown> {
-    const passes = since
-      ? [`${graphTodoTasksPath(listId)}?$top=100&$expand=checklistItems,linkedResources&$filter=lastModifiedDateTime ge ${since.toISOString()}`]
-      : [
-          `${graphTodoTasksPath(listId)}?$top=100&$expand=checklistItems,linkedResources`,
-          `${graphTodoTasksPath(listId)}?$top=100&$expand=checklistItems,linkedResources&$filter=status eq 'completed'`,
-        ];
+    const checkpoint = since ? this.taskDeltaLinks.get(listId) : undefined;
+    const initialUrl = checkpoint
+      ? checkpoint.replace(GRAPH_BASE_URL, '')
+      : `${graphTodoTasksPath(listId)}/delta?$top=100&$expand=checklistItems,linkedResources`;
     const recurringTasks: TaskItem[] = [];
     const recentCompletedRecurring = new Map<string, { completedAt: string; sourceId: string }>();
     const nearestOpenRecurring = new Map<string, { dueDate: string | null; updatedAt: string; sourceId: string }>();
+    let url = initialUrl;
+    let restartedExpiredCheckpoint = false;
 
-    for (const startUrl of passes) {
-      const isCompletedPass = startUrl.includes("status eq 'completed'");
-      let url: string = startUrl;
-
-      while (url) {
-        const res = await this.client.graphFetch(url);
-        if (!res.ok) {
-          if (url.includes("status eq 'completed'") && res.status === 400) break;
-          throw new Error(`Failed to fetch tasks from list ${listId}: ${res.status}`);
-        }
-        const data = await res.json();
-        const pageTasks: TaskItem[] = [];
-
-        for (const graphTask of data.value || []) {
-          if (
-            wellKnownListName === 'flaggedEmails'
-            && (!Array.isArray(graphTask.linkedResources) || graphTask.linkedResources.length === 0)
-          ) {
-            graphTask.linkedResources = await this.fetchLinkedResources(
-              listId,
-              graphTask.id,
-              graphTask.linkedResources,
-            );
-          }
-
-          if (isCompletedPass && graphTask.recurrence && graphTask.status === 'completed') {
-            const titleKey = (graphTask.title || '').trim().toLowerCase();
-            const completedAt = graphTask.completedDateTime?.dateTime || graphTask.lastModifiedDateTime || '';
-            const sourceId = `${listId}:${graphTask.id}`;
-            const existing = recentCompletedRecurring.get(titleKey);
-            if (existing && existing.completedAt >= completedAt) continue;
-            if (existing) {
-              removeBufferedRecurringTask(recurringTasks, existing.sourceId);
-            }
-            recentCompletedRecurring.set(titleKey, { completedAt, sourceId });
-          }
-
-          if (graphTask.recurrence && graphTask.status !== 'completed') {
-            const titleKey = (graphTask.title || '').trim().toLowerCase();
-            const openKey = `${titleKey}::${listId}`;
-            const dueDate = graphTask.dueDateTime?.dateTime?.slice(0, 10) || null;
-            const updatedAt = graphTask.lastModifiedDateTime || graphTask.createdDateTime || '';
-            const sourceId = `${listId}:${graphTask.id}`;
-            const existing = nearestOpenRecurring.get(openKey);
-            if (existing) {
-              const existingBetter = compareRecurringOccurrencePriority(
-                existing,
-                { dueDate, updatedAt },
-                getLocalToday(),
-              ) <= 0;
-              if (existingBetter) continue;
-              removeBufferedRecurringTask(recurringTasks, existing.sourceId);
-            }
-            nearestOpenRecurring.set(openKey, { dueDate, updatedAt, sourceId });
-          }
-
-          const task = mapGraphTask(graphTask, listId, listName, this.type, this.id, wellKnownListName);
-          let checklistItems = (graphTask.checklistItems || []) as GraphChecklistItem[];
-
-          // Graph API can omit checklistItems when $filter is combined with $expand.
-          // If the task reportedly has checklist items but expansion returned none,
-          // fetch them in a dedicated request as a fallback.
-          if (checklistItems.length === 0 && since) {
-            try {
-              const clRes = await this.client.graphFetch(
-                `${graphTodoTaskPath(listId, graphTask.id)}/checklistItems`
-              );
-              if (clRes.ok) {
-                const clData = await clRes.json();
-                checklistItems = (clData.value || []) as GraphChecklistItem[];
-              }
-            } catch {
-              // Non-fatal: checklist items will sync on next full sync
-            }
-          }
-
-          const checklistTasks = checklistItems.map(item =>
-            mapChecklistItem(item, listId, graphTask.id, task.id, this.type, this.id, graphTask.createdDateTime)
-          );
-
-          if (!graphTask.recurrence) {
-            pageTasks.push(task, ...checklistTasks);
-            continue;
-          }
-          recurringTasks.push(task, ...checklistTasks);
-        }
-
-        url = data['@odata.nextLink'] ? data['@odata.nextLink'].replace(GRAPH_BASE_URL, '') : '';
-        yield pageTasks;
+    while (url) {
+      const requestedUrl = url;
+      const res = await this.client.graphFetch(url);
+      if (res.status === 410 && checkpoint && !restartedExpiredCheckpoint) {
+        restartedExpiredCheckpoint = true;
+        url = `${graphTodoTasksPath(listId)}/delta?$top=100&$expand=checklistItems,linkedResources`;
+        connectorLogger.info({ listId }, 'Microsoft Todo delta checkpoint expired; rebuilding list baseline');
+        continue;
       }
+      if (!res.ok) {
+        throw new Error(`Failed to fetch task delta from list ${listId}: ${res.status}`);
+      }
+      const data = await res.json() as {
+        value?: Array<GraphTodoTask | GraphRemovedTodoTask>;
+        '@odata.nextLink'?: string;
+        '@odata.deltaLink'?: string;
+      };
+      const pageTasks: TaskItem[] = [];
+
+      for (const graphTask of data.value || []) {
+        if ('@removed' in graphTask) {
+          this.deletedTaskSourceIds.add(`${listId}:${graphTask.id}`);
+          continue;
+        }
+        if (
+          wellKnownListName === 'flaggedEmails'
+          && (!Array.isArray(graphTask.linkedResources) || graphTask.linkedResources.length === 0)
+        ) {
+          graphTask.linkedResources = await this.fetchLinkedResources(
+            listId,
+            graphTask.id,
+            graphTask.linkedResources,
+          );
+        }
+
+        if (graphTask.recurrence && graphTask.status === 'completed') {
+          const titleKey = (graphTask.title || '').trim().toLowerCase();
+          const completedAt = graphTask.completedDateTime?.dateTime || graphTask.lastModifiedDateTime || '';
+          const sourceId = `${listId}:${graphTask.id}`;
+          const existing = recentCompletedRecurring.get(titleKey);
+          if (existing && existing.completedAt >= completedAt) continue;
+          if (existing) {
+            removeBufferedRecurringTask(recurringTasks, existing.sourceId);
+          }
+          recentCompletedRecurring.set(titleKey, { completedAt, sourceId });
+        }
+
+        if (graphTask.recurrence && graphTask.status !== 'completed') {
+          const titleKey = (graphTask.title || '').trim().toLowerCase();
+          const openKey = `${titleKey}::${listId}`;
+          const dueDate = graphTask.dueDateTime?.dateTime?.slice(0, 10) || null;
+          const updatedAt = graphTask.lastModifiedDateTime || graphTask.createdDateTime || '';
+          const sourceId = `${listId}:${graphTask.id}`;
+          const existing = nearestOpenRecurring.get(openKey);
+          if (existing) {
+            const existingBetter = compareRecurringOccurrencePriority(
+              existing,
+              { dueDate, updatedAt },
+              getLocalToday(),
+            ) <= 0;
+            if (existingBetter) continue;
+            removeBufferedRecurringTask(recurringTasks, existing.sourceId);
+          }
+          nearestOpenRecurring.set(openKey, { dueDate, updatedAt, sourceId });
+        }
+
+        const task = mapGraphTask(graphTask, listId, listName, this.type, this.id, wellKnownListName);
+        let checklistItems = (graphTask.checklistItems || []) as GraphChecklistItem[];
+
+        if (checklistItems.length === 0 && since) {
+          try {
+            const clRes = await this.client.graphFetch(
+              `${graphTodoTaskPath(listId, graphTask.id)}/checklistItems`
+            );
+            if (clRes.ok) {
+              const clData = await clRes.json();
+              checklistItems = (clData.value || []) as GraphChecklistItem[];
+            }
+          } catch {
+            // Non-fatal: checklist items will sync on the next changed parent or full sync.
+          }
+        }
+
+        const checklistTasks = checklistItems.map(item =>
+          mapChecklistItem(item, listId, graphTask.id, task.id, this.type, this.id, graphTask.createdDateTime)
+        );
+
+        if (!graphTask.recurrence) {
+          pageTasks.push(task, ...checklistTasks);
+          continue;
+        }
+        recurringTasks.push(task, ...checklistTasks);
+      }
+
+      url = data['@odata.nextLink']?.replace(GRAPH_BASE_URL, '') || '';
+      const deltaLink = data['@odata.deltaLink'];
+      if (!url && !deltaLink) {
+        throw new Error(`Microsoft Todo delta response for list ${listId} did not include a continuation checkpoint`);
+      }
+      if (deltaLink) {
+        this.pendingTaskDeltaLinks.set(listId, deltaLink);
+      }
+      connectorLogger.debug(
+        { listId, pageTaskCount: pageTasks.length, continued: Boolean(url), requestWasCheckpoint: requestedUrl === checkpoint },
+        'Fetched Microsoft Todo delta page',
+      );
+      yield pageTasks;
     }
 
     if (recurringTasks.length > 0) {

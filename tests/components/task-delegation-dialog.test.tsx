@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TaskDelegationDialog } from '@/components/task-delegation/TaskDelegationDialog';
 import { openTaskDelegation } from '@/components/task-delegation/events';
@@ -58,6 +58,7 @@ const workerPreview = {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  window.sessionStorage.clear();
 });
 
 describe('TaskDelegationDialog disclosure review', () => {
@@ -472,12 +473,12 @@ describe('TaskDelegationDialog disclosure review', () => {
     expect(reviewButton).toBeEnabled();
     fireEvent.click(reviewButton);
 
+    expect(await screen.findByText('What will be sent')).toBeInTheDocument();
     await waitFor(() => expect(previewRequest).toMatchObject({
       taskBriefs: {
         'task-1': 'Focus on escaped delimiters and preserve compatibility.',
       },
     }));
-    expect(await screen.findByText('Task brief')).toBeInTheDocument();
     expect(screen.queryByText('Disclosed fields')).not.toBeInTheDocument();
     expect(screen.getByText('Request')).toBeInTheDocument();
     expect(screen.getByText('Fix the parser and add coverage.')).toBeInTheDocument();
@@ -697,8 +698,9 @@ describe('TaskDelegationDialog disclosure review', () => {
     render(<TaskDelegationDialog />);
     openTaskDelegation(['task-1']);
 
-    expect(await screen.findByRole('radio', { name: /Paperclip/ }))
-      .toHaveTextContent('3 registered routes');
+    const paperclipProvider = await screen.findByRole('radio', { name: /Paperclip/ });
+    expect(paperclipProvider.closest('label')).toHaveTextContent('3 registered routes');
+    expect(paperclipProvider.tagName).toBe('INPUT');
     fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
 
     expect(await screen.findByRole('combobox', { name: 'Paperclip company' }))
@@ -709,6 +711,7 @@ describe('TaskDelegationDialog disclosure review', () => {
       .toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Release Coordinator/ })).toBeEnabled();
     expect(screen.getByRole('radio', { name: /Proposed Hire/ })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: /Release Coordinator/ }).tagName).toBe('INPUT');
     expect(screen.getByText('Pending hire approval')).toBeInTheDocument();
 
     fireEvent.click(routeSelect);
@@ -822,5 +825,185 @@ describe('TaskDelegationDialog disclosure review', () => {
       '/api/tasks/task-1',
       expect.objectContaining({ method: 'PATCH' }),
     );
+  });
+
+  it('keeps selected work visible and collapses secondary configuration details', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response({
+      ...workerContext,
+      targets: [{
+        ...workerContext.targets[0],
+        alwaysInstructions: 'Use the approved Microsoft 365 sources.',
+      }],
+    })));
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+
+    const selectedWork = await screen.findByRole('region', { name: 'Selected work' });
+    expect(within(selectedWork).getByText('1 selected task')).toBeInTheDocument();
+    expect(within(selectedWork).getByText('Background task')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Microsoft Scout/ }).tagName).toBe('INPUT');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+
+    const destinationInstructions = screen.getByText((_, element) =>
+      element?.tagName === 'SUMMARY'
+      && element.textContent?.includes('Destination instructions')
+      && element.textContent?.includes('Configured') === true,
+    );
+    expect(destinationInstructions.closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('1 ready task').closest('details')).not.toHaveAttribute('open');
+  });
+
+  it('restores an interrupted draft for the same task selection', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response(workerContext)));
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+
+    expect(await screen.findByText('Microsoft Scout')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.change(screen.getByLabelText('Per-dispatch instructions'), {
+      target: { value: 'Resume this exact outcome.' },
+    });
+    await waitFor(() => {
+      expect(window.sessionStorage.length).toBe(1);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Close delegation' }));
+
+    openTaskDelegation(['task-1']);
+
+    expect(await screen.findByText(
+      'Your unfinished delegation settings were restored for these tasks.',
+    )).toBeInTheDocument();
+    expect(screen.getByLabelText('Per-dispatch instructions'))
+      .toHaveValue('Resume this exact outcome.');
+  });
+
+  it('retries only the assignment that failed during partial confirmation', async () => {
+    const dispatchAttempts: string[] = [];
+    let failedOnce = false;
+    const context = {
+      taskIds: ['task-1', 'task-2'],
+      tasks: [
+        { id: 'task-1', title: 'First task', connectorType: 'local' },
+        { id: 'task-2', title: 'Second task', connectorType: 'local' },
+      ],
+      targets: [{
+        ...workerContext.targets[0],
+        eligibility: [
+          { ...workerContext.targets[0].eligibility[0], taskId: 'task-1', title: 'First task' },
+          { ...workerContext.targets[0].eligibility[0], taskId: 'task-2', title: 'Second task' },
+        ],
+      }],
+      assignments: [],
+      syncErrors: [],
+    };
+    const preview = {
+      ...workerPreview,
+      previews: [
+        { ...workerPreview.previews[0], taskId: 'task-1', dispatchId: 'dispatch-1' },
+        { ...workerPreview.previews[0], taskId: 'task-2', dispatchId: 'dispatch-2' },
+      ],
+      readyCount: 2,
+    };
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response(context);
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        return response(preview, 201);
+      }
+      if (url === '/api/external-agents/dispatch' && init?.method === 'POST') {
+        const request = JSON.parse(String(init.body)) as { dispatchId: string };
+        dispatchAttempts.push(request.dispatchId);
+        if (request.dispatchId === 'dispatch-2' && !failedOnce) {
+          failedOnce = true;
+          return response({ error: 'Worker unavailable' }, 503);
+        }
+        return response({ dispatch: { status: 'queued' } }, 202);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1', 'task-2']);
+    expect(await screen.findByText('Microsoft Scout')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('checkbox', {
+      name: /Mark delegated tasks as In Progress/,
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review 2 delegations' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm and delegate 2' }));
+
+    const recovery = await screen.findByRole('alert', {
+      name: 'Some delegation work needs attention',
+    });
+    expect(within(recovery).getByText('Second task')).toBeInTheDocument();
+    expect(within(recovery).queryByText('First task')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry 1 failed delegation' }))
+      .toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close delegation' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    openTaskDelegation(['task-1', 'task-2']);
+    const resumedRecovery = await screen.findByRole('alert', {
+      name: 'Some delegation work needs attention',
+    });
+
+    fireEvent.click(within(resumedRecovery).getByRole('button', {
+      name: 'Retry assignment',
+    }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(dispatchAttempts).toEqual(['dispatch-1', 'dispatch-2', 'dispatch-2']);
+  });
+
+  it('retries a failed task status update without dispatching the assignment again', async () => {
+    let dispatchCount = 0;
+    let statusUpdateCount = 0;
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response(workerContext);
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        return response(workerPreview, 201);
+      }
+      if (url === '/api/external-agents/dispatch' && init?.method === 'POST') {
+        dispatchCount += 1;
+        return response({ dispatch: { status: 'queued' } }, 202);
+      }
+      if (url === '/api/tasks/task-1' && init?.method === 'PATCH') {
+        statusUpdateCount += 1;
+        return statusUpdateCount === 1
+          ? response({ error: 'Task source temporarily unavailable' }, 503)
+          : response({ id: 'task-1', status: 'in_progress' });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+    expect(await screen.findByText('Microsoft Scout')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm and delegate 1' }));
+
+    const recovery = await screen.findByRole('alert', {
+      name: 'Some delegation work needs attention',
+    });
+    expect(within(recovery).getByText(/status was not updated/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry 1 status update' }))
+      .toBeInTheDocument();
+
+    fireEvent.click(within(recovery).getByRole('button', { name: 'Retry status update' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(dispatchCount).toBe(1);
+    expect(statusUpdateCount).toBe(2);
   });
 });

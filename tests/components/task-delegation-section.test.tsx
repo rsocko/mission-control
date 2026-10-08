@@ -626,9 +626,13 @@ describe('TaskDelegationDialog', () => {
     });
     fireEvent.click(confirm);
 
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
-      '1 delegation confirmed. 1 delegation failed: task-2: Provider rejected the task',
-    );
+    const recovery = await within(dialog).findByRole('alert', {
+      name: 'Some delegation work needs attention',
+    });
+    expect(recovery).toHaveTextContent('Second task');
+    expect(recovery).toHaveTextContent('Assignment failed: Provider rejected the task');
+    expect(within(recovery).getByRole('button', { name: 'Retry assignment' }))
+      .toBeInTheDocument();
     expect(refreshed).toHaveBeenCalledOnce();
     expect((refreshed.mock.calls[0][0] as CustomEvent).detail).toEqual({
       taskIds: ['task-1'],

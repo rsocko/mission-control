@@ -20,7 +20,10 @@ import { createPostgresGitHubDependencyRepositories } from './github-dependency-
 import { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-repositories';
 import { createPostgresGitHubProjectRepositories } from './github-project-repositories';
 import { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
-import { createPostgresWorkTodoRepositories } from './work-todo-repositories';
+import {
+  createPostgresConnectorTaskDeltaRepository,
+  createPostgresWorkTodoRepositories,
+} from './work-todo-repositories';
 import { createPostgresRyMessageActionRepository } from './rymessage-action-repository';
 import { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
 import { createPostgresFinanceConnectionRecoveryPersistence } from './finance-recovery-repository';
@@ -183,6 +186,7 @@ export function createPostgresNonFinanceConnectorStateRepositories(
 ): NonFinanceConnectorStateRepositories {
   return {
     workTodo: createPostgresWorkTodoRepositories(pool),
+    taskDelta: createPostgresConnectorTaskDeltaRepository(pool),
     rymessageActions: createPostgresRyMessageActionRepository(pool),
   };
 }

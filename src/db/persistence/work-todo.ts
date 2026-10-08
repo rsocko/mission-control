@@ -210,6 +210,25 @@ export interface WorkTodoBridgePersistence {
   resetDelta(input: { connectorId: string; now: string }): Promise<WorkTodoResetResult>;
 }
 
+export interface ConnectorTaskDeltaCheckpoint {
+  listSourceId: string;
+  deltaLink: string;
+}
+
+/**
+ * Durable opaque task-delta checkpoints shared by pull-based connectors.
+ * Tokens are never exposed through connector settings or status responses.
+ */
+export interface ConnectorTaskDeltaPersistence {
+  list(connectorId: string): Promise<readonly ConnectorTaskDeltaCheckpoint[]>;
+  replace(input: {
+    connectorId: string;
+    checkpoints: readonly ConnectorTaskDeltaCheckpoint[];
+    removedListSourceIds: readonly string[];
+    now: string;
+  }): Promise<void>;
+}
+
 /**
  * Layer 4 composition for non-finance connector-owned state.
  *
@@ -220,5 +239,6 @@ export interface WorkTodoBridgePersistence {
  */
 export interface NonFinanceConnectorStateRepositories {
   readonly workTodo: WorkTodoBridgePersistence;
+  readonly taskDelta: ConnectorTaskDeltaPersistence;
   readonly rymessageActions: RyMessageActionPersistence;
 }

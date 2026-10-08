@@ -25,6 +25,7 @@ import {
   type WorkTodoAckResult,
   type WorkTodoBridgePersistence,
   type WorkTodoBridgeStatus,
+  type ConnectorTaskDeltaPersistence,
   type WorkTodoIngestCommand,
   type WorkTodoIngestResult,
   type WorkTodoLeaseCommand,
@@ -55,6 +56,49 @@ type SqliteTransaction = Parameters<Parameters<SqliteDrizzle['transaction']>[0]>
 
 /** Keeps the post-write searchable projection read off an unbounded IN list. */
 const SEARCH_READ_BATCH = 200;
+
+export function createSqliteConnectorTaskDeltaRepository(
+  database: SqliteDatabase,
+): ConnectorTaskDeltaPersistence {
+  return {
+    async list(connectorId) {
+      return database.prepare(`
+        SELECT list_source_id AS listSourceId, delta_link AS deltaLink
+        FROM work_todo_list_delta_state
+        WHERE connector_id = ? AND delta_link IS NOT NULL
+        ORDER BY list_source_id
+      `).all(connectorId) as Array<{ listSourceId: string; deltaLink: string }>;
+    },
+
+    async replace(input) {
+      database.transaction(() => {
+        const upsert = database.prepare(`
+          INSERT INTO work_todo_list_delta_state (
+            connector_id, list_source_id, delta_link, updated_at
+          ) VALUES (?, ?, ?, ?)
+          ON CONFLICT(connector_id, list_source_id) DO UPDATE SET
+            delta_link = excluded.delta_link,
+            updated_at = excluded.updated_at
+        `);
+        for (const checkpoint of input.checkpoints) {
+          upsert.run(
+            input.connectorId,
+            checkpoint.listSourceId,
+            checkpoint.deltaLink,
+            input.now,
+          );
+        }
+        const remove = database.prepare(`
+          DELETE FROM work_todo_list_delta_state
+          WHERE connector_id = ? AND list_source_id = ?
+        `);
+        for (const listSourceId of input.removedListSourceIds) {
+          remove.run(input.connectorId, listSourceId);
+        }
+      })();
+    },
+  };
+}
 
 function clampLimit(limit: number | undefined): number {
   if (!Number.isFinite(limit)) return WORK_TODO_MAX_CHANGE_BATCH;

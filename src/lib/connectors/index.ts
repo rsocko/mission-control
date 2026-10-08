@@ -91,6 +91,10 @@ export interface IConnector {
 
   /** Stream task pages (with sub-tasks as nested items via parentId). */
   fetchTasks(since?: Date, options?: FetchTaskOptions): AsyncGenerator<TaskItem[], void, unknown>;
+  /** Explicit source tombstones observed during the current task fetch. */
+  getDeletedTaskSourceIds?(): readonly string[];
+  /** Commit connector-owned task cursors after fetched tasks and tombstones are durable. */
+  commitTaskFetch?(): Promise<void>;
 
   /** Fetch notifications */
   fetchNotifications(since?: Date): Promise<InboundNotification[]>;

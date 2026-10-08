@@ -110,6 +110,31 @@ interface ConfirmationProgress {
   total: number;
 }
 
+interface DelegationDraft {
+  selectedTargetId: string;
+  instruction: string;
+  repository: string;
+  baseRef: string;
+  model: string;
+  createPullRequest: boolean;
+  dispatchStrategy: DispatchStrategy;
+  markInProgress: boolean;
+  maxAttempts: number;
+  timeoutHours: number;
+  allowedActions: string[];
+  paperclipBinding: PaperclipProviderConfig | null;
+}
+
+interface FailedDelegation {
+  preview: DelegationPreview;
+  message: string;
+}
+
+interface FailedStatusUpdate {
+  taskId: string;
+  message: string;
+}
+
 const STEP_ORDER: WizardStep[] = ['destination', 'configure', 'plan', 'review'];
 const STEP_LABELS: Record<WizardStep, string> = {
   destination: 'Choose provider',
@@ -143,6 +168,75 @@ const PROVIDER_OPTIONS: Array<{
     badge: 'M365 / work-related tasks',
   },
 ];
+
+const DRAFT_STORAGE_PREFIX = 'mission-control:delegation-draft:';
+
+function draftStorageKey(taskIds: string[]) {
+  return `${DRAFT_STORAGE_PREFIX}${JSON.stringify([...taskIds].sort())}`;
+}
+
+function isPaperclipBinding(value: unknown): value is PaperclipProviderConfig | null {
+  if (value === null) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const binding = value as Partial<PaperclipProviderConfig>;
+  return typeof binding.companyId === 'string'
+    && typeof binding.assigneeAgentId === 'string'
+    && (binding.companyName === undefined || typeof binding.companyName === 'string')
+    && (binding.projectId === undefined || typeof binding.projectId === 'string')
+    && (
+      binding.requiredAdapterType === undefined
+      || typeof binding.requiredAdapterType === 'string'
+    );
+}
+
+function readDraft(taskIds: string[]): DelegationDraft | null {
+  try {
+    const raw = window.sessionStorage.getItem(draftStorageKey(taskIds));
+    if (!raw) return null;
+    const draft = JSON.parse(raw) as Partial<DelegationDraft>;
+    if (
+      typeof draft.selectedTargetId !== 'string'
+      || typeof draft.instruction !== 'string'
+      || typeof draft.repository !== 'string'
+      || typeof draft.baseRef !== 'string'
+      || typeof draft.model !== 'string'
+      || typeof draft.createPullRequest !== 'boolean'
+      || !['separate', 'combined', 'auto'].includes(draft.dispatchStrategy ?? '')
+      || typeof draft.markInProgress !== 'boolean'
+      || !Number.isInteger(draft.maxAttempts)
+      || draft.maxAttempts < 1
+      || draft.maxAttempts > 20
+      || !Number.isInteger(draft.timeoutHours)
+      || draft.timeoutHours < 1
+      || draft.timeoutHours > 720
+      || !Array.isArray(draft.allowedActions)
+      || !draft.allowedActions.every((action) => typeof action === 'string')
+      || !isPaperclipBinding(draft.paperclipBinding)
+    ) {
+      window.sessionStorage.removeItem(draftStorageKey(taskIds));
+      return null;
+    }
+    return draft as DelegationDraft;
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(taskIds: string[], draft: DelegationDraft) {
+  try {
+    window.sessionStorage.setItem(draftStorageKey(taskIds), JSON.stringify(draft));
+  } catch {
+    // Draft persistence is best-effort when browser storage is unavailable.
+  }
+}
+
+function clearDraft(taskIds: string[]) {
+  try {
+    window.sessionStorage.removeItem(draftStorageKey(taskIds));
+  } catch {
+    // Draft persistence is best-effort when browser storage is unavailable.
+  }
+}
 
 function paperclipAgentState(status: string | null) {
   if (status === 'pending_approval') {
@@ -233,9 +327,26 @@ export function TaskDelegationDialog() {
   const [paperclipBinding, setPaperclipBinding] = useState<PaperclipProviderConfig | null>(null);
   const [loadingPaperclipOptions, setLoadingPaperclipOptions] = useState(false);
   const [paperclipOptionsError, setPaperclipOptionsError] = useState<string | null>(null);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [failedDelegations, setFailedDelegations] = useState<FailedDelegation[]>([]);
+  const [failedStatusUpdates, setFailedStatusUpdates] = useState<FailedStatusUpdate[]>([]);
   const contextRequestRef = useRef(0);
   const paperclipRequestRef = useRef(0);
   const wasOpenRef = useRef(false);
+  const pendingDraftRef = useRef<DelegationDraft | null>(null);
+  const restoredTargetIdRef = useRef('');
+  const restoredPaperclipBindingRef = useRef<PaperclipProviderConfig | null>(null);
+  const resumeRecoveryRef = useRef(false);
+  const taskIdsRef = useRef<string[]>([]);
+  const recoveryRef = useRef<{
+    delegationFailures: FailedDelegation[];
+    statusFailures: FailedStatusUpdate[];
+    previewBatch: PreviewBatch | null;
+  }>({
+    delegationFailures: [],
+    statusFailures: [],
+    previewBatch: null,
+  });
 
   useEffect(() => {
     if (open) {
@@ -257,29 +368,42 @@ export function TaskDelegationDialog() {
     return () => window.clearTimeout(timeoutId);
   }, [open]);
 
-  const reset = useCallback((ids: string[]) => {
+  const reset = useCallback((ids: string[], draft: DelegationDraft | null) => {
+    taskIdsRef.current = ids;
+    recoveryRef.current = {
+      delegationFailures: [],
+      statusFailures: [],
+      previewBatch: null,
+    };
     setTaskIds(ids);
-    setStep('destination');
+    setStep(draft?.selectedTargetId ? 'configure' : 'destination');
     setContext(null);
-    setSelectedTargetId('');
-    setInstruction('');
-    setRepository('');
-    setBaseRef('main');
-    setModel('');
-    setCreatePullRequest(true);
-    setDispatchStrategy('separate');
-    setMarkInProgress(true);
-    setMaxAttempts(3);
-    setTimeoutHours(24);
-    setAllowedActions([]);
+    setSelectedTargetId(draft?.selectedTargetId ?? '');
+    setInstruction(draft?.instruction ?? '');
+    setRepository(draft?.repository ?? '');
+    setBaseRef(draft?.baseRef ?? 'main');
+    setModel(draft?.model ?? '');
+    setCreatePullRequest(draft?.createPullRequest ?? true);
+    setDispatchStrategy(draft?.dispatchStrategy ?? 'separate');
+    setMarkInProgress(draft?.markInProgress ?? true);
+    setMaxAttempts(draft?.maxAttempts ?? 3);
+    setTimeoutHours(draft?.timeoutHours ?? 24);
+    setAllowedActions(draft?.allowedActions ?? []);
     setOperationId(crypto.randomUUID());
     setPreviewBatch(null);
     setAutoPlan(null);
     setConfirmationProgress(null);
     setError(null);
     setPaperclipOptions(null);
-    setPaperclipBinding(null);
+    setPaperclipBinding(draft?.paperclipBinding ?? null);
     setPaperclipOptionsError(null);
+    setDraftRestored(false);
+    setFailedDelegations([]);
+    setFailedStatusUpdates([]);
+    pendingDraftRef.current = draft;
+    restoredTargetIdRef.current = '';
+    restoredPaperclipBindingRef.current = draft?.paperclipBinding ?? null;
+    resumeRecoveryRef.current = false;
     paperclipRequestRef.current += 1;
   }, []);
 
@@ -291,7 +415,21 @@ export function TaskDelegationDialog() {
         (value): value is string => typeof value === 'string' && Boolean(value),
       ))];
       if (!normalized.length) return;
-      reset(normalized);
+      const currentTaskIds = taskIdsRef.current;
+      const recovery = recoveryRef.current;
+      const sameSelection = normalized.length === currentTaskIds.length
+        && normalized.every((taskId) => currentTaskIds.includes(taskId));
+      if (
+        sameSelection
+        && (recovery.delegationFailures.length > 0 || recovery.statusFailures.length > 0)
+        && recovery.previewBatch
+      ) {
+        resumeRecoveryRef.current = true;
+        setStep('review');
+        setOpen(true);
+        return;
+      }
+      reset(normalized, readDraft(normalized));
       setOpen(true);
     };
     window.addEventListener(TASK_DELEGATION_OPEN_EVENT, handleOpen);
@@ -319,13 +457,41 @@ export function TaskDelegationDialog() {
       const eligibleTargets = next.targets.filter((target) =>
         target.eligibility.some(({ ready }) => ready));
       const eligibleProviders = [...new Set(eligibleTargets.map(({ type }) => type))];
-      const initial = eligibleProviders.length === 1
-        ? preferredTarget(eligibleTargets.filter(({ type }) => type === eligibleProviders[0]))
+      const draft = pendingDraftRef.current;
+      const restoredTarget = draft
+        ? eligibleTargets.find(({ id }) => id === draft.selectedTargetId) ?? null
         : null;
+      const initial = restoredTarget ?? (eligibleProviders.length === 1
+        ? preferredTarget(eligibleTargets.filter(({ type }) => type === eligibleProviders[0]))
+        : null);
       if (initial) {
         setSelectedTargetId(initial.id);
-        setAllowedActions(initial.allowedActions);
+        if (restoredTarget) {
+          restoredTargetIdRef.current = restoredTarget.id;
+          setAllowedActions(draft.allowedActions.filter((action) =>
+            restoredTarget.allowedActions.includes(action)));
+          setDraftRestored(true);
+        } else {
+          setStep('destination');
+          setAllowedActions(initial.allowedActions);
+        }
+      } else if (draft) {
+        clearDraft(ids);
+        setStep('destination');
+        setSelectedTargetId('');
+        setInstruction('');
+        setRepository('');
+        setBaseRef('main');
+        setModel('');
+        setCreatePullRequest(true);
+        setDispatchStrategy('separate');
+        setMarkInProgress(true);
+        setMaxAttempts(3);
+        setTimeoutHours(24);
+        setAllowedActions([]);
+        setPaperclipBinding(null);
       }
+      pendingDraftRef.current = null;
     } catch (loadError) {
       if (requestId !== contextRequestRef.current || signal.aborted) return;
       setError(errorMessage(loadError));
@@ -339,6 +505,10 @@ export function TaskDelegationDialog() {
   useEffect(() => {
     const requestId = ++contextRequestRef.current;
     if (!open || !taskIds.length) return;
+    if (resumeRecoveryRef.current) {
+      resumeRecoveryRef.current = false;
+      return;
+    }
     const controller = new AbortController();
     void loadContext(taskIds, requestId, controller.signal);
     return () => controller.abort();
@@ -369,6 +539,42 @@ export function TaskDelegationDialog() {
   );
   const currentStepIndex = visibleSteps.indexOf(step);
 
+  useEffect(() => {
+    if (!open || !context || !taskIds.length || submitting || step === 'destination') return;
+    writeDraft(taskIds, {
+      selectedTargetId,
+      instruction,
+      repository,
+      baseRef,
+      model,
+      createPullRequest,
+      dispatchStrategy,
+      markInProgress,
+      maxAttempts,
+      timeoutHours,
+      allowedActions,
+      paperclipBinding,
+    });
+  }, [
+    allowedActions,
+    baseRef,
+    context,
+    createPullRequest,
+    dispatchStrategy,
+    instruction,
+    markInProgress,
+    maxAttempts,
+    model,
+    open,
+    paperclipBinding,
+    repository,
+    selectedTargetId,
+    submitting,
+    taskIds,
+    timeoutHours,
+    step,
+  ]);
+
   const loadPaperclipOptions = useCallback(async (targetId: string, companyId: string) => {
     const requestId = ++paperclipRequestRef.current;
     setLoadingPaperclipOptions(true);
@@ -395,17 +601,25 @@ export function TaskDelegationDialog() {
 
   useEffect(() => {
     if (!selectedTarget) return;
-    setAllowedActions(selectedTarget.allowedActions);
+    const restoringDraft = restoredTargetIdRef.current === selectedTarget.id;
+    const restoredPaperclipBinding = restoredPaperclipBindingRef.current;
+    restoredTargetIdRef.current = '';
+    restoredPaperclipBindingRef.current = null;
+    if (!restoringDraft) {
+      setAllowedActions(selectedTarget.allowedActions);
+    }
     setPreviewBatch(null);
     setAutoPlan(null);
     if (
+      !restoringDraft
+      &&
       selectedTarget.type === 'copilot-cloud'
       && selectedTarget.repositories.length === 1
     ) {
       setRepository(selectedTarget.repositories[0].repository);
     }
     if (selectedTarget.type === 'paperclip' && selectedTarget.paperclipBinding) {
-      const binding = {
+      const defaultBinding = {
         companyId: selectedTarget.paperclipBinding.companyId,
         ...(selectedTarget.paperclipBinding.companyName
           ? { companyName: selectedTarget.paperclipBinding.companyName }
@@ -415,6 +629,10 @@ export function TaskDelegationDialog() {
           ? { projectId: selectedTarget.paperclipBinding.projectId }
           : {}),
       };
+      const binding = restoringDraft
+        && restoredPaperclipBinding?.companyId === selectedTarget.paperclipBinding.companyId
+        ? restoredPaperclipBinding
+        : defaultBinding;
       setPaperclipBinding(binding);
       void loadPaperclipOptions(selectedTarget.id, binding.companyId);
     } else {
@@ -428,6 +646,8 @@ export function TaskDelegationDialog() {
     if (!selectedTarget) return;
     setSubmitting(true);
     setError(null);
+    setFailedDelegations([]);
+    setFailedStatusUpdates([]);
     try {
       if (dispatchStrategy === 'auto') {
         const response = await fetch('/api/tasks/delegation/plan', {
@@ -483,6 +703,8 @@ export function TaskDelegationDialog() {
     if (!selectedTarget || !autoPlan) return;
     setSubmitting(true);
     setError(null);
+    setFailedDelegations([]);
+    setFailedStatusUpdates([]);
     try {
       const batches: PreviewBatch[] = [];
       for (const group of autoPlan.groups) {
@@ -526,24 +748,27 @@ export function TaskDelegationDialog() {
     }
   };
 
-  const confirm = async () => {
-    if (!previewBatch?.previews.length) return;
+  const confirm = async (previews = previewBatch?.previews ?? []) => {
+    if (!previews.length) return;
     setSubmitting(true);
     setConfirmationProgress({
       active: 1,
       completed: 0,
-      total: previewBatch.previews.length,
+      total: previews.length,
     });
     setError(null);
-    const delegationFailures: string[] = [];
-    const statusFailures: string[] = [];
+    const attemptedDispatchIds = new Set(previews.map(({ dispatchId }) => dispatchId));
+    const delegationFailures: FailedDelegation[] = failedDelegations.filter(
+      ({ preview }) => !attemptedDispatchIds.has(preview.dispatchId),
+    );
+    const statusFailures: FailedStatusUpdate[] = [];
     const confirmedTaskIds = new Set<string>();
     let confirmed = 0;
-    for (const [index, preview] of previewBatch.previews.entries()) {
+    for (const [index, preview] of previews.entries()) {
       setConfirmationProgress({
         active: index + 1,
         completed: index,
-        total: previewBatch.previews.length,
+        total: previews.length,
       });
       try {
         const response = await fetch('/api/external-agents/dispatch', {
@@ -581,43 +806,99 @@ export function TaskDelegationDialog() {
                 throw new Error(await responseError(statusResponse));
               }
             } catch (statusError) {
-              statusFailures.push(`${taskId}: ${errorMessage(statusError)}`);
+              statusFailures.push({ taskId, message: errorMessage(statusError) });
             }
           }
         }
       } catch (confirmError) {
-        delegationFailures.push(`${preview.taskId}: ${errorMessage(confirmError)}`);
+        delegationFailures.push({
+          preview,
+          message: errorMessage(confirmError),
+        });
       } finally {
         setConfirmationProgress({
-          active: Math.min(index + 2, previewBatch.previews.length),
+          active: Math.min(index + 2, previews.length),
           completed: index + 1,
-          total: previewBatch.previews.length,
+          total: previews.length,
         });
       }
     }
     setSubmitting(false);
     setConfirmationProgress(null);
-    if (delegationFailures.length || statusFailures.length) {
+    const statusFailureByTaskId = new Map(
+      [...failedStatusUpdates, ...statusFailures].map((failure) => [failure.taskId, failure]),
+    );
+    const remainingStatusFailures = [...statusFailureByTaskId.values()];
+    setFailedDelegations(delegationFailures);
+    setFailedStatusUpdates(remainingStatusFailures);
+    recoveryRef.current = {
+      delegationFailures,
+      statusFailures: remainingStatusFailures,
+      previewBatch,
+    };
+    if (delegationFailures.length || remainingStatusFailures.length) {
       if (confirmedTaskIds.size) {
         notifyTaskDelegationUpdated([...confirmedTaskIds]);
       }
-      const details = [
-        delegationFailures.length
-          ? `${delegationFailures.length} delegation${delegationFailures.length === 1 ? '' : 's'} failed: ${delegationFailures.join('; ')}`
-          : null,
-        statusFailures.length
-          ? `${statusFailures.length} task status update${statusFailures.length === 1 ? '' : 's'} failed: ${statusFailures.join('; ')}`
-          : null,
-      ].filter(Boolean).join(' ');
-      setError(`${confirmed} delegation${confirmed === 1 ? '' : 's'} confirmed. ${details}`);
       return;
     }
+    recoveryRef.current = {
+      delegationFailures: [],
+      statusFailures: [],
+      previewBatch: null,
+    };
+    clearDraft(taskIds);
     setOpen(false);
     requestAnimationFrame(() => {
       notifyTaskDelegationUpdated([...confirmedTaskIds]);
       toast.success(
         `${confirmedTaskIds.size} task${confirmedTaskIds.size === 1 ? '' : 's'} queued in `
         + `${confirmed} assignment${confirmed === 1 ? '' : 's'} for ${selectedTarget?.name}`,
+      );
+    });
+  };
+
+  const retryStatusUpdates = async (taskIdsToRetry = failedStatusUpdates.map(
+    ({ taskId }) => taskId,
+  )) => {
+    if (!taskIdsToRetry.length) return;
+    setSubmitting(true);
+    setError(null);
+    const attemptedTaskIds = new Set(taskIdsToRetry);
+    const remaining = failedStatusUpdates.filter(
+      ({ taskId }) => !attemptedTaskIds.has(taskId),
+    );
+    for (const taskId of taskIdsToRetry) {
+      try {
+        const response = await fetch(`/api/tasks/${taskId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'in_progress' }),
+        });
+        if (!response.ok) throw new Error(await responseError(response));
+      } catch (statusError) {
+        remaining.push({ taskId, message: errorMessage(statusError) });
+      }
+    }
+    setSubmitting(false);
+    setFailedStatusUpdates(remaining);
+    recoveryRef.current = {
+      delegationFailures: failedDelegations,
+      statusFailures: remaining,
+      previewBatch,
+    };
+    if (remaining.length || failedDelegations.length) return;
+    recoveryRef.current = {
+      delegationFailures: [],
+      statusFailures: [],
+      previewBatch: null,
+    };
+    clearDraft(taskIds);
+    setOpen(false);
+    requestAnimationFrame(() => {
+      notifyTaskDelegationUpdated(taskIdsToRetry);
+      toast.success(
+        `${taskIdsToRetry.length} task status update${taskIdsToRetry.length === 1 ? '' : 's'} recovered`,
       );
     });
   };
@@ -691,26 +972,42 @@ export function TaskDelegationDialog() {
           </ol>
 
           <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
-            {loading ? (
-              <div className="space-y-3" aria-label="Loading delegation destinations">
-                <div className="h-16 animate-pulse rounded-lg bg-[var(--surface-2)]" />
-                <div className="h-16 animate-pulse rounded-lg bg-[var(--surface-2)]" />
-              </div>
-            ) : step === 'destination' ? (
-              <DestinationStep
-                context={context}
-                selectedTargetId={selectedTargetId}
-                onSelect={(target) => {
-                  setSelectedTargetId(target.id);
-                  setAllowedActions(target.allowedActions);
-                  if (target.type !== 'copilot-cloud') {
-                    setDispatchStrategy('separate');
-                  }
-                  setError(null);
-                }}
+            {!loading && context && (
+              <SelectedTasksSummary
+                tasks={context.tasks}
+                targetName={selectedTarget?.name ?? null}
               />
-            ) : step === 'configure' && selectedTarget ? (
-              <ConfigureStep
+            )}
+            {!loading && draftRestored && step === 'configure' && (
+              <div
+                className="mt-4 flex gap-2 rounded-lg border border-[var(--accent-500)]/25 bg-[var(--accent-500)]/8 px-3 py-2 text-xs text-[var(--text-secondary)]"
+                role="status"
+              >
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-[var(--accent-300)]" />
+                Your unfinished delegation settings were restored for these tasks.
+              </div>
+            )}
+            <div className={!loading && context ? 'mt-4' : undefined}>
+              {loading ? (
+                <div className="space-y-3" aria-label="Loading delegation destinations">
+                  <div className="h-16 animate-pulse rounded-lg bg-[var(--surface-2)]" />
+                  <div className="h-16 animate-pulse rounded-lg bg-[var(--surface-2)]" />
+                </div>
+              ) : step === 'destination' ? (
+                <DestinationStep
+                  context={context}
+                  selectedTargetId={selectedTargetId}
+                  onSelect={(target) => {
+                    setSelectedTargetId(target.id);
+                    setAllowedActions(target.allowedActions);
+                    if (target.type !== 'copilot-cloud') {
+                      setDispatchStrategy('separate');
+                    }
+                    setError(null);
+                  }}
+                />
+              ) : step === 'configure' && selectedTarget ? (
+                <ConfigureStep
                 target={selectedTarget}
                 instruction={instruction}
                 onInstructionChange={setInstruction}
@@ -744,9 +1041,9 @@ export function TaskDelegationDialog() {
                   setSelectedTargetId(target.id);
                   setAllowedActions(target.allowedActions);
                 }}
-              />
-            ) : step === 'plan' && autoPlan ? (
-              <AutoPlanStep
+                />
+              ) : step === 'plan' && autoPlan ? (
+                <AutoPlanStep
                 plan={autoPlan}
                 onStrategyChange={(groupId, strategy) => {
                   setAutoPlan({
@@ -756,9 +1053,9 @@ export function TaskDelegationDialog() {
                     )),
                   });
                 }}
-              />
-            ) : step === 'review' && selectedTarget && previewBatch ? (
-              <ReviewStep
+                />
+              ) : step === 'review' && selectedTarget && previewBatch ? (
+                <ReviewStep
                 target={selectedTarget}
                 batch={previewBatch}
                 baseRef={baseRef}
@@ -768,25 +1065,38 @@ export function TaskDelegationDialog() {
                 markInProgress={markInProgress}
                 paperclipBinding={paperclipBinding}
                 paperclipOptions={paperclipOptions}
-              />
-            ) : null}
+                />
+              ) : null}
 
-            {step === 'review' && confirmationProgress && selectedTarget && (
-              <DelegationHandoffProgress
-                progress={confirmationProgress}
-                targetName={selectedTarget.name}
-              />
-            )}
+              {step === 'review' && confirmationProgress && selectedTarget && (
+                <DelegationHandoffProgress
+                  progress={confirmationProgress}
+                  targetName={selectedTarget.name}
+                />
+              )}
 
-            {error && (
-              <div
-                role="alert"
-                className="mt-4 flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200"
-              >
-                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
+              {step === 'review'
+                && (failedDelegations.length > 0 || failedStatusUpdates.length > 0) && (
+                <DelegationRecovery
+                  context={context}
+                  delegationFailures={failedDelegations}
+                  statusFailures={failedStatusUpdates}
+                  submitting={submitting}
+                  onRetryDelegation={(preview) => void confirm([preview])}
+                  onRetryStatus={(taskId) => void retryStatusUpdates([taskId])}
+                />
+              )}
+
+              {error && (
+                <div
+                  role="alert"
+                  className="mt-4 flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-relaxed text-red-200"
+                >
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+            </div>
           </div>
 
           <footer className="flex flex-col-reverse gap-2 border-t border-[var(--border-subtle)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -806,7 +1116,11 @@ export function TaskDelegationDialog() {
               {step !== 'destination' && (
                 <button
                   type="button"
-                  disabled={submitting}
+                  disabled={
+                    submitting
+                    || failedDelegations.length > 0
+                    || failedStatusUpdates.length > 0
+                  }
                   onClick={() => {
                     setError(null);
                     setStep(
@@ -863,8 +1177,21 @@ export function TaskDelegationDialog() {
               {step === 'review' && (
                 <button
                   type="button"
-                  disabled={!previewBatch?.previews.length || submitting}
-                  onClick={() => void confirm()}
+                  disabled={
+                    (!previewBatch?.previews.length
+                      && !failedDelegations.length
+                      && !failedStatusUpdates.length)
+                    || submitting
+                  }
+                  onClick={() => {
+                    if (failedDelegations.length) {
+                      void confirm(failedDelegations.map(({ preview }) => preview));
+                    } else if (failedStatusUpdates.length) {
+                      void retryStatusUpdates();
+                    } else {
+                      void confirm();
+                    }
+                  }}
                   className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-4 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {submitting ? (
@@ -885,6 +1212,14 @@ export function TaskDelegationDialog() {
                   )}
                   {confirmationProgress
                     ? `Queueing ${confirmationProgress.active} of ${confirmationProgress.total}…`
+                    : failedDelegations.length
+                      ? `Retry ${failedDelegations.length} failed delegation${
+                        failedDelegations.length === 1 ? '' : 's'
+                      }`
+                      : failedStatusUpdates.length
+                        ? `Retry ${failedStatusUpdates.length} status update${
+                          failedStatusUpdates.length === 1 ? '' : 's'
+                        }`
                     : dispatchStrategy === 'combined'
                       ? `Confirm and delegate ${previewBatch?.readyCount ?? 0} tasks together`
                       : dispatchStrategy === 'auto'
@@ -897,6 +1232,38 @@ export function TaskDelegationDialog() {
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+function SelectedTasksSummary({
+  tasks,
+  targetName,
+}: {
+  tasks: TaskDelegationContext['tasks'];
+  targetName: string | null;
+}) {
+  const visibleTasks = tasks.slice(0, 2);
+  const hiddenCount = Math.max(tasks.length - visibleTasks.length, 0);
+  return (
+    <section
+      className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-2.5"
+      aria-label="Selected work"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="text-xs font-semibold text-[var(--text-primary)]">
+          {tasks.length} selected task{tasks.length === 1 ? '' : 's'}
+        </h2>
+        {targetName && (
+          <span className="text-[11px] text-[var(--text-muted)]">
+            Destination: {targetName}
+          </span>
+        )}
+      </div>
+      <p className="mt-1 truncate text-xs text-[var(--text-secondary)]">
+        {visibleTasks.map(({ title }) => title).join(' · ')}
+        {hiddenCount > 0 && ` · +${hiddenCount} more`}
+      </p>
+    </section>
   );
 }
 
@@ -964,6 +1331,95 @@ function DelegationHandoffProgress({
   );
 }
 
+function DelegationRecovery({
+  context,
+  delegationFailures,
+  statusFailures,
+  submitting,
+  onRetryDelegation,
+  onRetryStatus,
+}: {
+  context: TaskDelegationContext | null;
+  delegationFailures: FailedDelegation[];
+  statusFailures: FailedStatusUpdate[];
+  submitting: boolean;
+  onRetryDelegation: (preview: DelegationPreview) => void;
+  onRetryStatus: (taskId: string) => void;
+}) {
+  const taskTitle = (taskId: string) =>
+    context?.tasks.find(({ id }) => id === taskId)?.title ?? taskId;
+  return (
+    <section
+      className="mt-4 rounded-lg border border-amber-700/40 bg-amber-950/20 p-3"
+      aria-labelledby="delegation-recovery-title"
+      role="alert"
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-300" />
+        <div>
+          <h3
+            id="delegation-recovery-title"
+            className="text-xs font-semibold text-amber-200"
+          >
+            Some delegation work needs attention
+          </h3>
+          <p className="mt-1 text-[11px] leading-relaxed text-amber-100/80">
+            Successful assignments will not be sent again. Retry only the failed action below.
+          </p>
+        </div>
+      </div>
+      <ul className="mt-3 space-y-2">
+        {delegationFailures.map(({ preview, message }) => (
+          <li
+            key={preview.dispatchId}
+            className="flex flex-col gap-2 rounded-md border border-amber-700/30 bg-[var(--surface-0)] px-3 py-2 sm:flex-row sm:items-center"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-[var(--text-primary)]">
+                {taskTitle(preview.taskId)}
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                Assignment failed: {message}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => onRetryDelegation(preview)}
+              className="min-h-9 rounded-md border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+            >
+              Retry assignment
+            </button>
+          </li>
+        ))}
+        {statusFailures.map(({ taskId, message }) => (
+          <li
+            key={taskId}
+            className="flex flex-col gap-2 rounded-md border border-amber-700/30 bg-[var(--surface-0)] px-3 py-2 sm:flex-row sm:items-center"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-[var(--text-primary)]">
+                {taskTitle(taskId)}
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                Assignment queued, but status was not updated: {message}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => onRetryStatus(taskId)}
+              className="min-h-9 rounded-md border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+            >
+              Retry status update
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function DestinationStep({
   context,
   selectedTargetId,
@@ -1010,26 +1466,31 @@ function DestinationStep({
             .find(({ blocker }) => blocker)?.blocker
             ?? 'No selected tasks are eligible for this provider';
           return (
-            <button
+            <label
               key={provider.type}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              disabled={unavailable}
               title={unavailable ? unavailableReason : undefined}
-              onClick={() => {
-                const current = selectableTargets.find(({ id }) => id === selectedTargetId);
-                const target = current ?? preferredTarget(selectableTargets);
-                if (target) onSelect(target);
-              }}
               className={cn(
-                'flex min-h-24 items-center gap-4 rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
+                'relative flex min-h-24 items-center gap-4 rounded-lg border p-4 text-left transition-colors has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[var(--accent)]',
                 selected
                   ? 'border-[var(--accent-500)] bg-[var(--accent-500)]/10'
                   : 'border-[var(--border)] bg-[var(--surface-0)] hover:bg-[var(--surface-2)]',
                 unavailable && 'cursor-not-allowed opacity-55 hover:bg-[var(--surface-0)]',
               )}
             >
+              <input
+                type="radio"
+                name="delegation-provider"
+                value={provider.type}
+                checked={selected}
+                disabled={unavailable}
+                title={unavailable ? unavailableReason : undefined}
+                onChange={() => {
+                  const current = selectableTargets.find(({ id }) => id === selectedTargetId);
+                  const target = current ?? preferredTarget(selectableTargets);
+                  if (target) onSelect(target);
+                }}
+                className="sr-only"
+              />
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
                 <ExecutionDestinationIcon type={provider.type} />
               </span>
@@ -1058,7 +1519,7 @@ function DestinationStep({
                   </span>
                 )}
               </span>
-            </button>
+            </label>
           );
         })}
       </div>
@@ -1273,25 +1734,6 @@ function ConfigureStep({
           </div>
         </fieldset>
       )}
-      <section>
-        <h3 className="text-xs font-semibold text-[var(--text-primary)]">Task status</h3>
-        <label className="mt-2 flex min-h-12 items-center justify-between gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2">
-          <span>
-            <span className="block text-xs font-medium text-[var(--text-secondary)]">
-              Mark delegated tasks as In Progress
-            </span>
-            <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--text-muted)]">
-              Applies after each task is successfully queued.
-            </span>
-          </span>
-          <input
-            type="checkbox"
-            checked={markInProgress}
-            onChange={(event) => onMarkInProgressChange(event.target.checked)}
-            className="h-4 w-4 shrink-0 accent-[var(--accent-500)]"
-          />
-        </label>
-      </section>
       {target.type === 'paperclip' && target.paperclipBinding && (
         <section className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1409,31 +1851,37 @@ function ConfigureStep({
                 </Select>
                 </div>
               </div>
-              <div role="radiogroup" aria-label="Paperclip agent" className="grid gap-2 sm:grid-cols-2">
+              <fieldset>
+                <legend className="sr-only">Paperclip agent</legend>
+                <div className="grid gap-2 sm:grid-cols-2">
                 {visibleAgents.map((agent) => {
                 const state = paperclipAgentState(agent.status);
                 const selected = paperclipBinding.assigneeAgentId === agent.id;
                 return (
-                  <button
+                  <label
                     key={agent.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    disabled={!state.assignable}
                     title={state.detail ?? undefined}
-                    onClick={() => onPaperclipBindingChange({
-                      ...paperclipBinding,
-                      assigneeAgentId: agent.id,
-                      requiredAdapterType: undefined,
-                    })}
                     className={cn(
-                      'rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
+                      'relative rounded-lg border p-3 text-left transition-colors has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-[var(--accent)]',
                       selected
                         ? 'border-[var(--accent-500)] bg-[var(--accent-500)]/10'
                         : 'border-[var(--border)] bg-[var(--surface-0)] hover:bg-[var(--surface-2)]',
                       !state.assignable && 'cursor-not-allowed opacity-55 hover:bg-[var(--surface-0)]',
                     )}
                   >
+                    <input
+                      type="radio"
+                      name="paperclip-agent"
+                      value={agent.id}
+                      checked={selected}
+                      disabled={!state.assignable}
+                      onChange={() => onPaperclipBindingChange({
+                        ...paperclipBinding,
+                        assigneeAgentId: agent.id,
+                        requiredAdapterType: undefined,
+                      })}
+                      className="sr-only"
+                    />
                     <span className="flex items-start justify-between gap-2">
                       <span className="min-w-0">
                         <span className="block truncate text-xs font-semibold text-[var(--text-primary)]">
@@ -1472,10 +1920,11 @@ function ConfigureStep({
                         {state.detail}
                       </span>
                     )}
-                  </button>
+                  </label>
                 );
                 })}
-              </div>
+                </div>
+              </fieldset>
               {visibleAgents.length === 0 && (
                 <div className="rounded-lg border border-dashed border-[var(--border-strong)] bg-[var(--surface-0)] px-4 py-6 text-center text-xs text-[var(--text-muted)]">
                 No agents match this search and adapter filter.
@@ -1637,17 +2086,42 @@ function ConfigureStep({
         </span>
       </div>
 
-      <section className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-3">
-        <h3 className="text-xs font-medium text-[var(--text-secondary)]">
-          Destination always instructions
-        </h3>
-        <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
-          Configured in Settings and applied to every eligible dispatch to this destination.
-        </p>
-        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--surface-1)] p-2 text-xs leading-relaxed text-[var(--text-secondary)]">
-          {target.alwaysInstructions || 'No always instructions configured.'}
-        </pre>
+      <section>
+        <h3 className="text-xs font-semibold text-[var(--text-primary)]">After queueing</h3>
+        <label className="mt-2 flex min-h-12 items-center justify-between gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2">
+          <span>
+            <span className="block text-xs font-medium text-[var(--text-secondary)]">
+              Mark delegated tasks as In Progress
+            </span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--text-muted)]">
+              Applies after each task is successfully queued.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={markInProgress}
+            onChange={(event) => onMarkInProgressChange(event.target.checked)}
+            className="h-4 w-4 shrink-0 accent-[var(--accent-500)]"
+          />
+        </label>
       </section>
+
+      <details className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)]">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
+          Destination instructions
+          <span className="ml-2 font-normal text-[var(--text-muted)]">
+            {target.alwaysInstructions ? 'Configured' : 'None configured'}
+          </span>
+        </summary>
+        <div className="border-t border-[var(--border-subtle)] p-3">
+          <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
+            Applied to every eligible dispatch to this destination.
+          </p>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--surface-1)] p-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+            {target.alwaysInstructions || 'No destination instructions configured.'}
+          </pre>
+        </div>
+      </details>
 
       <details className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)]">
         <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
@@ -1728,35 +2202,54 @@ function EligibilityList({
         <h3 className="text-xs font-semibold text-[var(--text-primary)]">Eligibility</h3>
         <span className="text-[11px] text-[var(--text-muted)]">Blocked tasks are never skipped silently</span>
       </div>
-      <ul className="mt-2 overflow-hidden rounded-lg border border-[var(--border-subtle)]">
-        {[...ready, ...blocked].map((item) => (
-          <li
-            key={item.taskId}
-            className="flex items-start gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-2 last:border-b-0"
-          >
-            {item.ready
-              ? <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-300" />
-              : <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs font-medium text-[var(--text-primary)]">{item.title}</span>
-              <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--text-muted)]">
-                {item.ready
-                  ? item.repositoryLocked
-                    ? `Locked to ${item.repository}`
-                    : 'Ready for this destination'
-                  : item.blocker}
-              </span>
-            </span>
-            <span className={cn(
-              'text-[11px] font-medium',
-              item.ready ? 'text-emerald-300' : 'text-amber-300',
-            )}>
-              {item.ready ? 'Ready' : 'Blocked'}
-            </span>
-          </li>
-        ))}
-      </ul>
+      {blocked.length > 0 && (
+        <ul className="mt-2 overflow-hidden rounded-lg border border-amber-700/30">
+          {blocked.map((item) => <EligibilityItem key={item.taskId} item={item} />)}
+        </ul>
+      )}
+      {ready.length > 0 && (
+        <details className="mt-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)]">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
+            {ready.length} ready task{ready.length === 1 ? '' : 's'}
+          </summary>
+          <ul className="border-t border-[var(--border-subtle)]">
+            {ready.map((item) => <EligibilityItem key={item.taskId} item={item} />)}
+          </ul>
+        </details>
+      )}
     </section>
+  );
+}
+
+function EligibilityItem({
+  item,
+}: {
+  item: TaskDelegationTarget['eligibility'][number];
+}) {
+  return (
+    <li className="flex items-start gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-2 last:border-b-0">
+      {item.ready
+        ? <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-300" />
+        : <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium text-[var(--text-primary)]">
+          {item.title}
+        </span>
+        <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--text-muted)]">
+          {item.ready
+            ? item.repositoryLocked
+              ? `Locked to ${item.repository}`
+              : 'Ready for this destination'
+            : item.blocker}
+        </span>
+      </span>
+      <span className={cn(
+        'text-[11px] font-medium',
+        item.ready ? 'text-emerald-300' : 'text-amber-300',
+      )}>
+        {item.ready ? 'Ready' : 'Blocked'}
+      </span>
+    </li>
   );
 }
 
@@ -1882,6 +2375,95 @@ function ReviewStep({
   )];
   return (
     <div className="space-y-5">
+      <section>
+        <h3 className="text-xs font-semibold text-[var(--text-primary)]">
+          What will be sent
+        </h3>
+        <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+          Review the instructions and task context {
+            dispatchStrategy === 'combined'
+              ? 'for the combined cloud session'
+              : dispatchStrategy === 'auto'
+                ? 'for each proposed cloud session'
+                : `that will be sent to ${target.name}`
+          }.
+        </p>
+        <div className="mt-2 space-y-2">
+          {batch.previews.map((preview) => {
+            const tasks = Array.isArray(preview.payloadPreview.tasks)
+              ? preview.payloadPreview.tasks
+                .map(payloadRecord)
+                .filter((task): task is Record<string, unknown> => task !== null)
+              : [];
+            const taskCount = preview.taskIds?.length ?? tasks.length;
+            const title = taskCount > 1
+              ? `${taskCount} tasks combined`
+              : payloadText(tasks[0]?.title) ?? preview.taskId;
+            const instruction = payloadText(preview.payloadPreview.instruction);
+            const alwaysInstructions = payloadText(preview.payloadPreview.alwaysInstructions);
+            return (
+              <article
+                key={preview.dispatchId}
+                className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-3"
+              >
+                <h4 className="text-sm font-medium text-[var(--text-primary)]">{title}</h4>
+                {instruction && (
+                  <div className="mt-3">
+                    <p className="text-[11px] font-medium text-[var(--text-muted)]">Request</p>
+                    <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
+                      {instruction}
+                    </p>
+                  </div>
+                )}
+                {alwaysInstructions && (
+                  <div className="mt-3">
+                    <p className="text-[11px] font-medium text-[var(--text-muted)]">
+                      Destination instructions
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
+                      {alwaysInstructions}
+                    </p>
+                  </div>
+                )}
+                {tasks.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-[11px] font-medium text-[var(--text-muted)]">Task context</p>
+                    <div className="mt-1 space-y-2">
+                      {tasks.map((task, index) => {
+                        const taskTitle = payloadText(task.title) ?? `Task ${index + 1}`;
+                        const description = payloadText(task.description);
+                        return (
+                          <div key={payloadText(task.id) ?? `${preview.dispatchId}-${index}`}>
+                            {taskCount > 1 && (
+                              <p className="text-xs font-medium text-[var(--text-secondary)]">
+                                {taskTitle}
+                              </p>
+                            )}
+                            {description && (
+                              <p className="whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
+                                {description}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <details className="mt-3 border-t border-[var(--border-subtle)] pt-2">
+                  <summary className="cursor-pointer text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
+                    View technical dispatch data
+                  </summary>
+                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--background)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+                    {JSON.stringify(preview.payloadPreview, null, 2)}
+                  </pre>
+                </details>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
         <div className="flex items-center gap-3">
           <span className="grid h-9 w-9 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
@@ -1982,95 +2564,6 @@ function ReviewStep({
               ))}
             </div>
           </div>
-        </div>
-      </section>
-
-      <section>
-        <h3 className="text-xs font-semibold text-[var(--text-primary)]">
-          Task brief
-        </h3>
-        <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
-          Review the instructions and task context {
-            dispatchStrategy === 'combined'
-              ? 'for the combined cloud session'
-              : dispatchStrategy === 'auto'
-                ? 'for each proposed cloud session'
-                : `that will be sent to ${target.name}`
-          }.
-        </p>
-        <div className="mt-2 space-y-2">
-          {batch.previews.map((preview) => {
-            const tasks = Array.isArray(preview.payloadPreview.tasks)
-              ? preview.payloadPreview.tasks
-                .map(payloadRecord)
-                .filter((task): task is Record<string, unknown> => task !== null)
-              : [];
-            const taskCount = preview.taskIds?.length ?? tasks.length;
-            const title = taskCount > 1
-              ? `${taskCount} tasks combined`
-              : payloadText(tasks[0]?.title) ?? preview.taskId;
-            const instruction = payloadText(preview.payloadPreview.instruction);
-            const alwaysInstructions = payloadText(preview.payloadPreview.alwaysInstructions);
-            return (
-              <article
-                key={preview.dispatchId}
-                className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-3"
-              >
-                <h4 className="text-sm font-medium text-[var(--text-primary)]">{title}</h4>
-                {instruction && (
-                  <div className="mt-3">
-                    <p className="text-[11px] font-medium text-[var(--text-muted)]">Request</p>
-                    <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
-                      {instruction}
-                    </p>
-                  </div>
-                )}
-                {alwaysInstructions && (
-                  <div className="mt-3">
-                    <p className="text-[11px] font-medium text-[var(--text-muted)]">
-                      Destination instructions
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
-                      {alwaysInstructions}
-                    </p>
-                  </div>
-                )}
-                {tasks.length > 0 && (
-                  <div className="mt-3">
-                    <p className="text-[11px] font-medium text-[var(--text-muted)]">Task context</p>
-                    <div className="mt-1 space-y-2">
-                      {tasks.map((task, index) => {
-                        const taskTitle = payloadText(task.title) ?? `Task ${index + 1}`;
-                        const description = payloadText(task.description);
-                        return (
-                          <div key={payloadText(task.id) ?? `${preview.dispatchId}-${index}`}>
-                            {taskCount > 1 && (
-                              <p className="text-xs font-medium text-[var(--text-secondary)]">
-                                {taskTitle}
-                              </p>
-                            )}
-                            {description && (
-                              <p className="whitespace-pre-wrap text-xs leading-relaxed text-[var(--text-secondary)]">
-                                {description}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                <details className="mt-3 border-t border-[var(--border-subtle)] pt-2">
-                  <summary className="cursor-pointer text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
-                    View technical dispatch data
-                  </summary>
-                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--background)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)]">
-                    {JSON.stringify(preview.payloadPreview, null, 2)}
-                  </pre>
-                </details>
-              </article>
-            );
-          })}
         </div>
       </section>
 

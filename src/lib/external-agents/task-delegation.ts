@@ -169,6 +169,7 @@ export interface TaskDelegationContext {
   tasks: Array<{
     id: string;
     title: string;
+    description: string | null;
     connectorType: string;
   }>;
   targets: TaskDelegationTarget[];
@@ -180,6 +181,7 @@ export interface TaskDelegationPreviewInput {
   taskId: string;
   agentId: string;
   instruction?: string;
+  taskBriefs?: Record<string, string>;
   allowedActions?: string[];
   operationId: string;
   repository?: string;
@@ -593,9 +595,10 @@ export async function getTaskDelegationContext(
   }
   return {
     taskIds,
-    tasks: snapshot.tasks.map(({ id, title, connectorType }) => ({
+    tasks: snapshot.tasks.map(({ id, title, description, connectorType }) => ({
       id,
       title,
+      description,
       connectorType,
     })),
     targets: configuredTargets,
@@ -782,6 +785,7 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
         taskIds: [input.taskId],
         ...(paperclipBinding ? { paperclip: paperclipBinding } : {}),
       },
+    taskBriefs: input.taskBriefs,
     allowedActions: requested,
     idempotencyKey,
     callbackBaseUrl: input.callbackBaseUrl,
@@ -895,6 +899,7 @@ export async function previewCombinedTaskDelegation(
       model: input.model,
       createPullRequest,
     },
+    taskBriefs: input.taskBriefs,
     allowedActions: requested,
     idempotencyKey,
     callbackBaseUrl: input.callbackBaseUrl,

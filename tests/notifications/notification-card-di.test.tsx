@@ -194,6 +194,87 @@ describe('NotificationCard — DI Rich Cards', () => {
       expect(screen.queryByText('Custom REST')).toBeNull();
     });
 
+    it('confirms Paperclip decisions and passes an optional note', async () => {
+      const onExecuteAction = vi.fn(async () => ({
+        success: true,
+        result: { confirmation: 'Approved in Paperclip.' },
+      }));
+      const notification = makeNotification({
+        connectorType: 'paperclip',
+        templateKey: 'paperclip_approval',
+        metadata: {
+          approvalId: 'approval-1',
+          companyId: 'company-1',
+          approvalType: 'request_board_approval',
+        },
+        actions: [{
+          id: 'approve-action',
+          notificationId: 'test-1',
+          actionType: 'paperclip_approve',
+          label: 'Approve',
+          variant: 'primary',
+          isPrimary: true,
+          sortOrder: 0,
+          payload: {},
+          opensExternal: false,
+          requiresConfirmation: true,
+          createdBy: 'connector',
+        }],
+      });
+
+      render(
+        <NotificationDetail
+          notification={notification}
+          onExecuteAction={onExecuteAction}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+      expect(screen.getByText(/Paperclip remains authoritative/)).toBeDefined();
+      fireEvent.change(screen.getByLabelText(/Decision note/), {
+        target: { value: 'Approved for the pilot.' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+      await waitFor(() => {
+        expect(onExecuteAction).toHaveBeenCalledWith('approve-action', {
+          decisionNote: 'Approved for the pilot.',
+        });
+      });
+    });
+
+    it('upgrades an already-persisted raw Paperclip notification at render time', () => {
+      const enriched = makeNotification({
+        connectorType: 'paperclip',
+        templateKey: 'paperclip_approval',
+        metadata: {
+          approvalId: 'approval-1',
+          companyId: 'company-1',
+          companyName: 'Clip Joint',
+          approvalType: 'request_board_approval',
+          risk: 'high',
+          summary: 'Review this bounded approval request.',
+        },
+      });
+      const historical = {
+        ...enriched,
+        title: 'Paperclip approval: request_board_approval',
+        body: 'Company: Clip Joint\nType: request_board_approval\nRisk: high',
+        presentation: {},
+      };
+
+      render(
+        <NotificationDetail
+          notification={historical}
+          onExecuteAction={vi.fn(async () => ({ success: true }))}
+        />,
+      );
+
+      expect(screen.getByRole('heading', { name: 'Board approval requested' })).toBeDefined();
+      expect(screen.getByText('Review this bounded approval request.')).toBeDefined();
+      expect(screen.queryByText(/request_board_approval/)).toBeNull();
+    });
+
     it('layers a contextual Home Assistant icon over the connector source badge', () => {
       const notification = makeNotification({
         id: 'ha-update-1',

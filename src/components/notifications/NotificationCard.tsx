@@ -100,6 +100,8 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number; classNam
   navigate: ArrowRight,
   approve: CheckCircle,
   reject: XCircle,
+  paperclip_approve: CheckCircle,
+  paperclip_reject: XCircle,
   run_workflow: Zap,
   dismiss: X,
   snooze: Clock,
@@ -130,14 +132,23 @@ function NotificationActionConfirmation({
 }) {
   const metadata = notification.metadata ?? {};
   const canBackup = action?.actionType === 'install_update' && metadata.supportsBackup === true;
+  const isPaperclipDecision = action?.actionType === 'paperclip_approve'
+    || action?.actionType === 'paperclip_reject';
   const [createBackup, setCreateBackup] = useState(false);
+  const [decisionNote, setDecisionNote] = useState('');
   const cancel = () => {
     setCreateBackup(false);
+    setDecisionNote('');
     onCancel();
   };
   const confirm = () => {
-    const input = canBackup ? { createBackup } : undefined;
+    const input = canBackup
+      ? { createBackup }
+      : isPaperclipDecision && decisionNote.trim()
+        ? { decisionNote: decisionNote.trim() }
+        : undefined;
     setCreateBackup(false);
+    setDecisionNote('');
     onConfirm(input);
   };
 
@@ -152,10 +163,17 @@ function NotificationActionConfirmation({
             ? `Restart ${String(metadata.instanceName || 'Home Assistant')} now? Automations and connected devices may be briefly unavailable while it comes back online.`
           : action?.actionType === 'dismiss_persistent_notification'
             ? `Dismiss this notification in ${String(metadata.instanceName || 'Home Assistant')} and remove it from Mission Control?`
-          : `${action?.label || 'Apply this action'} in ${String(metadata.instanceName || 'Home Assistant')}? Mission Control will confirm the final state on the next poll.`
+          : isPaperclipDecision
+            ? `${action?.label || 'Apply this decision'} this Paperclip approval? Paperclip remains authoritative, and Mission Control will confirm the final state on the next poll.`
+            : `${action?.label || 'Apply this action'} in ${String(metadata.instanceName || 'Home Assistant')}? Mission Control will confirm the final state on the next poll.`
       }
       confirmLabel={action?.label || 'Confirm'}
-      confirmVariant={action?.actionType === 'restart_home_assistant' ? 'danger' : 'warning'}
+      confirmVariant={
+        action?.actionType === 'restart_home_assistant'
+        || action?.actionType === 'paperclip_reject'
+          ? 'danger'
+          : 'warning'
+      }
       onCancel={cancel}
       onConfirm={confirm}
     >
@@ -164,6 +182,19 @@ function NotificationActionConfirmation({
           <input type="checkbox" checked={createBackup} onChange={event => setCreateBackup(event.target.checked)}
             className="h-4 w-4 accent-blue-500" />
           Create a backup first
+        </label>
+      )}
+      {isPaperclipDecision && (
+        <label className="block text-xs font-medium text-[var(--text-secondary)]">
+          Decision note <span className="font-normal text-[var(--text-muted)]">(optional)</span>
+          <textarea
+            value={decisionNote}
+            onChange={event => setDecisionNote(event.target.value)}
+            maxLength={1000}
+            rows={3}
+            placeholder="Add context for the requesting agent"
+            className="mt-1.5 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm font-normal text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
+          />
         </label>
       )}
     </ConfirmDialog>
@@ -507,6 +538,7 @@ function useNotificationDisplay(notification: NotificationItem) {
       body: notification.body || undefined,
       level: notification.level,
       category: notification.category,
+      templateKey: notification.templateKey || undefined,
       isRead: !isNotificationUnread(notification),
       isActionable: notification.isActionable,
       receivedAt: notification.receivedAt,
@@ -514,10 +546,10 @@ function useNotificationDisplay(notification: NotificationItem) {
       tags: [],
       metadata: notification.metadata,
     } satisfies InboundNotification);
-    return resolved?.presentation.presentation || {};
+    return resolved?.presentation ?? null;
   }, [notification]);
   const presentation = {
-    ...providerFallback,
+    ...(providerFallback?.presentation ?? {}),
     ...(notification.presentation ?? {}),
   } as NotificationPresentation;
   const metadata = notification.metadata ?? {};
@@ -550,9 +582,14 @@ function useNotificationDisplay(notification: NotificationItem) {
   return {
     presentation,
     sourceName,
+    displayTitle: providerFallback?.title || notification.title,
     displayBody: notification.connectorType === 'rymessage'
-      ? messageExcerpt || notification.body
-      : aiSummary || notification.body,
+      ? messageExcerpt || providerFallback?.body || notification.body
+      : aiSummary || (
+        providerFallback && providerFallback.body !== undefined
+          ? providerFallback.body
+          : notification.body
+      ),
     classificationLabel: semanticType
       ? formatNotificationTypeLabel(`rymessage.${semanticType}`)
       : formatNotificationCategoryLabel(notification.category),
@@ -588,6 +625,7 @@ export function NotificationCard({
   const {
     presentation,
     sourceName,
+    displayTitle,
     displayBody,
     metadataChips,
     richContent,
@@ -636,7 +674,8 @@ export function NotificationCard({
         if (seed) {
           setPromotion(seed);
         } else if (
-          notification.connectorType === 'home-assistant'
+          (notification.connectorType === 'home-assistant'
+            || notification.connectorType === 'paperclip')
           && action.requiresConfirmation
         ) {
           setAcceptedSourceActionFor(notification.id);
@@ -682,7 +721,7 @@ export function NotificationCard({
         <button
           type="button"
           onClick={onSelect}
-          aria-label={`Open ${notification.title}`}
+          aria-label={`Open ${displayTitle}`}
           aria-pressed={isSelected}
           className="absolute inset-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
         />
@@ -710,7 +749,7 @@ export function NotificationCard({
               <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0 shadow-[0_0_4px_rgba(96,165,250,0.6)]" />
             )}
             <p className={`text-sm font-medium ${compact ? 'truncate' : 'line-clamp-2'} ${isUnread ? 'text-[var(--text-primary)] font-semibold' : 'text-[var(--text-secondary)]'}`}>
-              {notification.title}
+              {displayTitle}
             </p>
           </div>
 
@@ -1031,6 +1070,7 @@ export function NotificationDetail({
   const {
     presentation,
     sourceName,
+    displayTitle,
     displayBody,
     metadataChips,
     richContent,
@@ -1056,7 +1096,8 @@ export function NotificationDetail({
         if (seed) {
           setPromotion(seed);
         } else if (
-          notification.connectorType === 'home-assistant'
+          (notification.connectorType === 'home-assistant'
+            || notification.connectorType === 'paperclip')
           && action.requiresConfirmation
         ) {
           setAcceptedSourceActionFor(notification.id);
@@ -1137,7 +1178,7 @@ export function NotificationDetail({
         </div>
 
         <h2 className="text-lg font-semibold leading-6 text-[var(--text-primary)]">
-          {notification.title}
+          {displayTitle}
         </h2>
         {presentation.subtitle && (
           <p className="mt-1 text-sm font-medium text-[var(--accent)]">{presentation.subtitle}</p>
@@ -1543,9 +1584,11 @@ function ActionButton({
 }) {
   const Icon = ACTION_ICONS[action.actionType] || ArrowRight;
 
-  const variantClasses = isPrimary
-    ? (levelConfig?.buttonClass || 'bg-[var(--accent)] text-white hover:bg-blue-500 shadow-sm shadow-blue-900/30')
-    : 'bg-[var(--surface-2)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]/80 border border-[var(--border)]';
+  const variantClasses = action.variant === 'danger'
+    ? 'border border-red-500/30 bg-red-950/30 text-red-300 hover:bg-red-900/40 hover:text-red-200'
+    : isPrimary
+      ? (levelConfig?.buttonClass || 'bg-[var(--accent)] text-white hover:bg-blue-500 shadow-sm shadow-blue-900/30')
+      : 'bg-[var(--surface-2)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]/80 border border-[var(--border)]';
 
   return (
     <button

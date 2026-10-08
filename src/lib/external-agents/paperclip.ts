@@ -97,6 +97,8 @@ export interface PaperclipApproval extends Record<string, unknown> {
   status: string;
 }
 
+export type PaperclipApprovalDecision = 'approve' | 'reject';
+
 export interface PaperclipAttentionItem extends Record<string, unknown> {
   id: string;
   companyId: string;
@@ -378,6 +380,52 @@ export async function listPaperclipApprovals(
     ...approval,
     companyId,
   }));
+}
+
+export async function decidePaperclipApproval(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  input: {
+    approvalId: string;
+    companyId: string;
+    decision: PaperclipApprovalDecision;
+    decisionNote?: string;
+  },
+): Promise<PaperclipApproval> {
+  const approvalId = input.approvalId.trim();
+  const companyId = input.companyId.trim();
+  if (!approvalId || !companyId) {
+    throw new ExternalAgentError(
+      'Paperclip approval and company are required',
+      'TRANSPORT_INVALID',
+      422,
+    );
+  }
+  const decisionNote = input.decisionNote?.trim();
+  const approval = await request<PaperclipApproval>(
+    {
+      ...connection,
+      config: { companyId, assigneeAgentId: '' },
+    },
+    `/approvals/${encodeURIComponent(approvalId)}/${input.decision}`,
+    {
+      method: 'POST',
+      body: decisionNote ? { decisionNote } : {},
+    },
+  );
+  const expectedStatus = input.decision === 'approve' ? 'approved' : 'rejected';
+  if (
+    !approval
+    || approval.id !== approvalId
+    || approval.companyId !== companyId
+    || approval.status?.toLowerCase() !== expectedStatus
+  ) {
+    throw new ExternalAgentError(
+      `Paperclip approval is no longer available to ${input.decision}`,
+      'PROVIDER_CONFLICT',
+      409,
+    );
+  }
+  return approval;
 }
 
 export async function listPaperclipAttention(

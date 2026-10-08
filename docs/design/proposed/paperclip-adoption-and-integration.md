@@ -219,9 +219,9 @@ use, but REST provides a simpler durable dispatch and reconciliation contract.
 The notification connector uses Paperclip's browser-approved Board
 authorization flow. Mission Control exchanges the temporary approval credential
 for a named 90-day Board API key, revokes the temporary key, stores the named key
-server-side, and warns 14 days before it expires. A connector instance remains
-bound to one monitored company even when the Board identity can access several
-companies.
+server-side, and warns 14 days before it expires. A connector monitors every
+company accessible to that Board identity by default, or an explicitly selected
+subset.
 
 The implemented provider registers an API origin, a connector-owned credential,
 a server-owned direct credential, or a deployment-secret reference, plus a
@@ -330,9 +330,11 @@ as agent-addressed issue-thread cards, require issue synchronization and are
 tracked separately rather than forcing unbounded issue enumeration into the
 notification-only connector.
 
-The first version opens Paperclip to decide. A later version may approve or
-reject through MC only after adding narrowly scoped API authority, explicit
-confirmation, concurrency protection, and authoritative response handling.
+Mission Control can approve or reject through Paperclip's Board-only endpoints.
+Every inline decision requires explicit confirmation, is claimed once in MC,
+accepts an optional decision note, verifies Paperclip's authoritative response,
+and queues an immediate reconciliation poll. The Paperclip deep link remains
+available for richer review and revision requests.
 The notification connector polls the configured company approval collection,
 deduplicates by approval ID, and closes an existing notification only after a
 successful authoritative poll observes a terminal approval state. It stores a

@@ -203,9 +203,11 @@ function readDraft(taskIds: string[]): DelegationDraft | null {
       || typeof draft.createPullRequest !== 'boolean'
       || !['separate', 'combined', 'auto'].includes(draft.dispatchStrategy ?? '')
       || typeof draft.markInProgress !== 'boolean'
+      || typeof draft.maxAttempts !== 'number'
       || !Number.isInteger(draft.maxAttempts)
       || draft.maxAttempts < 1
       || draft.maxAttempts > 20
+      || typeof draft.timeoutHours !== 'number'
       || !Number.isInteger(draft.timeoutHours)
       || draft.timeoutHours < 1
       || draft.timeoutHours > 720

@@ -36,6 +36,7 @@ interface TaskRow {
   dueDate: string | null;
   connectorType: string;
   connectorInstanceId: string;
+  dataClassificationOverride: SemanticTaskSource['dataClassificationOverride'];
   sourceListName: string | null;
   parentId: string | null;
   isChecklistItem: number;
@@ -123,6 +124,11 @@ const TASK_COLUMNS = `
   due_date AS dueDate,
   connector_type AS connectorType,
   connector_instance_id AS connectorInstanceId,
+  (
+    SELECT json_extract(cc.settings, '$.dataClassificationOverride')
+    FROM connector_configs cc
+    WHERE cc.id = tasks.connector_instance_id
+  ) AS dataClassificationOverride,
   source_list_name AS sourceListName,
   parent_id AS parentId,
   is_checklist_item AS isChecklistItem,
@@ -199,6 +205,7 @@ function toTask(row: TaskRow, tags: string[]): SemanticTaskSource {
     dueDate: row.dueDate,
     connectorType: row.connectorType,
     connectorInstanceId: row.connectorInstanceId,
+    dataClassificationOverride: row.dataClassificationOverride,
     sourceListName: row.sourceListName,
     parentId: row.parentId,
     isChecklistItem: row.isChecklistItem === 1,

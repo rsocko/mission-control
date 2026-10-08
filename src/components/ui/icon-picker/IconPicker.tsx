@@ -16,7 +16,9 @@ import {
   POPULAR_SIMPLE_ICONS,
   serializeIconValue,
   getIconUrl,
+  getSimpleIconNames,
 } from './types';
+import { IconRenderer } from './IconRenderer';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
@@ -75,8 +77,25 @@ interface IconifySearchResult {
   total: number;
 }
 
+interface IconifyIconSet {
+  width?: number;
+  height?: number;
+  icons: Record<string, {
+    body: string;
+    width?: number;
+    height?: number;
+  }>;
+  aliases?: Record<string, {
+    parent: string;
+    width?: number;
+    height?: number;
+  }>;
+}
+
 const searchCache = new Map<string, string[]>();
+const iconMaskCache = new Map<string, string>();
 const MAX_CACHE_SIZE = 200;
+const MAX_ICON_MASK_CACHE_SIZE = 1_000;
 
 async function searchIconify(
   query: string,
@@ -91,7 +110,9 @@ async function searchIconify(
     const res = await fetch(url);
     if (!res.ok) return [];
     const data: IconifySearchResult = await res.json();
-    const names = data.icons.map((icon) => icon.replace(`${prefix}:`, ''));
+    const names = data.icons
+      .map((icon) => icon.replace(`${prefix}:`, ''))
+      .slice(0, limit);
     // Evict oldest entries if cache is full
     if (searchCache.size >= MAX_CACHE_SIZE) {
       const firstKey = searchCache.keys().next().value;
@@ -102,6 +123,58 @@ async function searchIconify(
   } catch {
     return [];
   }
+}
+
+function iconMaskCacheKey(source: IconSource, name: string) {
+  return `${source}:${name}`;
+}
+
+function createIconMaskUrl(body: string, width: number, height: number) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">${body}</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+async function loadIconifyMasks(
+  source: IconSource,
+  names: string[],
+): Promise<Record<string, string | null>> {
+  if (!['lucide', 'mdi', 'ph'].includes(source) || names.length === 0) return {};
+
+  const missingNames = names.filter((name) => !iconMaskCache.has(iconMaskCacheKey(source, name)));
+  if (missingNames.length > 0) {
+    try {
+      const params = new URLSearchParams({ icons: missingNames.join(',') });
+      const res = await fetch(`https://api.iconify.design/${source}.json?${params}`);
+      if (res.ok) {
+        const data: IconifyIconSet = await res.json();
+        for (const name of missingNames) {
+          const alias = data.aliases?.[name];
+          const icon = data.icons[name] ?? (alias ? data.icons[alias.parent] : undefined);
+          if (!icon) continue;
+
+          const width = alias?.width || icon.width || data.width || 24;
+          const height = alias?.height || icon.height || data.height || 24;
+          if (iconMaskCache.size >= MAX_ICON_MASK_CACHE_SIZE) {
+            const firstKey = iconMaskCache.keys().next().value;
+            if (firstKey) iconMaskCache.delete(firstKey);
+          }
+          iconMaskCache.set(
+            iconMaskCacheKey(source, name),
+            createIconMaskUrl(icon.body, width, height),
+          );
+        }
+      }
+    } catch {
+      // The picker remains usable for emoji, app, and brand icons if Iconify is unavailable.
+    }
+  }
+
+  return Object.fromEntries(
+    names.map((name) => [
+      iconMaskCacheKey(source, name),
+      iconMaskCache.get(iconMaskCacheKey(source, name)) ?? null,
+    ]),
+  );
 }
 
 // ─── DASHBOARD ICONS TREE ───────────────────────────────────────────────────
@@ -136,17 +209,14 @@ async function getSimpleIcons(): Promise<string[]> {
   if (simpleIconsCache) return simpleIconsCache;
 
   try {
-    // Use the official simple-icons npm CDN which always has the latest data
     const res = await fetch(
-      'https://cdn.jsdelivr.net/npm/simple-icons/_data/simple-icons.json',
+      'https://api.iconify.design/collection?prefix=simple-icons',
     );
     if (!res.ok) return POPULAR_SIMPLE_ICONS;
     const data = await res.json();
-    const names = (data.icons || []).map((icon: { slug?: string; title: string }) =>
-      icon.slug || icon.title.toLowerCase().replace(/[^a-z0-9]/g, ''),
-    );
-    simpleIconsCache = names;
-    return names;
+    const names = getSimpleIconNames(data);
+    simpleIconsCache = names.length > 0 ? names : POPULAR_SIMPLE_ICONS;
+    return simpleIconsCache;
   } catch {
     return POPULAR_SIMPLE_ICONS;
   }
@@ -181,6 +251,8 @@ export interface IconPickerProps {
   color?: string;
   /** Called when color changes */
   onColorChange?: (color: string) => void;
+  /** Extra className on the picker container */
+  className?: string;
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────────────────────
@@ -191,6 +263,7 @@ export const IconPicker = memo(function IconPicker({
   onClose,
   color,
   onColorChange,
+  className,
 }: IconPickerProps) {
   const [query, setQuery] = useState('');
   const [sourceGroups, setSourceGroups] = useState<SourceGroup[]>([]);
@@ -201,6 +274,7 @@ export const IconPicker = memo(function IconPicker({
   const [dashIcons, setDashIcons] = useState<string[]>([]);
   const [siIcons, setSiIcons] = useState<string[]>([]);
   const [showBrowseEmoji, setShowBrowseEmoji] = useState(false);
+  const [iconMasks, setIconMasks] = useState<Record<string, string | null>>({});
 
   // Load service icon lists lazily
   useEffect(() => {
@@ -341,8 +415,32 @@ export const IconPicker = memo(function IconPicker({
   const isSearching = query.trim().length > 0;
   const displayGroups = isSearching ? sourceGroups : defaultDisplay;
 
+  useEffect(() => {
+    let active = true;
+    const iconifyGroups = displayGroups.filter((group) =>
+      ['lucide', 'mdi', 'ph'].includes(group.source),
+    );
+    if (iconifyGroups.length === 0) return;
+
+    void Promise.all(
+      iconifyGroups.map((group) => loadIconifyMasks(group.source, group.icons)),
+    ).then((groups) => {
+      if (!active) return;
+      setIconMasks((current) => Object.assign({}, current, ...groups));
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [displayGroups]);
+
   return (
-    <div className="flex flex-col w-[420px] max-h-[520px] bg-[var(--surface-1)] rounded-xl border border-[var(--border)] shadow-2xl overflow-hidden">
+    <div
+      className={cn(
+        'flex w-[420px] max-h-[520px] flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)] shadow-2xl',
+        className,
+      )}
+    >
       {/* ── Search Bar (always visible, top of picker) ────── */}
       <div className="input-glow flex items-center gap-1.5 px-3 py-2.5 border-b border-[var(--border)] bg-[var(--surface-0)]">
         <Search size={15} className="shrink-0 text-[var(--text-muted)]" />
@@ -369,7 +467,11 @@ export const IconPicker = memo(function IconPicker({
       </div>
 
       {/* ── Filter Chips ────────────────────────────────────── */}
-      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[var(--border)]">
+      <div
+        role="group"
+        aria-label="Icon sources"
+        className="flex flex-wrap items-center gap-1 border-b border-[var(--border)] px-3 py-1.5"
+      >
         {ALL_SOURCE_FILTERS.map((sf) => {
           const active = activeFilters.size === 0 || activeFilters.has(sf.id);
           return (
@@ -392,48 +494,50 @@ export const IconPicker = memo(function IconPicker({
 
       {/* ── Color Picker Row (only when color is controllable) ── */}
       {onColorChange && (
-      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-[var(--border)]">
+      <div className="flex items-start gap-1.5 border-b border-[var(--border)] px-3 py-1.5">
         <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-medium mr-0.5">Color</span>
-        <button
-          type="button"
-          onClick={() => onColorChange('')}
-          className={cn(
-            'flex h-6 items-center gap-1 rounded-md border px-1.5 text-xs transition-colors',
-            !color
-              ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
-              : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
-          )}
-          title="Use theme color"
-          aria-label="Use theme color"
-        >
-          <SunMoon size={11} />
-          Auto
-        </button>
-        {ICON_COLORS.map((c) => (
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           <button
-            key={c}
             type="button"
-            onClick={() => onColorChange?.(c)}
+            onClick={() => onColorChange('')}
             className={cn(
-              'w-4 h-4 rounded-full border transition-transform hover:scale-125 flex items-center justify-center flex-shrink-0',
-              color === c ? 'border-[var(--accent)] scale-110' : 'border-[var(--border-subtle,var(--border))]',
+              'flex h-6 items-center gap-1 rounded-md border px-1.5 text-xs transition-colors',
+              !color
+                ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
+                : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
             )}
-            style={{ backgroundColor: c }}
-            title={c}
+            title="Use theme color"
+            aria-label="Use theme color"
           >
-            {color === c && (
-              <span
-                className="w-1 h-1 rounded-full"
-                style={{ backgroundColor: c === '#ffffff' ? '#000' : '#fff' }}
-              />
-            )}
+            <SunMoon size={11} />
+            Auto
           </button>
-        ))}
+          {ICON_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => onColorChange?.(c)}
+              className={cn(
+                'w-4 h-4 rounded-full border transition-transform hover:scale-125 flex items-center justify-center flex-shrink-0',
+                color === c ? 'border-[var(--accent)] scale-110' : 'border-[var(--border-subtle,var(--border))]',
+              )}
+              style={{ backgroundColor: c }}
+              title={c}
+            >
+              {color === c && (
+                <span
+                  className="w-1 h-1 rounded-full"
+                  style={{ backgroundColor: c === '#ffffff' ? '#000' : '#fff' }}
+                />
+              )}
+            </button>
+          ))}
+        </div>
       </div>
       )}
 
       {/* ── Results / Browse Area ────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {/* Browse emoji (full picker widget) — shown when user clicks "Browse all emoji" */}
         {showBrowseEmoji && !isSearching ? (
           <div>
@@ -509,6 +613,7 @@ export const IconPicker = memo(function IconPicker({
                       name={name}
                       source={group.source}
                       color={group.source !== 'dash' && group.source !== 'si' ? color : undefined}
+                      maskUrl={iconMasks[iconMaskCacheKey(group.source, name)]}
                       onClick={() => handleIconSelect(group.source, name)}
                     />
                   )
@@ -528,15 +633,18 @@ const IconGridItem = memo(function IconGridItem({
   name,
   source,
   color,
+  maskUrl,
   onClick,
 }: {
   name: string;
   source: IconSource;
   color?: string;
+  maskUrl?: string | null;
   onClick: () => void;
 }) {
   const parsed: ParsedIcon = { source, name };
   const url = getIconUrl(parsed, color);
+  const isIconifyIcon = ['lucide', 'mdi', 'ph'].includes(source);
 
   return (
     <button
@@ -545,7 +653,41 @@ const IconGridItem = memo(function IconGridItem({
       className="flex flex-col items-center justify-center p-1.5 rounded-lg hover:bg-[var(--surface-2)] transition-colors duration-75 group"
       title={`${source}:${name}`}
     >
-      {url ? (
+      {isIconifyIcon && maskUrl ? (
+        <span
+          role="img"
+          aria-label={`${source}:${name}`}
+          className="inline-block h-[22px] w-[22px] flex-shrink-0"
+          style={{
+            backgroundColor: color || 'currentColor',
+            maskImage: `url("${maskUrl}")`,
+            WebkitMaskImage: `url("${maskUrl}")`,
+            maskPosition: 'center',
+            WebkitMaskPosition: 'center',
+            maskRepeat: 'no-repeat',
+            WebkitMaskRepeat: 'no-repeat',
+            maskSize: 'contain',
+            WebkitMaskSize: 'contain',
+          }}
+        />
+      ) : isIconifyIcon && maskUrl === undefined ? (
+        <span
+          aria-hidden="true"
+          className="h-[22px] w-[22px] animate-pulse rounded bg-[var(--surface-3)]"
+        />
+      ) : isIconifyIcon ? (
+        <IconRenderer
+          value={`${source}:${name}`}
+          size={22}
+          color={color}
+          fallback={(
+            <span
+              aria-hidden="true"
+              className="h-[22px] w-[22px] rounded bg-[var(--surface-3)]"
+            />
+          )}
+        />
+      ) : url ? (
         <img
           src={url}
           alt={name}

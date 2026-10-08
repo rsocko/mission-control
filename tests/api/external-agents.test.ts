@@ -186,9 +186,8 @@ describe('external-agent API', () => {
     expect(claimResponse.status).toBe(200);
     expect(claim).toMatchObject({ dispatchId: preview.dispatchId, attempt: 1 });
 
-    const detailRequest = mutationRequest(
-      `/api/external-agents/dispatches/${preview.dispatchId}`,
-      {},
+    const detailRequest = new Request(
+      `http://localhost/api/external-agents/dispatches/${preview.dispatchId}`,
     );
     const detailResponse = await detailRoute.GET(detailRequest, {
       params: Promise.resolve({ id: preview.dispatchId }),

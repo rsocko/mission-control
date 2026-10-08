@@ -761,6 +761,7 @@ export function TaskDetailPanel({
         mode === 'workspace' && 'grid max-w-[1320px] grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(380px,1.35fr)] items-start gap-5 p-7',
       )}>
         <TaskDetailHeader
+          taskId={task.id}
           mode={mode}
           iconSrc={iconSrc ?? null}
           connectorType={task.connectorType}
@@ -1013,7 +1014,7 @@ export function TaskDetailPanel({
                 ? `Subtasks (${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length})`
                 : 'Subtasks'}
               className={cn(
-                'text-sm font-semibold text-[var(--text-secondary)]',
+                'text-sm font-semibold text-[var(--text-heading)]',
                 mode === 'panel' && 'rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]',
               )}
             >

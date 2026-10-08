@@ -48,6 +48,18 @@ export function serializeIconValue(icon: ParsedIcon): string {
 /** Validate icon name to prevent URL injection — only allow safe characters */
 const SAFE_ICON_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
+const DASHBOARD_ICON_ALIASES: Record<string, string> = {
+  pihole: 'pi-hole',
+  ubuntu: 'ubuntu-linux',
+  debian: 'debian-linux',
+  windows: 'microsoft-windows',
+  tandoor: 'tandoor-recipes',
+};
+
+const SIMPLE_ICON_ALIASES: Record<string, string> = {
+  twitter: 'x',
+};
+
 /** Get a renderable URL for an icon, optionally tinted with a color */
 export function getIconUrl(icon: ParsedIcon, color?: string): string | null {
   if (icon.source === 'emoji') return null;
@@ -67,15 +79,42 @@ export function getIconUrl(icon: ParsedIcon, color?: string): string | null {
     case 'ph':
       return `https://api.iconify.design/ph/${icon.name}.svg${encodedColor ? `?color=%23${encodedColor}` : ''}`;
 
-    case 'dash':
-      return `https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/${icon.name}.svg`;
+    case 'dash': {
+      const name = DASHBOARD_ICON_ALIASES[icon.name] ?? icon.name;
+      return `https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/${name}.svg`;
+    }
 
-    case 'si':
-      return `https://cdn.simpleicons.org/${icon.name}${encodedColor ? `/${encodedColor}` : ''}`;
+    case 'si': {
+      const name = SIMPLE_ICON_ALIASES[icon.name] ?? icon.name;
+      return `https://cdn.simpleicons.org/${name}${encodedColor ? `/${encodedColor}` : ''}`;
+    }
 
     default:
       return null;
   }
+}
+
+export function getSimpleIconNames(data: unknown): string[] {
+  let entries: unknown[] = [];
+  if (Array.isArray(data)) {
+    entries = data;
+  } else if (data && typeof data === 'object') {
+    if ('uncategorized' in data && Array.isArray(data.uncategorized)) {
+      entries = data.uncategorized;
+    } else if ('icons' in data && Array.isArray(data.icons)) {
+      entries = data.icons;
+    }
+  }
+
+  return entries.flatMap((entry) => {
+    if (typeof entry === 'string') return [entry];
+    if (!entry || typeof entry !== 'object') return [];
+
+    const slug = 'slug' in entry && typeof entry.slug === 'string' ? entry.slug : '';
+    const title = 'title' in entry && typeof entry.title === 'string' ? entry.title : '';
+    const name = slug || title.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return name ? [name] : [];
+  });
 }
 
 // ─── POPULAR ICONS (for initial display before search) ──────────────────────
@@ -95,7 +134,7 @@ export const POPULAR_LUCIDE = [
   'battery', 'power', 'download', 'upload', 'refresh-cw', 'loader',
   'alert-circle', 'info', 'help-circle', 'message-circle', 'send',
   'share-2', 'external-link', 'maximize', 'minimize', 'move',
-  'crop', 'filter', 'sliders', 'tool', 'wrench', 'hammer',
+  'crop', 'filter', 'sliders', 'tool-case', 'wrench', 'hammer',
   'paint-bucket', 'palette', 'brush', 'pen-tool', 'type',
   'bold', 'italic', 'align-left', 'list-ordered', 'table',
   'shopping-cart', 'credit-card', 'dollar-sign', 'gift', 'truck',
@@ -149,18 +188,18 @@ export const POPULAR_DASHBOARD_ICONS = [
   'github', 'gitlab', 'discord', 'slack', 'plex', 'jellyfin', 'sonarr',
   'radarr', 'nextcloud', 'home-assistant', 'grafana', 'prometheus',
   'portainer', 'nginx', 'traefik', 'docker', 'proxmox', 'unraid',
-  'pihole', 'adguard-home', 'bitwarden', 'vaultwarden', 'immich',
+  'pi-hole', 'adguard-home', 'bitwarden', 'vaultwarden', 'immich',
   'photoprism', 'audiobookshelf', 'calibre', 'paperless-ngx',
   'uptime-kuma', 'truenas', 'synology', 'qnap', 'cloudflare',
-  'tailscale', 'wireguard', 'opnsense', 'pfsense', 'ubuntu',
-  'debian', 'windows', 'linux', 'apple', 'android',
+  'tailscale', 'wireguard', 'opnsense', 'pfsense', 'ubuntu-linux',
+  'debian-linux', 'microsoft-windows', 'linux', 'apple', 'android',
   'google', 'microsoft', 'amazon', 'aws', 'azure',
   'notion', 'obsidian', 'joplin', 'standard-notes',
   'freshrss', 'miniflux', 'actual-budget', 'firefly-iii',
-  'mealie', 'tandoor', 'overseerr', 'bazarr', 'prowlarr',
+  'mealie', 'tandoor-recipes', 'overseerr', 'bazarr', 'prowlarr',
   'transmission', 'qbittorrent', 'deluge', 'sabnzbd',
-  'tautulli', 'organizr', 'homarr', 'dashy', 'homepage',
-  'gitea', 'forgejo', 'drone', 'woodpecker-ci', 'jenkins',
+  'tautulli', 'homarr',
+  'gitea', 'forgejo', 'woodpecker-ci', 'jenkins',
   'n8n', 'node-red', 'homebridge', 'zigbee2mqtt',
 ];
 
@@ -169,17 +208,17 @@ export const POPULAR_SIMPLE_ICONS = [
   'react', 'vuedotjs', 'angular', 'svelte', 'nextdotjs',
   'typescript', 'javascript', 'python', 'go', 'rust',
   'nodedotjs', 'deno', 'bun', 'npm', 'yarn',
-  'google', 'apple', 'microsoft', 'amazon', 'meta',
-  'slack', 'discord', 'telegram', 'whatsapp', 'signal',
-  'twitter', 'linkedin', 'instagram', 'youtube', 'twitch',
+  'google', 'apple', 'meta',
+  'discord', 'telegram', 'whatsapp', 'signal',
+  'x', 'instagram', 'youtube', 'twitch',
   'reddit', 'stackoverflow', 'medium', 'devdotto',
-  'figma', 'sketch', 'adobecreativecloud', 'canva',
+  'figma', 'sketch',
   'notion', 'obsidian', 'todoist', 'trello', 'jira',
-  'vercel', 'netlify', 'cloudflare', 'digitalocean', 'heroku',
+  'vercel', 'netlify', 'cloudflare', 'digitalocean',
   'postgresql', 'mysql', 'mongodb', 'redis', 'sqlite',
   'grafana', 'prometheus', 'elasticsearch', 'nginx',
   'linux', 'ubuntu', 'debian', 'fedora', 'archlinux',
-  'visualstudiocode', 'intellijidea', 'vim', 'neovim',
+  'intellijidea', 'vim', 'neovim',
   'stripe', 'paypal', 'shopify', 'wordpress',
   'spotify', 'netflix', 'plex', 'steam',
 ];

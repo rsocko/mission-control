@@ -382,6 +382,67 @@ describe('useTaskDetailMutations', () => {
     expect(onNavigationCountsRefresh).toHaveBeenCalledOnce();
   });
 
+  it('updates priority before the request resolves and rolls it back on failure', async () => {
+    let resolveRequest!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    })));
+    const onUpdate = vi.fn();
+    const { result } = renderMutations({ onUpdate });
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.mutations.handlePriorityChange('low');
+    });
+
+    expect(result.current.task?.priority).toBe('low');
+    expect(onUpdate).toHaveBeenCalledWith({ priority: 'low' });
+
+    await act(async () => {
+      resolveRequest(jsonResponse({}, false));
+      await request;
+    });
+
+    expect(result.current.task?.priority).toBe('high');
+    expect(onUpdate).toHaveBeenLastCalledWith({ priority: 'high' });
+    expect(toast.error).toHaveBeenCalledWith('Failed to save priority');
+  });
+
+  it('does not reconcile an older field mutation over a newer optimistic value', async () => {
+    const requests: Array<(response: Response) => void> = [];
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
+      requests.push(resolve);
+    })));
+    const onUpdate = vi.fn();
+    const { result } = renderMutations({ onUpdate });
+
+    let olderRequest!: Promise<void>;
+    let newerRequest!: Promise<void>;
+    act(() => {
+      olderRequest = result.current.mutations.handlePriorityChange('low');
+      newerRequest = result.current.mutations.handlePriorityChange('none');
+    });
+
+    expect(result.current.task?.priority).toBe('none');
+    expect(onUpdate).toHaveBeenNthCalledWith(1, { priority: 'low' });
+    expect(onUpdate).toHaveBeenNthCalledWith(2, { priority: 'none' });
+
+    await act(async () => {
+      requests[0](jsonResponse({}));
+      await olderRequest;
+    });
+
+    expect(result.current.task?.priority).toBe('none');
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      requests[1](jsonResponse({}));
+      await newerRequest;
+    });
+
+    expect(onUpdate).toHaveBeenLastCalledWith();
+  });
+
   it('refuses blocked fields with the policy reason', async () => {
     const fetchMock = stubFetch(() => jsonResponse({}));
     const { result } = renderMutations({

@@ -268,8 +268,17 @@ describe('dashboard state modules', () => {
     const { result } = renderHook(() => useDashboardUiState());
 
     expect(result.current.state.selectedTaskId).toBe('task-1');
+    expect(result.current.state.detailMode).toBe('dialog');
     act(() => result.current.actions.toggleSection('sources'));
     expect(result.current.state.collapsedSections.has('sources')).toBe(true);
     expect(useDashboardViewStore.getState().collapsedSections).toEqual(['sources']);
+  });
+
+  it('keeps the side panel as the default without a task deep link', () => {
+    window.history.replaceState({}, '', '/all-tasks');
+    const { result } = renderHook(() => useDashboardUiState());
+
+    expect(result.current.state.selectedTaskId).toBeNull();
+    expect(result.current.state.detailMode).toBe('panel');
   });
 });

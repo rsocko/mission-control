@@ -50,6 +50,7 @@ export type ExternalAgentAuthType = (typeof EXTERNAL_AGENT_AUTH_TYPES)[number];
 export type AgentDataClassification = (typeof AGENT_DATA_CLASSIFICATIONS)[number];
 export type AgentDispatchStatus = (typeof AGENT_DISPATCH_STATUSES)[number];
 export type AgentResultStatus = (typeof AGENT_RESULT_STATUSES)[number];
+export type AgentDispatchActionType = 'submit' | 'reconcile' | 'cancel';
 
 export interface ExternalAgentCapabilities {
   canAnalyzeCode?: boolean;
@@ -60,6 +61,67 @@ export interface ExternalAgentCapabilities {
   canProposeTasks?: boolean;
   canProposePhases?: boolean;
   canPerformM365Actions?: boolean;
+  scout?: ScoutWorkerCapabilities;
+}
+
+export const SCOUT_WORKER_SOURCE_TYPES = [
+  'email',
+  'teams',
+  'meeting',
+  'planner',
+  'cross-source',
+] as const;
+
+export const SCOUT_WORKER_ACTIONS = [
+  'read_m365',
+  'create_draft',
+  'send_message',
+  'update_planner',
+  'update_calendar',
+] as const;
+
+export type ScoutWorkerSourceType = (typeof SCOUT_WORKER_SOURCE_TYPES)[number];
+export type ScoutWorkerAction = (typeof SCOUT_WORKER_ACTIONS)[number];
+
+export interface ScoutWorkerCapabilities {
+  sourceTypes: ScoutWorkerSourceType[];
+  actions: ScoutWorkerAction[];
+  triggerTypes: Array<'schedule' | 'condition'>;
+  protectedCredentialStorage: boolean;
+  callbackUrl?: string;
+}
+
+export interface ScoutWorkerProviderConfig {
+  connectorId: string;
+  protocolVersion: string;
+  skillVersion: string;
+  onboarding: {
+    status:
+      | 'pending_registration'
+      | 'pending_approval'
+      | 'approved'
+      | 'claimed'
+      | 'rejected';
+    registrationTokenHash?: string;
+    registrationExpiresAt?: string;
+    claimTokenHash?: string;
+    claimExpiresAt?: string;
+    requestedAt?: string;
+    approvedAt?: string;
+    claimedAt?: string;
+    rejectedAt?: string;
+  };
+  connectivity: {
+    scoutToMissionControl: 'untested' | 'verified';
+    missionControlToScout: 'unsupported' | 'untested' | 'verified' | 'failed';
+    testedAt?: string;
+    detail?: string;
+  };
+  client?: {
+    name: string;
+    version: string;
+  };
+  lastSeenAt?: string;
 }
 
 export interface ExternalAgentDataPolicy {
@@ -71,6 +133,7 @@ export interface ExternalAgentDataPolicy {
 
 export interface PaperclipProviderConfig {
   companyId: string;
+  companyName?: string;
   assigneeAgentId: string;
   projectId?: string;
   requiredAdapterType?: string;
@@ -79,6 +142,24 @@ export interface PaperclipProviderConfig {
 export interface ExternalAgentProviderConfig {
   alwaysInstructions?: string;
   paperclip?: PaperclipProviderConfig;
+  scout?: ScoutWorkerProviderConfig;
+}
+
+export type AgentInteractionKind = 'question' | 'approval';
+export type AgentInteractionContinuationPolicy =
+  | 'resume_same_dispatch'
+  | 'require_new_dispatch';
+
+export interface AgentInteraction {
+  id: string;
+  kind: AgentInteractionKind;
+  status: 'pending' | 'answered' | 'approved' | 'rejected';
+  prompt: string;
+  choices?: string[];
+  continuationPolicy: AgentInteractionContinuationPolicy;
+  createdAt: string;
+  resolvedAt?: string;
+  answer?: string;
 }
 
 export interface AgentDispatchScope {
@@ -210,6 +291,15 @@ export type AgentDispatchDetail = AgentDispatchRecord & {
   events: AgentDispatchEventRecord[];
 };
 
+export interface AgentDispatchActionRecord {
+  id: string;
+  dispatchId: string;
+  action: AgentDispatchActionType;
+  attemptCount: number;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
+}
+
 export interface AgentPayloadSnapshot {
   project?: { id: string; name: string; description: string | null };
   tasks: Array<{
@@ -221,6 +311,7 @@ export interface AgentPayloadSnapshot {
     priority: string;
     status: string;
     connectorType: string;
+    connectorInstanceId?: string;
     tags: string[];
     dueDate: string | null;
     effort: number | null;
@@ -236,6 +327,7 @@ export interface AgentPayloadSnapshot {
       sourceId: string | null;
       sourceUrl: string | null;
       connectorType: string;
+      connectorInstanceId?: string;
       title: string;
       description: string | null;
       priority: string;

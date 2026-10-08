@@ -9,6 +9,14 @@ import { TaskSourceActionsSection } from '@/components/task-detail/TaskSourceAct
 import { TaskDetailFooter, TaskMobileActionBar } from '@/components/task-detail/TaskDetailFooter';
 import { TaskDuplicatesSection } from '@/components/task-detail/TaskDuplicatesSection';
 import { TaskStatusField } from '@/components/task-detail/TaskPropertiesSection';
+import { toast } from '@/lib/toast';
+
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
+}));
 
 vi.mock('@/components/task-detail/DuplicateTaskPreview', () => ({
   DuplicateTaskPreview: ({ candidate }: { candidate: { title: string } }) => <div>{candidate.title}</div>,
@@ -19,6 +27,7 @@ function renderWithTooltips(ui: React.ReactElement) {
 }
 
 const headerProps = {
+  taskId: 'task-42',
   mode: 'panel' as const,
   iconSrc: null,
   connectorType: 'github-issues',
@@ -61,6 +70,23 @@ describe('TaskDetailHeader', () => {
 
     expect(onTitleEditStart).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('copies the canonical task link', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    window.history.replaceState({}, '', '/all-tasks?taskId=task-42');
+
+    renderWithTooltips(<TaskDetailHeader {...headerProps} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy task link' }));
+
+    await vi.waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/tasks/task-42`);
+      expect(toast.success).toHaveBeenCalledWith('Task link copied');
+    });
   });
 
   it('commits on Enter and cancels on Escape while editing', () => {
@@ -175,6 +201,7 @@ describe('TaskTagsSection', () => {
     const onRemoveTag = vi.fn();
     renderWithTooltips(<TaskTagsSection {...tagsProps} onRemoveTag={onRemoveTag} />);
 
+    expect(screen.getByRole('heading', { name: 'Tags' })).toHaveClass('text-[var(--text-heading)]');
     fireEvent.click(screen.getByRole('button', { name: 'Remove tag urgent' }));
 
     expect(onRemoveTag).toHaveBeenCalledWith('tag-1');

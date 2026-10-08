@@ -265,6 +265,19 @@ export function NavRail({
     }
   }, []);
 
+  const handleProjectNavigate = useCallback(() => {
+    pointerDown.current = true;
+    setFocused(false);
+    setHovered(false);
+    setProjectMenuOpen(false);
+    clickSuppressUntil.current = Date.now() + 800;
+    if (pointerFocusTimer.current) clearTimeout(pointerFocusTimer.current);
+    pointerFocusTimer.current = setTimeout(() => {
+      pointerDown.current = false;
+      pointerFocusTimer.current = null;
+    }, 0);
+  }, []);
+
   const openSyncPopover = useCallback(() => {
     syncPopoverHovered.current = true;
     if (syncPopoverCloseTimer.current) {
@@ -353,6 +366,7 @@ export function NavRail({
           iconColor={item.iconColor}
           open={projectMenuOpen}
           pathname={pathname}
+          onNavigate={handleProjectNavigate}
           onOpenChange={setProjectMenuOpen}
         />
       );

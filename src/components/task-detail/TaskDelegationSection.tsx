@@ -15,7 +15,7 @@ import {
   Send,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import {
@@ -66,38 +66,156 @@ interface RunDetail {
   }>;
 }
 
+interface PendingInteraction {
+  id: string;
+  kind: 'question' | 'approval';
+  status: 'pending';
+  prompt: string;
+  choices?: string[];
+}
+
+function pendingInteraction(detail: RunDetail | null): PendingInteraction | null {
+  const value = detail?.providerDetail?.interaction;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const interaction = value as Record<string, unknown>;
+  if (
+    typeof interaction.id !== 'string'
+    || (interaction.kind !== 'question' && interaction.kind !== 'approval')
+    || interaction.status !== 'pending'
+    || typeof interaction.prompt !== 'string'
+  ) return null;
+  const choices = Array.isArray(interaction.choices)
+    && interaction.choices.every((choice) => typeof choice === 'string')
+    ? interaction.choices as string[]
+    : undefined;
+  return {
+    id: interaction.id,
+    kind: interaction.kind,
+    status: 'pending',
+    prompt: interaction.prompt,
+    ...(choices ? { choices } : {}),
+  };
+}
+
 async function responseError(response: Response) {
   const body = await response.json().catch(() => null) as { error?: string } | null;
   return body?.error ?? `Request failed (${response.status})`;
 }
 
-function StateLine({ assignment }: { assignment: TaskDelegationSummary }) {
+function StateLine({
+  assignment,
+  stale = false,
+}: {
+  assignment: TaskDelegationSummary;
+  stale?: boolean;
+}) {
   const presentation = STATE_PRESENTATION[assignment.displayState];
   const Icon = presentation.icon;
   return (
     <div className="flex min-w-0 items-center gap-2">
       <Icon size={14} className={cn('shrink-0', presentation.className)} aria-hidden="true" />
-      <span className={cn('font-medium', presentation.className)}>{presentation.label}</span>
+      <span className={cn('font-medium', presentation.className)}>
+        {stale ? `Last known: ${presentation.label}` : presentation.label}
+      </span>
       <span className="truncate text-[var(--text-muted)]">· {assignment.targetName}</span>
     </div>
   );
 }
 
-function outputLink(assignment: TaskDelegationSummary) {
+function assignmentMessage(assignment: TaskDelegationSummary) {
+  if (assignment.blocker) return assignment.blocker;
+  if (assignment.errorMessage) return assignment.errorMessage;
+  if (assignment.latestProgress) return assignment.latestProgress;
+  if (assignment.pendingApproval) return 'Approval is waiting for your review.';
+  return null;
+}
+
+function stateDescription(assignment: TaskDelegationSummary) {
+  const message = assignmentMessage(assignment);
+  if (message) return message;
+  switch (assignment.displayState) {
+    case 'preview':
+      return 'Review the assignment before sending it to the provider.';
+    case 'queued':
+      return 'GitHub accepted the task and is waiting to start it.';
+    case 'running':
+      return 'The provider reports that work is in progress.';
+    case 'idle':
+      return 'The provider has not reported active work.';
+    case 'waiting_for_user':
+      return 'The provider is waiting for your input.';
+    case 'blocked':
+      return 'The provider reports that work cannot continue.';
+    case 'failed':
+      return 'The provider reported that the run failed.';
+    case 'timed_out':
+      return 'The provider reported that the run exceeded its time limit.';
+    case 'cancelled':
+      return 'The run is no longer active.';
+    case 'completed':
+      if (assignment.pullRequestState === 'merged') {
+        return 'The provider completed the run and its pull request was merged.';
+      }
+      if (assignment.pullRequestState === 'closed') {
+        return 'The provider completed the run and its pull request was closed without merging.';
+      }
+      if (assignment.pullRequestState === 'draft') {
+        return 'The provider completed the run and its draft pull request is ready for review.';
+      }
+      if (assignment.pullRequestState === 'open') {
+        return 'The provider completed the run and its pull request is ready for review.';
+      }
+      return 'The provider reported that the run completed.';
+  }
+}
+
+function pullRequestStatusLabel(assignment: TaskDelegationSummary) {
+  switch (assignment.pullRequestState) {
+    case 'draft':
+      return 'Draft';
+    case 'open':
+      return 'Open';
+    case 'merged':
+      return 'Merged';
+    case 'closed':
+      return 'Closed';
+    default:
+      return null;
+  }
+}
+
+function outputLinks(assignment: TaskDelegationSummary) {
+  const links: Array<{
+    href: string;
+    label: string;
+    icon: typeof ExternalLink;
+  }> = [];
   if (assignment.pullRequestUrl) {
-    return { href: assignment.pullRequestUrl, label: 'Pull request', icon: GitPullRequest };
+    links.push({
+      href: assignment.pullRequestUrl,
+      label: assignment.pullRequestState === 'merged' || assignment.pullRequestState === 'closed'
+        ? 'View PR'
+        : 'Review PR',
+      icon: GitPullRequest,
+    });
   }
-  if (assignment.runUrl) {
-    return { href: assignment.runUrl, label: 'Provider run', icon: ExternalLink };
+  if (assignment.providerTaskUrl) {
+    links.push({
+      href: assignment.providerTaskUrl,
+      label: assignment.targetType === 'copilot-cloud' ? 'Cloud Agent' : 'Provider task',
+      icon: ExternalLink,
+    });
+  } else if (assignment.runUrl) {
+    links.push({ href: assignment.runUrl, label: 'Provider run', icon: ExternalLink });
   }
-  if (assignment.issueUrl) {
-    return {
+  if (!links.length && assignment.issueUrl) {
+    links.push({
       href: assignment.issueUrl,
       label: assignment.issueIdentifier ?? 'Provider issue',
       icon: ExternalLink,
-    };
+    });
   }
-  return null;
+  return links;
 }
 
 export function TaskDelegationSection({
@@ -117,7 +235,9 @@ export function TaskDelegationSection({
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/delegation`);
+      const response = await fetch(
+        `/api/tasks/${encodeURIComponent(taskId)}/delegation`,
+      );
       if (!response.ok) throw new Error(await responseError(response));
       setContext(await response.json() as TaskDelegationContext);
     } catch (loadError) {
@@ -138,8 +258,12 @@ export function TaskDelegationSection({
   }, [load, taskId]);
 
   const current = context?.assignments?.[0] ?? null;
-  const relevantOutput = current ? outputLink(current) : null;
-  const OutputIcon = relevantOutput?.icon;
+  const syncError = current
+    ? context?.syncErrors.find((item) => item.dispatchId === current.dispatchId) ?? null
+    : null;
+  const outputLinksForCurrent = current ? outputLinks(current) : [];
+  const pullRequestStatus = current ? pullRequestStatusLabel(current) : null;
+  const currentDescription = current ? assignmentMessage(current) : null;
 
   return (
     <>
@@ -154,7 +278,7 @@ export function TaskDelegationSection({
         <div className="flex min-h-11 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3">
           <h3
             id={`delegation-heading-${taskId}`}
-            className="flex items-center gap-2 text-sm font-semibold text-[var(--text-secondary)]"
+            className="flex items-center gap-2 text-sm font-semibold text-[var(--text-heading)]"
           >
             <GitMerge
               size={14}
@@ -190,39 +314,59 @@ export function TaskDelegationSection({
               </button>
             </div>
           ) : current ? (
-            <div className="space-y-2 text-xs">
-              <StateLine assignment={current} />
-              <p className="leading-relaxed text-[var(--text-secondary)]">
-                {current.blocker
-                  ?? current.errorMessage
-                  ?? current.latestProgress
-                  ?? (current.pendingApproval
-                    ? 'Approval is waiting for your review.'
-                    : 'Provider state is current.')}
-              </p>
+            <div className="space-y-1.5 text-xs">
+              <StateLine assignment={current} stale={Boolean(syncError)} />
+              {currentDescription && (
+                <p className="leading-relaxed text-[var(--text-secondary)]">
+                  {currentDescription}
+                </p>
+              )}
+              {syncError && (
+                <p className="text-amber-200" role="status">
+                  State refresh failed: {syncError.message}
+                </p>
+              )}
+              {current.outputWarning && (
+                <p className="text-amber-200" role="status">
+                  {current.outputWarning}
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--text-muted)]">
                 <span>{current.locality.replaceAll('-', ' ')}</span>
                 {current.baseRef && <span>Base {current.baseRef}</span>}
-                <span>Attempt {Math.max(current.attemptCount, 1)} of {current.maxAttempts}</span>
+                {pullRequestStatus && (
+                  <span>
+                    PR{current.pullRequestNumber ? ` #${current.pullRequestNumber}` : ''} {pullRequestStatus.toLowerCase()}
+                  </span>
+                )}
+                {current.displayState !== 'completed' && (
+                  <span>Attempt {Math.max(current.attemptCount, 1)}/{current.maxAttempts}</span>
+                )}
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                {relevantOutput && OutputIcon ? (
-                  <a
-                    href={relevantOutput.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[var(--accent-300)] hover:bg-[var(--surface-2)]"
-                  >
-                    <OutputIcon size={12} />
-                    {relevantOutput.label}
-                  </a>
-                ) : <span />}
+                <div className="flex flex-wrap items-center gap-1">
+                  {outputLinksForCurrent.map((link) => {
+                    const OutputIcon = link.icon;
+                    return (
+                      <a
+                        key={`${link.label}-${link.href}`}
+                        href={link.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[var(--accent-300)] hover:bg-[var(--surface-2)]"
+                      >
+                        <OutputIcon size={12} />
+                        {link.label}
+                      </a>
+                    );
+                  })}
+                </div>
                 <button
                   type="button"
                   onClick={() => setDetailsOpen(true)}
                   className="min-h-8 rounded-md border border-[var(--border)] px-2.5 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
                 >
-                  More details
+                  Details
                 </button>
               </div>
             </div>
@@ -237,6 +381,7 @@ export function TaskDelegationSection({
       {current && (
         <TaskDelegationRunDialog
           assignment={current}
+          syncError={syncError?.message ?? null}
           open={detailsOpen}
           onOpenChange={setDetailsOpen}
           onUpdated={load}
@@ -248,11 +393,13 @@ export function TaskDelegationSection({
 
 function TaskDelegationRunDialog({
   assignment,
+  syncError,
   open,
   onOpenChange,
   onUpdated,
 }: {
   assignment: TaskDelegationSummary;
+  syncError: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onUpdated: () => Promise<void>;
@@ -261,27 +408,79 @@ function TaskDelegationRunDialog({
   const [loading, setLoading] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [interactionAnswer, setInteractionAnswer] = useState('');
+  const refreshInFlight = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (requestProviderRefresh = false) => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/external-agents/dispatches/${encodeURIComponent(assignment.dispatchId)}`,
-      );
+      const url = `/api/external-agents/dispatches/${encodeURIComponent(assignment.dispatchId)}`;
+      const response = await fetch(url, requestProviderRefresh
+        ? {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'refresh' }),
+        }
+        : undefined);
       if (!response.ok) throw new Error(await responseError(response));
-      const body = await response.json() as { dispatch: RunDetail };
+      const body = await response.json() as {
+        dispatch: RunDetail;
+        accepted?: boolean;
+      };
       setDetail(body.dispatch);
+      setInteractionAnswer('');
+      if (requestProviderRefresh) {
+        toast.success(
+          body.accepted === false
+            ? 'Provider state is already current'
+            : 'Provider refresh queued',
+        );
+        await onUpdated();
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Run details could not be loaded');
     } finally {
+      refreshInFlight.current = false;
       setLoading(false);
     }
-  }, [assignment.dispatchId]);
+  }, [assignment.dispatchId, onUpdated]);
 
   useEffect(() => {
-    if (open) void load();
-  }, [load, open]);
+    if (!open) return;
+    const observePersistedState = () => {
+      void Promise.all([load(false), onUpdated()]);
+    };
+    const initialRefresh = window.setTimeout(observePersistedState, 0);
+    const active = [
+      'queued',
+      'running',
+      'idle',
+      'waiting_for_user',
+      'blocked',
+    ].includes(assignment.displayState)
+      || (
+        assignment.displayState === 'completed'
+        && assignment.createPullRequest
+        && assignment.pullRequestState !== 'merged'
+        && assignment.pullRequestState !== 'closed'
+      );
+    if (!active) return () => window.clearTimeout(initialRefresh);
+    const interval = window.setInterval(observePersistedState, 5_000);
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(interval);
+    };
+  }, [
+    assignment.createPullRequest,
+    assignment.displayState,
+    assignment.pullRequestState,
+    load,
+    onUpdated,
+    open,
+  ]);
 
   const act = async (action: 'cancel' | 'stop_tracking' | 'retry') => {
     setBusyAction(action);
@@ -298,10 +497,10 @@ function TaskDelegationRunDialog({
       if (!response.ok) throw new Error(await responseError(response));
       toast.success(
         action === 'retry'
-          ? 'Delegation retried'
+          ? 'Delegation retry queued'
           : action === 'stop_tracking'
             ? 'Mission Control stopped tracking the provider task'
-            : 'Delegation cancelled',
+            : 'Cancellation requested',
       );
       await Promise.all([load(), onUpdated()]);
     } catch (actionError) {
@@ -311,6 +510,47 @@ function TaskDelegationRunDialog({
     }
   };
 
+  const resolveInteraction = async (
+    interaction: PendingInteraction,
+    outcome: 'answered' | 'approved' | 'rejected',
+  ) => {
+    if (outcome === 'answered' && !interactionAnswer.trim()) {
+      setError('Enter or select an answer before continuing.');
+      return;
+    }
+    setBusyAction(`interaction-${outcome}`);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/external-agents/dispatches/${encodeURIComponent(assignment.dispatchId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'resolve_interaction',
+            interactionId: interaction.id,
+            outcome,
+            ...(outcome === 'answered' ? { answer: interactionAnswer.trim() } : {}),
+          }),
+        },
+      );
+      if (!response.ok) throw new Error(await responseError(response));
+      toast.success(
+        outcome === 'answered'
+          ? 'Answer saved for worker delivery'
+          : outcome === 'approved'
+            ? 'Approval saved for worker delivery'
+            : 'Rejection saved for worker delivery',
+      );
+      await Promise.all([load(), onUpdated()]);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Response could not be saved');
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const interaction = pendingInteraction(detail);
   const references = [
     ...(assignment.checks ?? []).map((reference) => ({ ...reference, kind: 'Check' })),
     ...(assignment.artifacts ?? []).map((reference) => ({ ...reference, kind: 'Artifact' })),
@@ -345,14 +585,125 @@ function TaskDelegationRunDialog({
               <div className="grid gap-5 md:grid-cols-[minmax(0,1.2fr)_minmax(260px,.8fr)]">
                 <div className="min-w-0 space-y-5">
                   <section>
-                    <StateLine assignment={assignment} />
+                    <StateLine assignment={assignment} stale={Boolean(syncError || error)} />
                     <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-                      {assignment.blocker
-                        ?? assignment.errorMessage
-                        ?? assignment.latestProgress
-                        ?? 'No additional provider progress is available.'}
+                      {stateDescription(assignment)}
                     </p>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                      {assignment.providerState && (
+                        <>Provider state: <span className="font-mono">{assignment.providerState}</span> · </>
+                      )}
+                      Last synced{' '}
+                      <time dateTime={assignment.updatedAt}>
+                        {new Date(assignment.updatedAt).toLocaleString()}
+                      </time>
+                      {assignment.providerUpdatedAt && (
+                        <>
+                          {' '}· Provider updated{' '}
+                          <time dateTime={assignment.providerUpdatedAt}>
+                            {new Date(assignment.providerUpdatedAt).toLocaleString()}
+                          </time>
+                        </>
+                      )}
+                    </p>
+                    {syncError && (
+                      <p className="mt-2 text-xs text-amber-200" role="status">
+                        Automatic refresh failed: {syncError}
+                      </p>
+                    )}
+                    {assignment.outputWarning && (
+                      <p className="mt-2 text-xs text-amber-200" role="status">
+                        {assignment.outputWarning}
+                      </p>
+                    )}
                   </section>
+
+                  {interaction && (
+                    <section className="rounded-lg border border-amber-500/30 bg-amber-950/25 p-4" aria-labelledby={`interaction-${interaction.id}`}>
+                      <div className="flex gap-3">
+                        <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-300" />
+                        <div className="min-w-0 flex-1">
+                          <h3 id={`interaction-${interaction.id}`} className="text-sm font-semibold text-amber-100">
+                            {interaction.kind === 'approval'
+                              ? 'Scout needs your approval'
+                              : 'Scout needs your answer'}
+                          </h3>
+                          <p className="mt-1 text-sm leading-relaxed text-amber-50/90">
+                            {interaction.prompt}
+                          </p>
+                          {interaction.kind === 'question' && (
+                            <div className="mt-3">
+                              {interaction.choices ? (
+                                <fieldset className="space-y-2">
+                                  <legend className="sr-only">Choose an answer</legend>
+                                  {interaction.choices.map((choice) => (
+                                    <label key={choice} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md border border-amber-700/40 px-3 text-xs text-amber-50 hover:bg-amber-900/30">
+                                      <input
+                                        type="radio"
+                                        name={`interaction-answer-${interaction.id}`}
+                                        value={choice}
+                                        checked={interactionAnswer === choice}
+                                        onChange={(event) => setInteractionAnswer(event.target.value)}
+                                        disabled={Boolean(busyAction)}
+                                        className="accent-[var(--accent)]"
+                                      />
+                                      {choice}
+                                    </label>
+                                  ))}
+                                </fieldset>
+                              ) : (
+                                <label className="block text-xs font-medium text-amber-100">
+                                  Answer
+                                  <textarea
+                                    value={interactionAnswer}
+                                    onChange={(event) => setInteractionAnswer(event.target.value)}
+                                    disabled={Boolean(busyAction)}
+                                    rows={3}
+                                    className="mt-1.5 w-full resize-y rounded-md border border-amber-700/40 bg-[var(--surface-0)] px-3 py-2 text-sm font-normal text-[var(--text-primary)] outline-none focus:border-[var(--accent)] disabled:opacity-50"
+                                  />
+                                </label>
+                              )}
+                              <button
+                                type="button"
+                                disabled={Boolean(busyAction) || !interactionAnswer.trim()}
+                                onClick={() => void resolveInteraction(interaction, 'answered')}
+                                className="mt-3 inline-flex min-h-9 items-center gap-1.5 rounded-md bg-[var(--accent-600)] px-3 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:opacity-50"
+                              >
+                                {busyAction === 'interaction-answered'
+                                  ? <Loader2 size={13} className="animate-spin" />
+                                  : <Send size={13} />}
+                                Send answer
+                              </button>
+                            </div>
+                          )}
+                          {interaction.kind === 'approval' && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                disabled={Boolean(busyAction)}
+                                onClick={() => void resolveInteraction(interaction, 'approved')}
+                                className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-[var(--accent-600)] px-3 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:opacity-50"
+                              >
+                                {busyAction === 'interaction-approved'
+                                  ? <Loader2 size={13} className="animate-spin" />
+                                  : <CheckCircle2 size={13} />}
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                disabled={Boolean(busyAction)}
+                                onClick={() => void resolveInteraction(interaction, 'rejected')}
+                                className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-red-500/40 px-3 text-xs font-medium text-red-200 hover:bg-red-950/40 disabled:opacity-50"
+                              >
+                                <X size={13} />
+                                Reject
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </section>
+                  )}
 
                   <section>
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Timeline</h3>
@@ -374,12 +725,25 @@ function TaskDelegationRunDialog({
                     </ol>
                   </section>
 
-                  {(assignment.pullRequestUrl || assignment.branchRef || assignment.commitSha || references.length > 0) && (
+                  {(assignment.pullRequestUrl || assignment.providerTaskUrl || assignment.branchRef || assignment.commitSha || references.length > 0) && (
                     <section>
                       <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Outputs</h3>
                       <div className="mt-2 space-y-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-2">
                         {assignment.pullRequestUrl && (
-                          <RunReference href={assignment.pullRequestUrl} icon={GitPullRequest}>Pull request</RunReference>
+                          <RunReference href={assignment.pullRequestUrl} icon={GitPullRequest}>
+                            Pull request
+                            {assignment.pullRequestNumber ? ` #${assignment.pullRequestNumber}` : ''}
+                            {pullRequestStatusLabel(assignment)
+                              ? ` · ${pullRequestStatusLabel(assignment)}`
+                              : ''}
+                          </RunReference>
+                        )}
+                        {assignment.providerTaskUrl && (
+                          <RunReference href={assignment.providerTaskUrl} icon={ExternalLink}>
+                            {assignment.targetType === 'copilot-cloud'
+                              ? 'Open Cloud Agent session'
+                              : 'Open provider task'}
+                          </RunReference>
                         )}
                         {assignment.branchRef && (
                           <div className="flex min-h-8 items-center gap-2 px-2 text-xs text-[var(--text-secondary)]">
@@ -427,6 +791,8 @@ function TaskDelegationRunDialog({
                         ['Base ref', assignment.baseRef],
                         ['Model', assignment.model ?? 'Auto'],
                         ['Attempt', `${Math.max(assignment.attemptCount, 1)} of ${assignment.maxAttempts}`],
+                        ['Provider state', assignment.providerState],
+                        ['Pull request', pullRequestStatusLabel(assignment)],
                         ['Provider task', assignment.providerTaskId],
                         ['Run ID', assignment.runId],
                         ['Dispatch ID', assignment.dispatchId],
@@ -462,11 +828,11 @@ function TaskDelegationRunDialog({
                     <button
                       type="button"
                       disabled={loading || Boolean(busyAction)}
-                      onClick={() => void load()}
+                      onClick={() => void load(true)}
                       className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--border)] px-3 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50"
                     >
                       <RefreshCw size={13} className={cn(loading && 'animate-spin')} />
-                      Refresh
+                      Request refresh
                     </button>
                     {assignment.canRetry && (
                       <button

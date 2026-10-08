@@ -26,6 +26,7 @@ import {
   validatePaperclipConnection,
   type PaperclipConnection,
 } from './paperclip';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 export type ExternalAgent = ExternalAgentRecord;
 
@@ -53,12 +54,14 @@ export interface PaperclipDiscoveryInput {
   endpoint?: string;
   credential?: string | null;
   authCredentialRef?: string | null;
+  connectorId?: string | null;
   destinationId?: string | null;
   companyId?: string | null;
 }
 
 const MANAGED_GITHUB_CREDENTIAL = 'mission-control:github-user';
 const MANAGED_AGENT_CREDENTIAL = 'mission-control:external-agent';
+const PAPERCLIP_CONNECTOR_CREDENTIAL_PREFIX = 'paperclip-connector:';
 export const MAX_ALWAYS_INSTRUCTIONS_LENGTH = 16_000;
 
 const TYPE_DEFAULTS: Record<
@@ -120,6 +123,23 @@ function validateProviderConfig(
     );
   }
   const common = alwaysInstructions ? { alwaysInstructions } : {};
+  if (type === 'pull-queue' && value?.scout) {
+    const scout = value.scout;
+    if (
+      !scout.connectorId
+      || !scout.protocolVersion
+      || !scout.skillVersion
+      || !scout.onboarding
+      || !scout.connectivity
+    ) {
+      throw new ExternalAgentError(
+        'providerConfig.scout is incomplete',
+        'VALIDATION_ERROR',
+        422,
+      );
+    }
+    return { ...common, scout };
+  }
   if (type !== 'paperclip') return common;
   const paperclip = value?.paperclip;
   if (!paperclip || typeof paperclip !== 'object' || Array.isArray(paperclip)) {
@@ -133,6 +153,17 @@ function validateProviderConfig(
     paperclip.requiredAdapterType,
     'providerConfig.paperclip.requiredAdapterType',
   );
+  const companyName = optionalText(
+    paperclip.companyName,
+    'providerConfig.paperclip.companyName',
+  );
+  if (companyName && companyName.length > 120) {
+    throw new ExternalAgentError(
+      'providerConfig.paperclip.companyName exceeds 120 characters',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
   return {
     ...common,
     paperclip: {
@@ -140,6 +171,7 @@ function validateProviderConfig(
         paperclip.companyId,
         'providerConfig.paperclip.companyId',
       ),
+      ...(companyName ? { companyName } : {}),
       assigneeAgentId: requiredUuid(
         paperclip.assigneeAgentId,
         'providerConfig.paperclip.assigneeAgentId',
@@ -348,16 +380,37 @@ export function validateExternalAgentInput(input: ExternalAgentInput): Omit<
 
 export function publicExternalAgent(agent: ExternalAgent) {
   const { authCredentialRef: _credentialRef, ...safe } = agent;
+  const scout = agent.providerConfig.scout;
+  let publicScout: typeof scout = undefined;
+  if (scout) {
+    const {
+      registrationTokenHash: _registrationTokenHash,
+      claimTokenHash: _claimTokenHash,
+      ...publicOnboarding
+    } = scout.onboarding;
+    void _registrationTokenHash;
+    void _claimTokenHash;
+    publicScout = { ...scout, onboarding: publicOnboarding };
+  }
   void _credentialRef;
   return {
     ...safe,
+    providerConfig: publicScout
+      ? {
+        ...agent.providerConfig,
+        scout: publicScout,
+      }
+      : agent.providerConfig,
     hasCredentialReference: Boolean(agent.authCredentialRef),
-    credentialSource: (
-      agent.authCredentialRef === MANAGED_GITHUB_CREDENTIAL
-      || agent.authCredentialRef === MANAGED_AGENT_CREDENTIAL
-    )
-      ? 'mission-control'
-      : 'deployment-secret',
+    credentialSource: isPaperclipConnectorCredentialReference(agent.authCredentialRef)
+      ? 'paperclip-connector'
+      : (
+        agent.authCredentialRef === MANAGED_GITHUB_CREDENTIAL
+        || agent.authCredentialRef === MANAGED_AGENT_CREDENTIAL
+      )
+        ? 'mission-control'
+        : 'deployment-secret',
+    paperclipConnectorId: paperclipConnectorId(agent.authCredentialRef),
   };
 }
 
@@ -404,7 +457,11 @@ export async function createExternalAgent(input: ExternalAgentInput) {
   }, credential);
 }
 
-export async function updateExternalAgent(id: string, patch: Partial<ExternalAgentInput>) {
+export async function updateExternalAgent(
+  id: string,
+  patch: Partial<ExternalAgentInput>,
+  options: { expectedScoutOnboardingStatus?: string } = {},
+) {
   const existing = await getExternalAgent(id);
   if (!existing) throw new ExternalAgentError('External agent not found', 'NOT_FOUND', 404);
   const credential = managedCredential(patch, patch.type ?? existing.type);
@@ -444,8 +501,17 @@ export async function updateExternalAgent(id: string, patch: Partial<ExternalAge
   const updated = await (await getExternalAgentControlPersistence()).registry.update(id, {
     ...values,
     updatedAt: new Date().toISOString(),
-  }, credentialUpdate);
-  if (!updated) throw new ExternalAgentError('External agent not found', 'NOT_FOUND', 404);
+  }, credentialUpdate, options.expectedScoutOnboardingStatus);
+  if (!updated) {
+    if (options.expectedScoutOnboardingStatus) {
+      throw new ExternalAgentError(
+        'Scout onboarding state changed concurrently',
+        'INVALID_TRANSITION',
+        409,
+      );
+    }
+    throw new ExternalAgentError('External agent not found', 'NOT_FOUND', 404);
+  }
   return updated;
 }
 
@@ -495,6 +561,12 @@ export async function resolveExternalAgentCredential(
   if (isManagedCredentialReference(agent.authCredentialRef)) {
     return (await getExternalAgentControlPersistence()).registry.getCredential(agent.id);
   }
+  if (isPaperclipConnectorCredentialReference(agent.authCredentialRef)) {
+    return resolvePaperclipConnectorCredential(
+      agent.authCredentialRef,
+      agent.endpoint,
+    );
+  }
   return resolveAgentCredential(agent.authCredentialRef);
 }
 
@@ -506,9 +578,16 @@ export async function discoverPaperclipSetup(input: PaperclipDiscoveryInput) {
   }
   const endpointInput = optionalText(input.endpoint, 'endpoint') ?? existing?.endpoint;
   const directCredential = optionalText(input.credential, 'credential');
-  const credentialRef = optionalText(input.authCredentialRef, 'authCredentialRef');
+  const connectorId = optionalText(input.connectorId, 'connectorId');
+  const credentialRef = connectorId
+    ? `${PAPERCLIP_CONNECTOR_CREDENTIAL_PREFIX}${connectorId}`
+    : optionalText(input.authCredentialRef, 'authCredentialRef');
   let credential = directCredential;
-  if (!credential && credentialRef) credential = resolveAgentCredential(credentialRef);
+  if (!credential && credentialRef) {
+    credential = isPaperclipConnectorCredentialReference(credentialRef)
+      ? await resolvePaperclipConnectorCredential(credentialRef, endpointInput)
+      : resolveAgentCredential(credentialRef);
+  }
   if (!credential && existing) {
     if (endpointInput !== existing.endpoint) {
       throw new ExternalAgentError(
@@ -597,6 +676,69 @@ function isManagedCredentialReference(reference: string | null) {
     || reference === MANAGED_AGENT_CREDENTIAL;
 }
 
+function paperclipConnectorId(reference: string | null): string | null {
+  if (!reference?.startsWith(PAPERCLIP_CONNECTOR_CREDENTIAL_PREFIX)) return null;
+  return reference.slice(PAPERCLIP_CONNECTOR_CREDENTIAL_PREFIX.length) || null;
+}
+
+function isPaperclipConnectorCredentialReference(
+  reference: string | null,
+): reference is string {
+  return paperclipConnectorId(reference) !== null;
+}
+
+async function resolvePaperclipConnectorCredential(
+  reference: string,
+  expectedEndpoint?: string | null,
+): Promise<string> {
+  const connectorId = paperclipConnectorId(reference);
+  if (!connectorId) {
+    throw new ExternalAgentError(
+      'Paperclip connector credential reference is invalid',
+      'CREDENTIAL_UNAVAILABLE',
+      422,
+    );
+  }
+  const connector = await (
+    await getConnectorManagementPersistence()
+  ).getConnector(connectorId);
+  if (
+    !connector
+    || connector.deletedAt
+    || connector.type !== 'paperclip'
+    || !connector.enabled
+  ) {
+    throw new ExternalAgentError(
+      'The selected Paperclip connector is unavailable',
+      'CREDENTIAL_UNAVAILABLE',
+      503,
+    );
+  }
+  const connectorOrigin = typeof connector.settings.apiOrigin === 'string'
+    ? connector.settings.apiOrigin
+    : null;
+  if (
+    expectedEndpoint
+    && connectorOrigin
+    && new URL(expectedEndpoint).origin !== new URL(connectorOrigin).origin
+  ) {
+    throw new ExternalAgentError(
+      'The selected Paperclip connector belongs to a different Paperclip server',
+      'CREDENTIAL_UNAVAILABLE',
+      422,
+    );
+  }
+  const apiToken = connector.credentials.apiToken;
+  if (typeof apiToken !== 'string' || !apiToken.trim()) {
+    throw new ExternalAgentError(
+      'The selected Paperclip connector credential is unavailable',
+      'CREDENTIAL_UNAVAILABLE',
+      503,
+    );
+  }
+  return apiToken;
+}
+
 async function validateProviderConnection(
   values: Omit<ExternalAgentRecord, 'id' | 'createdAt' | 'updatedAt'>,
   managedCredentialValue: string | null = null,
@@ -640,7 +782,11 @@ async function validateProviderConnection(
   }
   const connection: PaperclipConnection = {
     endpoint: values.endpoint,
-    credential: managedCredentialValue ?? resolveAgentCredential(values.authCredentialRef),
+    credential: managedCredentialValue ?? (
+      isPaperclipConnectorCredentialReference(values.authCredentialRef)
+        ? await resolvePaperclipConnectorCredential(values.authCredentialRef, values.endpoint)
+        : resolveAgentCredential(values.authCredentialRef)
+    ),
     config,
   };
   await validatePaperclipConnection(connection);

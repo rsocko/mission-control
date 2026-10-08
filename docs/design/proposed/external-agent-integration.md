@@ -292,8 +292,14 @@ Agents**. Mission Control validates the token with GitHub, persists it in the
 destination's server-side credential field, and never returns it in API
 responses or persists it in payload/result logs. Existing installations may
 instead select the advanced deployment-secret-reference mode, which resolves
-`auth_credential_ref` from `MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. Paperclip
-bearer credentials continue to use deployment-secret references.
+`auth_credential_ref` from `MC_EXTERNAL_AGENT_CREDENTIALS_JSON`.
+
+Paperclip's notification connector uses a browser-approved Board identity and
+stores a named Board API key server-side. A Paperclip execution destination can
+reference that credential as `paperclip-connector:<connectorId>`; resolution
+checks that the connector is enabled, is a Paperclip connector, and targets the
+same Paperclip origin. Direct and deployment-secret credentials remain
+available for existing installations and advanced deployments.
 
 Each GitHub Cloud or Paperclip destination may also define **Always
 instructions** in Settings. These are ordinary server-owned configuration, not
@@ -441,13 +447,32 @@ business M365 payloads should not be copied into a code-hosting work item.
 Scout setup provisions this as a second role linked to the existing Scout
 connector. The connector remains the inbound task source; the worker is an
 independently enabled execution destination with its own managed credential,
-disclosure policy, and audit history. Its dedicated MCP endpoint exposes only
-claim, progress, complete, and fail tools. Mission Control generates a setup
-prompt that instructs Scout to create the scheduled pickup automation and
-connect that endpoint without granting access to the general MC MCP tool
-surface. The user can explicitly reveal the prompt again from Scout settings;
-ordinary status reads never return its credential. Credential rotation remains
-a separate action because it invalidates an existing automation.
+disclosure policy, and audit history.
+
+The copied bootstrap prompt contains only a short-lived registration token and
+the onboarding endpoint. Scout downloads a versioned durable worker skill,
+declares tenant-available M365 source/action/trigger capabilities, and confirms
+protected MCP credential storage. Mission Control records the outbound
+connectivity test and requires an operator to approve the declared capabilities.
+Scout then exchanges a one-time claim token for the durable bearer credential
+exactly once. The credential response marks the token sensitive and requires a
+protected MCP connection field; the settings UI never reveals it. Restarting
+onboarding invalidates the prior credential and temporary secrets.
+
+The dedicated endpoint exposes only identity, health, exact-or-next claim,
+progress, durable question/approval, complete, and fail tools. Identity binds
+the runtime to the expected connector, protocol/skill versions, capabilities,
+and disclosure policy. A human-input request releases the active lease and
+claim token. Operator resolution durably requeues the dispatch, and the next
+claim carries scoped resume context.
+
+MCP is the authenticated control/work channel, not a wake mechanism. Scheduled
+polling is the guaranteed Scout activation path. A Scout-native condition
+trigger can invoke the same automation sooner and supply a trusted `dispatchId`
+for an exact claim, but Mission Control does not send a webhook or event into
+Scout because no generic inbound wake protocol is documented. Health therefore
+reports Scout-to-Mission-Control connectivity independently from the currently
+unsupported Mission-Control-to-Scout direction.
 
 ##### GitHub Copilot app pull-worker profile
 
@@ -647,8 +672,9 @@ routes are typed execution destinations; source connectors remain separate.
 Operators manage those destinations in **Settings → AI & Agents → Execution
 Destinations**. GitHub Copilot Cloud setup accepts and validates a personal access
 token directly; deployment-secret references remain available as an advanced
-and backward-compatible option. Paperclip references remain server-side in
-`MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. GitHub Copilot Cloud and Paperclip setup,
+and backward-compatible option. Paperclip routes can reuse an enabled Paperclip
+connector's server-side Board credential without registering every Paperclip
+agent or copying the token. GitHub Copilot Cloud and Paperclip setup,
 validation, enablement, capability policy, and data
 classification policy are managed there. Paperclip route bindings are validated
 when saved and remain read-only during individual delegations.

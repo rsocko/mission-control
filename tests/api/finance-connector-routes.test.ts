@@ -203,7 +203,7 @@ describe('finance connector routes', () => {
     expect(mocks.getPersistedConfig).toHaveBeenCalledWith('persisted-finance');
     expect(mocks.runSync).toHaveBeenCalledWith('persisted-finance', expect.objectContaining({
       full: true,
-      source: 'api',
+      source: 'manual',
       signal: request.signal,
     }));
   });

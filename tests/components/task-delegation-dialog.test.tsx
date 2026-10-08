@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TaskDelegationDialog } from '@/components/task-delegation/TaskDelegationDialog';
 import { openTaskDelegation } from '@/components/task-delegation/events';
@@ -11,12 +11,349 @@ function response(data: unknown, status = 200) {
   });
 }
 
+const workerContext = {
+  taskIds: ['task-1'],
+  tasks: [{ id: 'task-1', title: 'Background task', connectorType: 'local' }],
+  targets: [{
+    id: 'worker-queue',
+    name: 'Worker queue',
+    type: 'pull-queue',
+    description: null,
+    alwaysInstructions: '',
+    executionLocality: 'mission-control-host',
+    allowedActions: ['write_code'],
+    hasCredential: true,
+    paperclipBinding: null,
+    repositories: [],
+    eligibility: [{
+      taskId: 'task-1',
+      title: 'Background task',
+      connectorType: 'local',
+      ready: true,
+      blocker: null,
+      repository: null,
+      repositoryLocked: false,
+    }],
+  }],
+  assignments: [],
+  syncErrors: [],
+};
+
+const workerPreview = {
+  previews: [{
+    taskId: 'task-1',
+    dispatchId: 'dispatch-1',
+    previewHash: 'preview-hash',
+    processingLocation: 'mission-control-host',
+    dataClassification: 'standard',
+    disclosedFields: ['tasks.title'],
+    allowedActions: ['write_code'],
+    payloadPreview: { tasks: [{ id: 'task-1', title: 'Background task' }] },
+  }],
+  blocked: [],
+  readyCount: 1,
+  blockedCount: 0,
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
 describe('TaskDelegationDialog disclosure review', () => {
+  it('offers one combined Copilot cloud assignment for compatible selected tasks', async () => {
+    let previewRequest: Record<string, unknown> | null = null;
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response({
+          taskIds: ['task-1', 'task-2'],
+          tasks: [
+            { id: 'task-1', title: 'Update parser', connectorType: 'github-issues' },
+            { id: 'task-2', title: 'Add parser tests', connectorType: 'github-issues' },
+          ],
+          targets: [{
+            id: 'github-cloud',
+            name: 'GitHub Cloud',
+            type: 'copilot-cloud',
+            description: null,
+            alwaysInstructions: '',
+            executionLocality: 'github-hosted',
+            allowedActions: ['write_code'],
+            hasCredential: true,
+            paperclipBinding: null,
+            repositories: [],
+            eligibility: [
+              {
+                taskId: 'task-1',
+                title: 'Update parser',
+                connectorType: 'github-issues',
+                ready: true,
+                blocker: null,
+                repository: 'octo/example',
+                repositoryLocked: true,
+              },
+              {
+                taskId: 'task-2',
+                title: 'Add parser tests',
+                connectorType: 'github-issues',
+                ready: true,
+                blocker: null,
+                repository: 'octo/example',
+                repositoryLocked: true,
+              },
+            ],
+          }],
+          assignments: [],
+          syncErrors: [],
+        });
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        previewRequest = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response({
+          previews: [{
+            taskId: 'task-1',
+            taskIds: ['task-1', 'task-2'],
+            dispatchId: 'dispatch-combined',
+            previewHash: 'preview-hash',
+            processingLocation: 'github-hosted',
+            dataClassification: 'standard',
+            disclosedFields: ['tasks.title'],
+            allowedActions: ['write_code'],
+            payloadPreview: {
+              tasks: [
+                { id: 'task-1', title: 'Update parser' },
+                { id: 'task-2', title: 'Add parser tests' },
+              ],
+            },
+          }],
+          blocked: [],
+          readyCount: 2,
+          blockedCount: 0,
+          dispatchCount: 1,
+          strategy: 'combined',
+        }, 201);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1', 'task-2']);
+
+    expect(await screen.findByText('GitHub Copilot Cloud')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('radio', { name: /Combined/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review combined delegation' }));
+
+    await waitFor(() => expect(previewRequest).toMatchObject({
+      taskIds: ['task-1', 'task-2'],
+      strategy: 'combined',
+    }));
+    expect(await screen.findByText('2 tasks combined')).toBeInTheDocument();
+    expect(screen.getByText(/1 durable assignment for 2 tasks/)).toBeInTheDocument();
+    expect(screen.getByRole('button', {
+      name: 'Confirm and delegate 2 tasks together',
+    })).toBeInTheDocument();
+  });
+
+  it('shows and applies an editable Auto execution proposal before review', async () => {
+    const previewRequests: Array<Record<string, unknown>> = [];
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response({
+          taskIds: ['task-1', 'task-2'],
+          tasks: [
+            { id: 'task-1', title: 'Update parser', connectorType: 'github-issues' },
+            { id: 'task-2', title: 'Add parser tests', connectorType: 'github-issues' },
+          ],
+          targets: [{
+            id: 'github-cloud',
+            name: 'GitHub Cloud',
+            type: 'copilot-cloud',
+            description: null,
+            alwaysInstructions: '',
+            executionLocality: 'github-hosted',
+            allowedActions: ['write_code'],
+            hasCredential: true,
+            paperclipBinding: null,
+            repositories: [],
+            eligibility: [
+              {
+                taskId: 'task-1',
+                title: 'Update parser',
+                connectorType: 'github-issues',
+                ready: true,
+                blocker: null,
+                repository: 'octo/example',
+                repositoryLocked: true,
+              },
+              {
+                taskId: 'task-2',
+                title: 'Add parser tests',
+                connectorType: 'github-issues',
+                ready: true,
+                blocker: null,
+                repository: 'octo/example',
+                repositoryLocked: true,
+              },
+            ],
+          }],
+          assignments: [],
+          syncErrors: [],
+        });
+      }
+      if (url === '/api/tasks/delegation/plan' && init?.method === 'POST') {
+        return response({
+          groups: [{
+            id: 'group-1',
+            taskIds: ['task-1', 'task-2'],
+            strategy: 'combined',
+            repository: 'octo/example',
+            rationale: 'The implementation and regression coverage form one reviewable change.',
+            confidence: 0.91,
+          }],
+          blocked: [],
+          taskTitles: {
+            'task-1': 'Update parser',
+            'task-2': 'Add parser tests',
+          },
+          routing: { provider: 'openai', model: 'test-model' },
+        });
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        const request = JSON.parse(String(init.body)) as Record<string, unknown>;
+        previewRequests.push(request);
+        return response({
+          previews: [
+            {
+              taskId: 'task-1',
+              taskIds: ['task-1'],
+              dispatchId: 'dispatch-1',
+              previewHash: 'hash-1',
+              processingLocation: 'github-hosted',
+              dataClassification: 'standard',
+              disclosedFields: ['tasks.title'],
+              allowedActions: ['write_code'],
+              payloadPreview: { tasks: [{ id: 'task-1', title: 'Update parser' }] },
+            },
+            {
+              taskId: 'task-2',
+              taskIds: ['task-2'],
+              dispatchId: 'dispatch-2',
+              previewHash: 'hash-2',
+              processingLocation: 'github-hosted',
+              dataClassification: 'standard',
+              disclosedFields: ['tasks.title'],
+              allowedActions: ['write_code'],
+              payloadPreview: { tasks: [{ id: 'task-2', title: 'Add parser tests' }] },
+            },
+          ],
+          blocked: [],
+          readyCount: 2,
+          blockedCount: 0,
+          dispatchCount: 2,
+          strategy: 'separate',
+        }, 201);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1', 'task-2']);
+
+    expect(await screen.findByText('GitHub Copilot Cloud')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('radio', { name: /Auto/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Propose delegation plan' }));
+
+    expect(await screen.findByText('Proposed execution plan')).toBeInTheDocument();
+    expect(screen.getByText(/1 cloud session proposed by openai/)).toBeInTheDocument();
+    expect(screen.getByText(/implementation and regression coverage/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'separate' }));
+    expect(screen.getByText('2 separate sessions')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Review proposed sessions' }));
+
+    await waitFor(() => expect(previewRequests).toHaveLength(1));
+    expect(previewRequests[0]).toMatchObject({
+      taskIds: ['task-1', 'task-2'],
+      strategy: 'separate',
+      repository: 'octo/example',
+    });
+    expect(await screen.findByText(/2 durable assignments for 2 tasks/)).toBeInTheDocument();
+    expect(screen.getByRole('button', {
+      name: 'Confirm 2 proposed sessions',
+    })).toBeInTheDocument();
+  });
+
+  it('only allows destinations with at least one eligible selected task', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response({
+      taskIds: ['task-1'],
+      tasks: [{ id: 'task-1', title: 'Restricted task', connectorType: 'scout' }],
+      targets: [
+        {
+          id: 'public-cloud',
+          name: 'Public Cloud',
+          type: 'copilot-cloud',
+          description: null,
+          alwaysInstructions: '',
+          executionLocality: 'github-hosted',
+          allowedActions: ['write_code'],
+          hasCredential: true,
+          paperclipBinding: null,
+          repositories: [],
+          eligibility: [{
+            taskId: 'task-1',
+            title: 'Restricted task',
+            connectorType: 'scout',
+            ready: false,
+            blocker: 'Agent policy does not allow restricted data',
+            repository: null,
+            repositoryLocked: false,
+          }],
+        },
+        {
+          id: 'private-runner',
+          name: 'Private Runner',
+          type: 'pull-queue',
+          description: null,
+          alwaysInstructions: '',
+          executionLocality: 'mission-control-host',
+          allowedActions: ['write_code'],
+          hasCredential: true,
+          paperclipBinding: null,
+          repositories: [],
+          eligibility: [{
+            taskId: 'task-1',
+            title: 'Restricted task',
+            connectorType: 'scout',
+            ready: true,
+            blocker: null,
+            repository: null,
+            repositoryLocked: false,
+          }],
+        },
+      ],
+      assignments: [],
+      syncErrors: [],
+    })));
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+
+    const blockedTarget = await screen.findByRole('radio', { name: /GitHub Copilot Cloud/ });
+    expect(blockedTarget).toBeDisabled();
+    expect(blockedTarget).toHaveAttribute(
+      'title',
+      'Agent policy does not allow restricted data',
+    );
+    expect(screen.getByText('Agent policy does not allow restricted data')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Microsoft Scout/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Configure' })).toBeEnabled();
+  });
+
   it('shows configured and per-dispatch instructions with the exact rich payload', async () => {
     const payloadPreview = {
       instruction: 'Fix the parser and add coverage.',
@@ -76,6 +413,15 @@ describe('TaskDelegationDialog disclosure review', () => {
             previewHash: 'preview-hash',
             processingLocation: 'github-hosted',
             dataClassification: 'standard',
+            classificationExplanation: 'Standard because GitHub Issues uses the active policy default',
+            classificationSources: [{
+              connectorType: 'github-issues',
+              connectorInstanceId: 'github-primary',
+              connectorName: 'GitHub Issues',
+              baseline: 'standard',
+              effective: 'standard',
+              override: null,
+            }],
             disclosedFields: [
               'instruction',
               'alwaysInstructions',
@@ -97,16 +443,30 @@ describe('TaskDelegationDialog disclosure review', () => {
     render(<TaskDelegationDialog />);
     openTaskDelegation(['task-1']);
 
-    expect(await screen.findByText('GitHub Cloud')).toBeInTheDocument();
+    expect(await screen.findByText('GitHub Copilot Cloud')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
     expect(screen.getByText('Run focused tests before handoff.')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Per-dispatch instructions'), {
+    const instructionInput = screen.getByLabelText('Per-dispatch instructions');
+    const reviewButton = screen.getByRole('button', { name: 'Review 1 delegation' });
+    expect(instructionInput).not.toBeRequired();
+    expect(instructionInput).toHaveAccessibleDescription(
+      'Add guidance only when the task details do not fully describe the desired outcome.',
+    );
+    expect(reviewButton).toBeEnabled();
+    fireEvent.change(instructionInput, {
       target: { value: 'Fix the parser and add coverage.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
+    expect(reviewButton).toBeEnabled();
+    fireEvent.click(reviewButton);
 
-    expect(await screen.findByText('Effective reviewed context')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Canonical parser task'));
+    expect(await screen.findByText('Task brief')).toBeInTheDocument();
+    expect(screen.queryByText('Disclosed fields')).not.toBeInTheDocument();
+    expect(screen.getByText('Request')).toBeInTheDocument();
+    expect(screen.getByText('Fix the parser and add coverage.')).toBeInTheDocument();
+    expect(screen.getByText('Destination instructions')).toBeInTheDocument();
+    expect(screen.getByText(/Standard because GitHub Issues uses the active policy default/))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByText('View technical dispatch data'));
     await waitFor(() => {
       expect(screen.getByText((_, element) =>
         element?.tagName === 'PRE'
@@ -217,8 +577,232 @@ describe('TaskDelegationDialog disclosure review', () => {
           companyId: '11111111-1111-4111-8111-111111111111',
           projectId: '22222222-2222-4222-8222-222222222222',
           assigneeAgentId: '33333333-3333-4333-8333-333333333333',
-          requiredAdapterType: 'claude-local',
         },
       }));
+  });
+
+  it('groups duplicate Paperclip routes by company and lets the user choose the connection', async () => {
+    const acmeCompanyId = '11111111-1111-4111-8111-111111111111';
+    const contosoCompanyId = '22222222-2222-4222-8222-222222222222';
+    const agentId = '33333333-3333-4333-8333-333333333333';
+    const paperclipTarget = (
+      id: string,
+      name: string,
+      companyId: string,
+      companyName: string,
+    ) => ({
+      id,
+      name,
+      type: 'paperclip',
+      description: null,
+      alwaysInstructions: '',
+      executionLocality: 'external',
+      allowedActions: ['write_code'],
+      hasCredential: true,
+      paperclipBinding: {
+        companyId,
+        companyName,
+        projectId: null,
+        assigneeAgentId: agentId,
+        requiredAdapterType: null,
+      },
+      repositories: [],
+      eligibility: [{
+        taskId: 'task-1',
+        title: 'Implement parser',
+        connectorType: 'local',
+        ready: true,
+        blocker: null,
+        repository: null,
+        repositoryLocked: false,
+      }],
+    });
+    const discoveryRequests: Array<Record<string, unknown>> = [];
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response({
+          taskIds: ['task-1'],
+          tasks: [{ id: 'task-1', title: 'Implement parser', connectorType: 'local' }],
+          targets: [
+            paperclipTarget('acme-primary', 'A · Acme primary', acmeCompanyId, 'Acme Corp'),
+            paperclipTarget('acme-backup', 'Z · Acme backup', acmeCompanyId, 'Acme Corp'),
+            paperclipTarget('contoso-primary', 'Contoso primary', contosoCompanyId, 'Contoso Labs'),
+          ],
+          assignments: [],
+          syncErrors: [],
+        });
+      }
+      if (url === '/api/external-agents/paperclip/discover' && init?.method === 'POST') {
+        const request = JSON.parse(String(init.body)) as Record<string, unknown>;
+        discoveryRequests.push(request);
+        const companyId = String(request.companyId);
+        return response({
+          companies: [{
+            id: companyId,
+            name: companyId === acmeCompanyId ? 'Acme Corp' : 'Contoso Labs',
+            status: 'active',
+          }],
+          projects: [],
+          agents: [
+            {
+              id: agentId,
+              name: 'Parser Engineer',
+              title: 'Software Engineer',
+              role: 'engineer',
+              status: 'idle',
+              adapterType: 'claude-local',
+            },
+            {
+              id: '44444444-4444-4444-8444-444444444444',
+              name: 'Release Coordinator',
+              title: 'Engineering Operations',
+              role: 'coordination',
+              status: 'paused',
+              adapterType: 'process',
+            },
+            {
+              id: '55555555-5555-4555-8555-555555555555',
+              name: 'Proposed Hire',
+              title: 'Developer',
+              role: 'engineer',
+              status: 'pending_approval',
+              adapterType: 'claude-local',
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+
+    expect(await screen.findByRole('radio', { name: /Paperclip/ }))
+      .toHaveTextContent('3 registered routes');
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+
+    expect(await screen.findByRole('combobox', { name: 'Paperclip company' }))
+      .toBeInTheDocument();
+    const routeSelect = screen.getByRole('combobox', { name: 'Paperclip connection route' });
+    expect(routeSelect).toHaveTextContent('A · Acme primary');
+    expect(screen.getByText(/Multiple Mission Control routes connect this company/))
+      .toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Release Coordinator/ })).toBeEnabled();
+    expect(screen.getByRole('radio', { name: /Proposed Hire/ })).toBeDisabled();
+    expect(screen.getByText('Pending hire approval')).toBeInTheDocument();
+
+    fireEvent.click(routeSelect);
+    fireEvent.click(screen.getByRole('option', { name: 'Z · Acme backup' }));
+    await waitFor(() => {
+      expect(discoveryRequests.at(-1)).toMatchObject({
+        destinationId: 'acme-backup',
+        companyId: acmeCompanyId,
+      });
+    });
+  });
+
+  it('releases the modal pointer lock when closed during worker handoff', async () => {
+    type MockResponse = Awaited<ReturnType<typeof response>>;
+    let resolveConfirmation!: (value: MockResponse) => void;
+    const pendingConfirmation = new Promise<MockResponse>((resolve) => {
+      resolveConfirmation = resolve;
+    });
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response(workerContext);
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        return response(workerPreview, 201);
+      }
+      if (url === '/api/external-agents/dispatch' && init?.method === 'POST') {
+        return pendingConfirmation;
+      }
+      if (url === '/api/tasks/task-1' && init?.method === 'PATCH') {
+        return response({ id: 'task-1', status: 'in_progress' });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+    expect(await screen.findByText('Microsoft Scout')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
+    expect(await screen.findByRole('button', { name: 'Confirm and delegate 1' }))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and delegate 1' }));
+
+    expect(await screen.findByText('Queueing work with Worker queue')).toBeInTheDocument();
+    expect(screen.getByText(
+      'Sending delegation 1 of 1 to the Mission Control worker.',
+    )).toBeInTheDocument();
+    expect(screen.getByText(
+      'You can close this window. Queued work continues in the background.',
+    )).toBeInTheDocument();
+    const progress = screen.getByRole('progressbar', {
+      name: 'Delegation handoff progress',
+    });
+    expect(progress).toHaveAttribute('aria-valuenow', '0');
+    expect(progress).toHaveAttribute('aria-valuetext', '0 of 1 queued');
+    expect(progress.firstElementChild).toHaveClass('motion-reduce:transition-none');
+    expect(screen.getByRole('button', { name: 'Queueing 1 of 1…' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close delegation' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(document.body.style.pointerEvents).not.toBe('none');
+    });
+
+    await act(async () => {
+      resolveConfirmation(await response({ dispatch: { status: 'queued' } }, 202));
+      await pendingConfirmation;
+    });
+    expect(fetcher).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'in_progress' }),
+    }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('lets the user keep delegated task statuses unchanged', async () => {
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?') && !init?.method) {
+        return response(workerContext);
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        return response(workerPreview, 201);
+      }
+      if (url === '/api/external-agents/dispatch' && init?.method === 'POST') {
+        return response({ dispatch: { status: 'queued' } }, 202);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationDialog />);
+    openTaskDelegation(['task-1']);
+    expect(await screen.findByText('Microsoft Scout')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+
+    const statusPreference = screen.getByRole('checkbox', {
+      name: /Mark delegated tasks as In Progress/,
+    });
+    expect(statusPreference).toBeChecked();
+    fireEvent.click(statusPreference);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review 1 delegation' }));
+    expect(await screen.findByText('Leave unchanged')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and delegate 1' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(fetcher).not.toHaveBeenCalledWith(
+      '/api/tasks/task-1',
+      expect.objectContaining({ method: 'PATCH' }),
+    );
   });
 });

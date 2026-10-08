@@ -29,6 +29,7 @@ interface RecentProjectsNavItemProps {
   iconColor?: string;
   open: boolean;
   pathname: string;
+  onNavigate: () => void;
   onOpenChange: (open: boolean) => void;
 }
 
@@ -66,6 +67,7 @@ export function RecentProjectsNavItem({
   iconColor,
   open,
   pathname,
+  onNavigate,
   onOpenChange,
 }: RecentProjectsNavItemProps) {
   const [recentIds, setRecentIds] = useState<string[]>([]);
@@ -221,7 +223,7 @@ export function RecentProjectsNavItem({
             </div>
           )}
           {loadState === 'ready' && projects.map((project) => (
-            <DropdownMenu.Item key={project.id} asChild>
+            <DropdownMenu.Item key={project.id} onSelect={onNavigate} asChild>
               <Link
                 href={`/projects/${encodeURIComponent(project.id)}`}
                 className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-[var(--text-secondary)] outline-none data-[highlighted]:bg-[var(--surface-2)] data-[highlighted]:text-[var(--text-primary)]"
@@ -240,7 +242,7 @@ export function RecentProjectsNavItem({
           ))}
 
           <DropdownMenu.Separator className="my-1 h-px bg-[var(--border)]" />
-          <DropdownMenu.Item asChild>
+          <DropdownMenu.Item onSelect={onNavigate} asChild>
             <Link
               href="/projects"
               className="flex cursor-default items-center rounded-lg px-2.5 py-2 text-xs font-medium text-[var(--accent-400)] outline-none data-[highlighted]:bg-[var(--surface-2)]"

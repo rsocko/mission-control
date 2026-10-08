@@ -34,6 +34,19 @@ import {
   normalizeHomeAssistantSettings,
   readHomeAssistantCredentials,
 } from '@/lib/connectors/home-assistant/settings';
+import {
+  CONNECTOR_CLASSIFICATION_SETTING,
+  connectorClassificationOverride,
+  connectorClassificationSummary,
+  validateConnectorClassificationOverride,
+  withConnectorClassificationOverride,
+} from '@/lib/connectors/data-classification';
+import { loadAIProviderConfiguration } from '@/lib/ai/provider-configuration-service';
+import { validatePaperclipConnectorConfig } from '@/lib/connectors/paperclip';
+import {
+  completePaperclipAuthorization,
+  consumePaperclipAuthorization,
+} from '@/lib/connectors/paperclip/auth-session';
 
 function configsNameMatch(
   connectors: Array<{ id: string; type: string; name: string; deletedAt?: string | null }>,
@@ -56,6 +69,7 @@ export async function GET(request: Request) {
 
   try {
     const persistence = await getConnectorManagementPersistence();
+    const { routingPolicy } = await loadAIProviderConfiguration();
     let overview = await persistence.getOverview(includeDeleted);
     let { connectors: configs, sourceLists: lists } = overview;
 
@@ -133,7 +147,7 @@ export async function GET(request: Request) {
       const defaults = CAPABILITY_DEFAULTS[c.type] ?? {};
       const storedCaps = c.capabilities ?? {};
       const lastOutcome = lastSyncStatusMap.get(c.id);
-      return serializeConnectorForBrowser({
+      const serialized = serializeConnectorForBrowser({
         ...c,
         capabilities: { ...defaults, ...storedCaps },
         lastSyncedAt: lastSyncMap.get(c.id) || null,
@@ -141,9 +155,17 @@ export async function GET(request: Request) {
         lastSyncStatus: lastOutcome ? (lastOutcome.success ? 'success' : 'failed') : null,
         lastSyncError: lastOutcome?.error ?? null,
       });
+      return {
+        ...serialized,
+        dataClassification: connectorClassificationSummary(c.type, c.settings, routingPolicy),
+      };
     });
 
-    return NextResponse.json({ connectors, sourceLists: enrichedLists });
+    return NextResponse.json({
+      connectors,
+      sourceLists: enrichedLists,
+      classificationDefaults: routingPolicy.sourceDefaults,
+    });
   } catch (error) {
     return ApiErrors.internal('Failed to fetch connectors', error);
   }
@@ -163,7 +185,10 @@ export async function POST(request: Request) {
     const persistence = await getConnectorManagementPersistence();
     const body = await request.json();
     const sanitizedBody = sanitizeFinanceConnectorWrite(body);
-    const { id: requestedId, type, name, enabled, syncMode, pollIntervalMinutes, capabilities, credentials, settings, syncedLists } = sanitizedBody;
+    const { id: requestedId, type, name, enabled, syncMode, pollIntervalMinutes, capabilities, settings, syncedLists } = sanitizedBody;
+    let credentials = sanitizedBody.credentials;
+    let paperclipAuthSessionId = '';
+    const { routingPolicy } = await loadAIProviderConfiguration();
 
     const id = requestedId || crypto.randomUUID();
     const now = new Date().toISOString();
@@ -197,6 +222,52 @@ export async function POST(request: Request) {
       );
       if (duplicate) {
         return ApiErrors.conflict('A Home Assistant connector with this name already exists');
+      }
+    }
+    if (type === 'paperclip') {
+      try {
+        const authSessionId = typeof credentials?.authSessionId === 'string'
+          ? credentials.authSessionId.trim()
+          : '';
+        if (authSessionId) {
+          const monitorAllCompanies = connectorSettings.monitorAllCompanies === true;
+          const requestedCompanyIds = Array.isArray(connectorSettings.companyIds)
+            ? connectorSettings.companyIds.filter(
+              (companyId: unknown): companyId is string => typeof companyId === 'string',
+            )
+            : typeof connectorSettings.companyId === 'string'
+              ? [connectorSettings.companyId]
+              : [];
+          const authorized = consumePaperclipAuthorization(
+            authSessionId,
+            String(connectorSettings.apiOrigin ?? ''),
+            monitorAllCompanies ? null : requestedCompanyIds,
+          );
+          credentials = { apiToken: authorized.apiToken };
+          paperclipAuthSessionId = authSessionId;
+          connectorSettings = {
+            ...connectorSettings,
+            monitorAllCompanies,
+            companyIds: monitorAllCompanies
+              ? []
+              : authorized.companies.map((company) => company.id),
+            companyNames: Object.fromEntries(
+              authorized.companies.map((company) => [company.id, company.name]),
+            ),
+            boardKeyId: authorized.keyId,
+            boardKeyExpiresAt: authorized.keyExpiresAt,
+            boardUserId: authorized.boardUserId,
+            boardUserName: authorized.boardUserName,
+          };
+        }
+        connectorSettings = {
+          ...connectorSettings,
+          ...validatePaperclipConnectorConfig(connectorSettings, credentials ?? {}),
+        };
+      } catch (error) {
+        return ApiErrors.badRequest(
+          error instanceof Error ? error.message : 'Invalid Paperclip connector configuration',
+        );
       }
     }
     let workTodoSettings = null;
@@ -233,6 +304,18 @@ export async function POST(request: Request) {
       workTodoSettings = validation.data;
       connectorSettings = validation.data;
     }
+    try {
+      const override = validateConnectorClassificationOverride(
+        type,
+        (settings as Record<string, unknown> | undefined)?.[CONNECTOR_CLASSIFICATION_SETTING],
+        routingPolicy,
+      );
+      connectorSettings = withConnectorClassificationOverride(connectorSettings, override);
+    } catch (error) {
+      return ApiErrors.badRequest(
+        error instanceof Error ? error.message : 'Invalid data classification',
+      );
+    }
 
     await persistence.createConnector({
       id,
@@ -260,6 +343,9 @@ export async function POST(request: Request) {
       syncedLists: syncedLists || [],
       now,
     });
+    if (paperclipAuthSessionId) {
+      completePaperclipAuthorization(paperclipAuthSessionId);
+    }
 
     // Auto-create source lists for Scout connector
     if (type === 'scout') {
@@ -351,6 +437,14 @@ export async function PATCH(request: Request) {
     }
 
     if (updates.settings !== undefined) {
+      const requestedSettings = updates.settings as Record<string, unknown>;
+      const hasClassificationOverride = Object.prototype.hasOwnProperty.call(
+        requestedSettings,
+        CONNECTOR_CLASSIFICATION_SETTING,
+      );
+      const requestedClassificationOverride = hasClassificationOverride
+        ? requestedSettings[CONNECTOR_CLASSIFICATION_SETTING]
+        : connectorClassificationOverride(existing?.settings);
       if (existing?.type === 'scout') {
         const validation = validateScoutSettings(updates.settings);
         if (!validation.success) {
@@ -383,6 +477,19 @@ export async function PATCH(request: Request) {
           ...existingSettings,
           ...(updates.settings as Record<string, unknown>),
         });
+      }
+      try {
+        const { routingPolicy } = await loadAIProviderConfiguration();
+        const override = validateConnectorClassificationOverride(
+          existing?.type ?? '',
+          requestedClassificationOverride,
+          routingPolicy,
+        );
+        updates.settings = withConnectorClassificationOverride(updates.settings, override);
+      } catch (error) {
+        return ApiErrors.badRequest(
+          error instanceof Error ? error.message : 'Invalid data classification',
+        );
       }
     }
     if (existing?.type === 'home-assistant' && updates.name !== undefined) {

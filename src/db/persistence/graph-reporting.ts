@@ -303,9 +303,13 @@ export interface BurnReportRows {
     scheduleEnd: string | null;
   } | null;
   candidateEvents: BurnHistoryEvent[];
+  currentScopeTaskIds: string[];
   tasks: Array<{
     id: string;
     title: string;
+    status: string;
+    effort: number | null;
+    localDisposition: string;
     createdAt: string;
     completedAt: string | null;
     deletedAt: string | null;

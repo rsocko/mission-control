@@ -52,7 +52,7 @@ interface PaperclipWorkProduct {
   metadata?: Record<string, unknown> | null;
 }
 
-interface PaperclipIssue {
+export interface PaperclipIssue {
   id: string;
   identifier?: string;
   companyId?: string;
@@ -89,6 +89,29 @@ interface PaperclipRun {
   nextAction?: string | null;
   livenessState?: string | null;
   livenessReason?: string | null;
+}
+
+export interface PaperclipApproval extends Record<string, unknown> {
+  id: string;
+  companyId?: string;
+  status: string;
+}
+
+export type PaperclipApprovalDecision = 'approve' | 'reject';
+
+export interface PaperclipAttentionItem extends Record<string, unknown> {
+  id: string;
+  companyId: string;
+  sourceKind: string;
+  subject?: Record<string, unknown> | null;
+  relatedIssue?: Record<string, unknown> | null;
+  detail?: Record<string, unknown> | null;
+  decisionVerbs?: Array<Record<string, unknown>>;
+  inlineResolvable?: boolean;
+  severity?: string;
+  activityAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface PaperclipDispatchInput {
@@ -323,6 +346,201 @@ function arrayResponse<T extends { id: string }>(value: unknown, label: string):
     );
   }
   return value as T[];
+}
+
+export async function listPaperclipApprovals(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  companyId: string,
+): Promise<PaperclipApproval[]> {
+  if (!companyId.trim()) {
+    throw new ExternalAgentError(
+      'Paperclip company is required to list approvals',
+      'TRANSPORT_INVALID',
+      422,
+    );
+  }
+  const approvals = arrayResponse<PaperclipApproval>(
+    await request<unknown>(
+      { ...connection, config: { companyId, assigneeAgentId: '' } },
+      `/companies/${encodeURIComponent(companyId)}/approvals`,
+    ),
+    'approvals',
+  );
+  if (approvals.some((approval) =>
+    !approval.id.trim()
+    || typeof approval.status !== 'string'
+    || (approval.companyId !== undefined && approval.companyId !== companyId))) {
+    throw new ExternalAgentError(
+      'Paperclip returned approvals outside the configured company or with invalid state',
+      'PROVIDER_SCOPE_MISMATCH',
+      502,
+    );
+  }
+  return approvals.map((approval) => ({
+    ...approval,
+    companyId,
+  }));
+}
+
+export async function decidePaperclipApproval(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  input: {
+    approvalId: string;
+    companyId: string;
+    decision: PaperclipApprovalDecision;
+    decisionNote?: string;
+  },
+): Promise<PaperclipApproval> {
+  const approvalId = input.approvalId.trim();
+  const companyId = input.companyId.trim();
+  if (!approvalId || !companyId) {
+    throw new ExternalAgentError(
+      'Paperclip approval and company are required',
+      'TRANSPORT_INVALID',
+      422,
+    );
+  }
+  const decisionNote = input.decisionNote?.trim();
+  const approval = await request<PaperclipApproval>(
+    {
+      ...connection,
+      config: { companyId, assigneeAgentId: '' },
+    },
+    `/approvals/${encodeURIComponent(approvalId)}/${input.decision}`,
+    {
+      method: 'POST',
+      body: decisionNote ? { decisionNote } : {},
+    },
+  );
+  const expectedStatus = input.decision === 'approve' ? 'approved' : 'rejected';
+  if (
+    !approval
+    || approval.id !== approvalId
+    || approval.companyId !== companyId
+    || approval.status?.toLowerCase() !== expectedStatus
+  ) {
+    throw new ExternalAgentError(
+      `Paperclip approval is no longer available to ${input.decision}`,
+      'PROVIDER_CONFLICT',
+      409,
+    );
+  }
+  return approval;
+}
+
+export async function listPaperclipAttention(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  companyId: string,
+): Promise<PaperclipAttentionItem[]> {
+  if (!companyId.trim()) {
+    throw new ExternalAgentError(
+      'Paperclip company is required to list attention',
+      'TRANSPORT_INVALID',
+      422,
+    );
+  }
+  const items: PaperclipAttentionItem[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < 100; page += 1) {
+    const query = new URLSearchParams({ limit: '100' });
+    if (cursor) query.set('cursor', cursor);
+    const response = await request<unknown>(
+      { ...connection, config: { companyId, assigneeAgentId: '' } },
+      `/companies/${encodeURIComponent(companyId)}/attention?${query.toString()}`,
+    );
+    if (!response || typeof response !== 'object' || Array.isArray(response)) {
+      throw new ExternalAgentError(
+        'Paperclip returned an invalid attention response',
+        'PROVIDER_RESPONSE_INVALID',
+        502,
+      );
+    }
+    const feed = response as Record<string, unknown>;
+    if (feed.companyId !== undefined && feed.companyId !== companyId) {
+      throw new ExternalAgentError(
+        'Paperclip returned attention outside the configured company',
+        'PROVIDER_SCOPE_MISMATCH',
+        502,
+      );
+    }
+    const pageItems = arrayResponse<PaperclipAttentionItem>(feed.items, 'attention');
+    if (pageItems.some((item) =>
+      item.companyId !== companyId
+      || typeof item.sourceKind !== 'string'
+      || !item.sourceKind.trim())) {
+      throw new ExternalAgentError(
+        'Paperclip returned attention outside the configured company or with invalid state',
+        'PROVIDER_SCOPE_MISMATCH',
+        502,
+      );
+    }
+    items.push(...pageItems);
+    const nextCursor = typeof feed.nextCursor === 'string' && feed.nextCursor.trim()
+      ? feed.nextCursor.trim()
+      : null;
+    if (!nextCursor) return items;
+    if (seenCursors.has(nextCursor)) {
+      throw new ExternalAgentError(
+        'Paperclip repeated an attention cursor',
+        'PROVIDER_RESPONSE_INVALID',
+        502,
+      );
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  throw new ExternalAgentError(
+    'Paperclip attention exceeded the pagination limit',
+    'PROVIDER_RESPONSE_INVALID',
+    502,
+  );
+}
+
+export async function getPaperclipCompanyName(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  companyId: string,
+): Promise<string> {
+  const companies = arrayResponse<PaperclipCompany>(
+    await request<unknown>(
+      { ...connection, config: { companyId, assigneeAgentId: '' } },
+      '/companies',
+    ),
+    'companies',
+  );
+  const company = companies.find((candidate) => candidate.id === companyId);
+  if (!company) {
+    throw new ExternalAgentError(
+      'Paperclip company is not accessible with this credential',
+      'PROVIDER_SCOPE_MISMATCH',
+      403,
+    );
+  }
+  return typeof company.name === 'string' && company.name.trim()
+    ? company.name.trim().slice(0, 120)
+    : company.id;
+}
+
+export async function listPaperclipApprovalIssues(
+  connection: Pick<PaperclipConnection, 'endpoint' | 'credential' | 'fetcher'>,
+  companyId: string,
+  approvalId: string,
+): Promise<PaperclipIssue[]> {
+  const issues = arrayResponse<PaperclipIssue>(
+    await request<unknown>(
+      { ...connection, config: { companyId, assigneeAgentId: '' } },
+      `/approvals/${encodeURIComponent(approvalId)}/issues`,
+    ),
+    'approval issues',
+  );
+  if (issues.some((issue) => issue.companyId && issue.companyId !== companyId)) {
+    throw new ExternalAgentError(
+      'Paperclip returned an issue outside the configured company',
+      'PROVIDER_SCOPE_MISMATCH',
+      502,
+    );
+  }
+  return issues;
 }
 
 export async function discoverPaperclip(

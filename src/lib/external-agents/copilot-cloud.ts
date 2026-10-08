@@ -73,10 +73,50 @@ interface CopilotTaskTarget {
   createPullRequest: boolean;
 }
 
-interface PullRequestResponse {
-  html_url?: string;
+interface PullRequestReference {
+  number?: number;
+  url?: string;
+  state?: 'draft' | 'open' | 'merged' | 'closed';
+  mergedAt?: string;
+  closedAt?: string;
   head?: { ref?: string; sha?: string; repo?: { full_name?: string } };
   base?: { ref?: string; repo?: { full_name?: string } };
+}
+
+function parsePullRequestReference(value: unknown): PullRequestReference | undefined {
+  const node = record(value);
+  if (node?.__typename !== 'PullRequest') return undefined;
+  const headRepository = record(node.headRepository);
+  const baseRepository = record(node.baseRepository);
+  const state = text(node.state)?.toLowerCase();
+  const pullRequestState = node.isDraft === true && state === 'open'
+    ? 'draft'
+    : state;
+  return {
+    ...(typeof node.number === 'number' ? { number: node.number } : {}),
+    url: text(node.url),
+    ...(pullRequestState === 'draft'
+      || pullRequestState === 'open'
+      || pullRequestState === 'merged'
+      || pullRequestState === 'closed'
+      ? { state: pullRequestState }
+      : {}),
+    mergedAt: text(node.mergedAt),
+    closedAt: text(node.closedAt),
+    head: {
+      ref: text(node.headRefName),
+      sha: text(node.headRefOid),
+      ...(headRepository
+        ? { repo: { full_name: text(headRepository.nameWithOwner) } }
+        : {}),
+    },
+    base: {
+      ref: text(node.baseRefName),
+      ...(baseRepository
+        ? { repo: { full_name: text(baseRepository.nameWithOwner) } }
+        : {}),
+    },
+  };
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -319,37 +359,6 @@ function parseTask(value: Record<string, unknown>): GitHubAgentTask {
   };
 }
 
-function parsePullRequest(value: Record<string, unknown>): PullRequestResponse {
-  const head = record(value.head);
-  const base = record(value.base);
-  const headRepository = record(head?.repo);
-  const baseRepository = record(base?.repo);
-  return {
-    html_url: text(value.html_url),
-    ...(head
-      ? {
-        head: {
-          ref: text(head.ref),
-          sha: text(head.sha),
-          ...(headRepository
-            ? { repo: { full_name: text(headRepository.full_name) } }
-            : {}),
-        },
-      }
-      : {}),
-    ...(base
-      ? {
-        base: {
-          ref: text(base.ref),
-          ...(baseRepository
-            ? { repo: { full_name: text(baseRepository.full_name) } }
-            : {}),
-        },
-      }
-      : {}),
-  };
-}
-
 export function mapGitHubAgentTaskState(
   state: GitHubAgentTaskState,
 ): Extract<
@@ -491,8 +500,132 @@ async function preflight(
     : [];
 }
 
+function readableLabel(value: string) {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replaceAll('_', ' ')
+    .toLowerCase()
+    .replace(/^./, (character) => character.toUpperCase());
+}
+
+function scalarText(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() || null;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return null;
+}
+
+function detailLines(
+  value: Record<string, unknown>,
+  excluded: ReadonlySet<string> = new Set(),
+  parentLabel = '',
+): string[] {
+  return Object.entries(value).flatMap(([key, item]) => {
+    if (excluded.has(key) || item === null || item === undefined || item === '') return [];
+    const keyLabel = readableLabel(key);
+    const parentTail = parentLabel.split(' ').at(-1)?.toLowerCase();
+    const childLabel = parentTail && keyLabel.toLowerCase().startsWith(`${parentTail} `)
+      ? keyLabel.slice(parentTail.length + 1)
+      : keyLabel.toLowerCase();
+    const label = parentLabel ? `${parentLabel} ${childLabel}` : keyLabel;
+    const scalar = scalarText(item);
+    if (scalar) return [`- **${label}:** ${scalar}`];
+    if (Array.isArray(item) && item.every((entry) => scalarText(entry) !== null)) {
+      return item.length
+        ? [`- **${label}:** ${item.map(scalarText).join(', ')}`]
+        : [];
+    }
+    const child = record(item);
+    if (child) return detailLines(child, new Set(), label);
+    return [`- **${label}:** ${canonicalJson(item)}`];
+  });
+}
+
+function taskBrief(taskValue: unknown, index: number) {
+  const task = record(taskValue);
+  if (!task) return `### Task ${index + 1}\n\n${String(taskValue)}`;
+  const title = scalarText(task.title) ?? `Task ${index + 1}`;
+  const lines = [`### ${title}`];
+  const description = scalarText(task.description);
+  if (description) lines.push('', description);
+  const details = detailLines(task, new Set(['title', 'description', 'subtasks']));
+  if (details.length) lines.push('', ...details);
+  if (Array.isArray(task.subtasks) && task.subtasks.length) {
+    lines.push('', '#### Subtasks');
+    task.subtasks.forEach((subtaskValue, subtaskIndex) => {
+      const subtask = record(subtaskValue);
+      if (!subtask) {
+        lines.push(`${subtaskIndex + 1}. ${String(subtaskValue)}`);
+        return;
+      }
+      const subtaskTitle = scalarText(subtask.title) ?? `Subtask ${subtaskIndex + 1}`;
+      lines.push(`${subtaskIndex + 1}. **${subtaskTitle}**`);
+      const subtaskDescription = scalarText(subtask.description);
+      if (subtaskDescription) lines.push(`   ${subtaskDescription.replaceAll('\n', '\n   ')}`);
+      detailLines(subtask, new Set(['title', 'description'])).forEach((line) => {
+        lines.push(`   ${line}`);
+      });
+    });
+  }
+  return lines.join('\n');
+}
+
 function taskPrompt(dispatch: TransportDispatch): string {
-  return `Mission Control dispatch ${dispatch.dispatchId}\n\n${canonicalJson(dispatch.payload)}`;
+  const payload = dispatch.payload;
+  const sections = [
+    `Mission Control dispatch ${dispatch.dispatchId}`,
+    '',
+    '# Task',
+  ];
+  const instruction = scalarText(payload.instruction);
+  if (instruction) sections.push('', '## Request', '', instruction);
+  const alwaysInstructions = scalarText(payload.alwaysInstructions);
+  if (alwaysInstructions) {
+    sections.push('', '## Destination instructions', '', alwaysInstructions);
+  }
+  if (Array.isArray(payload.tasks) && payload.tasks.length) {
+    sections.push(
+      '',
+      '## Task context',
+      '',
+      ...payload.tasks.map((task, index) => taskBrief(task, index)),
+    );
+  }
+  const project = record(payload.project);
+  if (project) sections.push('', '## Project', '', ...detailLines(project));
+  if (Array.isArray(payload.phases) && payload.phases.length) {
+    sections.push(
+      '',
+      '## Project phases',
+      '',
+      ...payload.phases.map((phase, index) => {
+        const phaseRecord = record(phase);
+        return phaseRecord
+          ? [`### ${scalarText(phaseRecord.name) ?? `Phase ${index + 1}`}`, ...detailLines(
+            phaseRecord,
+            new Set(['name']),
+          )].join('\n')
+          : String(phase);
+      }),
+    );
+  }
+  const allowedActions = Array.isArray(payload.allowedActions)
+    ? payload.allowedActions.map(scalarText).filter((action): action is string => Boolean(action))
+    : [];
+  const controls = [
+    ...detailLines(record(payload.repository) ?? {}, new Set(), 'Repository'),
+    ...detailLines(record(payload.execution) ?? {}, new Set(), 'Execution'),
+    ...(allowedActions.length
+      ? [`- **Allowed actions:** ${allowedActions.map((action) => readableLabel(action)).join(', ')}`]
+      : []),
+    ...(scalarText(payload.dataClassification)
+      ? [`- **Data classification:** ${scalarText(payload.dataClassification)}`]
+      : []),
+    ...(scalarText(payload.callbackUrl)
+      ? [`- **Callback URL:** ${scalarText(payload.callbackUrl)}`]
+      : []),
+  ];
+  if (controls.length) sections.push('', '## Execution details', '', ...controls);
+  return sections.join('\n');
 }
 
 async function findExistingTask(
@@ -501,6 +634,7 @@ async function findExistingTask(
   tasks: GitHubAgentTask[],
   prompt: string,
 ): Promise<GitHubAgentTask | null> {
+  const dispatchMarker = prompt.split('\n', 1)[0];
   for (const task of tasks) {
     const detail = parseTask(await assertGitHubResponse(
       await client.restFetch(
@@ -509,7 +643,10 @@ async function findExistingTask(
       ),
       'checking an existing Agent task',
     ));
-    if (detail.sessions?.some((session) => session.prompt === prompt)) return detail;
+    if (detail.sessions?.some((session) =>
+      session.prompt === prompt || session.prompt?.startsWith(`${dispatchMarker}\n`))) {
+      return detail;
+    }
   }
   return null;
 }
@@ -518,18 +655,117 @@ async function pullRequestReference(
   client: GitHubClient,
   target: CopilotTaskTarget,
   task: GitHubAgentTask,
-): Promise<AgentDispatchResult['codeChange'] | undefined> {
+): Promise<{
+  codeChange?: AgentDispatchResult['codeChange'];
+  pullRequest?: PullRequestReference;
+  warning?: string;
+}> {
   const branch = task.artifacts?.find((artifact) => artifact.type === 'branch')?.data;
   const pull = task.artifacts?.find((artifact) => artifact.type === 'pull')?.data;
-  let pullRequest: PullRequestResponse | undefined;
-  if (pull?.id) {
-    pullRequest = parsePullRequest(await assertGitHubResponse(
-      await client.restFetch(
-        `/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repository)}/pulls/${pull.id}`,
-        { headers: apiHeaders() },
-      ),
-      'resolving the Agent task pull request',
-    ));
+  const session = task.sessions?.at(-1);
+  const reportedHeadRef = branch?.head_ref ?? session?.head_ref;
+  const reportedBaseRef = branch?.base_ref ?? session?.base_ref ?? target.baseRef;
+  let pullRequest: PullRequestReference | undefined;
+  let warning: string | undefined;
+  if (pull?.global_id) {
+    try {
+      const response = await client.graphqlFetchAny(
+        `query AgentTaskPullRequest($id: ID!) {
+          node(id: $id) {
+            __typename
+            ... on PullRequest {
+              url
+              number
+              state
+              isDraft
+              mergedAt
+              closedAt
+              headRefName
+              headRefOid
+              baseRefName
+              headRepository { nameWithOwner }
+              baseRepository { nameWithOwner }
+            }
+          }
+        }`,
+        { id: pull.global_id },
+      );
+      const resolvedPullRequest = parsePullRequestReference(response.data?.node);
+      if (response.errors?.length || !resolvedPullRequest) {
+        warning = 'GitHub reported a pull request output, but its details are unavailable.';
+      } else {
+        pullRequest = resolvedPullRequest;
+      }
+    } catch {
+      warning = 'GitHub reported a pull request output, but its details could not be loaded.';
+    }
+  }
+  if (pull && !pullRequest && task.state === 'completed' && reportedHeadRef) {
+    try {
+      const [owner, name] = target.fullName.split('/');
+      const response = await client.graphqlFetchAny(
+        `query AgentTaskPullRequestByBranch(
+          $owner: String!,
+          $name: String!,
+          $headRef: String!,
+          $baseRef: String!
+        ) {
+          repository(owner: $owner, name: $name) {
+            pullRequests(
+              first: 2,
+              headRefName: $headRef,
+              baseRefName: $baseRef,
+              states: [OPEN, CLOSED, MERGED]
+            ) {
+              nodes {
+                __typename
+                databaseId
+                url
+                number
+                state
+                isDraft
+                mergedAt
+                closedAt
+                headRefName
+                headRefOid
+                baseRefName
+                headRepository { nameWithOwner }
+                baseRepository { nameWithOwner }
+              }
+            }
+          }
+        }`,
+        {
+          owner,
+          name,
+          headRef: reportedHeadRef,
+          baseRef: reportedBaseRef,
+        },
+      );
+      const repository = record(response.data?.repository);
+      const pullRequests = record(repository?.pullRequests);
+      const nodes = Array.isArray(pullRequests?.nodes) ? pullRequests.nodes : [];
+      const artifactMatch = typeof pull.id === 'number'
+        ? nodes.find((node) => record(node)?.databaseId === pull.id)
+        : undefined;
+      const matches = (artifactMatch ? [artifactMatch] : nodes)
+        .map(parsePullRequestReference)
+        .filter((entry): entry is PullRequestReference => Boolean(entry));
+      if (!response.errors?.length && matches.length === 1) {
+        pullRequest = matches[0];
+        warning = undefined;
+      } else if (!warning) {
+        warning = 'GitHub reported a pull request output, but its details are unavailable.';
+      }
+    } catch {
+      if (!warning) {
+        warning = 'GitHub reported a pull request output, but its details could not be loaded.';
+      }
+    }
+  } else if (pull && !pullRequest && task.state === 'completed') {
+    warning = 'GitHub reported a pull request output without a resolvable global ID.';
+  }
+  if (pullRequest) {
     if (
       pullRequest.base?.repo?.full_name
       && pullRequest.base.repo.full_name.toLowerCase() !== target.fullName.toLowerCase()
@@ -541,20 +777,30 @@ async function pullRequestReference(
       );
     }
   }
-  const session = task.sessions?.at(-1);
-  const branchRef = pullRequest?.head?.ref ?? branch?.head_ref ?? session?.head_ref;
-  const baseRef = pullRequest?.base?.ref ?? branch?.base_ref ?? session?.base_ref ?? target.baseRef;
-  if (!branchRef && !pullRequest?.html_url) return undefined;
+  const branchRef = pullRequest?.head?.ref ?? reportedHeadRef;
+  const baseRef = pullRequest?.base?.ref ?? reportedBaseRef;
   return {
-    repository: target.fullName,
-    baseRef,
-    branchRef,
-    commitSha: pullRequest?.head?.sha,
-    pullRequestUrl: pullRequest?.html_url,
+    ...((branchRef || pullRequest?.url)
+      ? {
+        codeChange: {
+          repository: target.fullName,
+          baseRef,
+          branchRef,
+          commitSha: pullRequest?.head?.sha,
+          pullRequestUrl: pullRequest?.url,
+        },
+      }
+      : {}),
+    ...(pullRequest ? { pullRequest } : {}),
+    ...(warning ? { warning } : {}),
   };
 }
 
-function providerDetail(task: GitHubAgentTask): Record<string, unknown> {
+function providerDetail(
+  task: GitHubAgentTask,
+  outputWarning?: string,
+  pullRequest?: PullRequestReference,
+): Record<string, unknown> {
   const session = task.sessions?.at(-1);
   return redactForPersistence({
     state: task.state,
@@ -565,6 +811,8 @@ function providerDetail(task: GitHubAgentTask): Record<string, unknown> {
     createdAt: task.created_at,
     updatedAt: task.updated_at,
     artifacts: task.artifacts,
+    ...(outputWarning ? { outputWarning } : {}),
+    ...(pullRequest ? { pullRequest } : {}),
   }, { maxBytes: 128 * 1024 }) as Record<string, unknown>;
 }
 
@@ -574,7 +822,7 @@ async function transportResult(
   task: GitHubAgentTask,
 ): Promise<TransportDispatchResult> {
   const status = mapGitHubAgentTaskState(task.state);
-  const codeChange = await pullRequestReference(client, target, task);
+  const output = await pullRequestReference(client, target, task);
   const errorMessage = task.sessions
     ?.map((session) => session.error?.message)
     .find((message): message is string => Boolean(message));
@@ -582,7 +830,7 @@ async function transportResult(
     status,
     providerTaskId: task.id,
     providerState: task.state,
-    providerDetail: providerDetail(task),
+    providerDetail: providerDetail(task, output.warning, output.pullRequest),
     ...(errorMessage ? { errorMessage } : {}),
     ...(status === 'completed'
       ? {
@@ -590,7 +838,7 @@ async function transportResult(
           summary: task.name
             ? `GitHub Copilot completed "${task.name}"`
             : 'GitHub Copilot completed the Agent task',
-          ...(codeChange ? { codeChange } : {}),
+          ...(output.codeChange ? { codeChange: output.codeChange } : {}),
         },
       }
       : {}),

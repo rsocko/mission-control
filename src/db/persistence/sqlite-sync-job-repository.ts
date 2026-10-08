@@ -16,6 +16,7 @@ import type {
   SyncQueueMetrics,
   SyncScheduleHealth,
 } from '@/lib/sync/job-repository';
+import { getSyncJobPriority } from '@/lib/sync/job-repository';
 import { connectorSyncLeaseOwner } from '@/lib/sync/connector-lock-values';
 import { enqueueSqliteEventOutbox } from '@/db/persistence/sqlite-event-outbox-repository';
 import { isTerminalSyncJobStatus } from '@/lib/sync/terminal-events';
@@ -196,22 +197,26 @@ function enqueueSyncJobRecord(
   }
   if (existing) {
     const accelerate = availableAt < existing.availableAt;
-    if ((full && existing.full !== 1) || accelerate) {
+    const promote = getSyncJobPriority(source) > getSyncJobPriority(existing.source);
+    if ((full && existing.full !== 1) || accelerate || promote) {
       sqlite.prepare(`
         UPDATE sync_jobs
         SET full = ?,
+            source = ?,
             available_at = ?,
             scheduled_for = ?,
             updated_at = ?
         WHERE id = ?
       `).run(
         full || existing.full === 1 ? 1 : 0,
+        promote ? source : existing.source,
         accelerate ? availableAt : existing.availableAt,
         accelerate ? scheduledFor : existing.scheduledFor,
         now,
         existing.id,
       );
       existing.full = full || existing.full === 1 ? 1 : 0;
+      if (promote) existing.source = source;
       if (accelerate) {
         existing.availableAt = availableAt;
         existing.scheduledFor = scheduledFor;
@@ -333,7 +338,20 @@ export function claimNextSyncJob(
             )
           )
         )
-      ORDER BY full DESC, scheduled_for ASC, created_at ASC
+      ORDER BY
+        CASE source
+          WHEN 'manual' THEN 100
+          WHEN 'operator-canary' THEN 90
+          WHEN 'recovery' THEN 80
+          WHEN 'watchdog' THEN 60
+          WHEN 'api' THEN 50
+          WHEN 'schedule' THEN 20
+          WHEN 'nightly' THEN 10
+          ELSE 0
+        END DESC,
+        full DESC,
+        scheduled_for ASC,
+        created_at ASC
       LIMIT 1
     `).get(nowIso, ...excluded) as SyncJobDatabaseRow | undefined;
     if (!candidate) return null;

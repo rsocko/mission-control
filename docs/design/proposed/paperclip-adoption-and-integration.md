@@ -197,7 +197,10 @@ tools, credentials, skills, budget, and approval policy.
 ## Mission Control integration
 
 Implement Paperclip as a concrete provider over the existing external-agent
-control plane, not as a conventional task connector.
+control plane, not as a task-producing connector. A separate notification-only
+Paperclip connector polls approvals across all companies accessible to its Board
+credential by default, with an optional selected-company scope. Paperclip remains
+available as an external-agent dispatch destination as well.
 
 ### Dispatch
 
@@ -213,12 +216,21 @@ a parent issue with:
 Use Paperclip's REST/OpenAPI surface first. MCP is useful for interactive tool
 use, but REST provides a simpler durable dispatch and reconciliation contract.
 
-The implemented provider registers an API origin, a server-owned direct
-credential or deployment-secret reference, and default company, assignee,
-optional project, and optional adapter guard. Setup first checks the URL and
-credential, then discovers accessible companies, projects, agents, and adapter
-types for selection. Registration verifies `/api/health`, the selected
-assignee, and any selected project before persistence.
+The notification connector uses Paperclip's browser-approved Board
+authorization flow. Mission Control exchanges the temporary approval credential
+for a named 90-day Board API key, revokes the temporary key, stores the named key
+server-side, and warns 14 days before it expires. A connector monitors every
+company accessible to that Board identity by default, or an explicitly selected
+subset.
+
+The implemented provider registers an API origin, a connector-owned credential,
+a server-owned direct credential, or a deployment-secret reference, plus a
+default company, assignee, optional project, and optional adapter guard.
+Connector-backed routes store only `paperclip-connector:<connectorId>` and
+resolve the key on the server; they never duplicate or expose it. Setup first
+checks the URL and credential, then discovers accessible companies, projects,
+agents, and adapter types for selection. Registration verifies `/api/health`,
+the selected assignee, and any selected project before persistence.
 
 The saved route values are delegation defaults rather than immutable bindings.
 The delegation review flow can select another discovered company, project,
@@ -308,9 +320,26 @@ Paperclip remains authoritative for Paperclip approvals. MC mirrors pending
 approvals as actionable notifications with the company, requester, risk,
 related MC task/Paperclip issue, expiry, and deep link.
 
-The first version opens Paperclip to decide. A later version may approve or
-reject through MC only after adding narrowly scoped API authority, explicit
-confirmation, concurrency protection, and authoritative response handling.
+MC also polls each configured company's authoritative attention feed and
+mirrors active decisions, interactions, reviews, recovery actions, and other
+attention items. Approval rows in that feed are excluded because the dedicated
+approval collection remains authoritative for approval detail and lifecycle.
+Attention pagination must complete successfully before MC reconciles missing
+items as resolved. Paperclip interactions omitted from the company feed, such
+as agent-addressed issue-thread cards, require issue synchronization and are
+tracked separately rather than forcing unbounded issue enumeration into the
+notification-only connector.
+
+Mission Control can approve or reject through Paperclip's Board-only endpoints.
+Every inline decision requires explicit confirmation, is claimed once in MC,
+accepts an optional decision note, verifies Paperclip's authoritative response,
+and queues an immediate reconciliation poll. The Paperclip deep link remains
+available for richer review and revision requests.
+The notification connector polls the configured company approval collection,
+deduplicates by approval ID, and closes an existing notification only after a
+successful authoritative poll observes a terminal approval state. It stores a
+bounded summary rather than the approval payload, classifies the source as
+restricted, and disables push previews by default.
 
 ### Human work
 

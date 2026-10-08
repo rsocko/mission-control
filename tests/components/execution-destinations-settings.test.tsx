@@ -16,13 +16,44 @@ afterEach(() => {
 });
 
 describe('ExecutionDestinationsSection', () => {
+  it('uses destination brand marks for setup actions and Scout', async () => {
+    const fetcher = vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/external-agents') return response({ agents: [] });
+      if (url === '/api/connectors') return response({ connectors: [] });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<ExecutionDestinationsSection />);
+
+    expect(await screen.findByText('No direct execution destinations yet')).toBeInTheDocument();
+
+    const paperclipButton = screen.getByRole('button', { name: 'Paperclip route' });
+    expect(paperclipButton.querySelector('svg path')).toHaveAttribute(
+      'd',
+      'm16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551',
+    );
+
+    const githubButton = screen.getByRole('button', { name: 'GitHub Copilot Cloud' });
+    expect(githubButton.querySelector('img')).toHaveAttribute(
+      'src',
+      '/icons/connectors/github.svg',
+    );
+
+    expect(screen.getByAltText('dash:microsoft-copilot')).toHaveAttribute(
+      'src',
+      'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/microsoft-copilot.svg',
+    );
+  });
+
   it('shows a retryable load error instead of a false empty state', async () => {
     vi.stubGlobal('fetch', vi.fn(() => response({ error: 'Registry unavailable' }, 503)));
 
     render(<ExecutionDestinationsSection />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Registry unavailable');
-    expect(screen.getByText('Scout status unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Microsoft Scout status unavailable')).toBeInTheDocument();
     expect(screen.queryByText('No direct execution destinations yet')).not.toBeInTheDocument();
     expect(screen.getByRole('button', {
       name: 'Retry loading execution destinations',
@@ -149,11 +180,13 @@ describe('ExecutionDestinationsSection', () => {
     fireEvent.change(screen.getByLabelText('Paperclip API origin'), {
       target: { value: 'http://localhost:3100' },
     });
-    fireEvent.change(screen.getByLabelText('Access token'), {
+    fireEvent.change(screen.getByLabelText('Agent API key'), {
       target: { value: 'paperclip-secret' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Check connection' }));
-    expect(await screen.findByText('Connected · Paperclip 1.2.3')).toBeInTheDocument();
+    expect(await screen.findByText(
+      'Connected · company roster visibility verified · Paperclip 1.2.3',
+    )).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Default project'));
     fireEvent.click(screen.getByRole('option', { name: 'Mission Control' }));
     fireEvent.change(screen.getByLabelText('Always instructions'), {
@@ -171,12 +204,98 @@ describe('ExecutionDestinationsSection', () => {
         alwaysInstructions: 'Post concise progress updates.',
         paperclip: {
           companyId: '11111111-1111-4111-8111-111111111111',
+          companyName: 'Acme',
           projectId: '22222222-2222-4222-8222-222222222222',
           assigneeAgentId: '33333333-3333-4333-8333-333333333333',
-          requiredAdapterType: 'claude-local',
         },
       },
     });
+  });
+
+  it('reuses a connected Paperclip Board credential for a delegation route', async () => {
+    let discoveryBody: Record<string, unknown> | null = null;
+    let requestBody: Record<string, unknown> | null = null;
+    const companyId = '11111111-1111-4111-8111-111111111111';
+    const agentId = '33333333-3333-4333-8333-333333333333';
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/connectors') {
+        return response({
+          connectors: [{
+            id: 'paperclip-connector-1',
+            type: 'paperclip',
+            name: 'Paperclip — Acme',
+            enabled: true,
+            settings: {
+              apiOrigin: 'https://paperclip.example.test',
+              companyId,
+              companyName: 'Acme',
+            },
+          }],
+        });
+      }
+      if (url === '/api/external-agents' && !init?.method) {
+        return response({ agents: [] });
+      }
+      if (url === '/api/external-agents/paperclip/discover') {
+        discoveryBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return response({
+          health: { status: 'ok', version: '1.2.3', deploymentMode: 'local' },
+          companies: [{ id: companyId, name: 'Acme', status: 'active' }],
+          projects: [],
+          agents: [{
+            id: agentId,
+            name: 'Engineer',
+            title: 'Software Engineer',
+            role: 'engineer',
+            status: 'idle',
+            adapterType: 'claude-local',
+          }],
+        });
+      }
+      if (url === '/api/external-agents' && init?.method === 'POST') {
+        requestBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return response({ agent: { id: 'paperclip-route' } }, 201);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<ExecutionDestinationsSection />);
+    expect(await screen.findByText('No direct execution destinations yet')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Paperclip route' }));
+    fireEvent.click(screen.getByLabelText('Credential source'));
+    fireEvent.click(screen.getByRole('option', { name: 'Existing Paperclip connector' }));
+    fireEvent.click(screen.getByLabelText('Paperclip connector'));
+    fireEvent.click(screen.getByRole('option', { name: 'Acme — Paperclip — Acme' }));
+    expect(screen.getByLabelText('Paperclip API origin'))
+      .toHaveValue('https://paperclip.example.test');
+    fireEvent.click(screen.getByRole('button', { name: 'Check connection' }));
+    expect(await screen.findByText(
+      'Connected · company roster visibility verified · Paperclip 1.2.3',
+    )).toBeInTheDocument();
+    expect(discoveryBody).toMatchObject({
+      connectorId: 'paperclip-connector-1',
+      endpoint: 'https://paperclip.example.test',
+      companyId,
+    });
+    expect(discoveryBody).not.toHaveProperty('credential');
+    fireEvent.click(screen.getByRole('button', { name: 'Add destination' }));
+
+    await waitFor(() => expect(requestBody).not.toBeNull());
+    expect(requestBody).toMatchObject({
+      type: 'paperclip',
+      endpoint: 'https://paperclip.example.test',
+      authType: 'bearer',
+      authCredentialRef: 'paperclip-connector:paperclip-connector-1',
+      providerConfig: {
+        paperclip: {
+          companyId,
+          assigneeAgentId: agentId,
+        },
+      },
+    });
+    expect(requestBody).not.toHaveProperty('credential');
   });
 
   it('shows configured Scout pickup and can disable it from AI settings', async () => {
@@ -215,7 +334,9 @@ describe('ExecutionDestinationsSection', () => {
     render(<ExecutionDestinationsSection />);
 
     expect(await screen.findByText('Pickup enabled')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('switch', { name: 'Disable Scout work pickup' }));
+    fireEvent.click(screen.getByRole('switch', {
+      name: 'Disable Microsoft Scout work pickup',
+    }));
 
     await waitFor(() => expect(disabled).toBe(true));
     expect(await screen.findByText('Pickup off')).toBeInTheDocument();
@@ -249,9 +370,11 @@ describe('ExecutionDestinationsSection', () => {
 
     render(<ExecutionDestinationsSection />);
 
-    fireEvent.click(await screen.findByRole('switch', { name: 'Enable Scout work pickup' }));
+    fireEvent.click(await screen.findByRole('switch', {
+      name: 'Enable Microsoft Scout work pickup',
+    }));
 
-    expect(await screen.findByText('Finish setup in Scout')).toBeInTheDocument();
+    expect(await screen.findByText('Finish setup in Microsoft Scout')).toBeInTheDocument();
     expect(screen.getByText('Configure Scout to claim Mission Control work.')).toBeInTheDocument();
   });
 
@@ -328,5 +451,62 @@ describe('ExecutionDestinationsSection', () => {
       },
     });
     expect(getCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('recommends one standard integration agent and flags duplicate company routes', async () => {
+    const paperclipRoute = (id: string, name: string) => ({
+      id,
+      name,
+      type: 'paperclip',
+      description: null,
+      endpoint: 'https://paperclip.example.com',
+      authType: 'bearer',
+      providerConfig: {
+        paperclip: {
+          companyId: '11111111-1111-4111-8111-111111111111',
+          companyName: 'Acme Corp',
+          assigneeAgentId: '22222222-2222-4222-8222-222222222222',
+        },
+      },
+      capabilities: { canWriteCode: true },
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+        fieldAllowlist: [],
+        retentionDays: 30,
+        maxRequestsPerMinute: 60,
+      },
+      enabled: true,
+      executionLocality: 'external',
+      hasCredentialReference: true,
+      credentialSource: 'mission-control',
+      updatedAt: '2026-10-06T00:00:00.000Z',
+    });
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/connectors') return response({ connectors: [] });
+      if (url === '/api/external-agents') {
+        return response({
+          agents: [
+            paperclipRoute('paperclip-primary', 'Acme primary'),
+            paperclipRoute('paperclip-backup', 'Acme backup'),
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<ExecutionDestinationsSection />);
+
+    expect((await screen.findAllByText('2 routes for this company'))).toHaveLength(2);
+    expect(screen.getAllByText(/Acme Corp/)).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Paperclip route' }));
+
+    expect(screen.getByText('Use one integration agent per Paperclip company'))
+      .toBeInTheDocument();
+    expect(screen.getByText(/Mission Control Dispatcher/)).toBeInTheDocument();
+    expect(screen.getByText(/standard trust/)).toBeInTheDocument();
+    expect(screen.getByText(/A CEO key works, but is not required/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Agent API key')).toBeInTheDocument();
   });
 });

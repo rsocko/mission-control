@@ -54,6 +54,7 @@ function initialHistoryFilters(
 }
 
 const triggerLabels: Record<NonNullable<SyncLogEntry['trigger']>, string> = {
+  manual: 'Manual',
   api: 'Manual',
   schedule: 'Scheduled',
   nightly: 'Nightly',

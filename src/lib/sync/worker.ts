@@ -27,6 +27,7 @@ export type SyncJobExecutor = (
 
 class WorkerShutdownError extends Error {}
 class SyncExecutionTimeoutError extends Error {}
+const MAX_SYNC_WORKER_CONCURRENCY = 16;
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -43,23 +44,34 @@ export function assertSupportedWorkerReplicaCount(
   }
 }
 
+export function resolveSyncWorkerConcurrency(
+  backend = process.env.MC_DATABASE_BACKEND,
+  configured = process.env.MC_SYNC_WORKER_CONCURRENCY,
+): number {
+  if (backend !== 'postgres') return 1;
+  return Math.min(
+    positiveInteger(configured, 1),
+    MAX_SYNC_WORKER_CONCURRENCY,
+  );
+}
+
 export class SyncWorker {
   readonly ownerId: string;
   private readonly execute: SyncJobExecutor;
   private readonly pollIntervalMs: number;
   private readonly abortGraceMs: number;
+  private readonly maxConcurrentJobs: number;
   private readonly isEnabled: () => boolean;
   private wakeWaiter: (() => void) | null = null;
   private stopping = false;
   private loopPromise: Promise<void> | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
-  private active:
-    | {
-        job: SyncJob;
-        controller: AbortController;
-        promise: Promise<void>;
-      }
-    | null = null;
+  private readonly active = new Map<string, {
+    job: SyncJob;
+    controller: AbortController;
+    promise: Promise<void>;
+    completion: Promise<void>;
+  }>();
   private readonly abandoned = new Map<string, {
     job: SyncJob;
     promise: Promise<void>;
@@ -81,6 +93,7 @@ export class SyncWorker {
       ?? positiveInteger(process.env.MC_SYNC_WORKER_POLL_MS, 500);
     this.abortGraceMs = options.abortGraceMs
       ?? positiveInteger(process.env.MC_SYNC_WORKER_ABORT_GRACE_MS, 30_000);
+    this.maxConcurrentJobs = resolveSyncWorkerConcurrency();
     this.isEnabled = options.isEnabled ?? (() => true);
   }
 
@@ -88,9 +101,9 @@ export class SyncWorker {
     if (this.loopPromise) return;
     this.stopping = false;
     setSyncEventPersistence((event) => {
-      const activeJob = this.active?.job.connectorId === event.connectorId
-        ? this.active.job
-        : this.abandoned.get(event.connectorId)?.job;
+      const activeJob = [...this.active.values()]
+        .find(({ job }) => job.connectorId === event.connectorId)?.job
+        ?? this.abandoned.get(event.connectorId)?.job;
       if (!activeJob) return;
       void withDatabaseOperation('sync-job-events', () => getSyncJobRepository()
         .then((repository) => repository.persistEvent(activeJob.id, event)))
@@ -120,7 +133,10 @@ export class SyncWorker {
       this.loopPromise = null;
       setSyncEventPersistence(null);
     });
-    syncLogger.info({ ownerId: this.ownerId }, 'Sync worker started');
+    syncLogger.info(
+      { ownerId: this.ownerId, concurrency: this.maxConcurrentJobs },
+      'Sync worker started',
+    );
   }
 
   private async runLoop(): Promise<void> {
@@ -128,6 +144,10 @@ export class SyncWorker {
     while (!this.stopping) {
       if (!this.isEnabled()) {
         await this.delay(this.pollIntervalMs);
+        continue;
+      }
+      if (this.active.size >= this.maxConcurrentJobs) {
+        await Promise.race([...this.active.values()].map(({ completion }) => completion));
         continue;
       }
       const recoveredSchedules = await withDatabaseOperation(
@@ -169,15 +189,17 @@ export class SyncWorker {
       }
       const controller = new AbortController();
       const promise = this.executeJob(job, controller);
-      this.active = { job, controller, promise };
-      await this.waitForJob(job, controller, promise);
-      if (this.active?.job.id === job.id) this.active = null;
-      const refreshedQueuedCount = await withDatabaseOperation(
-        'sync-queue-count',
-        () => repository.countQueued(),
-      );
-      this.lastKnownQueuedCount = refreshedQueuedCount;
-      setQueuedExpensiveOperations(refreshedQueuedCount);
+      const active = {
+        job,
+        controller,
+        promise,
+        completion: Promise.resolve(),
+      };
+      this.active.set(job.id, active);
+      active.completion = this.waitForJob(job, controller, promise).finally(() => {
+        if (this.active.get(job.id) === active) this.active.delete(job.id);
+        this.wake();
+      });
     }
   }
 
@@ -388,16 +410,18 @@ export class SyncWorker {
     this.wake();
     if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.pruneTimer = null;
-    const active = this.active;
+    const active = [...this.active.values()];
     let timedOut = false;
-    if (active) {
+    if (active.length > 0) {
       const completed = await Promise.race([
-        active.promise.then(() => true),
+        Promise.allSettled(active.map(({ promise }) => promise)).then(() => true),
         this.delay(graceMs).then(() => false),
       ]);
       if (!completed) {
         timedOut = true;
-        active.controller.abort(new WorkerShutdownError('Worker shutdown grace period expired'));
+        for (const { controller } of active) {
+          controller.abort(new WorkerShutdownError('Worker shutdown grace period expired'));
+        }
       }
     }
     if (this.loopPromise && !timedOut) await this.loopPromise;
@@ -407,11 +431,11 @@ export class SyncWorker {
   }
 
   getActiveJob(): SyncJob | null {
-    return this.active?.job ?? null;
+    return this.active.values().next().value?.job ?? null;
   }
 
   hasPendingWork(): boolean {
-    if (this.active !== null) return true;
+    if (this.active.size > 0) return true;
     // The backend-neutral queue count is refreshed every poll. Avoid running
     // the full queue-health aggregate from this synchronous health check.
     return this.lastKnownQueuedCount > 0;

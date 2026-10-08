@@ -21,6 +21,7 @@ import { microsoftTodoFactory } from './microsoft-todo';
 import { financeManagerFactory } from './monarch-money';
 import { outlookCalendarFactory } from './outlook-calendar';
 import { outlookEmailFactory } from './outlook-email';
+import { paperclipFactory } from './paperclip';
 import { ryMessageFactory } from './rymessage';
 import { scoutFactory } from './scout';
 import { workTodoBridgeFactory } from './work-todo';
@@ -283,6 +284,7 @@ export function registerDefaultConnectorFactories(): void {
   connectorRegistry.registerFactory('github-issues', githubIssuesFactory);
   connectorRegistry.registerFactory('outlook-calendar', outlookCalendarFactory);
   connectorRegistry.registerFactory('outlook-email', outlookEmailFactory);
+  connectorRegistry.registerFactory('paperclip', paperclipFactory);
   connectorRegistry.registerFactory('rymessage', ryMessageFactory);
   connectorRegistry.registerFactory('finance-manager', financeManagerFactory);
   connectorRegistry.registerFactory('monarch-money', financeManagerFactory);

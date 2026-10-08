@@ -28,7 +28,7 @@ mkdir -p ~/.copilot/automations
 cp automations/*.json ~/.copilot/automations/
 ```
 
-### 3. Configure MCP Server
+### 3. Configure the General Connector MCP Server
 
 Add MC's MCP server to your user-level `.mcp.json`:
 
@@ -44,6 +44,37 @@ Add MC's MCP server to your user-level `.mcp.json`:
 ```
 
 > **Note:** This connects directly to the deployed MC instance — no local process needed. For local development, you can use the stdio transport instead (see `docs/MCP-SERVER.md`).
+
+This general connection supports Scout's connector duties: finding M365 work,
+pushing curated tasks, reconciliation, and status sync. It is not the delegated
+work worker.
+
+### 4. Onboard Delegated Work Pickup
+
+In Mission Control, open the Scout connector and choose **Generate onboarding
+prompt**. Give that short bootstrap prompt to Scout. The prompt contains a
+temporary registration token, not the durable worker credential.
+
+Scout then:
+
+1. downloads the versioned worker skill from Mission Control;
+2. declares the M365 sources, actions, and Scout trigger types available in the
+   current tenant;
+3. confirms that its MCP connection can keep bearer credentials in protected
+   credential storage;
+4. waits for an operator to approve those capabilities;
+5. claims the durable credential exactly once and stores it only in that
+   protected connection field; and
+6. configures a recurring pickup automation, normally every 15 minutes.
+
+Do not continue onboarding if Scout can retain the durable credential only in
+prompt text, automation instructions, chat history, output, or logs. Mission
+Control never shows or retrieves the claimed credential in the settings UI;
+restart onboarding to replace it.
+
+The worker connection is intentionally narrower than the general connector
+connection. It exposes identity, health, exact-or-next claim, progress, durable
+question/approval, completion, and failure tools only.
 
 ## Automations
 
@@ -105,6 +136,25 @@ Scout (reasons over business M365)
 | `mc_search_tasks` | Scout → MC | Pre-push dedup check |
 | `mc_create_task` | Scout → MC | Create individual tasks |
 | `mc_list_projects` | Scout → MC | Map items to MC projects |
+
+Delegated work pickup uses a separate least-privilege MCP connection:
+
+| Tool | Purpose |
+|---|---|
+| `mc_agent_identity` | Verify worker, connector, capability, and policy binding |
+| `mc_agent_health` | Report runtime readiness and activation constraints |
+| `mc_agent_claim_work` | Claim the next dispatch or a trusted exact dispatch |
+| `mc_agent_update_progress` | Renew the lease and publish progress |
+| `mc_agent_request_input` | Persist a question/approval and release the claim |
+| `mc_agent_complete_work` | Return the final structured result |
+| `mc_agent_fail_work` | Record a sanitized failure |
+
+MCP is the authenticated work channel; it does not wake Scout. Scheduled polling
+is the guaranteed activation path. A Scout-native condition trigger may invoke
+the same pickup automation sooner and pass a trusted `dispatchId`, allowing the
+worker to skip broad queue discovery. Mission Control does not currently send a
+webhook or event directly into Scout because Scout documents no generic inbound
+wake endpoint.
 
 Reconciliation does not give the model direct completion authority. Mission
 Control stores evidence summaries and policy decisions, defaults completion to

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 process.env.MC_DB_PATH = ':memory:';
 process.env.MC_API_KEY = 'task-delegation-test-key';
@@ -12,6 +12,8 @@ let registry: typeof import('@/lib/external-agents/registry');
 let delegation: typeof import('@/lib/external-agents/task-delegation');
 let singleRoute: typeof import('@/app/api/tasks/[id]/delegation/route');
 let bulkRoute: typeof import('@/app/api/tasks/delegation/route');
+let dispatchRoute: typeof import('@/app/api/external-agents/dispatch/route');
+let dispatchDetailRoute: typeof import('@/app/api/external-agents/dispatches/[id]/route');
 
 const companyId = '11111111-1111-4111-8111-111111111111';
 const projectId = '22222222-2222-4222-8222-222222222222';
@@ -114,6 +116,7 @@ async function createPaperclipAgent() {
         alwaysInstructions: 'Keep Paperclip progress concise.',
         paperclip: {
           companyId,
+          companyName: 'Acme Corp',
           projectId,
           assigneeAgentId,
           requiredAdapterType: 'github-copilot-web',
@@ -160,11 +163,20 @@ async function createScoutPullAgent() {
 beforeAll(async () => {
   const databaseModule = await import('@/db');
   await (await import('@/db/runtime')).initializeRuntimeDatabase();
-  [registry, delegation, singleRoute, bulkRoute] = await Promise.all([
+  [
+    registry,
+    delegation,
+    singleRoute,
+    bulkRoute,
+    dispatchRoute,
+    dispatchDetailRoute,
+  ] = await Promise.all([
     import('@/lib/external-agents/registry'),
     import('@/lib/external-agents/task-delegation'),
     import('@/app/api/tasks/[id]/delegation/route'),
     import('@/app/api/tasks/delegation/route'),
+    import('@/app/api/external-agents/dispatch/route'),
+    import('@/app/api/external-agents/dispatches/[id]/route'),
   ]);
   sqlite = databaseModule.sqlite;
 }, 30_000);
@@ -255,6 +267,91 @@ afterAll(async () => {
 });
 
 describe('provider-neutral task delegation API', () => {
+  it('persists confirmation intent without calling a provider from the API process', async () => {
+    await createCloudAgent();
+    const preview = await delegation.previewTaskDelegation({
+      taskId: 'task-github',
+      agentId: 'github-cloud',
+      operationId: 'api-worker-owned-confirmation',
+      instruction: 'Fix the parser',
+      repository: 'octo/source',
+    });
+
+    const providerFetch = vi.fn(() => {
+      throw new Error('provider transport must not run in the web process');
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = providerFetch as typeof fetch;
+    try {
+      const response = await dispatchRoute.POST(mutationRequest(
+        'http://localhost/api/external-agents/dispatch',
+        {
+          dispatchId: preview.id,
+          previewHash: preview.previewHash,
+          confirm: true,
+        },
+      ));
+      expect(response.status).toBe(202);
+      expect(await response.json()).toMatchObject({
+        accepted: true,
+        dispatch: { id: preview.id, status: 'queued' },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(sqlite.prepare(`
+      SELECT action, status FROM agent_dispatch_actions WHERE dispatch_id = ?
+    `).get(preview.id)).toEqual({ action: 'submit', status: 'pending' });
+  });
+
+  it('queues refresh intent and keeps delegation reads side-effect free', async () => {
+    await createCloudAgent();
+    const preview = await delegation.previewTaskDelegation({
+      taskId: 'task-github',
+      agentId: 'github-cloud',
+      operationId: 'api-worker-owned-refresh',
+      instruction: 'Fix the parser',
+      repository: 'octo/source',
+    });
+    await (await import('@/lib/external-agents/service'))
+      .confirmDispatch(preview.id, preview.previewHash);
+    const providerFetch = vi.fn(() => {
+      throw new Error('provider transport must not run in the web process');
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = providerFetch as typeof fetch;
+    try {
+      const getResponse = await singleRoute.GET(
+        new Request('http://localhost/api/tasks/task-github/delegation'),
+        { params: Promise.resolve({ id: 'task-github' }) },
+      );
+      expect(getResponse.status).toBe(200);
+      const refreshResponse = await dispatchDetailRoute.PATCH(
+        new Request(
+          `http://localhost/api/external-agents/dispatches/${preview.id}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-mc-api-key': 'task-delegation-test-key',
+            },
+            body: JSON.stringify({ action: 'refresh' }),
+          },
+        ),
+        { params: Promise.resolve({ id: preview.id }) },
+      );
+      expect(refreshResponse.status).toBe(202);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(sqlite.prepare(`
+      SELECT action, status FROM agent_dispatch_actions
+      WHERE dispatch_id = ? AND action = 'reconcile'
+    `).get(preview.id)).toEqual({ action: 'reconcile', status: 'pending' });
+  });
+
   it('maps every canonical and provider liveness state for task surfaces', () => {
     const base = { status: 'queued' } as import(
       '@/lib/external-agents/contracts'
@@ -336,6 +433,7 @@ describe('provider-neutral task delegation API', () => {
         type: 'paperclip',
         paperclipBinding: {
           companyId,
+          companyName: 'Acme Corp',
           projectId,
           assigneeAgentId,
           requiredAdapterType: 'github-copilot-web',
@@ -485,6 +583,22 @@ describe('provider-neutral task delegation API', () => {
       (await import('@/lib/external-agents/service'))
         .confirmDispatch(first.id, first.previewHash),
     ).rejects.toMatchObject({ code: 'PREVIEW_MISMATCH' });
+  });
+
+  it('uses the task details when per-dispatch instructions are omitted', async () => {
+    await createCloudAgent();
+    const preview = await delegation.previewTaskDelegation({
+      taskId: 'task-github',
+      agentId: 'github-cloud',
+      operationId: 'task-details-only',
+      repository: 'octo/source',
+      allowedActions: ['write_code'],
+    });
+
+    expect(preview.payloadPreview).toMatchObject({
+      instruction: 'Complete the delegated task using the task details provided.',
+      tasks: [{ id: 'task-github' }],
+    });
   });
 
   it('atomically prevents concurrent operations from reserving the same task', async () => {
@@ -660,6 +774,81 @@ describe('provider-neutral task delegation API', () => {
     expect(replayBatch.blocked).toEqual(firstBatch.blocked);
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
       .toEqual({ count: 2 });
+  });
+
+  it('combines selected tasks into one idempotent Copilot cloud assignment', async () => {
+    await createCloudAgent();
+    const body = {
+      taskIds: ['task-github', 'task-local'],
+      agentId: 'github-cloud',
+      operationId: 'combined-operation',
+      strategy: 'combined',
+      repository: 'octo/source',
+      baseRef: 'main',
+      instruction: 'Deliver both tasks as one cohesive change.',
+      allowedActions: ['write_code'],
+    };
+
+    const first = await bulkRoute.POST(mutationRequest(
+      'http://localhost/api/tasks/delegation',
+      body,
+    ));
+    const firstBatch = await first.json();
+    const replay = await bulkRoute.POST(mutationRequest(
+      'http://localhost/api/tasks/delegation',
+      body,
+    ));
+    const replayBatch = await replay.json();
+
+    expect(first.status).toBe(201);
+    expect(firstBatch).toMatchObject({
+      readyCount: 2,
+      blockedCount: 0,
+      dispatchCount: 1,
+      strategy: 'combined',
+      previews: [{
+        taskIds: ['task-github', 'task-local'],
+        payloadPreview: {
+          repository: { fullName: 'octo/source' },
+          tasks: expect.arrayContaining([
+            expect.objectContaining({ id: 'task-github', title: 'Fix the parser' }),
+            expect.objectContaining({ id: 'task-local', title: 'Write release notes' }),
+          ]),
+        },
+      }],
+    });
+    expect(replayBatch.previews).toEqual(firstBatch.previews);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
+      .toEqual({ count: 1 });
+    expect(JSON.parse(String(sqlite.prepare(
+      'SELECT scope FROM agent_dispatches LIMIT 1',
+    ).pluck().get()))).toMatchObject({
+      taskIds: ['task-github', 'task-local'],
+      repository: 'octo/source',
+    });
+  });
+
+  it('keeps combined delegation all-or-nothing when any selected task is blocked', async () => {
+    await createCloudAgent();
+    const response = await bulkRoute.POST(mutationRequest(
+      'http://localhost/api/tasks/delegation',
+      {
+        taskIds: ['task-github', 'task-done'],
+        agentId: 'github-cloud',
+        operationId: 'combined-blocked',
+        strategy: 'combined',
+        baseRef: 'main',
+        allowedActions: ['write_code'],
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      code: 'DISCLOSURE_BLOCKED',
+      error: 'Task is done',
+    });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
+      .toEqual({ count: 0 });
   });
 
   it('isolates oversized bulk tasks while preserving visible idempotent previews', async () => {
@@ -860,6 +1049,13 @@ describe('provider-neutral task delegation API', () => {
         preview.id,
       );
     }
+    sqlite.prepare(`
+      UPDATE agent_dispatches
+      SET provider_detail = ?
+      WHERE id = ?
+    `).run(JSON.stringify({
+      taskUrl: 'https://github.com/copilot/tasks/cloud-task-1',
+    }), latestGithubId);
 
     const summaries = await delegation.listTaskDelegationSummaries([
       'task-github',
@@ -867,6 +1063,8 @@ describe('provider-neutral task delegation API', () => {
     ]);
     expect(summaries.size).toBe(2);
     expect(summaries.get('task-github')?.dispatchId).toBe(latestGithubId);
+    expect(summaries.get('task-github')?.providerTaskUrl)
+      .toBe('https://github.com/copilot/tasks/cloud-task-1');
     expect(summaries.get('task-local')?.dispatchId).toBe(local.id);
   });
 });

@@ -135,7 +135,7 @@ export default function SettingsPage() {
     router.push(`/settings/${SECTION_TO_SLUG[id]}`);
   }, [router]);
   const {
-    connectors, sourceLists, listGroups, loading,
+    connectors, sourceLists, classificationDefaults, listGroups, loading,
     showAddModal, setShowAddModal,
     selectedConnector, setSelectedConnector, syncing,
     fetchData, toggleConnector, deleteConnector, restoreConnector,
@@ -422,6 +422,8 @@ export default function SettingsPage() {
         <AddConnectorModal
           onClose={() => setShowAddModal(false)}
           onAdded={() => { setShowAddModal(false); fetchData(); }}
+          classificationDefaults={classificationDefaults}
+          connectors={connectors}
         />
       )}
     </AnimatePresence>

@@ -119,6 +119,8 @@ async function waitFor(assertion: () => void): Promise<void> {
 describe('sync worker runtime', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.MC_DATABASE_BACKEND;
+    delete process.env.MC_SYNC_WORKER_CONCURRENCY;
     queueMocks.countQueuedSyncJobs.mockReturnValue(0);
     queueMocks.claimNextSyncJob.mockReturnValueOnce(job()).mockReturnValue(null);
   });
@@ -131,6 +133,55 @@ describe('sync worker runtime', () => {
       'MC_SYNC_WORKER_REPLICA_COUNT must be 1',
     );
     expect(() => assertSupportedWorkerReplicaCount('1')).not.toThrow();
+  });
+
+  it('forces SQLite concurrency to one and bounds PostgreSQL concurrency', async () => {
+    queueMocks.claimNextSyncJob.mockReset();
+    const { resolveSyncWorkerConcurrency } = await import('@/lib/sync/worker');
+
+    expect(resolveSyncWorkerConcurrency('sqlite', '8')).toBe(1);
+    expect(resolveSyncWorkerConcurrency(undefined, '8')).toBe(1);
+    expect(resolveSyncWorkerConcurrency('postgres', '8')).toBe(8);
+    expect(resolveSyncWorkerConcurrency('postgres', '100')).toBe(16);
+    expect(resolveSyncWorkerConcurrency('postgres', 'invalid')).toBe(1);
+  });
+
+  it('runs independent PostgreSQL connector jobs up to the configured limit', async () => {
+    process.env.MC_DATABASE_BACKEND = 'postgres';
+    process.env.MC_SYNC_WORKER_CONCURRENCY = '2';
+    queueMocks.claimNextSyncJob.mockReset();
+    queueMocks.claimNextSyncJob
+      .mockReturnValueOnce(job({
+        connectorId: 'todo-1',
+        identityMode: null,
+        identityModeRevision: null,
+      }))
+      .mockReturnValueOnce(job({
+        id: 'job-2',
+        connectorId: 'github-1',
+      }))
+      .mockReturnValue(null);
+    const completions = new Map<string, (value: SyncResult) => void>();
+    const execute = vi.fn((connectorId: string) => new Promise<SyncResult>((resolve) => {
+      completions.set(connectorId, resolve);
+    }));
+    const { SyncWorker } = await import('@/lib/sync/worker');
+    const worker = new SyncWorker(execute, { ownerId: 'worker-a', pollIntervalMs: 1 });
+
+    worker.start();
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(execute.mock.calls.map(([connectorId]) => connectorId)).toEqual([
+      'todo-1',
+      'github-1',
+    ]);
+
+    completions.get('todo-1')?.({
+      ...result(true),
+      connectorId: 'todo-1',
+    });
+    completions.get('github-1')?.(result(true));
+    await waitFor(() => expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledTimes(2));
+    await worker.stop();
   });
 
   it('reports pending work from either the active execution or durable queue', async () => {

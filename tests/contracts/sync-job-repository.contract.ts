@@ -68,6 +68,27 @@ export function runSyncJobRepositoryContract(
       expect(competing.find(Boolean)?.connectorId).toBe(normalConnector);
     });
 
+    it('prioritizes and promotes manual work without duplicating the queued job', async () => {
+      const repository = harness.repository();
+      const nightlyConnector = await harness.createConnector('nightly-full');
+      const manualConnector = await harness.createConnector('manual');
+      await repository.enqueue(nightlyConnector, { full: true, source: 'nightly' });
+      const scheduled = await repository.enqueue(manualConnector, { source: 'schedule' });
+      const promoted = await repository.enqueue(manualConnector, { source: 'manual' });
+
+      expect(promoted).toMatchObject({
+        id: scheduled.id,
+        source: 'manual',
+      });
+      await expect(repository.countQueued()).resolves.toBe(2);
+      await expect(repository.claimNext('contract-priority-worker', 60_000))
+        .resolves.toMatchObject({
+          id: scheduled.id,
+          connectorId: manualConnector,
+          source: 'manual',
+        });
+    });
+
     it('fences an earlier attempt reclaimed by the same owner', async () => {
       const repository = harness.repository();
       const connectorId = await harness.createConnector('attempt');

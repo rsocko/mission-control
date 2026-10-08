@@ -1586,7 +1586,7 @@ export class SyncExecutionPipeline {
     }
 
     const results = await Promise.allSettled(
-      connectorIds.map(id => this.runSync(id, { full, source: 'api' }))
+      connectorIds.map(id => this.runSync(id, { full, source: 'manual' }))
     );
     return results
       .filter((r): r is PromiseFulfilledResult<SyncResult> => r.status === 'fulfilled')

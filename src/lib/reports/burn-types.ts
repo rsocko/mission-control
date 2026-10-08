@@ -27,6 +27,9 @@ export interface BurnReportPoint {
 export interface BurnReportTask {
   id: string;
   title: string;
+  status?: string;
+  effort?: number | null;
+  localDisposition?: string;
   createdAt?: string;
   completedAt?: string | null;
   deletedAt?: string | null;

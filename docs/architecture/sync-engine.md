@@ -162,10 +162,13 @@ only in the final transaction after every page validates. Failure or
 cancellation records the attempt but leaves the last successful window
 unchanged.
 
-The worker intentionally claims one job at a time. This isolates request
-serving from connector load and preserves connector ordering. PostgreSQL does
-not remove the risk of duplicate external side effects after lease takeover, so
-the single-worker invariant remains in force.
+The worker defaults to one job at a time. PostgreSQL deployments can increase
+`MC_SYNC_WORKER_CONCURRENCY` for bounded parallel execution across different
+connectors. Connector leases and active-job uniqueness preserve per-connector
+ordering. SQLite always uses one slot regardless of that setting to avoid local
+write contention. PostgreSQL does not remove the risk of duplicate external
+side effects after lease takeover, so the single-worker-replica invariant
+remains in force.
 
 Development remains inline unless `MC_SYNC_EXECUTION_MODE=worker` is set. To
 exercise worker mode outside Compose, run Next.js and `npm run worker` as
@@ -381,7 +384,7 @@ degradation.
 | Decision | Rationale |
 |---|---|
 | Relational tables instead of a message broker | Both supported backends provide durable jobs, leases, schedules, and events without adding a separate queue service. |
-| Exactly one sequential worker replica | Sequential execution bounds connector CPU and memory pressure. Multiple replicas remain unsafe because database leases cannot fence remote side effects in a stalled predecessor. |
+| Exactly one worker replica with bounded PostgreSQL concurrency | Per-connector exclusion preserves ordering while allowing independent connectors to overlap. SQLite remains serial. Multiple replicas remain unsafe because database leases cannot fence remote side effects in a stalled predecessor. |
 | Polling for the API response | Existing callers receive the same synchronous result shape while execution moves across a durable process boundary. |
 | Durable SSE events | Monotonic IDs let the web process replay progress after reconnects or process restarts. |
 | Checkpointed per-issue GitHub REST reads | REST cancellation and partial-result behavior are proven; GraphQL parity for errors, permissions, deletion, pagination, and aborts is not. |
@@ -397,6 +400,7 @@ degradation.
 | `MC_SYNC_API_WAIT_TIMEOUT_MS` | `900000` | Compatibility wait for `/api/sync` |
 | `MC_SYNC_DURATION_BUDGET_MS` | `300000` | Hard connector execution budget and over-budget alert threshold |
 | `MC_SYNC_WORKER_POLL_MS` | `500` | Queue poll interval |
+| `MC_SYNC_WORKER_CONCURRENCY` | `1` | PostgreSQL connector jobs allowed in parallel, capped at 16; ignored by SQLite, which is always 1 |
 | `MC_SYNC_WORKER_ABORT_GRACE_MS` | `30000` | Cooperative cleanup grace after cancellation, lease loss, or duration timeout |
 | `MC_SYNC_WORKER_SHUTDOWN_GRACE_MS` | `30000` | Graceful active-job drain budget |
 | `MC_SYNC_WORKER_REPLICA_COUNT` | `1` | Required single-worker deployment invariant |

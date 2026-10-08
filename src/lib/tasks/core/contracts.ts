@@ -44,6 +44,7 @@ export const TASK_QUICK_FILTERS = [
   'waiting',
   'assigned',
   'inbox',
+  'delegated',
 ] as const;
 
 export type TaskQuickFilter = typeof TASK_QUICK_FILTERS[number];
@@ -167,6 +168,7 @@ export interface TaskStatsResult {
   readonly recurring: number;
   readonly waiting: number;
   readonly inbox: number;
+  readonly delegated?: number;
 }
 
 export type TaskSourceCounts = Record<string, number>;

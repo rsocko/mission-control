@@ -5,6 +5,7 @@ import {
   normalizeSyncedLists,
 } from '@/lib/connectors/source-list-selection';
 import type { ContextAppearance } from '@/types';
+import type { ConnectorDataClassification } from '@/lib/connectors/data-classification';
 
 export { getConnectorDisplayName } from '@/lib/connectors/display-name';
 export { isSourceListSelected, normalizeSyncedLists };
@@ -24,6 +25,11 @@ export interface ConnectorConfig {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  dataClassification?: {
+    baseline: ConnectorDataClassification;
+    effective: ConnectorDataClassification;
+    override: ConnectorDataClassification | null;
+  };
   configurationState?: {
     status: 'configured' | 'needs-configuration';
     code: 'household_currency_unavailable' | null;
@@ -84,7 +90,7 @@ export interface SyncLogEntry {
   syncedAt: string;
   durationMs: number | null;
   jobId?: string | null;
-  trigger?: 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary' | null;
+  trigger?: 'manual' | 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary' | null;
   scheduledFor?: string | null;
   startedAt?: string | null;
   attempt?: number | null;
@@ -223,6 +229,7 @@ export const CONNECTOR_TYPES = [
   { type: 'outlook-calendar', name: 'Outlook Calendar', description: 'Calendar events and meeting alerts' },
   { type: 'outlook-email', name: 'Outlook Email', description: 'Flagged emails and action-required messages' },
   { type: 'scout', name: 'Scout', description: 'AI-curated action items from M365 (push-only via MCP)' },
+  { type: 'paperclip', name: 'Paperclip', description: 'Agent approvals from one Paperclip company' },
   { type: 'rymessage', name: 'RyMessage', description: 'AI-extracted actions from iMessage via RyMessage desktop client' },
   { type: 'finance-manager', name: 'Tyrion', description: 'Monarch Money bridge for Mission Control' },
   { type: 'custom-rest', name: 'Custom REST API', description: 'Connect any REST endpoint with flexible mapping' },
@@ -239,6 +246,7 @@ export const CONNECTOR_ICONS: Record<string, string> = {
   'outlook-email': '/icons/connectors/outlook.svg',
   'rymessage': '/icons/connectors/rymessage.svg',
   'scout': 'dash:microsoft-copilot',
+  'paperclip': '/icons/connectors/paperclip.svg',
   finance: '/icons/connectors/tyrion.svg',
   'finance-manager': '/icons/connectors/tyrion.svg',
   'monarch-money': '/icons/connectors/tyrion.svg',

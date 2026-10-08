@@ -15,7 +15,8 @@ import { getExternalAgentControlPersistence } from './persistence';
 import {
   assertClassificationAllowed,
   assertRichTaskContextAllowed,
-  resolveDispatchClassification,
+  resolveDispatchClassificationForSources,
+  type DispatchClassificationResolution,
 } from './policy';
 import {
   getExternalAgent,
@@ -25,12 +26,9 @@ import {
 } from './registry';
 import {
   createDispatchPreview,
-  expireDispatches,
-  reconcileDispatch,
 } from './service';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 import { parseSourceId } from '@/lib/connectors/github-issues/issue-transformer';
-import { validatePaperclipConnection } from './paperclip';
 
 const CAPABILITY_ACTIONS: Array<[keyof ExternalAgentCapabilities, string]> = [
   ['canAnalyzeCode', 'analyze_code'],
@@ -81,6 +79,9 @@ export interface TaskDelegationEligibility {
   blocker: string | null;
   repository: string | null;
   repositoryLocked: boolean;
+  dataClassification?: DispatchClassificationResolution['classification'];
+  classificationExplanation?: string;
+  classificationSources?: DispatchClassificationResolution['sources'];
   errorCode?: string;
   statusCode?: number;
 }
@@ -96,6 +97,7 @@ export interface TaskDelegationTarget {
   hasCredential: boolean;
   paperclipBinding: {
     companyId: string;
+    companyName?: string | null;
     projectId: string | null;
     assigneeAgentId: string;
     requiredAdapterType: string | null;
@@ -129,9 +131,15 @@ export interface TaskDelegationSummary {
   runId: string | null;
   runUrl: string | null;
   providerTaskId: string | null;
+  providerTaskUrl: string | null;
   locality: ExternalAgentLocality;
   canonicalState: AgentDispatchStatus;
   displayState: TaskDelegationDisplayState;
+  providerState: string | null;
+  providerUpdatedAt: string | null;
+  outputWarning: string | null;
+  pullRequestState: 'draft' | 'open' | 'merged' | 'closed' | null;
+  pullRequestNumber: number | null;
   latestProgress: string | null;
   blocker: string | null;
   pendingApproval: boolean;
@@ -171,7 +179,7 @@ export interface TaskDelegationContext {
 export interface TaskDelegationPreviewInput {
   taskId: string;
   agentId: string;
-  instruction: string;
+  instruction?: string;
   allowedActions?: string[];
   operationId: string;
   repository?: string;
@@ -182,6 +190,11 @@ export interface TaskDelegationPreviewInput {
   maxAttempts?: number;
   timeoutMs?: number;
   callbackBaseUrl?: string;
+}
+
+export interface CombinedTaskDelegationPreviewInput
+  extends Omit<TaskDelegationPreviewInput, 'taskId'> {
+  taskIds: string[];
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -253,6 +266,19 @@ function providerLink(endpoint: string | null, path: string | null) {
   }
 }
 
+function externalUrl(value: unknown) {
+  const candidate = text(value);
+  if (!candidate) return null;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'https:' || url.protocol === 'http:'
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function assignmentSummary(
   dispatch: AgentDispatchRecord,
   target: Awaited<ReturnType<typeof listExternalAgents>>[number] | undefined,
@@ -260,6 +286,8 @@ function assignmentSummary(
   const detail = record(dispatch.providerDetail);
   const executor = record(detail?.executor);
   const progress = record(detail?.progress);
+  const pullRequest = record(detail?.pullRequest);
+  const pullRequestState = text(pullRequest?.state);
   const pendingApprovals = Array.isArray(detail?.pendingApprovals)
     ? detail.pendingApprovals
     : [];
@@ -286,9 +314,22 @@ function assignmentSummary(
         : null,
     ),
     providerTaskId: dispatch.providerTaskId,
+    providerTaskUrl: externalUrl(detail?.taskUrl),
     locality: dispatch.executionLocality,
     canonicalState: dispatch.status,
     displayState: taskDelegationDisplayState(dispatch, detail),
+    providerState: text(detail?.state) ?? text(detail?.providerState),
+    providerUpdatedAt: text(detail?.updatedAt),
+    outputWarning: text(detail?.outputWarning),
+    pullRequestState: (
+      pullRequestState === 'draft'
+      || pullRequestState === 'open'
+      || pullRequestState === 'merged'
+      || pullRequestState === 'closed'
+    ) ? pullRequestState : null,
+    pullRequestNumber: typeof pullRequest?.number === 'number'
+      ? pullRequest.number
+      : null,
     latestProgress: text(progress?.message)
       ?? (dispatch.status === 'waiting_for_user' ? 'Waiting for your input or approval.' : null),
     blocker: firstBlocker(detail),
@@ -405,7 +446,7 @@ async function credentialBlocker(agent: Awaited<ReturnType<typeof getExternalAge
 
 function eligibilityFor(
   task: SnapshotTask,
-  disclosedConnectorTypes: string[],
+  classification: DispatchClassificationResolution,
   target: Awaited<ReturnType<typeof listExternalAgents>>[number],
   activeTaskIds: Set<string>,
   credentialError: string | null,
@@ -420,10 +461,9 @@ function eligibilityFor(
   } else if (credentialError) {
     blocker = credentialError;
   } else {
-    const classification = resolveDispatchClassification(disclosedConnectorTypes);
     try {
       assertClassificationAllowed(
-        classification,
+        classification.classification,
         target.dataPolicy,
         target.executionLocality,
       );
@@ -455,6 +495,9 @@ function eligibilityFor(
     blocker,
     repository,
     repositoryLocked: task.connectorType === 'github-issues',
+    dataClassification: classification.classification,
+    classificationExplanation: classification.explanation,
+    classificationSources: classification.sources,
   };
 }
 
@@ -467,36 +510,32 @@ export async function getTaskDelegationContext(
     taskSnapshot(taskIds),
     persistence.payloads.snapshot({ taskIds }),
   ]);
-  const connectorTypesByTask = new Map(payloadSnapshot.tasks.map((task) => [
+  const connectorSourcesByTask = new Map(payloadSnapshot.tasks.map((task) => [
     task.id,
     [
-      task.connectorType,
-      ...task.subtasks.map((subtask) => subtask.connectorType),
+      {
+        connectorType: task.connectorType,
+        connectorInstanceId: task.connectorInstanceId ?? '',
+      },
+      ...task.subtasks.map((subtask) => ({
+        connectorType: subtask.connectorType,
+        connectorInstanceId: subtask.connectorInstanceId ?? '',
+      })),
     ],
   ]));
-  await expireDispatches();
-  let dispatches = await persistence.dispatches.list({
+  const classificationByTask = new Map(await Promise.all(
+    payloadSnapshot.tasks.map(async (task) => [
+      task.id,
+      await resolveDispatchClassificationForSources(
+        connectorSourcesByTask.get(task.id) ?? [],
+      ),
+    ] as const),
+  ));
+  const dispatches = await persistence.dispatches.list({
     taskIds,
     limit: Math.min(taskIds.length * 10, 500),
   });
   const syncErrors: TaskDelegationContext['syncErrors'] = [];
-  for (const dispatch of dispatches) {
-    if (!ACTIVE_STATUSES.includes(dispatch.status) || !dispatch.providerTaskId) continue;
-    try {
-      await reconcileDispatch(dispatch.id);
-    } catch (error) {
-      syncErrors.push({
-        dispatchId: dispatch.id,
-        message: error instanceof Error
-          ? error.message
-          : 'Delegation status could not be refreshed',
-      });
-    }
-  }
-  dispatches = await persistence.dispatches.list({
-    taskIds,
-    limit: Math.min(taskIds.length * 10, 500),
-  });
   const [targets, repositories] = await Promise.all([
     listExternalAgents({ includeDeleted: true }),
     configuredRepositories(),
@@ -531,6 +570,7 @@ export async function getTaskDelegationContext(
       paperclipBinding: paperclip
         ? {
           companyId: paperclip.companyId,
+          companyName: paperclip.companyName ?? null,
           projectId: paperclip.projectId ?? null,
           assigneeAgentId: paperclip.assigneeAgentId,
           requiredAdapterType: paperclip.requiredAdapterType ?? null,
@@ -539,7 +579,11 @@ export async function getTaskDelegationContext(
       repositories: target.type === 'copilot-cloud' ? repositories : [],
       eligibility: snapshot.tasks.map((task) => eligibilityFor(
         task,
-        connectorTypesByTask.get(task.id) ?? [task.connectorType],
+        classificationByTask.get(task.id) ?? {
+          classification: 'restricted',
+          sources: [],
+          explanation: 'Restricted because the source classification could not be resolved',
+        },
         target,
         activeTaskIds,
         credentialError,
@@ -610,6 +654,10 @@ function delegationIdempotencyKey(
   taskId: string,
 ) {
   return `task-delegation:${operationId}:${taskId}`;
+}
+
+function combinedDelegationIdempotencyKey(operationId: string) {
+  return `task-delegation:${operationId}:combined`;
 }
 
 export async function hasTaskDelegationOperation(
@@ -715,16 +763,12 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
         422,
       );
     }
-    await validatePaperclipConnection({
-      endpoint: internal.endpoint,
-      credential: await resolveExternalAgentCredential(internal),
-      config: paperclipBinding,
-    });
   }
   const idempotencyKey = delegationIdempotencyKey(operationId, input.taskId);
   return createDispatchPreview({
     agentId: target.id,
-    instruction: input.instruction,
+    instruction: input.instruction?.trim()
+      || 'Complete the delegated task using the task details provided.',
     scope: target.type === 'copilot-cloud'
       ? {
         taskIds: [input.taskId],
@@ -738,6 +782,119 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
         taskIds: [input.taskId],
         ...(paperclipBinding ? { paperclip: paperclipBinding } : {}),
       },
+    allowedActions: requested,
+    idempotencyKey,
+    callbackBaseUrl: input.callbackBaseUrl,
+    maxAttempts: input.maxAttempts,
+    timeoutMs: input.timeoutMs,
+  });
+}
+
+export async function previewCombinedTaskDelegation(
+  input: CombinedTaskDelegationPreviewInput,
+) {
+  const operationId = input.operationId.trim();
+  if (!operationId) {
+    throw new ExternalAgentError(
+      'operationId is required',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  const taskIds = [...new Set(input.taskIds)];
+  if (taskIds.length < 2) {
+    throw new ExternalAgentError(
+      'Combined delegation requires at least two tasks',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  const context = await getTaskDelegationContext(taskIds);
+  const target = context.targets.find(({ id }) => id === input.agentId);
+  if (!target || target.type !== 'copilot-cloud') {
+    throw new ExternalAgentError(
+      'Combined delegation is currently available only for GitHub Copilot Cloud',
+      'CAPABILITY_MISMATCH',
+      422,
+    );
+  }
+  const idempotencyKey = combinedDelegationIdempotencyKey(operationId);
+  const existing = await (
+    await getExternalAgentControlPersistence()
+  ).dispatches.findPreview(target.id, idempotencyKey);
+  const eligibility = taskIds.map((taskId) =>
+    target.eligibility.find((item) => item.taskId === taskId));
+  const blocker = eligibility.find((item) => !item || !item.ready)?.blocker;
+  if ((!existing && blocker) || eligibility.some((item) => !item)) {
+    throw new ExternalAgentError(
+      blocker ?? 'Execution target is not eligible for every selected task',
+      'DISCLOSURE_BLOCKED',
+      403,
+    );
+  }
+  const requested = input.allowedActions ?? target.allowedActions;
+  if (requested.some((action) => !target.allowedActions.includes(action))) {
+    throw new ExternalAgentError(
+      'Requested action is not allowed for this execution target',
+      'CAPABILITY_MISMATCH',
+      422,
+    );
+  }
+  const createPullRequest = input.createPullRequest === true;
+  if (createPullRequest && !requested.includes('create_pull_request')) {
+    throw new ExternalAgentError(
+      'Creating a pull request requires the create_pull_request action',
+      'CONFIRMATION_REQUIRED',
+      422,
+    );
+  }
+  const lockedRepositories = [...new Set(eligibility
+    .filter((item) => item?.repositoryLocked)
+    .map((item) => item?.repository?.toLowerCase())
+    .filter((value): value is string => Boolean(value)))];
+  if (lockedRepositories.length > 1) {
+    throw new ExternalAgentError(
+      'Combined delegation requires every GitHub-origin task to use the same repository',
+      'REPOSITORY_SCOPE_MISMATCH',
+      409,
+    );
+  }
+  let repository: string;
+  if (lockedRepositories.length === 1) {
+    const locked = eligibility.find((item) =>
+      item?.repository?.toLowerCase() === lockedRepositories[0])?.repository;
+    repository = locked!;
+    if (input.repository && input.repository.toLowerCase() !== lockedRepositories[0]) {
+      throw new ExternalAgentError(
+        'Combined delegation must use the repository shared by its GitHub-origin tasks',
+        'REPOSITORY_SCOPE_MISMATCH',
+        409,
+      );
+    }
+  } else {
+    repository = normalizeRepository(input.repository);
+    if (!target.repositories.some(
+      (option) => option.repository.toLowerCase() === repository.toLowerCase(),
+    )) {
+      throw new ExternalAgentError(
+        'Repository is not configured and validated for delegation',
+        'REPOSITORY_SCOPE_MISMATCH',
+        403,
+      );
+    }
+  }
+  return createDispatchPreview({
+    agentId: target.id,
+    instruction: input.instruction?.trim()
+      || 'Complete the selected tasks as one cohesive change using the task details provided.',
+    scope: {
+      taskIds,
+      repository,
+      defaultBranch: input.baseRef,
+      baseRef: input.baseRef,
+      model: input.model,
+      createPullRequest,
+    },
     allowedActions: requested,
     idempotencyKey,
     callbackBaseUrl: input.callbackBaseUrl,

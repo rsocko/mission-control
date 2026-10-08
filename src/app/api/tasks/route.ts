@@ -56,6 +56,10 @@ import {
   taskCollectionGroupReturnsEmpty,
 } from '@/lib/tasks/core/filter-spec';
 import type { TaskCoreTaskRow, TaskListSortField } from '@/lib/tasks/core/contracts';
+import {
+  buildSubtaskTask,
+  writeThroughSubtask,
+} from '@/lib/tasks/subtask-creation';
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import {
   claimRyMessagePromotionIntent,
@@ -66,6 +70,26 @@ const VALID_PRIORITIES = ['critical', 'high', 'medium', 'low', 'none'];
 
 function isTaskPriority(value: unknown): value is TaskPriority {
   return VALID_PRIORITIES.includes(String(value));
+}
+
+function parseSubtaskTitles(value: unknown): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100) return null;
+  const titles = value.map((subtask) => {
+    if (typeof subtask === 'string') return subtask.trim();
+    if (
+      subtask
+      && typeof subtask === 'object'
+      && 'title' in subtask
+      && typeof subtask.title === 'string'
+    ) {
+      return subtask.title.trim();
+    }
+    return '';
+  });
+  return titles.every((title) => title.length > 0 && title.length <= 200)
+    ? titles
+    : null;
 }
 
 const TASK_SORT_FIELDS = new Set<TaskListSortField>([
@@ -146,6 +170,7 @@ export async function GET(request: Request) {
           recurring: 0,
           waiting: 0,
           inbox: 0,
+          delegated: 0,
         },
         hasMore: false,
         sourceCounts: {},
@@ -350,6 +375,12 @@ export async function POST(request: Request) {
       estimatedDuration,
       effort,
     } = body;
+    const subtaskTitles = parseSubtaskTitles(body.subtasks);
+    if (!subtaskTitles) {
+      return ApiErrors.badRequest(
+        'subtasks must contain at most 100 non-empty titles of 200 characters or fewer',
+      );
+    }
     const recurrenceMode = body.recurrenceMode === 'completion' ? 'completion' : 'schedule';
     const recurrenceSkipDates = Array.isArray(body.recurrenceSkipDates)
       ? body.recurrenceSkipDates
@@ -509,6 +540,9 @@ export async function POST(request: Request) {
           `sourceListId is required for ${resolvedConnectorType} connector`,
         );
       }
+      if (subtaskTitles.length > 0 && capabilities.subtasks !== true) {
+        return ApiErrors.badRequest('The selected connector does not support subtasks');
+      }
     }
     if (recurrence) {
       try {
@@ -655,6 +689,27 @@ export async function POST(request: Request) {
     }
 
     const committedTask = createResult.task;
+    const createdSubtasks: Array<{ id: string; title: string }> = [];
+    for (const subtaskTitle of subtaskTitles) {
+      const subtaskId = crypto.randomUUID();
+      const outcome = await persistence.ancillary.createSubtask({
+        task: buildSubtaskTask(committedTask, {
+          id: subtaskId,
+          title: subtaskTitle,
+          priority: 'none',
+          planningHorizon: null,
+          dueDate: null,
+          effort: null,
+          now,
+          syncStatus: shouldWriteThrough ? 'pending_push' : 'synced',
+        }),
+      });
+      if (outcome.kind !== 'created') {
+        throw new Error(`Failed to persist initial subtask: ${outcome.kind}`);
+      }
+      createdSubtasks.push({ id: subtaskId, title: subtaskTitle });
+    }
+
     if (shouldWriteThrough) {
       void writeThroughCreate({
         id: committedTask.id,
@@ -669,6 +724,7 @@ export async function POST(request: Request) {
         metadata,
         tagNames: createResult.sourceTagNames,
         promotionIdentity,
+        subtasks: createdSubtasks,
       }).catch((error) => {
         logger.error({ err: error, taskId: id }, 'Write-through task creation failed unexpectedly');
       });
@@ -701,7 +757,11 @@ export async function POST(request: Request) {
     }
 
     const [editPolicy] = (await resolveTaskEditPolicies([committedTask])).values();
-    return NextResponse.json({ id, editPolicy }, { status: 201 });
+    return NextResponse.json({
+      id,
+      editPolicy,
+      subtasks: createdSubtasks,
+    }, { status: 201 });
   } catch (error) {
     if (idempotentTaskId) {
       const existing = await getCorePersistenceRepositories().tasks.get(idempotentTaskId);
@@ -737,6 +797,7 @@ async function writeThroughCreate(params: {
     connectorId: string;
     expectedRevision?: number;
   } | null;
+  subtasks: Array<{ id: string; title: string }>;
 }) {
   let pushLeaseToken: string | null = null;
   try {
@@ -839,6 +900,16 @@ async function writeThroughCreate(params: {
         { err: error, taskId: params.id },
         'Task created but external identity persistence requires reconciliation',
       );
+    }
+
+    for (const subtask of params.subtasks) {
+      await writeThroughSubtask({
+        subtaskId: subtask.id,
+        title: subtask.title,
+        parentTaskId: params.id,
+        parentSourceId: created.sourceId,
+        connectorInstanceId: params.connectorInstanceId,
+      });
     }
 
     await logWriteThrough({

@@ -275,6 +275,32 @@ describe('useProjectTaskActions field updates', () => {
     });
   });
 
+  it('updates fields before persistence resolves', async () => {
+    let resolveRequest!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/my-day' && !init?.method) {
+        return Promise.resolve(jsonResponse({ items: [] }));
+      }
+      return new Promise<Response>((resolve) => {
+        resolveRequest = resolve;
+      });
+    });
+    const { result } = renderActions();
+    await waitForMyDayLoad();
+
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.handleSetTaskPriority('task-1', 'high');
+    });
+
+    expect(result.current.tasks[0].priority).toBe('high');
+
+    await act(async () => {
+      resolveRequest(jsonResponse());
+      await request;
+    });
+  });
+
   it('keeps local field state and reports the action-specific error on failure', async () => {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === '/api/my-day' && !init?.method) return jsonResponse({ items: [] });

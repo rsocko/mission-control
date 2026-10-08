@@ -5,6 +5,7 @@ import {
   mapGitHubAgentTaskState,
 } from '@/lib/external-agents/copilot-cloud';
 import type { ExternalAgent } from '@/lib/external-agents/registry';
+import type { TransportDispatch } from '@/lib/external-agents/transports';
 
 const credentialReference = 'copilot-cloud-test';
 
@@ -48,10 +49,18 @@ function response(body: unknown, status = 200, headers: HeadersInit = {}) {
   return Response.json(body, { status, headers });
 }
 
-function dispatch() {
+function dispatch(): TransportDispatch {
   return {
     dispatchId: 'dispatch-123',
     attempt: 1,
+    scope: {
+      taskIds: ['task-1'],
+      repository: 'octo/example',
+      defaultBranch: 'main',
+      baseRef: 'main',
+      model: 'gpt-5.4',
+      createPullRequest: true,
+    },
     payload: {
       instruction: 'Fix the failing parser',
       alwaysInstructions: 'Run focused tests before handoff.',
@@ -105,6 +114,7 @@ describe('GitHub Copilot cloud agent adapter', () => {
       [credentialReference]: 'user-token',
     });
     let storedPrompt: string | undefined;
+    let submittedPrompt: string | undefined;
     let storedBody: Record<string, unknown> | undefined;
     let created = false;
     const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -130,12 +140,13 @@ describe('GitHub Copilot cloud agent adapter', () => {
         return response({
           id: 'task-1',
           state: 'queued',
-          sessions: [{ prompt: storedPrompt }],
+          sessions: [{}, { prompt: storedPrompt }],
         });
       }
       if (url.endsWith('/tasks') && init?.method === 'POST') {
         storedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
         storedPrompt = String(storedBody.prompt);
+        submittedPrompt = storedPrompt;
         created = true;
         return response({ id: 'task-1', state: 'queued' }, 201);
       }
@@ -144,17 +155,23 @@ describe('GitHub Copilot cloud agent adapter', () => {
     const transport = createCopilotCloudTransport(fetcher as typeof fetch);
 
     const first = await transport.dispatch(agent(), dispatch());
+    storedPrompt = 'Mission Control dispatch dispatch-123\n\n{"instruction":"legacy format"}';
     const duplicate = await transport.dispatch(agent(), dispatch());
 
     expect(first).toMatchObject({ providerTaskId: 'task-1', status: 'queued' });
     expect(duplicate).toMatchObject({ providerTaskId: 'task-1', status: 'queued' });
     expect(fetcher.mock.calls.filter(([input, init]) =>
       String(input).endsWith('/tasks') && init?.method === 'POST')).toHaveLength(1);
-    expect(storedPrompt).toContain('Mission Control dispatch dispatch-123');
-    expect(storedPrompt).toContain('"fullName":"octo/example"');
-    expect(storedPrompt).toContain('"alwaysInstructions":"Run focused tests before handoff."');
-    expect(storedPrompt).toContain('"sourceIssue":{"issueNumber":42');
-    expect(storedPrompt).not.toContain('user-token');
+    expect(submittedPrompt).toContain('Mission Control dispatch dispatch-123\n\n# Task');
+    expect(submittedPrompt).toContain('## Request\n\nFix the failing parser');
+    expect(submittedPrompt).toContain(
+      '## Destination instructions\n\nRun focused tests before handoff.',
+    );
+    expect(submittedPrompt).toContain('### Fix the parser');
+    expect(submittedPrompt).toContain('**Repository full name:** octo/example');
+    expect(submittedPrompt).toContain('**Source issue number:** 42');
+    expect(submittedPrompt).toContain('**Allowed actions:** Write code, Create pull request');
+    expect(submittedPrompt).not.toContain('user-token');
     expect(storedBody).toMatchObject({
       base_ref: 'main',
       model: 'gpt-5.4',
@@ -218,7 +235,11 @@ describe('GitHub Copilot cloud agent adapter', () => {
           state: 'completed',
           sessions: [{ model: 'gpt-5.4', base_ref: 'main', head_ref: 'copilot/fix-parser' }],
           artifacts: [
-            { provider: 'github', type: 'pull', data: { id: 42 } },
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 987654321, global_id: 'PR_kwDOExample' },
+            },
             {
               provider: 'github',
               type: 'branch',
@@ -227,15 +248,24 @@ describe('GitHub Copilot cloud agent adapter', () => {
           ],
         });
       }
-      if (url.endsWith('/pulls/42')) {
+      if (url.endsWith('/graphql')) {
         return response({
-          html_url: 'https://github.com/octo/example/pull/42',
-          head: {
-            ref: 'copilot/fix-parser',
-            sha: '0123456789abcdef',
-            repo: { full_name: 'octo/example' },
+          data: {
+            node: {
+              __typename: 'PullRequest',
+              number: 42,
+              url: 'https://github.com/octo/example/pull/42',
+              state: 'OPEN',
+              isDraft: false,
+              mergedAt: null,
+              closedAt: null,
+              headRefName: 'copilot/fix-parser',
+              headRefOid: '0123456789abcdef',
+              headRepository: { nameWithOwner: 'octo/example' },
+              baseRefName: 'main',
+              baseRepository: { nameWithOwner: 'octo/example' },
+            },
           },
-          base: { ref: 'main', repo: { full_name: 'octo/example' } },
         });
       }
       throw new Error(`Unexpected GitHub request: ${url}`);
@@ -252,6 +282,13 @@ describe('GitHub Copilot cloud agent adapter', () => {
     expect(result).toMatchObject({
       status: 'completed',
       providerTaskId: 'task-42',
+      providerDetail: {
+        pullRequest: {
+          number: 42,
+          state: 'open',
+          url: 'https://github.com/octo/example/pull/42',
+        },
+      },
       result: {
         codeChange: {
           repository: 'octo/example',
@@ -262,5 +299,332 @@ describe('GitHub Copilot cloud agent adapter', () => {
         },
       },
     });
+    expect(fetcher).not.toHaveBeenCalledWith(
+      expect.stringContaining('/pulls/987654321'),
+      expect.anything(),
+    );
+  });
+
+  it('keeps provider state updates when pull request enrichment is unavailable', async () => {
+    process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+      [credentialReference]: 'user-token',
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-closed')) {
+        return response({
+          id: 'task-closed',
+          state: 'completed',
+          updated_at: '2026-10-05T13:00:00Z',
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 987654321, global_id: 'PR_missing' },
+            },
+            {
+              provider: 'github',
+              type: 'branch',
+              data: { head_ref: 'copilot/closed-session', base_ref: 'main' },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        return response({
+          data: { node: null },
+          errors: [{ message: 'Could not resolve to a node' }],
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    const result = await getCopilotCloudTask(
+      agent(),
+      'octo/example',
+      'main',
+      'task-closed',
+      fetcher,
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      providerState: 'completed',
+      providerDetail: {
+        outputWarning: 'GitHub reported a pull request output, but its details are unavailable.',
+      },
+      result: {
+        codeChange: {
+          repository: 'octo/example',
+          baseRef: 'main',
+          branchRef: 'copilot/closed-session',
+        },
+      },
+    });
+  });
+
+  it('resolves a pull request by its reported branch when GitHub omits the global ID', async () => {
+    process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+      [credentialReference]: 'user-token',
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-empty-global-id')) {
+        return response({
+          id: 'task-empty-global-id',
+          state: 'completed',
+          sessions: [{ model: 'gpt-5.4', base_ref: 'main' }],
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 4748906850, global_id: '' },
+            },
+            {
+              provider: 'github',
+              type: 'branch',
+              data: { head_ref: 'copilot/dispatch-123', base_ref: 'main' },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        const body = JSON.parse(String(init?.body)) as {
+          variables?: Record<string, unknown>;
+        };
+        expect(body.variables).toMatchObject({
+          owner: 'octo',
+          name: 'example',
+          headRef: 'copilot/dispatch-123',
+          baseRef: 'main',
+        });
+        return response({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [{
+                  __typename: 'PullRequest',
+                  number: 42,
+                  url: 'https://github.com/octo/example/pull/42',
+                  state: 'OPEN',
+                  isDraft: true,
+                  mergedAt: null,
+                  closedAt: null,
+                  headRefName: 'copilot/dispatch-123',
+                  headRefOid: '0123456789abcdef',
+                  headRepository: { nameWithOwner: 'octo/example' },
+                  baseRefName: 'main',
+                  baseRepository: { nameWithOwner: 'octo/example' },
+                }],
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    const result = await getCopilotCloudTask(
+      agent(),
+      'octo/example',
+      'main',
+      'task-empty-global-id',
+      fetcher,
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      providerDetail: {
+        pullRequest: {
+          number: 42,
+          state: 'draft',
+          url: 'https://github.com/octo/example/pull/42',
+        },
+      },
+      result: {
+        codeChange: {
+          repository: 'octo/example',
+          baseRef: 'main',
+          branchRef: 'copilot/dispatch-123',
+          commitSha: '0123456789abcdef',
+          pullRequestUrl: 'https://github.com/octo/example/pull/42',
+        },
+      },
+    });
+    expect(result.providerDetail).not.toHaveProperty('outputWarning');
+  });
+
+  it('uses the artifact database ID when a branch has multiple pull requests', async () => {
+    process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+      [credentialReference]: 'user-token',
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-reused-branch')) {
+        return response({
+          id: 'task-reused-branch',
+          state: 'completed',
+          sessions: [{ model: 'gpt-5.4', base_ref: 'main' }],
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: { id: 4751477800 },
+            },
+            {
+              provider: 'github',
+              type: 'branch',
+              data: { head_ref: 'copilot/reused-branch', base_ref: 'main' },
+            },
+          ],
+        });
+      }
+      if (url.endsWith('/graphql')) {
+        return response({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    __typename: 'PullRequest',
+                    databaseId: 4650000000,
+                    number: 41,
+                    url: 'https://github.com/octo/example/pull/41',
+                    state: 'MERGED',
+                    isDraft: false,
+                    mergedAt: '2026-09-01T00:00:00Z',
+                    closedAt: '2026-09-01T00:00:00Z',
+                    headRefName: 'copilot/reused-branch',
+                    headRefOid: 'old-commit',
+                    headRepository: { nameWithOwner: 'octo/example' },
+                    baseRefName: 'main',
+                    baseRepository: { nameWithOwner: 'octo/example' },
+                  },
+                  {
+                    __typename: 'PullRequest',
+                    databaseId: 4751477800,
+                    number: 42,
+                    url: 'https://github.com/octo/example/pull/42',
+                    state: 'OPEN',
+                    isDraft: true,
+                    mergedAt: null,
+                    closedAt: null,
+                    headRefName: 'copilot/reused-branch',
+                    headRefOid: 'current-commit',
+                    headRepository: { nameWithOwner: 'octo/example' },
+                    baseRefName: 'main',
+                    baseRepository: { nameWithOwner: 'octo/example' },
+                  },
+                ],
+              },
+            },
+          },
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    const result = await getCopilotCloudTask(
+      agent(),
+      'octo/example',
+      'main',
+      'task-reused-branch',
+      fetcher,
+    );
+
+    expect(result).toMatchObject({
+      providerDetail: {
+        pullRequest: {
+          number: 42,
+          state: 'draft',
+          url: 'https://github.com/octo/example/pull/42',
+        },
+      },
+      result: {
+        codeChange: {
+          commitSha: 'current-commit',
+          pullRequestUrl: 'https://github.com/octo/example/pull/42',
+        },
+      },
+    });
+    expect(result.providerDetail).not.toHaveProperty('outputWarning');
+  });
+
+  it('does not warn about a placeholder pull request while the task is queued', async () => {
+    process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+      [credentialReference]: 'user-token',
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-queued')) {
+        return response({
+          id: 'task-queued',
+          state: 'queued',
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: {},
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    const result = await getCopilotCloudTask(
+      agent(),
+      'octo/example',
+      'main',
+      'task-queued',
+      fetcher,
+    );
+
+    expect(result).toMatchObject({
+      status: 'queued',
+      providerState: 'queued',
+    });
+    expect(result.providerDetail).not.toHaveProperty('outputWarning');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns about an unresolved pull request after the task completes', async () => {
+    process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+      [credentialReference]: 'user-token',
+    });
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/task-completed')) {
+        return response({
+          id: 'task-completed',
+          state: 'completed',
+          artifacts: [
+            {
+              provider: 'github',
+              type: 'pull',
+              data: {},
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    const result = await getCopilotCloudTask(
+      agent(),
+      'octo/example',
+      'main',
+      'task-completed',
+      fetcher,
+    );
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      providerState: 'completed',
+      providerDetail: {
+        outputWarning: 'GitHub reported a pull request output without a resolvable global ID.',
+      },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });

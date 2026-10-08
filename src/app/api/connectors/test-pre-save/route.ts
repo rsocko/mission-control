@@ -20,6 +20,11 @@ import {
   normalizeTrustedOrigin,
   normalizeTrustedOrigins,
 } from '@/lib/connectors/rymessage/action-contract-v2';
+import {
+  getPaperclipCompanyName,
+  listPaperclipApprovals,
+} from '@/lib/external-agents/paperclip';
+import { validatePaperclipConnectorConfig } from '@/lib/connectors/paperclip';
 
 /**
  * POST /api/connectors/test-pre-save
@@ -149,6 +154,38 @@ async function testUnsavedConnector(
           latencyMs,
           details: `Connected — ${available} of 3 notification sources available`,
           sources: result.sources,
+        };
+      }
+
+      case 'paperclip': {
+        const apiOrigin = typeof settings.apiOrigin === 'string'
+          ? settings.apiOrigin.trim()
+          : '';
+        const companyId = typeof settings.companyId === 'string'
+          ? settings.companyId.trim()
+          : '';
+        const apiToken = credentials.apiToken?.trim();
+        if (!apiOrigin || !companyId || !apiToken) {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            error: 'Paperclip API origin, company ID, and API token are required',
+          };
+        }
+        validatePaperclipConnectorConfig(settings, { apiToken });
+        const connection = {
+          endpoint: new URL(apiOrigin).origin,
+          credential: apiToken,
+        };
+        const [approvals, companyName] = await Promise.all([
+          listPaperclipApprovals(connection, companyId),
+          getPaperclipCompanyName(connection, companyId),
+        ]);
+        return {
+          success: true,
+          latencyMs: Date.now() - start,
+          details: `Connected to Paperclip company ${companyName}`,
+          sources: { approvals: approvals.length, companyName },
         };
       }
 

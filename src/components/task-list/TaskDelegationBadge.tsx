@@ -16,32 +16,58 @@ const STATE_CLASSES: Record<TaskDelegationSummary['displayState'], string> = {
 };
 
 export function TaskDelegationBadge({ delegation }: { delegation: TaskDelegationSummary }) {
-  const stateLabel = delegation.pullRequestUrl
-    ? 'Review'
-    : delegation.displayState === 'waiting_for_user'
-      ? 'Waiting'
-      : delegation.displayState === 'preview'
-        ? 'Review'
-        : delegation.displayState.replaceAll('_', ' ');
-  const destinationLabel = delegation.pullRequestUrl
-    ? 'PR ready'
-    : delegation.targetType === 'copilot-cloud'
-      ? 'GitHub Copilot Cloud'
-      : delegation.targetType === 'paperclip'
-        ? 'Paperclip'
-        : delegation.targetName;
-  const label = `${stateLabel} · ${destinationLabel}`;
+  const completedWithPullRequest = delegation.displayState === 'completed'
+    && Boolean(delegation.pullRequestUrl);
+  const stateLabel = delegation.pullRequestState === 'merged'
+    ? 'Merged'
+    : delegation.pullRequestState === 'closed'
+      ? 'Closed'
+      : delegation.pullRequestState === 'draft'
+        ? 'Draft'
+        : delegation.pullRequestState === 'open'
+          ? 'Review'
+          : completedWithPullRequest
+            ? 'Completed'
+            : delegation.pullRequestUrl
+              ? 'Review'
+              : delegation.displayState === 'waiting_for_user'
+                ? 'Waiting'
+                : delegation.displayState === 'preview'
+                  ? 'Review'
+                  : delegation.displayState.replaceAll('_', ' ');
+  const destinationLabel = delegation.pullRequestState === 'merged'
+    || delegation.pullRequestState === 'closed'
+    || delegation.pullRequestState === 'draft'
+      ? 'PR'
+      : delegation.pullRequestState === 'open'
+        ? 'PR ready'
+        : completedWithPullRequest
+          ? 'PR created'
+          : delegation.pullRequestUrl
+            ? 'PR ready'
+            : delegation.targetType === 'copilot-cloud'
+              ? 'GitHub Copilot Cloud'
+              : delegation.targetType === 'paperclip'
+                ? 'Paperclip'
+                : delegation.targetName;
+  const targetLabel = delegation.targetType === 'copilot-cloud'
+    ? 'Copilot'
+    : delegation.targetType === 'paperclip'
+      ? 'Paperclip'
+      : delegation.targetName;
+  const label = `${targetLabel} · ${stateLabel}`;
+  const detail = `${stateLabel} · ${destinationLabel}`;
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center gap-1 rounded border px-1 py-0.5 text-xs font-medium',
+        'inline-flex max-w-40 shrink-0 items-center gap-1 rounded border px-1 py-0.5 text-xs font-medium',
         STATE_CLASSES[delegation.displayState],
       )}
-      title={`${delegation.targetName}: ${label}`}
+      title={`${delegation.targetName}: ${detail}`}
       aria-label={`Delegation ${label}`}
     >
       <Bot size={9} aria-hidden="true" />
-      <span className="capitalize">{label}</span>
+      <span className="truncate">{label}</span>
     </span>
   );
 }

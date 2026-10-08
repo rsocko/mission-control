@@ -108,7 +108,7 @@ export function TaskPlanningSection({
       <h3
         ref={headingRef}
         tabIndex={-1}
-        className="flex min-h-11 items-center border-b border-[var(--border-subtle)] px-3 text-sm font-semibold text-[var(--text-secondary)] outline-none"
+        className="flex min-h-11 items-center border-b border-[var(--border-subtle)] px-3 text-sm font-semibold text-[var(--text-heading)] outline-none"
       >
         Planning
       </h3>

@@ -172,10 +172,13 @@ export async function createPackagedPostgresSemanticRuntime(
         repository,
         source,
         embeddings,
-        resolveSensitivity: ({ connectorType }) => resolveSensitivity(
+        resolveSensitivity: ({ connectorType, dataClassificationOverride }) => resolveSensitivity(
           'semantic-embedding',
           policy,
-          { sources: connectorType ? [connectorType.trim().toLowerCase()] : [] },
+          {
+            sources: connectorType ? [connectorType.trim().toLowerCase()] : [],
+            override: dataClassificationOverride ?? undefined,
+          },
         ),
         embeddingTimeoutMs: config.embeddingTimeoutMs,
       });

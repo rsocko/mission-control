@@ -15,6 +15,7 @@ export const DEFAULT_HOME_ASSISTANT_CRITICAL_UPDATE_PATTERNS = [
 
 export interface HomeAssistantSourceSettings {
   entityAlerts: { enabled: boolean };
+  integrationHealth: { enabled: boolean };
   updates: {
     enabled: boolean;
     criticalEntityPatterns: string[];
@@ -30,6 +31,7 @@ export interface HomeAssistantOutboundDeliverySettings {
   updatePush: 'immediate' | 'daily_summary' | 'off';
   dailySummaryTime: string;
   immediateCriticalUpdates: boolean;
+  immediateIntegrationFailures: boolean;
   immediateActionNeededRepairs: boolean;
   immediateUrgentEntityAlerts: boolean;
   immediateCriticalPersistentNotifications: boolean;
@@ -99,6 +101,7 @@ export const DEFAULT_HOME_ASSISTANT_SETTINGS: HomeAssistantSettings = {
   alertRules: [...DEFAULT_HOME_ASSISTANT_ALERT_RULES],
   sources: {
     entityAlerts: { enabled: true },
+    integrationHealth: { enabled: true },
     updates: {
       enabled: true,
       criticalEntityPatterns: [...DEFAULT_HOME_ASSISTANT_CRITICAL_UPDATE_PATTERNS],
@@ -114,6 +117,7 @@ export const DEFAULT_HOME_ASSISTANT_SETTINGS: HomeAssistantSettings = {
     updatePush: 'daily_summary',
     dailySummaryTime: '08:00',
     immediateCriticalUpdates: true,
+    immediateIntegrationFailures: true,
     immediateActionNeededRepairs: true,
     immediateUrgentEntityAlerts: true,
     immediateCriticalPersistentNotifications: true,
@@ -226,6 +230,12 @@ export function normalizeHomeAssistantSettings(value: unknown): HomeAssistantSet
           DEFAULT_HOME_ASSISTANT_SETTINGS.sources.entityAlerts.enabled,
         ),
       },
+      integrationHealth: {
+        enabled: booleanValue(
+          record(sources.integrationHealth).enabled,
+          DEFAULT_HOME_ASSISTANT_SETTINGS.sources.integrationHealth.enabled,
+        ),
+      },
       updates: {
         enabled: booleanValue(updates.enabled, DEFAULT_HOME_ASSISTANT_SETTINGS.sources.updates.enabled),
         criticalEntityPatterns: stringArray(
@@ -259,6 +269,10 @@ export function normalizeHomeAssistantSettings(value: unknown): HomeAssistantSet
       immediateCriticalUpdates: booleanValue(
         outbound.immediateCriticalUpdates,
         DEFAULT_HOME_ASSISTANT_SETTINGS.outboundDelivery.immediateCriticalUpdates,
+      ),
+      immediateIntegrationFailures: booleanValue(
+        outbound.immediateIntegrationFailures,
+        DEFAULT_HOME_ASSISTANT_SETTINGS.outboundDelivery.immediateIntegrationFailures,
       ),
       immediateActionNeededRepairs: booleanValue(
         outbound.immediateActionNeededRepairs,

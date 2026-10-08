@@ -167,6 +167,7 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
 }
 
 const HA_SOURCE_OPTIONS = [
+  { key: 'integrationHealth', label: 'Integration health', description: 'Setup, migration, and unload failures shown on Home Assistant’s Integrations page.' },
   { key: 'entityAlerts', label: 'Device alerts', description: 'Rules for doors, batteries, motion, and package sensors.' },
   { key: 'updates', label: 'Updates', description: 'One actionable notification for each available update.' },
   { key: 'persistentNotifications', label: 'Persistent notifications', description: 'Notifications created in Home Assistant.' },
@@ -180,6 +181,7 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
   const [accessToken, setAccessToken] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [sources, setSources] = useState<Record<(typeof HA_SOURCE_OPTIONS)[number]['key'], boolean>>({
+    integrationHealth: true,
     entityAlerts: true,
     updates: true,
     persistentNotifications: true,
@@ -218,6 +220,7 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
       schemaVersion: 2,
       baseUrl: normalizedUrl,
       sources: {
+        integrationHealth: { enabled: sources.integrationHealth },
         entityAlerts: { enabled: sources.entityAlerts },
         updates: { enabled: sources.updates },
         persistentNotifications: {
@@ -231,6 +234,7 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
         updatePush,
         dailySummaryTime,
         immediateCriticalUpdates: true,
+        immediateIntegrationFailures: true,
         immediateActionNeededRepairs: true,
         immediateUrgentEntityAlerts: true,
         immediateCriticalPersistentNotifications: true,
@@ -253,6 +257,7 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
       });
       const data = await response.json();
       const sourceAvailable = {
+        integrationHealth: data.sources?.integrationHealth?.available === true,
         entityAlerts: data.sources?.states?.available === true,
         updates: data.sources?.states?.available === true,
         persistentNotifications: data.sources?.persistentNotifications?.available === true,

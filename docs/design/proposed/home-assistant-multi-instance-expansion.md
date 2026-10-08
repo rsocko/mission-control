@@ -2,7 +2,7 @@
 title: "Home Assistant: Multi-Instance, Updates, Repairs, and Actions"
 status: proposed
 created: 2026-09-03
-last_reviewed: 2026-09-07
+last_reviewed: 2026-10-07
 category: design
 related:
   - "[Connector Expansion Review](../active/connector-expansion-review.md)"
@@ -21,13 +21,16 @@ Extend the existing `home-assistant` connector rather than replacing it. Each
 Home Assistant server remains a separate connector instance with independent
 credentials, source settings, sync health, notifications, and actions.
 
-The implementation adds three first-class sources:
+The implementation adds four first-class sources:
 
-1. **Updates** from `update.*` states returned by REST `GET /api/states`.
-2. **Persistent notifications** from the WebSocket command
+1. **Integration health** from the WebSocket command `config_entries/get`.
+   This is the same runtime state used by Home Assistant's Integrations page
+   for conditions such as **Failed setup, will retry**.
+2. **Updates** from `update.*` states returned by REST `GET /api/states`.
+3. **Persistent notifications** from the WebSocket command
    `persistent_notification/get`. Persistent notifications are not
    `persistent_notification.*` REST state entities.
-3. **Repairs** from the WebSocket command `repairs/list_issues`.
+4. **Repairs** from the WebSocket command `repairs/list_issues`.
 
 Mission Control may invoke a small allowlist of Home Assistant actions. Every
 mutating action requires confirmation. Update installation offers a backup
@@ -85,6 +88,8 @@ not exploring analytics or configuring an automation platform.
 - Add and edit flows for identity, URL, token, source toggles, outbound delivery
   behavior, escalation patterns, and action availability.
 - Existing entity-rule alerts and package checks.
+- Config-entry setup, migration, retry, and unload failure ingestion with
+  recovery when Home Assistant reports the entry loaded again.
 - Update ingestion, individual update notifications, outbound update summaries,
   critical update overrides, version and progress presentation, install, and
   skip.
@@ -162,6 +167,40 @@ See the official
 for the authentication and command protocol and the
 [Home Assistant REST API](https://developers.home-assistant.io/docs/api/rest/)
 for state reads and service-call request shape.
+
+### Integration health
+
+Read config entries with:
+
+```json
+{
+  "id": 2,
+  "type": "config_entries/get"
+}
+```
+
+The response includes `entry_id`, `domain`, `title`, `state`, `disabled_by`,
+`reason`, and optional translated-error metadata. Mission Control treats
+`setup_retry`, `setup_error`, `migration_error`, and `failed_unload` as active
+integration-health conditions. `setup_retry` is a heads-up; the other failure
+states require action. User-disabled entries do not alert.
+
+The notification identity is the config-entry `entry_id`, so a changed reason
+or failure state updates the same condition instead of creating duplicates.
+Known non-failure states resolve it. Unknown future states preserve an existing
+condition without claiming recovery.
+
+`config_entries/get` is a frontend/internal Home Assistant API rather than a
+documented stable public API. The connector therefore isolates command failure
+to this source, preserves existing conditions when the source cannot be read,
+and reports degraded source health. It must not fall back to log parsing:
+ordinary setup retries may be logged below the System Log event threshold.
+
+Home Assistant automation is optional. Critical entity availability can still
+be handled locally with a state trigger to `unavailable` and an appropriate
+grace period. A local persistent notification may be useful when an alert must
+remain visible while Mission Control is offline, but it is not required for
+Mission Control integration-health ingestion and would duplicate this source.
 
 ### Updates
 
@@ -321,7 +360,7 @@ Every Home Assistant notification carries:
   metadata: {
     sourceName: string;       // connector instance display name
     sourceType: 'Home Assistant';
-    haSource: 'entity_rule' | 'updates' | 'persistent_notifications' | 'repairs';
+    haSource: 'entity_rule' | 'integration_health' | 'updates' | 'persistent_notifications' | 'repairs';
   };
 }
 ```
@@ -599,6 +638,19 @@ levels.
 - A matching critical pattern changes only level/category, not content or
   action behavior.
 
+### Integration health
+
+- Title: `{integration title} setup is retrying` for `setup_retry`; otherwise
+  `{integration title} integration failed`.
+- Body: the bounded Home Assistant failure reason when available, with a
+  state-specific fallback.
+- Metadata: config-entry ID, integration domain/title, state, and translated
+  error metadata.
+- Primary action: **Open in Home Assistant**, deep-linked to the integration.
+- Generic **Create task** remains available.
+- Setup retries default to Heads Up without immediate push. Setup, migration,
+  and unload failures default to Action Needed and may push immediately.
+
 ### Repairs
 
 - Title: `Repair required: {humanized domain}`.
@@ -754,7 +806,8 @@ shows the update is no longer available.
 - A REST failure degrades entity alerts and Updates but does not automatically
   resolve either source.
 - A WebSocket authentication/connection failure degrades Persistent
-  notifications and Repairs while preserving their active notifications.
+  notifications, Integration health, and Repairs while preserving their active
+  notifications.
 - A command-specific error degrades only that source. For example,
   `repairs/list_issues` failing must not suppress successful persistent
   notifications from the same WebSocket session.
@@ -805,7 +858,7 @@ source.
 - Missing `settingsVersion` is read as version 1.
 - Existing `entityPatterns` and `alertRules` are preserved byte-for-byte after
   validation.
-- For existing connectors, all three new read sources default on, update push
+- For existing connectors, all four new read sources default on, update push
   delivery defaults to a daily summary at 08:00 local time, immediate critical
   triggers default on, and mutating actions default off until the user opts in.
 - Default critical update patterns are applied only when the setting is absent.

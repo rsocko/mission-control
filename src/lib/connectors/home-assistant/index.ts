@@ -29,9 +29,11 @@ import {
 import type { HomeAssistantSettings } from './settings';
 import type { ConnectorNotificationTypeDefinition } from '@/lib/notifications/push-policy/catalog';
 import {
+  buildIntegrationHealthNotifications,
   buildPersistentNotifications,
   buildRepairNotifications,
   buildUpdateNotifications,
+  INTEGRATION_HEALTH_KNOWN_STATES,
 } from './source-transformers';
 import { getHomeAssistantBrandImagePath } from './notification-icons';
 
@@ -55,6 +57,7 @@ export type HomeAssistantNotificationAction =
 
 type HomeAssistantSource =
   | 'entityAlerts'
+  | 'integrationHealth'
   | 'updates'
   | 'persistentNotifications'
   | 'repairs';
@@ -63,6 +66,7 @@ type SourceReconciliationState = {
   status: 'ok' | 'disabled' | 'failed';
   activeIds: Set<string>;
   uncertainEntityIds?: Set<string>;
+  uncertainIds?: Set<string>;
   error?: string;
 };
 
@@ -80,6 +84,28 @@ function notificationTypeCatalog(
   settings: HomeAssistantSettings,
 ): readonly ConnectorNotificationTypeDefinition[] {
   return [
+      {
+        key: 'ha_integration_retry',
+        label: 'Integration setup retry',
+        description: 'A Home Assistant integration failed to set up and is retrying.',
+        defaultLevel: 'heads_up',
+        pushEligible: true,
+        pushRecommendation: 'off',
+        sensitivity: 'standard',
+        defaultPreview: 'title_and_body',
+      },
+      {
+        key: 'ha_integration_failed',
+        label: 'Integration failure',
+        description: 'A Home Assistant integration reported a setup, migration, or unload failure.',
+        defaultLevel: 'action_needed',
+        pushEligible: true,
+        pushRecommendation: settings.outboundDelivery.immediateIntegrationFailures
+          ? 'action_needed_or_higher'
+          : 'off',
+        sensitivity: 'standard',
+        defaultPreview: 'title_and_body',
+      },
       {
         key: 'home_assistant_entity_alert',
         label: 'Device alert',
@@ -262,6 +288,11 @@ export class HomeAssistantConnector implements IConnector {
         status: this.settings.sources.entityAlerts.enabled ? 'failed' : 'disabled',
         activeIds: new Set(),
       },
+      integrationHealth: {
+        status: this.settings.sources.integrationHealth.enabled ? 'failed' : 'disabled',
+        activeIds: new Set(),
+        uncertainIds: new Set(),
+      },
       updates: {
         status: this.settings.sources.updates.enabled ? 'failed' : 'disabled',
         activeIds: new Set(),
@@ -365,6 +396,9 @@ export class HomeAssistantConnector implements IConnector {
     }
 
     const websocketSources = [
+      ...(this.settings.sources.integrationHealth.enabled
+        ? ['integrationHealth' as const]
+        : []),
       ...(this.settings.sources.persistentNotifications.enabled
         ? ['persistentNotifications' as const]
         : []),
@@ -373,6 +407,33 @@ export class HomeAssistantConnector implements IConnector {
     if (websocketSources.length > 0) {
       try {
         const result = await this.client!.fetchWebSocketSources(websocketSources);
+        if (result.integrationHealth) {
+          reconciliation.integrationHealth.status = 'ok';
+          const integrationNotifications = buildIntegrationHealthNotifications({
+            entries: result.integrationHealth,
+            connectorType: this.type,
+            connectorInstanceId: this.id,
+            instanceName: this.config?.name || this.displayName,
+            baseUrl: this.settings.baseUrl,
+            immediateFailures:
+              this.settings.outboundDelivery.immediateIntegrationFailures,
+          });
+          notifications.push(...integrationNotifications);
+          integrationNotifications.forEach(notification => {
+            reconciliation.integrationHealth.activeIds.add(notification.id);
+          });
+          result.integrationHealth.forEach((entry) => {
+            if (
+              typeof entry.entry_id === 'string'
+              && typeof entry.state === 'string'
+              && !INTEGRATION_HEALTH_KNOWN_STATES.has(entry.state)
+            ) {
+              reconciliation.integrationHealth.uncertainIds?.add(
+                `integration-health:${encodeURIComponent(entry.entry_id)}`,
+              );
+            }
+          });
+        }
         if (result.persistentNotifications) {
           reconciliation.persistentNotifications.status = 'ok';
           const persistentNotifications = buildPersistentNotifications({
@@ -415,6 +476,9 @@ export class HomeAssistantConnector implements IConnector {
         }
         if (result.errors.persistentNotifications) {
           reconciliation.persistentNotifications.error = result.errors.persistentNotifications;
+        }
+        if (result.errors.integrationHealth) {
+          reconciliation.integrationHealth.error = result.errors.integrationHealth;
         }
         if (result.errors.repairs) {
           reconciliation.repairs.error = result.errors.repairs;
@@ -461,6 +525,9 @@ export class HomeAssistantConnector implements IConnector {
     if (this.settings.sources.entityAlerts.enabled) {
       lists.push({ id: `${this.id}:entity-alerts`, connectorInstanceId: this.id, sourceId: 'entity-alerts', name: 'Device Alerts', type: 'folder', taskCount: 0, lastSyncedAt: now });
     }
+    if (this.settings.sources.integrationHealth.enabled) {
+      lists.push({ id: `${this.id}:integration-health`, connectorInstanceId: this.id, sourceId: 'integration-health', name: 'Integration Health', type: 'folder', taskCount: 0, lastSyncedAt: now });
+    }
     if (this.settings.sources.updates.enabled) {
       lists.push({ id: `${this.id}:updates`, connectorInstanceId: this.id, sourceId: 'updates', name: 'Updates', type: 'folder', taskCount: 0, lastSyncedAt: now });
     }
@@ -491,6 +558,7 @@ export class HomeAssistantConnector implements IConnector {
     if (!this.lastSourceReconciliation) return [];
     const sourceIds: Record<HomeAssistantSource, string> = {
       entityAlerts: 'entity-alerts',
+      integrationHealth: 'integration-health',
       updates: 'updates',
       persistentNotifications: 'persistent-notifications',
       repairs: 'repairs',
@@ -517,14 +585,19 @@ export class HomeAssistantConnector implements IConnector {
         : sourceId;
       const source: HomeAssistantSource = localId.startsWith('update:')
         ? 'updates'
-        : localId.startsWith('persistent:')
-          ? 'persistentNotifications'
-          : localId.startsWith('repair:')
-            ? 'repairs'
-            : 'entityAlerts';
+        : localId.startsWith('integration-health:')
+          ? 'integrationHealth'
+          : localId.startsWith('persistent:')
+            ? 'persistentNotifications'
+            : localId.startsWith('repair:')
+              ? 'repairs'
+              : 'entityAlerts';
       const state = cycle[source];
 
       if (state.status === 'failed') {
+        return { sourceId, resolved: false, verified: false };
+      }
+      if (state.uncertainIds?.has(localId)) {
         return { sourceId, resolved: false, verified: false };
       }
       if (source === 'updates') {

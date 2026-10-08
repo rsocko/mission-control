@@ -42,6 +42,12 @@ export function resolveHomeAssistantOpenUrl(
   if (!baseUrl) return storedUrl;
 
   switch (text(metadata.haSource)) {
+    case 'integration_health': {
+      const domain = text(metadata.integrationDomain);
+      return domain
+        ? sourceUrl(baseUrl, `/config/integrations/integration/${encodeURIComponent(domain)}`)
+        : sourceUrl(baseUrl, '/config/integrations');
+    }
     case 'updates':
       return sourceUrl(baseUrl, '/config/updates');
     case 'repairs':
@@ -153,6 +159,8 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
               : text(metadata.updateType) === 'app'
                 ? 'App update'
                 : 'Software update'
+            : source === 'integration_health'
+              ? 'Integration health'
             : source === 'repairs'
               ? 'Repair issue'
               : source === 'persistent_notifications'

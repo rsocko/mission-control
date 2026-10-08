@@ -1,10 +1,30 @@
 import type { InboundNotification, NotificationLevel } from '@/types';
-import type { HomeAssistantState, HomeAssistantPersistentNotification, HomeAssistantRepairIssue } from './ha-client';
+import type {
+  HomeAssistantConfigEntry,
+  HomeAssistantPersistentNotification,
+  HomeAssistantRepairIssue,
+  HomeAssistantState,
+} from './ha-client';
 import { matchPattern } from './entity-transformer';
 
 const UPDATE_SUPPORT_INSTALL = 1;
 const UPDATE_SUPPORT_BACKUP = 8;
 const UPDATE_SUPPORT_RELEASE_NOTES = 16;
+
+export const INTEGRATION_HEALTH_FAILURE_STATES = new Set([
+  'failed_unload',
+  'migration_error',
+  'setup_error',
+  'setup_retry',
+]);
+
+export const INTEGRATION_HEALTH_KNOWN_STATES = new Set([
+  ...INTEGRATION_HEALTH_FAILURE_STATES,
+  'loaded',
+  'not_loaded',
+  'setup_in_progress',
+  'unload_in_progress',
+]);
 
 function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -25,6 +45,86 @@ function safeId(value: string): string {
 
 function sourceUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, '')}${path}`;
+}
+
+function translationPlaceholders(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, string] => (
+        entry[0].length <= 100 && typeof entry[1] === 'string'
+      ))
+      .slice(0, 20)
+      .map(([key, placeholder]) => [key, placeholder.slice(0, 300)]),
+  );
+}
+
+export function buildIntegrationHealthNotifications(input: {
+  entries: HomeAssistantConfigEntry[];
+  connectorType: string;
+  connectorInstanceId: string;
+  instanceName: string;
+  baseUrl: string;
+  immediateFailures: boolean;
+  observedAt?: string;
+}): InboundNotification[] {
+  const observedAt = input.observedAt ?? new Date().toISOString();
+  return input.entries.flatMap((entry): InboundNotification[] => {
+    const entryId = text(entry.entry_id);
+    const domain = text(entry.domain);
+    const state = text(entry.state);
+    if (
+      !entryId
+      || !domain
+      || !state
+      || entry.disabled_by != null
+      || !INTEGRATION_HEALTH_FAILURE_STATES.has(state)
+    ) {
+      return [];
+    }
+
+    const title = (text(entry.title) ?? domain).slice(0, 200);
+    const reason = text(entry.reason)?.slice(0, 1_000) ?? null;
+    const retrying = state === 'setup_retry';
+    const level: NotificationLevel = retrying ? 'heads_up' : 'action_needed';
+    return [{
+      id: `integration-health:${safeId(entryId)}`,
+      sourceId: entryId,
+      connectorType: input.connectorType,
+      connectorInstanceId: input.connectorInstanceId,
+      title: retrying ? `${title} setup is retrying` : `${title} integration failed`,
+      body: reason ?? (retrying
+        ? 'Home Assistant could not set up this integration and will retry.'
+        : `Home Assistant reported ${state.replace(/_/g, ' ')}.`),
+      level,
+      category: 'system',
+      templateKey: retrying ? 'ha_integration_retry' : 'ha_integration_failed',
+      isRead: false,
+      isActionable: false,
+      actionUrl: sourceUrl(input.baseUrl, `/config/integrations/integration/${encodeURIComponent(domain)}`),
+      receivedAt: observedAt,
+      sourceActivityKey: `${entryId}:${state}:${reason ?? ''}`,
+      reopenPolicy: 'handled_and_dismissed',
+      hubProjectIds: [],
+      tags: [],
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'integration_health',
+        instanceName: input.instanceName,
+        configEntryId: entryId,
+        integrationDomain: domain,
+        integrationTitle: title,
+        configEntryState: state,
+        reason,
+        errorReasonTranslationDomain: text(entry.error_reason_translation_domain),
+        errorReasonTranslationKey: text(entry.error_reason_translation_key),
+        errorReasonTranslationPlaceholders:
+          translationPlaceholders(entry.error_reason_translation_placeholders),
+        baseUrl: input.baseUrl,
+        pushDelivery: !retrying && input.immediateFailures ? 'immediate' : 'default',
+      },
+    }];
+  });
 }
 
 export function buildUpdateNotifications(input: {

@@ -137,6 +137,27 @@ afterEach(() => {
 });
 
 describe('TaskDetailPanel redesigned presentations', () => {
+  it.each(['panel', 'dialog'] as const)('shows linked GitHub PRs in %s mode', async (mode) => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') {
+        return json({ task: { ...task, connectorType: 'github-issues', sourceId: 'owner/repo:1086' } });
+      }
+      if (url === '/api/tasks/task-1/pull-requests') {
+        return json({ pullRequests: [{
+          number: 42, url: 'https://github.com/owner/repo/pull/42', title: 'Fix issue',
+          state: 'MERGED', isDraft: false, repository: 'owner/repo',
+          baseRefName: 'main', defaultBranch: 'main', checks: 'SUCCESS',
+        }], hasMore: false });
+      }
+      return json({});
+    }));
+    renderPanel({ taskId: 'task-1', mode, onClose: vi.fn() });
+    expect(await screen.findByRole('link', { name: 'owner/repo pull request #42: Fix issue' }))
+      .toHaveAttribute('href', 'https://github.com/owner/repo/pull/42');
+    expect(screen.getByText('Merged into main (default branch) · Merge checks: passed')).toBeInTheDocument();
+  });
+
   it('portals the move dialog outside its transformed task-detail container', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const url = String(input);
@@ -1266,6 +1287,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
       ] });
       if (url === '/api/projects/project-1/hierarchy') return json({ hierarchy: projectHierarchy });
       if (url === '/api/connectors') return json({ connectors: [] });
+      if (url === '/api/tasks/task-1/pull-requests') return json({ pullRequests: [], hasMore: false });
       if (url.includes('detect-duplicates')) return json({ duplicates: [] });
       return json({});
     }));

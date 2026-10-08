@@ -426,7 +426,7 @@ export class MicrosoftTodoConnector implements IConnector {
         const existingRes = await this.client.graphFetch(url);
         if (!existingRes.ok) throw new Error(`Failed to reconcile task creation: ${existingRes.status}`);
         const data = await existingRes.json() as {
-          value?: Array<GraphTodoTask | GraphRemovedTodoTask>;
+          value?: GraphTodoTask[];
           '@odata.nextLink'?: string;
         };
         const existing = data.value?.find((candidate) => candidate.body?.content?.includes(marker));
@@ -958,14 +958,14 @@ export class MicrosoftTodoConnector implements IConnector {
         throw new Error(`Failed to fetch task delta from list ${listId}: ${res.status}`);
       }
       const data = await res.json() as {
-        value?: GraphTodoTask[];
+        value?: Array<GraphTodoTask | GraphRemovedTodoTask>;
         '@odata.nextLink'?: string;
         '@odata.deltaLink'?: string;
       };
       const pageTasks: TaskItem[] = [];
 
       for (const graphTask of data.value || []) {
-        if (graphTask['@removed']) {
+        if ('@removed' in graphTask) {
           this.deletedTaskSourceIds.add(`${listId}:${graphTask.id}`);
           continue;
         }

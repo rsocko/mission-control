@@ -98,6 +98,10 @@ const mocks = vi.hoisted(() => ({
       updatedAt: '2026-08-07T19:00:00.000Z',
     })),
   },
+  taskDelta: {
+    list: vi.fn(async () => []),
+    replace: vi.fn(async () => undefined),
+  },
   listSourceLists: vi.fn(async () => [{
     id: 'pg-todo:hidden-list',
     connectorInstanceId: 'pg-todo',
@@ -140,7 +144,10 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
       support: { allowsLegacyWorkflow: () => false },
     },
     github: {},
-    connectorState: { workTodo: mocks.workTodo },
+    connectorState: {
+      workTodo: mocks.workTodo,
+      taskDelta: mocks.taskDelta,
+    },
   }),
 }));
 
@@ -361,7 +368,7 @@ describe('Layer 4 PostgreSQL selection — Microsoft To Do connector state', () 
   it('discovers hidden lists through the portable source-list port', async () => {
     graphResponses.set('/me/todo/lists?$top=100', { value: [] });
     graphResponses.set('/me/todo/lists/hidden-list', { displayName: 'Hidden remote name' });
-    graphResponses.set('/me/todo/lists/hidden-list/tasks', {
+    graphResponses.set('/me/todo/lists/hidden-list/tasks/delta', {
       value: [{
         id: 'graph-task-1',
         title: 'Hidden task',
@@ -370,6 +377,7 @@ describe('Layer 4 PostgreSQL selection — Microsoft To Do connector state', () 
         createdDateTime: '2026-08-07T17:00:00.000Z',
         lastModifiedDateTime: '2026-08-07T18:00:00.000Z',
       }],
+      '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/todo/lists/hidden-list/tasks/delta?$deltatoken=next',
     });
     stubGraphClient();
     const { microsoftTodoFactory } = await import('@/lib/connectors/microsoft-todo');
@@ -401,6 +409,7 @@ describe('Layer 4 PostgreSQL selection — Microsoft To Do connector state', () 
     }
     const sourceIds = new Set(pages.flat().map((task) => task.sourceId));
 
+    expect(mocks.taskDelta.list).toHaveBeenCalledWith('pg-todo');
     expect(mocks.listSourceLists).toHaveBeenCalledWith('pg-todo');
     expect([...sourceIds]).toEqual(['hidden-list:graph-task-1']);
     expect(pages.flat()[0].sourceListName).toBe('Hidden remote name');

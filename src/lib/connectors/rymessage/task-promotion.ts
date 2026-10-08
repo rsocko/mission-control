@@ -21,10 +21,19 @@ function submitConnectorMutation(
   connectorId: string | undefined,
   client: CompanionActionClient,
   request: CompanionActionMutationRequestV2,
+  signal?: AbortSignal,
 ) {
-  return connectorId
-    ? submitDurableRyMessageV2Mutation(connectorId, client, request)
+  if (connectorId) {
+    return submitDurableRyMessageV2Mutation(connectorId, client, request, signal);
+  }
+  return signal
+    ? client.submitMutationV2(request, signal)
     : client.submitMutationV2(request);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new DOMException('RyMessage sync aborted', 'AbortError');
 }
 
 interface PromotionIdentity {
@@ -237,13 +246,17 @@ export async function observeManagedRyMessageTasks(
   page: CompanionActionFeedPageV2,
   client: CompanionActionClient,
   connectorId?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const taskRepository = getCorePersistenceRepositories().tasks;
   for (const item of page.items) {
+    throwIfAborted(signal);
     if (item.kind !== 'upsert') continue;
     for (const relation of item.projection.taskMaterializations) {
+      throwIfAborted(signal);
       if (!relation.management || relation.state === 'unlinked') continue;
       const task = await taskRepository.get(relation.management.managerTaskId);
+      throwIfAborted(signal);
       const status = task ? normalizedStatus(task.status) : 'deleted';
       const availability = task ? 'live' : 'unavailable';
       const providerVersion = task?.updatedAt ?? relation.snapshot.providerVersion;
@@ -279,7 +292,7 @@ export async function observeManagedRyMessageTasks(
           managerVersion: task?.updatedAt ?? relation.management.managerVersion,
           managerCanonicalUrl: relation.management.canonicalUrl,
         },
-      });
+      }, signal);
     }
 
   }
@@ -290,13 +303,16 @@ export async function attachImportedRyMessageManagers(
   client: CompanionActionClient,
   connectorId: string,
   trustedOrigin: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const taskRepository = getCorePersistenceRepositories().tasks;
   if (!taskRepository.findByProviderIdentity) return;
   for (const item of page.items) {
+    throwIfAborted(signal);
     if (item.kind !== 'upsert') continue;
     let expectedRevision = item.aggregateVersion;
     for (const relation of item.projection.taskMaterializations) {
+      throwIfAborted(signal);
       if (
         relation.management
         || relation.state !== 'linked'
@@ -309,6 +325,7 @@ export async function attachImportedRyMessageManagers(
           ? { providerContainerId: relation.underlying.providerContainerId }
           : {}),
       });
+      throwIfAborted(signal);
       if (!task) continue;
       const receipt = await submitDurableRyMessageV2Mutation(connectorId, client, {
         contractVersion: '2.0',
@@ -328,7 +345,7 @@ export async function attachImportedRyMessageManagers(
           managerVersion: task.updatedAt,
           managerCanonicalUrl: `${trustedOrigin}/tasks/${encodeURIComponent(task.id)}`,
         },
-      });
+      }, signal);
       if (receipt.outcome !== 'conflict') expectedRevision = receipt.revision;
     }
   }
@@ -407,17 +424,21 @@ export async function applyManagedRyMessageCommands(
     page: CompanionActionFeedPageV2,
     client: CompanionActionClient,
     connectorId?: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     const taskRepository = getCorePersistenceRepositories().tasks;
     for (const item of page.items) {
+      throwIfAborted(signal);
       if (item.kind !== 'upsert') continue;
       for (const command of item.projection.managedTaskCommands) {
+        throwIfAborted(signal);
         if (command.state !== 'pending' && command.state !== 'claimed') continue;
         const relation = item.projection.taskMaterializations.find(
           candidate => candidate.relationId === command.relationId,
         );
         if (!relation?.management) continue;
         const initialTask = await taskRepository.get(relation.management.managerTaskId);
+        throwIfAborted(signal);
         let preflightError: Error | null = null;
         if (!initialTask) {
           preflightError = new Error('managed_task_missing');
@@ -452,12 +473,14 @@ export async function applyManagedRyMessageCommands(
                 kind: 'managed-task-command.claim',
                 commandId: command.commandId,
               },
-            });
+            }, signal);
+            throwIfAborted(signal);
             if (claim.outcome === 'conflict') continue;
           }
 
           if (preflightError) throw preflightError;
           const task = await taskRepository.get(relation.management.managerTaskId);
+          throwIfAborted(signal);
           if (!task) throw new Error('managed_task_missing');
           if (
             command.expectedManagerVersion
@@ -487,6 +510,7 @@ export async function applyManagedRyMessageCommands(
             updated = await taskRepository.upsert({ ...task, ...updates });
           } else {
             const connector = await getOrInitializeConnector(task.connectorInstanceId);
+            throwIfAborted(signal);
             if (!connector?.updateTask) throw new Error('provider_update_unavailable');
             let providerTask: TaskItem;
             if (
@@ -504,6 +528,7 @@ export async function applyManagedRyMessageCommands(
               providerTask = hasOtherUpdates
                 ? await connector.updateTask(task.sourceId, nonStatusUpdates)
                 : task;
+              throwIfAborted(signal);
               if (command.patch.status === 'cancelled' && connector.cancelTask) {
                 await connector.cancelTask(task.sourceId);
               } else if (connector.completeTask) {
@@ -519,6 +544,7 @@ export async function applyManagedRyMessageCommands(
             } else {
               providerTask = await connector.updateTask(task.sourceId, updates);
             }
+            throwIfAborted(signal);
             assertManagedPatchApplied(command.patch, providerTask);
             updated = await taskRepository.upsert({
               ...task,
@@ -528,6 +554,7 @@ export async function applyManagedRyMessageCommands(
               connectorInstanceId: task.connectorInstanceId,
             });
           }
+          throwIfAborted(signal);
           assertManagedPatchApplied(command.patch, updated);
           await submitConnectorMutation(connectorId, client, {
             contractVersion: '2.0',
@@ -549,8 +576,9 @@ export async function applyManagedRyMessageCommands(
               },
               managerVersion: updated.updatedAt,
             },
-          });
+          }, signal);
         } catch (error) {
+          throwIfAborted(signal);
           const code = error instanceof Error && /^[a-z][a-z0-9._-]{0,63}$/.test(error.message)
             ? error.message
             : 'provider_update_failed';
@@ -566,7 +594,7 @@ export async function applyManagedRyMessageCommands(
               commandId: command.commandId,
               failureCode: code,
             },
-          });
+          }, signal);
         }
     }
   }

@@ -5,11 +5,17 @@ import type {
 } from './action-contract-v2';
 import type { CompanionActionClient } from './companion-action-client';
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new DOMException('RyMessage sync aborted', 'AbortError');
+}
+
 export async function flushRyMessageV2MutationOutbox(
   connectorId: string,
   client: CompanionActionClient,
   signal?: AbortSignal,
 ): Promise<Map<string, CompanionActionMutationReceiptV2>> {
+  throwIfAborted(signal);
   const repository = (await getWorkerPersistenceRepositories())
     .connectorState.rymessageActions;
   const now = new Date().toISOString();
@@ -20,8 +26,10 @@ export async function flushRyMessageV2MutationOutbox(
   });
   const receipts = new Map<string, CompanionActionMutationReceiptV2>();
   for (const item of lease.items) {
+    throwIfAborted(signal);
     try {
       const receipt = await client.submitMutationV2(item.request, signal);
+      throwIfAborted(signal);
       await repository.settleV2Mutation({
         connectorId,
         operationId: item.operationId,
@@ -45,6 +53,7 @@ export async function flushRyMessageV2MutationOutbox(
         errorCode: error instanceof Error ? error.message.slice(0, 128) : 'mutation_failed',
         now: new Date().toISOString(),
       });
+      throwIfAborted(signal);
       if (!retryable) throw error;
     }
   }
@@ -57,6 +66,7 @@ export async function submitDurableRyMessageV2Mutation(
   request: CompanionActionMutationRequestV2,
   signal?: AbortSignal,
 ): Promise<CompanionActionMutationReceiptV2> {
+  throwIfAborted(signal);
   if (!client.validateMutationV2(request)) {
     throw new Error('RyMessage ActionV2 mutation is outside the trusted contract');
   }
@@ -67,6 +77,7 @@ export async function submitDurableRyMessageV2Mutation(
     request,
     now: new Date().toISOString(),
   });
+  throwIfAborted(signal);
   const receipts = await flushRyMessageV2MutationOutbox(connectorId, client, signal);
   const receipt = receipts.get(request.operationId);
   if (receipt) return receipt;

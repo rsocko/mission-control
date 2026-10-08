@@ -124,7 +124,11 @@ function projectionInput(
 export async function projectCompanionActionV2PageToNotifications(
   connectorId: string,
   page: CompanionActionFeedPageV2,
+  signal?: AbortSignal,
 ): Promise<{ created: number; updated: number }> {
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException('RyMessage sync aborted', 'AbortError');
+  }
   if (page.items.length === 0) return { created: 0, updated: 0 };
   const inputs = page.items.map((item) => {
     if (item.kind === 'tombstone') {
@@ -195,7 +199,13 @@ export async function projectCompanionActionV2PageToNotifications(
       enrichmentRevision: `rymessage-v2:${item.aggregateVersion}:${presentationDigest}`,
     };
   });
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException('RyMessage sync aborted', 'AbortError');
+  }
   const results = await createNotifications(inputs);
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException('RyMessage sync aborted', 'AbortError');
+  }
   return {
     created: results.filter(result => result.created).length,
     updated: results.filter(result => !result.created).length,

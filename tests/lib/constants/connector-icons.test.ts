@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CONNECTOR_ICON_PATHS,
   LOCAL_CONNECTOR_ICON_PATH,
+  PAPERCLIP_CONNECTOR_ICON_PATH,
 } from '@/lib/constants/colors';
 import { CONNECTOR_ICONS as SETTINGS_CONNECTOR_ICONS } from '@/app/settings/components/types';
 import {
@@ -19,6 +20,22 @@ describe('connector icon mappings', () => {
 
   it('uses the local Copilot icon for Scout', () => {
     expect(CONNECTOR_ICONS.scout).toBe('/icons/connectors/scout.svg');
+  });
+
+  it('uses the vendored official Paperclip logo across connector surfaces', () => {
+    expect(CONNECTOR_ICON_PATHS.paperclip).toBe(PAPERCLIP_CONNECTOR_ICON_PATH);
+    expect(CONNECTOR_ICONS.paperclip).toBe(PAPERCLIP_CONNECTOR_ICON_PATH);
+    expect(SETTINGS_CONNECTOR_ICONS.paperclip).toBe(PAPERCLIP_CONNECTOR_ICON_PATH);
+    expect(NOTIFICATION_SOURCE_ICONS.paperclip).toBe(PAPERCLIP_CONNECTOR_ICON_PATH);
+
+    const icon = readFileSync(
+      resolve(process.cwd(), 'public/icons/connectors/paperclip.svg'),
+      'utf8',
+    );
+    expect(icon).toContain('viewBox="0 0 48 48"');
+    expect(icon).toContain('<rect width="48" height="48" rx="10" fill="#0A0A0A"/>');
+    expect(icon).toContain('stroke="#FFFFFF"');
+    expect(icon).toContain('d="m16 6-8.414 8.586');
   });
 
   it('uses the Home Assistant logo across connector surfaces', () => {

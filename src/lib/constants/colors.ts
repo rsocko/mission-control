@@ -26,6 +26,7 @@ export const CONNECTOR_COLORS: Record<string, string> = {
 };
 
 export const LOCAL_CONNECTOR_ICON_PATH = '/icons/connectors/local.svg';
+export const PAPERCLIP_CONNECTOR_ICON_PATH = '/icons/connectors/paperclip.svg';
 
 /** Icon paths for connector logos */
 export const CONNECTOR_ICON_PATHS: Record<string, string> = {
@@ -38,6 +39,7 @@ export const CONNECTOR_ICON_PATHS: Record<string, string> = {
   'outlook-email': '/icons/connectors/outlook.svg',
   'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
   'scout': '/icons/connectors/scout.svg',
+  'paperclip': PAPERCLIP_CONNECTOR_ICON_PATH,
   'rymessage': '/icons/connectors/rymessage.svg',
   'document-intelligence': '/icons/agents/owl.svg',
   'home-assistant': '/icons/connectors/home-assistant.svg',
@@ -57,6 +59,7 @@ export const CONNECTOR_LABELS: Record<string, string> = {
   'outlook-email': 'Outlook Email',
   'outlook-calendar': 'Outlook Calendar',
   'scout': 'Microsoft Scout',
+  'paperclip': 'Paperclip',
   'rymessage': 'RyMessage',
   'document-intelligence': 'OWL',
   'home-assistant': 'Home Assistant',

@@ -1632,15 +1632,17 @@ function ConfigureStep({
                 className="block text-xs font-medium text-[var(--text-secondary)]"
               >
                 {task.title}
-                <textarea
-                  aria-label={`Agent brief for ${task.title}`}
-                  value={taskBriefs[task.id] ?? ''}
-                  onChange={(event) => onTaskBriefChange(task.id, event.target.value)}
-                  rows={4}
-                  maxLength={32_000}
-                  placeholder="Add the details Copilot needs to complete this task."
-                  className="mt-1.5 w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm font-normal text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
-                />
+                <div className="input-glow mt-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+                  <textarea
+                    aria-label={`Agent brief for ${task.title}`}
+                    value={taskBriefs[task.id] ?? ''}
+                    onChange={(event) => onTaskBriefChange(task.id, event.target.value)}
+                    rows={4}
+                    maxLength={32_000}
+                    placeholder="Add the details Copilot needs to complete this task."
+                    className="w-full resize-y bg-transparent px-3 py-2 text-sm font-normal text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                  />
+                </div>
               </label>
             ))}
           </div>

@@ -243,7 +243,7 @@ function ViewModeButtons() {
 }
 
 // Routes that render without the AppShell chrome (standalone pages)
-const STANDALONE_ROUTES = ['/icons'];
+const STANDALONE_ROUTES = ['/icons', '/task-window/'];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const syncContextValue = useSyncStreamConnection();

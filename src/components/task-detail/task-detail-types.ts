@@ -224,6 +224,8 @@ export interface TaskDetailPanelProps {
   documentPreviewClassName?: string;
   /** Move keyboard focus into the panel when it opens. */
   focusPanelOnMount?: boolean;
+  /** Hide the separate-window action when this panel already owns a task window. */
+  allowPopout?: boolean;
   /** Open the existing expanded Notes dialog after the requested task loads. */
   notesOpenRequest?: TaskNotesOpenRequest | null;
   /** Scroll the side panel to Subtasks after the requested task loads. */

@@ -55,7 +55,6 @@ import { parseTaskMetadata } from './task-detail-types';
 import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 import type {
   TaskConfirmDialogState,
-  TaskDetailCloseReason,
   TaskDetailPanelProps,
 } from './task-detail-types';
 
@@ -101,6 +100,7 @@ export function TaskDetailPanel({
   fillContainer = false,
   documentPreviewClassName,
   focusPanelOnMount = false,
+  allowPopout = true,
   notesOpenRequest = null,
   subtasksOpenRequest = null,
 }: TaskDetailPanelProps) {
@@ -786,6 +786,7 @@ export function TaskDetailPanel({
           updatedAtLabel={formatTaskDetailUpdatedAt(task.updatedAt)}
           onClose={onClose}
           onModeChange={onModeChange}
+          allowPopout={allowPopout}
         />
 
         <TaskConnectorSyncState

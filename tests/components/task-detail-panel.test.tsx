@@ -726,7 +726,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
   });
 
-  it('keeps the full title visible and exposes popout and expanded Notes actions', async () => {
+  it('keeps the full title visible and exposes expansion and expanded Notes actions', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const url = String(input);
       if (url === '/api/tasks/task-1') return json({ task });
@@ -749,7 +749,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(screen.getByText(formatTaskDetailUpdatedAt(task.updatedAt))).toBeInTheDocument();
     expect(container.querySelector('aside')).toHaveStyle({ width: '430px' });
     expect(screen.getByRole('button', { name: task.title })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open popout' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand task details' }));
     expect(onModeChange).toHaveBeenCalledWith('dialog');
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand notes' }));

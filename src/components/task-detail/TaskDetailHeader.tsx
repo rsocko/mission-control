@@ -1,11 +1,11 @@
 'use client';
 
 import Image from 'next/image';
-import { Columns3, Link2, Maximize2, Minimize2, X } from 'lucide-react';
+import { AppWindow, Columns3, Link2, Maximize2, Minimize2, X } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
-import { buildTaskDeepLinkUrl } from '@/lib/utils/deep-links';
+import { buildTaskDeepLinkUrl, buildTaskWindowPath } from '@/lib/utils/deep-links';
 import type { TaskDetailMode } from './task-detail-types';
 
 export interface TaskDetailHeaderProps {
@@ -34,6 +34,7 @@ export interface TaskDetailHeaderProps {
   updatedAtLabel: string;
   onClose: () => void;
   onModeChange?: (mode: Exclude<TaskDetailMode, 'mobile'>) => void;
+  allowPopout?: boolean;
 }
 
 /** Task identity, mode affordances, and inline title editing. */
@@ -58,6 +59,7 @@ export function TaskDetailHeader({
   updatedAtLabel,
   onClose,
   onModeChange,
+  allowPopout = true,
 }: TaskDetailHeaderProps) {
   const copyTaskLink = async () => {
     try {
@@ -66,6 +68,24 @@ export function TaskDetailHeader({
     } catch {
       toast.error('Could not copy the task link. Check browser clipboard permissions and try again.');
     }
+  };
+
+  const popOutTask = () => {
+    const width = Math.min(1200, window.screen.availWidth);
+    const height = Math.min(900, window.screen.availHeight);
+    const left = Math.max(0, Math.round((window.screen.availWidth - width) / 2));
+    const top = Math.max(0, Math.round((window.screen.availHeight - height) / 2));
+    const popup = window.open(
+      buildTaskWindowPath(taskId),
+      `mission-control-task-${taskId}`,
+      `popup=yes,width=${width},height=${height},left=${left},top=${top}`,
+    );
+
+    if (!popup) {
+      toast.error('The task window was blocked. Allow pop-ups for Mission Control and try again.');
+      return;
+    }
+    popup.focus();
   };
 
   return (
@@ -94,6 +114,18 @@ export function TaskDetailHeader({
               <Link2 size={15} aria-hidden="true" />
             </button>
           </Tooltip>
+          {allowPopout && mode !== 'mobile' && (
+            <Tooltip content="Pop out task">
+              <button
+                type="button"
+                onClick={popOutTask}
+                className="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                aria-label="Pop out task"
+              >
+                <AppWindow size={15} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )}
           {onModeChange && mode !== 'mobile' && mode !== 'panel' && (
             <Tooltip content="Pin to side panel">
               <button
@@ -106,11 +138,11 @@ export function TaskDetailHeader({
             </Tooltip>
           )}
           {onModeChange && mode !== 'mobile' && (
-            <Tooltip content={mode === 'workspace' ? 'Exit full workspace' : mode === 'dialog' ? 'Use full workspace' : 'Open popout'}>
+            <Tooltip content={mode === 'workspace' ? 'Exit full workspace' : mode === 'dialog' ? 'Use full workspace' : 'Expand task details'}>
               <button
                 onClick={() => onModeChange?.(mode === 'panel' ? 'dialog' : mode === 'dialog' ? 'workspace' : 'dialog')}
                 className="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
-                aria-label={mode === 'workspace' ? 'Exit full workspace' : mode === 'dialog' ? 'Use full workspace' : 'Open popout'}
+                aria-label={mode === 'workspace' ? 'Exit full workspace' : mode === 'dialog' ? 'Use full workspace' : 'Expand task details'}
               >
                 {mode === 'workspace' ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
               </button>

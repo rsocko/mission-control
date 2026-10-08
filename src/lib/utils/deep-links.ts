@@ -25,6 +25,11 @@ export function buildTaskDeepLinkPath(taskId: string): string {
   return `/tasks/${encodeURIComponent(taskId)}`;
 }
 
+/** Build the dedicated Mission Control task-window path. */
+export function buildTaskWindowPath(taskId: string): string {
+  return `/task-window/${encodeURIComponent(taskId)}`;
+}
+
 /** Build an absolute Mission Control task URL suitable for sharing. */
 export function buildTaskDeepLinkUrl(origin: string, taskId: string): string {
   return new URL(buildTaskDeepLinkPath(taskId), origin).toString();

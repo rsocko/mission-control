@@ -89,6 +89,27 @@ describe('TaskDetailHeader', () => {
     });
   });
 
+  it('opens a dedicated named task window and focuses it', () => {
+    const focus = vi.fn();
+    const open = vi.spyOn(window, 'open').mockReturnValue({ focus } as unknown as Window);
+
+    renderWithTooltips(<TaskDetailHeader {...headerProps} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Pop out task' }));
+
+    expect(open).toHaveBeenCalledWith(
+      '/task-window/task-42',
+      'mission-control-task-task-42',
+      expect.stringContaining('popup=yes'),
+    );
+    expect(focus).toHaveBeenCalledOnce();
+  });
+
+  it('hides the popout action inside the dedicated task window', () => {
+    renderWithTooltips(<TaskDetailHeader {...headerProps} allowPopout={false} mode="workspace" />);
+
+    expect(screen.queryByRole('button', { name: 'Pop out task' })).not.toBeInTheDocument();
+  });
+
   it('commits on Enter and cancels on Escape while editing', () => {
     const onTitleCommit = vi.fn();
     const onTitleCancel = vi.fn();
@@ -128,6 +149,7 @@ describe('TaskDetailHeader', () => {
       <TaskDetailHeader {...headerProps} onModeChange={onModeChange} />,
     );
     expect(screen.queryByRole('button', { name: 'Pin to side panel' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand task details' })).toBeInTheDocument();
 
     rerender(
       <TooltipProvider>

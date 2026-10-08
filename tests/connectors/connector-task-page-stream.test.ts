@@ -136,8 +136,8 @@ describe('connector task page streams', () => {
       if (url === '/me/todo/lists?$top=100') {
         return new Response(JSON.stringify({ value: [{ id: 'list-1', displayName: 'Tasks' }] }));
       }
-      if (url.endsWith('/checklistItems')) {
-        return new Response(JSON.stringify({ value: [] }));
+      if (url.endsWith('/checklistItems') || url.endsWith('/linkedResources')) {
+        return Response.json({ value: [] });
       }
       if (url.includes('cursor=page-2')) {
         return new Response(JSON.stringify({
@@ -162,9 +162,8 @@ describe('connector task page streams', () => {
     const iterator = connector.fetchTasks(new Date('2026-08-01T00:00:00Z'));
     const first = await iterator.next();
     expect(first.value?.map(task => task.title)).toEqual(['First page']);
-    expect(graphFetch.mock.calls.some(([url]) => (
-      String(url).includes('$expand=checklistItems,linkedResources')
-    ))).toBe(true);
+    expect(graphFetch).toHaveBeenCalledWith('/me/todo/lists/list-1/tasks/delta');
+    expect(graphFetch.mock.calls.some(([url]) => String(url).includes('$expand'))).toBe(false);
     expect(graphFetch.mock.calls.filter(([url]) => (
       String(url).includes('/tasks/delta') || String(url).includes('cursor=page-2')
     ))).toHaveLength(2);
@@ -197,6 +196,9 @@ describe('connector task page streams', () => {
             webUrl: 'https://outlook.office.com/mail/deeplink/read/id',
           }],
         });
+      }
+      if (url.endsWith('/checklistItems')) {
+        return Response.json({ value: [] });
       }
       return Response.json({
         value: [{ ...graphTask('flagged-task', 'Follow up'), linkedResources: [] }],
@@ -276,7 +278,7 @@ describe('connector task page streams', () => {
       if (url.includes('$deltatoken=expired')) {
         return new Response(null, { status: 410 });
       }
-      if (url.includes('/tasks/delta?')) {
+      if (url.endsWith('/tasks/delta')) {
         return Response.json({
           value: [graphTask('current-task', 'Current task')],
           '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=fresh',
@@ -297,7 +299,7 @@ describe('connector task page streams', () => {
 
     expect(titles).toContain('Current task');
     expect(graphFetch.mock.calls.some(([url]) => String(url).includes('$deltatoken=expired'))).toBe(true);
-    expect(graphFetch.mock.calls.some(([url]) => String(url).includes('/tasks/delta?'))).toBe(true);
+    expect(graphFetch).toHaveBeenCalledWith('/me/todo/lists/list-1/tasks/delta');
   });
 
   it('keeps only the latest completed recurring occurrence across pages and passes', async () => {

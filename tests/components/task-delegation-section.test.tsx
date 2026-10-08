@@ -80,9 +80,9 @@ function assignment(
     errorMessage: null,
     updatedAt: '2026-10-01T00:00:00.000Z',
     canCancel: false,
-    canStopTracking: true,
+    canStopTracking: false,
     canRetry: false,
-    cancellationLimitation: 'GitHub Agent Tasks does not expose cancellation. Mission Control can stop tracking, but provider work may continue.',
+    cancellationLimitation: null,
     ...overrides,
   };
 }
@@ -125,7 +125,7 @@ describe('TaskDelegationSection', () => {
     window.removeEventListener(TASK_DELEGATION_OPEN_EVENT, opened);
   });
 
-  it('shows compact progress and truthful GitHub stop-tracking details', async () => {
+  it('shows compact GitHub progress without unsupported stop controls', async () => {
     const current = assignment();
     const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -173,7 +173,7 @@ describe('TaskDelegationSection', () => {
             },
           });
         }
-        return response({ stoppedTracking: true });
+        throw new Error(`Unexpected action: ${action}`);
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -191,23 +191,7 @@ describe('TaskDelegationSection', () => {
     expect(await within(dialog).findByText('provider started')).toBeInTheDocument();
     expect(within(dialog).getAllByText('in_progress')).not.toHaveLength(0);
     expect(within(dialog).getByText(/Last synced/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/provider work may continue/i)).toBeInTheDocument();
-    expect(within(dialog).queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
-
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Stop tracking' }));
-    await waitFor(() => {
-      expect(fetcher).toHaveBeenCalledWith(
-        '/api/external-agents/dispatches/dispatch-1',
-        expect.objectContaining({
-          method: 'PATCH',
-          body: JSON.stringify({ action: 'stop_tracking' }),
-        }),
-      );
-    });
-
-    expect(toast.success).toHaveBeenCalledWith(
-      'Mission Control stopped tracking the provider task',
-    );
+    expect(within(dialog).queryByRole('button', { name: /cancel|stop/i })).not.toBeInTheDocument();
   });
 
   it('queues a provider refresh and polls persisted state', async () => {
@@ -389,6 +373,69 @@ describe('TaskDelegationSection', () => {
     expect(within(dialog).getByRole('link', { name: /Check: CI/ })).toBeInTheDocument();
     expect(within(dialog).getByRole('link', { name: /Artifact: Log/ })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('offers provider cancellation only for active Paperclip work', async () => {
+    const current = assignment({
+      targetId: 'paperclip-route',
+      targetName: 'Paperclip build route',
+      targetType: 'paperclip',
+      locality: 'external',
+      providerTaskId: 'paperclip-issue-1',
+      canCancel: true,
+      canStopTracking: false,
+      cancellationLimitation: null,
+    });
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/tasks/task-1/delegation')) {
+        return response(context([{ taskId: 'task-1', ...current }]));
+      }
+      if (url.endsWith('/api/external-agents/dispatches/dispatch-1') && !init?.method) {
+        return response({
+          dispatch: {
+            id: 'dispatch-1',
+            providerTaskId: 'paperclip-issue-1',
+            providerDetail: null,
+            attempts: [],
+            events: [],
+          },
+        });
+      }
+      if (url.endsWith('/api/external-agents/dispatches/dispatch-1') && init?.method === 'PATCH') {
+        const action = JSON.parse(String(init.body)).action;
+        if (action === 'cancel') {
+          return response({
+            dispatch: {
+              id: 'dispatch-1',
+              providerTaskId: 'paperclip-issue-1',
+              providerDetail: null,
+              attempts: [],
+              events: [],
+            },
+          });
+        }
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    render(<TaskDelegationSection taskId="task-1" taskTitle="Fix parser" mode="dialog" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Details' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Paperclip build route run' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel Paperclip work' }));
+
+    await waitFor(() => {
+      expect(fetcher).toHaveBeenCalledWith(
+        '/api/external-agents/dispatches/dispatch-1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ action: 'cancel' }),
+        }),
+      );
+    });
+    expect(toast.success).toHaveBeenCalledWith('Paperclip cancellation requested');
   });
 });
 

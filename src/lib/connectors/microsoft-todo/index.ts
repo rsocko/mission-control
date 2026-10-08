@@ -938,7 +938,7 @@ export class MicrosoftTodoConnector implements IConnector {
     const checkpoint = since ? this.taskDeltaLinks.get(listId) : undefined;
     const initialUrl = checkpoint
       ? checkpoint.replace(GRAPH_BASE_URL, '')
-      : `${graphTodoTasksPath(listId)}/delta?$top=100&$expand=checklistItems,linkedResources`;
+      : `${graphTodoTasksPath(listId)}/delta`;
     const recurringTasks: TaskItem[] = [];
     const recentCompletedRecurring = new Map<string, { completedAt: string; sourceId: string }>();
     const nearestOpenRecurring = new Map<string, { dueDate: string | null; updatedAt: string; sourceId: string }>();
@@ -950,7 +950,7 @@ export class MicrosoftTodoConnector implements IConnector {
       const res = await this.client.graphFetch(url);
       if (res.status === 410 && checkpoint && !restartedExpiredCheckpoint) {
         restartedExpiredCheckpoint = true;
-        url = `${graphTodoTasksPath(listId)}/delta?$top=100&$expand=checklistItems,linkedResources`;
+        url = `${graphTodoTasksPath(listId)}/delta`;
         connectorLogger.info({ listId }, 'Microsoft Todo delta checkpoint expired; rebuilding list baseline');
         continue;
       }
@@ -969,16 +969,15 @@ export class MicrosoftTodoConnector implements IConnector {
           this.deletedTaskSourceIds.add(`${listId}:${graphTask.id}`);
           continue;
         }
-        if (
-          wellKnownListName === 'flaggedEmails'
-          && (!Array.isArray(graphTask.linkedResources) || graphTask.linkedResources.length === 0)
-        ) {
-          graphTask.linkedResources = await this.fetchLinkedResources(
+        const [checklistItems, linkedResources] = await Promise.all([
+          this.fetchChecklistItems(
             listId,
             graphTask.id,
-            graphTask.linkedResources,
-          );
-        }
+            graphTask.checklistItems,
+          ),
+          this.fetchLinkedResources(listId, graphTask.id, graphTask.linkedResources),
+        ]);
+        graphTask.linkedResources = linkedResources;
 
         if (graphTask.recurrence && graphTask.status === 'completed') {
           const titleKey = (graphTask.title || '').trim().toLowerCase();
@@ -1012,22 +1011,6 @@ export class MicrosoftTodoConnector implements IConnector {
         }
 
         const task = mapGraphTask(graphTask, listId, listName, this.type, this.id, wellKnownListName);
-        let checklistItems = (graphTask.checklistItems || []) as GraphChecklistItem[];
-
-        if (checklistItems.length === 0 && since) {
-          try {
-            const clRes = await this.client.graphFetch(
-              `${graphTodoTaskPath(listId, graphTask.id)}/checklistItems`
-            );
-            if (clRes.ok) {
-              const clData = await clRes.json();
-              checklistItems = (clData.value || []) as GraphChecklistItem[];
-            }
-          } catch {
-            // Non-fatal: checklist items will sync on the next changed parent or full sync.
-          }
-        }
-
         const checklistTasks = checklistItems.map(item =>
           mapChecklistItem(item, listId, graphTask.id, task.id, this.type, this.id, graphTask.createdDateTime)
         );
@@ -1059,12 +1042,50 @@ export class MicrosoftTodoConnector implements IConnector {
     }
   }
 
+  private async fetchChecklistItems(
+    listId: string,
+    taskId: string,
+    expandedItems: GraphChecklistItem[] | undefined,
+  ): Promise<GraphChecklistItem[]> {
+    const items = [...(expandedItems ?? [])];
+    if (items.length > 0) return items;
+
+    let url = `${graphTodoTaskPath(listId, taskId)}/checklistItems`;
+    while (url) {
+      let response: Response;
+      try {
+        response = await this.client.graphFetch(url);
+      } catch (error) {
+        connectorLogger.warn({ err: error, listId, taskId }, 'Failed to fetch Todo checklist items');
+        return items;
+      }
+      if (!response.ok) {
+        connectorLogger.warn(
+          { status: response.status, listId, taskId },
+          'Failed to fetch Todo checklist items',
+        );
+        return items;
+      }
+
+      const data = await response.json() as {
+        value?: GraphChecklistItem[];
+        '@odata.nextLink'?: string;
+      };
+      items.push(...(data.value ?? []));
+      url = data['@odata.nextLink']?.replace(GRAPH_BASE_URL, '') ?? '';
+    }
+
+    return items;
+  }
+
   private async fetchLinkedResources(
     listId: string,
     taskId: string,
     expandedResources: GraphLinkedResource[] | undefined,
   ): Promise<GraphLinkedResource[]> {
     const resources = [...(expandedResources ?? [])];
+    if (resources.length > 0) return resources;
+
     let url = `${graphTodoTaskPath(listId, taskId)}/linkedResources`;
 
     while (url) {
@@ -1072,13 +1093,13 @@ export class MicrosoftTodoConnector implements IConnector {
       try {
         response = await this.client.graphFetch(url);
       } catch (error) {
-        connectorLogger.warn({ err: error, listId, taskId }, 'Failed to fetch flagged email linked resources');
+        connectorLogger.warn({ err: error, listId, taskId }, 'Failed to fetch Todo linked resources');
         return resources;
       }
       if (!response.ok) {
         connectorLogger.warn(
           { status: response.status, listId, taskId },
-          'Failed to fetch flagged email linked resources',
+          'Failed to fetch Todo linked resources',
         );
         return resources;
       }

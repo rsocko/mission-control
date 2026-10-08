@@ -38,6 +38,7 @@ export interface CompanionActionClientOptions {
   credential: string;
   fetchImpl?: typeof fetch;
   maxRetries?: number;
+  requestTimeoutMs?: number;
   trustedMissionControlOrigin?: string;
   trustedTaskOrigins?: readonly string[];
 }
@@ -74,6 +75,10 @@ export function createCompanionActionClient(
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxRetries = Math.min(Math.max(options.maxRetries ?? 3, 0), 5);
+  const requestTimeoutMs = Math.min(
+    Math.max(options.requestTimeoutMs ?? 30_000, 1),
+    120_000,
+  );
   const normalizedTrustedOrigin = normalizeTrustedOrigin(
     options.trustedMissionControlOrigin,
   );
@@ -88,9 +93,13 @@ export function createCompanionActionClient(
     let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        const timeoutSignal = AbortSignal.timeout(requestTimeoutMs);
+        const requestSignal = signal
+          ? AbortSignal.any([signal, timeoutSignal])
+          : timeoutSignal;
         const response = await fetchImpl(`${baseUrl}${path}`, {
           ...init,
-          signal,
+          signal: requestSignal,
           cache: 'no-store',
           headers: {
             authorization: `Bearer ${options.credential}`,

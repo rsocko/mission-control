@@ -184,6 +184,33 @@ describe('RyMessage task promotion convergence', () => {
     }));
   });
 
+  it('stops reconciliation before additional work after the sync is aborted', async () => {
+    const controller = new AbortController();
+    const reason = new Error('Sync duration budget exceeded');
+    controller.abort(reason);
+
+    await expect(
+      observeManagedRyMessageTasks(page(), client(), undefined, controller.signal),
+    ).rejects.toBe(reason);
+    expect(getTask).not.toHaveBeenCalled();
+    expect(submitMutationV2).not.toHaveBeenCalled();
+  });
+
+  it('does not submit a mutation when the sync aborts during a task lookup', async () => {
+    const controller = new AbortController();
+    const reason = new Error('Sync duration budget exceeded');
+    getTask.mockImplementationOnce(async () => {
+      controller.abort(reason);
+      return null;
+    });
+
+    await expect(
+      observeManagedRyMessageTasks(page(), client(), undefined, controller.signal),
+    ).rejects.toBe(reason);
+    expect(getTask).toHaveBeenCalledOnce();
+    expect(submitMutationV2).not.toHaveBeenCalled();
+  });
+
   it('attaches an exact imported Microsoft To Do tuple without creating a task', async () => {
     findByProviderIdentity.mockResolvedValue({
       id: 'mc-imported',

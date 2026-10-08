@@ -71,6 +71,28 @@ describe('Companion canonical ActionV2 client', () => {
     );
   });
 
+  it('bounds each Companion request independently of the overall sync budget', async () => {
+    const fetchImpl = vi.fn((_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
+          once: true,
+        });
+      }));
+    const client = createCompanionActionClient({
+      baseUrl: 'https://companion.example',
+      credential: 'credential',
+      trustedMissionControlOrigin: 'https://mission-control.example',
+      fetchImpl,
+      maxRetries: 0,
+      requestTimeoutMs: 5,
+    });
+
+    await expect(client.fetchPageV2(null)).rejects.toMatchObject({
+      name: 'TimeoutError',
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it('submits only canonical V2 mutations and verifies receipt identity', async () => {
     const request = {
       contractVersion: '2.0' as const,

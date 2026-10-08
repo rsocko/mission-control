@@ -10,6 +10,7 @@ import {
   normalizeHomeAssistantSettings,
 } from '@/lib/connectors/home-assistant/settings';
 import {
+  buildIntegrationHealthNotifications,
   buildPersistentNotifications,
   buildRepairNotifications,
   buildUpdateNotifications,
@@ -39,6 +40,7 @@ describe('Home Assistant settings', () => {
 
     expect(settings.baseUrl).toBe('https://ha.example.test');
     expect(settings.sources.entityAlerts.enabled).toBe(true);
+    expect(settings.sources.integrationHealth.enabled).toBe(true);
     expect(settings.sources.updates.enabled).toBe(true);
     expect(settings.outboundDelivery).toMatchObject({
       updatePush: 'off',
@@ -156,6 +158,67 @@ describe('Home Assistant source transformers', () => {
       supportsInstall: true,
       supportsBackup: true,
       supportsReleaseNotes: false,
+      pushDelivery: 'immediate',
+    });
+  });
+
+  it('maps config-entry failures and suppresses healthy or disabled entries', () => {
+    const notifications = buildIntegrationHealthNotifications({
+      ...common,
+      entries: [
+        {
+          entry_id: 'entry-tplink',
+          domain: 'tplink',
+          title: 'TP-Link Smart Home',
+          state: 'setup_retry',
+          reason: 'Timed out connecting to 192.0.2.5',
+        },
+        {
+          entry_id: 'entry-envoy',
+          domain: 'enphase_envoy',
+          title: 'Enphase Envoy',
+          state: 'setup_error',
+        },
+        {
+          entry_id: 'entry-loaded',
+          domain: 'mqtt',
+          title: 'MQTT',
+          state: 'loaded',
+        },
+        {
+          entry_id: 'entry-disabled',
+          domain: 'tuya',
+          title: 'Tuya',
+          state: 'setup_error',
+          disabled_by: 'user',
+        },
+      ],
+      immediateFailures: true,
+      observedAt: '2026-10-07T12:00:00.000Z',
+    });
+
+    expect(notifications).toHaveLength(2);
+    expect(notifications[0]).toMatchObject({
+      id: 'integration-health:entry-tplink',
+      title: 'TP-Link Smart Home setup is retrying',
+      body: 'Timed out connecting to 192.0.2.5',
+      level: 'heads_up',
+      templateKey: 'ha_integration_retry',
+      actionUrl: 'https://ha.example.test/config/integrations/integration/tplink',
+    });
+    expect(notifications[0].metadata).toMatchObject({
+      haSource: 'integration_health',
+      integrationDomain: 'tplink',
+      configEntryState: 'setup_retry',
+      pushDelivery: 'default',
+    });
+    expect(notifications[1]).toMatchObject({
+      id: 'integration-health:entry-envoy',
+      title: 'Enphase Envoy integration failed',
+      level: 'action_needed',
+      templateKey: 'ha_integration_failed',
+    });
+    expect(notifications[1].metadata).toMatchObject({
       pushDelivery: 'immediate',
     });
   });
@@ -718,6 +781,18 @@ describe('Home Assistant WebSocket client', () => {
         const message = JSON.parse(data) as Record<string, unknown>;
         if (message.type === 'auth') {
           queueMicrotask(() => this.emit({ type: 'auth_ok' }));
+        } else if (message.type === 'config_entries/get') {
+          queueMicrotask(() => this.emit({
+            id: message.id,
+            type: 'result',
+            success: true,
+            result: [{
+              entry_id: 'entry-1',
+              domain: 'tplink',
+              title: 'TP-Link',
+              state: 'setup_retry',
+            }],
+          }));
         } else if (message.type === 'persistent_notification/get') {
           queueMicrotask(() => this.emit({
             id: message.id,
@@ -746,9 +821,13 @@ describe('Home Assistant WebSocket client', () => {
     const result = await createHAClient({
       baseUrl: 'https://ha.example.test',
       accessToken: 'secret',
-    }).fetchWebSocketSources(['persistentNotifications', 'repairs']);
+    }).fetchWebSocketSources(['integrationHealth', 'persistentNotifications', 'repairs']);
 
     expect(result.errors).toEqual({});
+    expect(result.integrationHealth?.[0]).toMatchObject({
+      entry_id: 'entry-1',
+      state: 'setup_retry',
+    });
     expect(result.persistentNotifications?.[0].notification_id).toBe('notice-1');
     expect(result.repairs?.[0]).toMatchObject({ domain: 'mqtt', issue_id: 'offline' });
   });
@@ -995,6 +1074,7 @@ describe('HomeAssistantConnector', () => {
       baseUrl: 'https://ha.example.test',
       sources: {
         entityAlerts: { enabled: false },
+        integrationHealth: { enabled: true },
         updates: { enabled: true, criticalEntityPatterns: [] },
         persistentNotifications: {
           enabled: true,
@@ -1023,6 +1103,7 @@ describe('HomeAssistantConnector', () => {
           },
         }],
         fetchWebSocketSources: async () => ({
+          integrationHealth: [],
           persistentNotifications: [{
             notification_id: 'notice',
             title: 'Notice',
@@ -1062,6 +1143,7 @@ describe('HomeAssistantConnector', () => {
     ]);
     expect(connector.getNotificationSourceHealth()).toEqual([
       { sourceId: 'entity-alerts', status: 'disabled' },
+      { sourceId: 'integration-health', status: 'ok' },
       { sourceId: 'updates', status: 'ok' },
       { sourceId: 'persistent-notifications', status: 'ok' },
       { sourceId: 'repairs', status: 'failed', error: 'Repairs unavailable' },
@@ -1081,6 +1163,7 @@ describe('HomeAssistantConnector', () => {
           },
         }],
         fetchWebSocketSources: async () => ({
+          integrationHealth: [],
           persistentNotifications: [],
           repairs: [],
           errors: {},
@@ -1098,6 +1181,65 @@ describe('HomeAssistantConnector', () => {
     }]);
   });
 
+  it('resolves recovered integration failures but preserves unknown future states', async () => {
+    const connector = new HomeAssistantConnector();
+    await connector.initialize({
+      ...config,
+      settings: {
+        ...config.settings,
+        sources: {
+          entityAlerts: { enabled: false },
+          integrationHealth: { enabled: true },
+          updates: { enabled: false, criticalEntityPatterns: [] },
+          persistentNotifications: {
+            enabled: false,
+            criticalNotificationPatterns: [],
+          },
+          repairs: { enabled: false },
+        },
+      },
+    });
+    let state = 'setup_retry';
+    Object.assign(connector, {
+      client: {
+        fetchWebSocketSources: async () => ({
+          integrationHealth: [{
+            entry_id: 'entry-tplink',
+            domain: 'tplink',
+            title: 'TP-Link Smart Home',
+            state,
+          }],
+          errors: {},
+        }),
+      },
+    });
+
+    await expect(connector.fetchNotifications()).resolves.toEqual([
+      expect.objectContaining({ id: 'integration-health:entry-tplink' }),
+    ]);
+
+    state = 'loaded';
+    await expect(connector.fetchNotifications()).resolves.toEqual([]);
+    await expect(connector.reconcileAlerts([
+      'ha-lake:integration-health:entry-tplink',
+    ])).resolves.toEqual([{
+      sourceId: 'ha-lake:integration-health:entry-tplink',
+      resolved: true,
+      verified: true,
+      reason: 'not_in_source',
+    }]);
+
+    state = 'future_reconnect_state';
+    await expect(connector.fetchNotifications()).resolves.toEqual([]);
+    await expect(connector.reconcileAlerts([
+      'ha-lake:integration-health:entry-tplink',
+    ])).resolves.toEqual([{
+      sourceId: 'ha-lake:integration-health:entry-tplink',
+      resolved: false,
+      verified: false,
+    }]);
+  });
+
   it('resolves notifications after their Home Assistant source is disabled', async () => {
     const connector = new HomeAssistantConnector();
     await connector.initialize({
@@ -1106,6 +1248,7 @@ describe('HomeAssistantConnector', () => {
         ...config.settings,
         sources: {
           entityAlerts: { enabled: false },
+          integrationHealth: { enabled: false },
           updates: { enabled: false, criticalEntityPatterns: [] },
           persistentNotifications: {
             enabled: false,
@@ -1120,10 +1263,12 @@ describe('HomeAssistantConnector', () => {
     expect(connector.reconcileAlertsBatchSize).toBeNull();
     await expect(connector.reconcileAlerts([
       'ha-lake:update:update.router:1.1',
+      'ha-lake:integration-health:entry-tplink',
       'ha-lake:persistent:notice',
       'ha-lake:repair:mqtt:offline',
       'ha-lake:rule:door-open:binary_sensor.garage',
     ])).resolves.toEqual([
+      expect.objectContaining({ resolved: true, reason: 'source_disabled' }),
       expect.objectContaining({ resolved: true, reason: 'source_disabled' }),
       expect.objectContaining({ resolved: true, reason: 'source_disabled' }),
       expect.objectContaining({ resolved: true, reason: 'source_disabled' }),

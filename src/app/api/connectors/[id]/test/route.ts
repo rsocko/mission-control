@@ -272,11 +272,12 @@ async function testConnector(
         if (!result.ok) {
           return { success: false, latencyMs, error: result.error || 'Connection failed' };
         }
-        const available = Object.values(result.sources || {}).filter(source => source.available).length;
+        const sourceProbes = Object.values(result.sources || {});
+        const available = sourceProbes.filter(source => source.available).length;
         return {
           success: true,
           latencyMs,
-          details: `Connected — ${available} of 3 notification sources available`,
+          details: `Connected — ${available} of ${sourceProbes.length} source APIs available`,
           sources: result.sources,
         };
       }

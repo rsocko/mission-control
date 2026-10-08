@@ -37,6 +37,18 @@ export interface HomeAssistantRepairIssue {
   created?: string;
 }
 
+export interface HomeAssistantConfigEntry {
+  entry_id: string;
+  domain: string;
+  title: string;
+  state: string;
+  disabled_by?: string | null;
+  reason?: string | null;
+  error_reason_translation_domain?: string | null;
+  error_reason_translation_key?: string | null;
+  error_reason_translation_placeholders?: Record<string, unknown> | null;
+}
+
 export interface HomeAssistantSourceProbe {
   available: boolean;
   count?: number;
@@ -51,6 +63,7 @@ export interface HomeAssistantConnectionResult {
   error?: string;
   sources?: {
     states: HomeAssistantSourceProbe;
+    integrationHealth: HomeAssistantSourceProbe;
     persistentNotifications: HomeAssistantSourceProbe;
     repairs: HomeAssistantSourceProbe;
   };
@@ -62,9 +75,10 @@ export interface HAClientOptions {
 }
 
 export interface HAWebSocketSourceResult {
+  integrationHealth?: HomeAssistantConfigEntry[];
   persistentNotifications?: HomeAssistantPersistentNotification[];
   repairs?: HomeAssistantRepairIssue[];
-  errors: Partial<Record<'persistentNotifications' | 'repairs', string>>;
+  errors: Partial<Record<'integrationHealth' | 'persistentNotifications' | 'repairs', string>>;
 }
 
 export interface HomeAssistantImage {
@@ -77,7 +91,7 @@ export interface HAClient {
   fetchImage(path: string): Promise<HomeAssistantImage>;
   fetchUpdateReleaseNotes(entityId: string): Promise<string | null>;
   fetchWebSocketSources(
-    sources: Array<'persistentNotifications' | 'repairs'>,
+    sources: Array<'integrationHealth' | 'persistentNotifications' | 'repairs'>,
   ): Promise<HAWebSocketSourceResult>;
   callService(
     domain: string,
@@ -95,7 +109,13 @@ export interface HAClient {
 }
 
 type WebSocketCommand = {
-  key: 'persistentNotifications' | 'repairs' | 'repairTranslations' | 'repairAction' | 'releaseNotes';
+  key:
+    | 'integrationHealth'
+    | 'persistentNotifications'
+    | 'repairs'
+    | 'repairTranslations'
+    | 'repairAction'
+    | 'releaseNotes';
   message: Record<string, unknown>;
 };
 
@@ -352,11 +372,15 @@ export function createHAClient(options: HAClientOptions): HAClient {
     },
 
     async fetchWebSocketSources(sources): Promise<HAWebSocketSourceResult> {
-      const commands: WebSocketCommand[] = sources.map(source => (
-        source === 'persistentNotifications'
-          ? { key: source, message: { type: 'persistent_notification/get' } }
-          : { key: source, message: { type: 'repairs/list_issues' } }
-      ));
+      const commands: WebSocketCommand[] = sources.map((source) => {
+        if (source === 'integrationHealth') {
+          return { key: source, message: { type: 'config_entries/get' } };
+        }
+        if (source === 'persistentNotifications') {
+          return { key: source, message: { type: 'persistent_notification/get' } };
+        }
+        return { key: source, message: { type: 'repairs/list_issues' } };
+      });
       const result = await runWebSocketCommands(options, commands);
       const repairsPayload = result.repairs;
       let repairs = repairsPayload && typeof repairsPayload === 'object' && !Array.isArray(repairsPayload)
@@ -425,6 +449,9 @@ export function createHAClient(options: HAClientOptions): HAClient {
       }
 
       return {
+        ...(sources.includes('integrationHealth') && !result.integrationHealthError
+          ? { integrationHealth: asArray(result.integrationHealth) as HomeAssistantConfigEntry[] }
+          : {}),
         ...(sources.includes('persistentNotifications') && !result.persistentNotificationsError
           ? { persistentNotifications: asArray(result.persistentNotifications) as HomeAssistantPersistentNotification[] }
           : {}),
@@ -432,6 +459,9 @@ export function createHAClient(options: HAClientOptions): HAClient {
           ? { repairs: repairs as HomeAssistantRepairIssue[] }
           : {}),
         errors: {
+          ...(typeof result.integrationHealthError === 'string'
+            ? { integrationHealth: result.integrationHealthError }
+            : {}),
           ...(typeof result.persistentNotificationsError === 'string'
             ? { persistentNotifications: result.persistentNotificationsError }
             : {}),
@@ -507,6 +537,7 @@ export function createHAClient(options: HAClientOptions): HAClient {
           fetchJson('/api/services'),
           fetchJson('/api/states'),
           runWebSocketCommands(options, [
+            { key: 'integrationHealth', message: { type: 'config_entries/get' } },
             { key: 'persistentNotifications', message: { type: 'persistent_notification/get' } },
             { key: 'repairs', message: { type: 'repairs/list_issues' } },
           ]),
@@ -528,6 +559,10 @@ export function createHAClient(options: HAClientOptions): HAClient {
             states: statesResult.status === 'fulfilled'
               ? { available: true, count: states.length }
               : { available: false, error: 'State API unavailable' },
+            integrationHealth: websocketResult.status === 'fulfilled'
+              && typeof websocket.integrationHealthError !== 'string'
+              ? { available: true, count: asArray(websocket.integrationHealth).length }
+              : { available: false, error: 'Integration health unavailable' },
             persistentNotifications: websocketResult.status === 'fulfilled'
               && typeof websocket.persistentNotificationsError !== 'string'
               ? { available: true, count: asArray(websocket.persistentNotifications).length }

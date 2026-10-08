@@ -1277,6 +1277,7 @@ function HomeAssistantConnectorEditPanel({
   const [showToken, setShowToken] = useState(false);
   const [pollInterval, setPollInterval] = useState(connector.pollIntervalMinutes || 5);
   const [sources, setSources] = useState({
+    integrationHealth: source('integrationHealth').enabled !== false,
     entityAlerts: source('entityAlerts').enabled !== false,
     updates: source('updates').enabled !== false,
     persistentNotifications: source('persistentNotifications').enabled !== false,
@@ -1302,6 +1303,7 @@ function HomeAssistantConnectorEditPanel({
     typeof initialDelivery.dailySummaryTime === 'string' ? initialDelivery.dailySummaryTime : '08:00',
   );
   const [immediateCriticalUpdates, setImmediateCriticalUpdates] = useState(initialDelivery.immediateCriticalUpdates !== false);
+  const [immediateIntegrationFailures, setImmediateIntegrationFailures] = useState(initialDelivery.immediateIntegrationFailures !== false);
   const [immediateActionNeededRepairs, setImmediateActionNeededRepairs] = useState(initialDelivery.immediateActionNeededRepairs !== false);
   const [immediateUrgentEntityAlerts, setImmediateUrgentEntityAlerts] = useState(initialDelivery.immediateUrgentEntityAlerts !== false);
   const [immediateCriticalPersistent, setImmediateCriticalPersistent] = useState(initialDelivery.immediateCriticalPersistentNotifications !== false);
@@ -1329,6 +1331,7 @@ function HomeAssistantConnectorEditPanel({
     baseUrl: baseUrl.trim().replace(/\/+$/, ''),
     sources: {
       ...initialSources,
+      integrationHealth: { ...source('integrationHealth'), enabled: sources.integrationHealth },
       entityAlerts: { ...source('entityAlerts'), enabled: sources.entityAlerts },
       updates: {
         ...source('updates'),
@@ -1348,6 +1351,7 @@ function HomeAssistantConnectorEditPanel({
       updatePush,
       dailySummaryTime,
       immediateCriticalUpdates,
+      immediateIntegrationFailures,
       immediateActionNeededRepairs,
       immediateUrgentEntityAlerts,
       immediateCriticalPersistentNotifications: immediateCriticalPersistent,
@@ -1355,6 +1359,7 @@ function HomeAssistantConnectorEditPanel({
   };
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
   const initialSourceEnabled = {
+    integrationHealth: source('integrationHealth').enabled !== false,
     entityAlerts: source('entityAlerts').enabled !== false,
     updates: source('updates').enabled !== false,
     persistentNotifications: source('persistentNotifications').enabled !== false,
@@ -1414,6 +1419,7 @@ function HomeAssistantConnectorEditPanel({
       });
       const data = await response.json();
       const sourceAvailable = {
+        integrationHealth: data.sources?.integrationHealth?.available === true,
         entityAlerts: data.sources?.states?.available === true,
         updates: data.sources?.states?.available === true,
         persistentNotifications: data.sources?.persistentNotifications?.available === true,
@@ -1488,8 +1494,9 @@ function HomeAssistantConnectorEditPanel({
 
       <fieldset className="mt-5">
         <legend className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Notification sources</legend>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           {([
+            ['integrationHealth', 'Integration health'],
             ['entityAlerts', 'Polled device rules'],
             ['updates', 'Updates'],
             ['persistentNotifications', 'Persistent'],
@@ -1508,6 +1515,7 @@ function HomeAssistantConnectorEditPanel({
         </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {([
+            ['integrationHealth', 'integration-health', 'Integration health'],
             ['entityAlerts', 'entity-alerts', 'Polled device rules'],
             ['updates', 'updates', 'Updates'],
             ['persistentNotifications', 'persistent-notifications', 'Persistent notifications'],
@@ -1597,6 +1605,7 @@ function HomeAssistantConnectorEditPanel({
         <div className="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2">
           {([
             [immediateCriticalUpdates, setImmediateCriticalUpdates, 'Critical updates'],
+            [immediateIntegrationFailures, setImmediateIntegrationFailures, 'Integration failures'],
             [immediateActionNeededRepairs, setImmediateActionNeededRepairs, 'Action-needed repairs'],
             [immediateUrgentEntityAlerts, setImmediateUrgentEntityAlerts, 'Urgent device alerts'],
             [immediateCriticalPersistent, setImmediateCriticalPersistent, 'Critical persistent notifications'],

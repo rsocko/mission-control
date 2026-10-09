@@ -1,0 +1,1357 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Control — Operational Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --navy-950: #06101b;
+      --navy-900: #0a1724;
+      --navy-850: #102131;
+      --navy-800: #14293b;
+      --paper: #f3f0e8;
+      --paper-2: #ebe7dd;
+      --ink: #122233;
+      --ink-2: #405163;
+      --line: #ccd2d1;
+      --line-dark: #23394b;
+      --amber: #f2aa2b;
+      --amber-dark: #7d4b04;
+      --amber-pale: #fff1c9;
+      --teal: #18a6a6;
+      --teal-dark: #0d676a;
+      --teal-pale: #d8f2ee;
+      --green: #37d67a;
+      --green-dark: #195f39;
+      --green-pale: #def5e6;
+      --red: #d9534f;
+      --red-pale: #fae2dd;
+      --muted: #77889a;
+      --white: #f8faf8;
+      --shadow: 0 18px 45px rgba(0, 0, 0, .18);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { background: var(--navy-950); }
+
+    body {
+      margin: 0;
+      min-width: 1180px;
+      background: var(--navy-950);
+      color: var(--white);
+      font-family: "IBM Plex Sans", sans-serif;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    button, input { font: inherit; }
+
+    button {
+      color: inherit;
+      border: 0;
+      cursor: pointer;
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--amber);
+      outline-offset: 2px;
+    }
+
+    ::selection {
+      color: var(--navy-950);
+      background: var(--amber);
+    }
+
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: var(--navy-950); }
+    ::-webkit-scrollbar-thumb {
+      background: #344b60;
+      border: 2px solid var(--navy-950);
+      border-radius: 8px;
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-rows: 34px 76px 1fr;
+      min-height: 100vh;
+      background: var(--navy-950);
+    }
+
+    .system-strip {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      align-items: center;
+      gap: 20px;
+      padding: 0 22px;
+      border-bottom: 1px solid #182a3a;
+      background: #050d16;
+      color: #9eb0bf;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      letter-spacing: .025em;
+    }
+
+    .system-strip strong { color: #d9e3e7; font-weight: 500; }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 310px 1fr 410px;
+      align-items: center;
+      gap: 28px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line-dark);
+      background: rgba(10, 23, 36, .96);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, .16);
+      z-index: 3;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 31px;
+      height: 31px;
+      flex: 0 0 31px;
+      border: 1px solid #50677b;
+      background: #0c1d2b;
+      box-shadow: inset 0 0 0 5px #102b3b;
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      background: var(--amber);
+    }
+
+    .brand-mark::before {
+      width: 2px;
+      height: 19px;
+      left: 14px;
+      top: 5px;
+    }
+
+    .brand-mark::after {
+      width: 19px;
+      height: 2px;
+      left: 5px;
+      top: 14px;
+    }
+
+    .brand-copy strong {
+      display: block;
+      font-family: "Source Serif 4", serif;
+      font-size: 18px;
+      line-height: 1.05;
+      letter-spacing: -.015em;
+    }
+
+    .brand-copy span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font: 10px/1 "IBM Plex Mono", monospace;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+    }
+
+    .primary-nav {
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      height: 100%;
+    }
+
+    .nav-item {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-width: 80px;
+      padding: 0 14px;
+      color: #8ea2b3;
+      background: transparent;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .nav-item:hover { color: var(--white); }
+
+    .nav-item.active {
+      color: var(--white);
+      background: rgba(255,255,255,.025);
+    }
+
+    .nav-item.active::after {
+      content: "";
+      position: absolute;
+      right: 13px;
+      bottom: 0;
+      left: 13px;
+      height: 2px;
+      background: var(--amber);
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .search {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      width: 230px;
+      height: 34px;
+      padding: 0 10px;
+      border: 1px solid #30475a;
+      background: #081522;
+      color: #6f8496;
+    }
+
+    .search svg { width: 15px; height: 15px; }
+
+    .search input {
+      min-width: 0;
+      flex: 1;
+      border: 0;
+      outline: 0;
+      color: var(--white);
+      background: transparent;
+      font-size: 12px;
+    }
+
+    .kbd {
+      border: 1px solid #31485b;
+      padding: 2px 5px;
+      color: #8092a1;
+      background: #0c1d2c;
+      font: 10px/1 "IBM Plex Mono", monospace;
+    }
+
+    .icon-button {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 1px solid #30475a;
+      background: #0b1b29;
+    }
+
+    .icon-button:hover { background: #132a3b; }
+    .icon-button svg { width: 16px; height: 16px; }
+
+    .icon-button .dot {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 5px;
+      height: 5px;
+      background: var(--amber);
+      border-radius: 50%;
+      box-shadow: 0 0 0 2px var(--navy-900);
+    }
+
+    .user-avatar {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 1px solid #51677a;
+      color: var(--navy-950);
+      background: var(--paper);
+      font: 600 11px/1 "IBM Plex Mono", monospace;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 1fr 330px;
+      min-height: 0;
+    }
+
+    .main {
+      min-width: 0;
+      padding: 18px 20px 26px 22px;
+    }
+
+    .headline-row {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 13px;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+
+    h1 {
+      font-family: "Source Serif 4", serif;
+      font-size: 27px;
+      line-height: 1.05;
+      letter-spacing: -.025em;
+    }
+
+    .subtitle {
+      margin-top: 4px;
+      color: #7f94a5;
+      font-size: 11px;
+    }
+
+    .headline-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 32px;
+      padding: 0 12px;
+      border: 1px solid #31485b;
+      background: #0d1d2b;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .button:hover { background: #162d3f; }
+    .button svg { width: 14px; height: 14px; }
+
+    .button.primary {
+      color: #2a1800;
+      border-color: var(--amber);
+      background: var(--amber);
+    }
+
+    .filter-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 9px 10px;
+      border: 1px solid #203547;
+      background: #0a1825;
+      margin-bottom: 13px;
+    }
+
+    .chips {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .chip {
+      height: 26px;
+      padding: 0 10px;
+      border: 1px solid #334a5d;
+      border-radius: 999px;
+      color: #9eb1c0;
+      background: #0c1d2b;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .chip:hover { color: var(--white); }
+
+    .chip.active {
+      color: #201300;
+      border-color: var(--amber);
+      background: var(--amber);
+    }
+
+    .filter-meta {
+      color: #708596;
+      font: 10px/1 "IBM Plex Mono", monospace;
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: minmax(650px, 1.5fr) minmax(430px, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .panel {
+      color: var(--ink);
+      border: 1px solid rgba(15, 35, 51, .25);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 46px;
+      padding: 0 15px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .panel-title h2 {
+      font-family: "Source Serif 4", serif;
+      font-size: 17px;
+      letter-spacing: -.015em;
+    }
+
+    .panel-title span {
+      color: var(--ink-2);
+      font: 10px/1 "IBM Plex Mono", monospace;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--teal);
+      box-shadow: 0 0 0 3px rgba(24, 166, 166, .13);
+    }
+
+    .status-dot.green {
+      background: var(--green-dark);
+      box-shadow: 0 0 0 3px rgba(25, 95, 57, .13);
+    }
+
+    .count-badge {
+      display: inline-grid;
+      place-items: center;
+      min-width: 22px;
+      height: 20px;
+      padding: 0 6px;
+      border: 1px solid #b8c0c0;
+      background: #e5e7e1;
+      font: 600 10px/1 "IBM Plex Mono", monospace;
+    }
+
+    .risk-panel {
+      position: relative;
+      min-height: 651px;
+      overflow: hidden;
+    }
+
+    .risk-panel::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 3px;
+      background: var(--amber);
+      z-index: 2;
+    }
+
+    .risk-summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-bottom: 1px solid var(--line);
+      background: #e9e6de;
+    }
+
+    .risk-metric {
+      padding: 11px 12px;
+      border-right: 1px solid var(--line);
+    }
+
+    .risk-metric:last-child { border-right: 0; }
+
+    .risk-metric strong {
+      display: block;
+      font: 700 17px/1 "IBM Plex Mono", monospace;
+      color: var(--ink);
+    }
+
+    .risk-metric span {
+      display: block;
+      margin-top: 5px;
+      color: #66737f;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .group {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .group:last-child { border-bottom: 0; }
+
+    .group-toggle {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      align-items: center;
+      width: 100%;
+      min-height: 36px;
+      padding: 0 12px 0 13px;
+      color: var(--ink);
+      background: #e6e4dd;
+      text-align: left;
+    }
+
+    .group-toggle:hover { background: #dddcd6; }
+
+    .chevron {
+      width: 13px;
+      height: 13px;
+      transition: transform .18s ease-out;
+    }
+
+    .group.collapsed .chevron { transform: rotate(-90deg); }
+
+    .group-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .group-count {
+      color: #65727c;
+      font: 10px/1 "IBM Plex Mono", monospace;
+    }
+
+    .group-body {
+      overflow: hidden;
+    }
+
+    .group.collapsed .group-body { display: none; }
+
+    .work-item {
+      position: relative;
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr) 112px 92px 20px;
+      align-items: center;
+      gap: 9px;
+      min-height: 54px;
+      padding: 8px 11px 8px 12px;
+      border-top: 1px solid #d5d8d4;
+      background: var(--paper);
+    }
+
+    .work-item:first-child { border-top: 0; }
+    .work-item:hover { background: #faf8f1; }
+
+    .source-icon {
+      display: grid;
+      place-items: center;
+      width: 21px;
+      height: 21px;
+      border: 1px solid #aeb9b8;
+      background: #f8f6ef;
+      color: #40586a;
+    }
+
+    .source-icon svg { width: 12px; height: 12px; }
+
+    .item-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .item-sub {
+      display: flex;
+      gap: 8px;
+      margin-top: 3px;
+      color: #71808c;
+      font: 9px/1.3 "IBM Plex Mono", monospace;
+    }
+
+    .owner {
+      color: #53636e;
+      font-size: 10px;
+    }
+
+    .priority {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 21px;
+      padding: 0 7px;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font: 600 9px/1 "IBM Plex Mono", monospace;
+    }
+
+    .priority.critical { color: #a52f28; background: var(--red-pale); }
+    .priority.high { color: var(--amber-dark); background: var(--amber-pale); }
+    .priority.medium { color: var(--teal-dark); background: var(--teal-pale); }
+
+    .item-menu {
+      display: grid;
+      place-items: center;
+      width: 20px;
+      height: 24px;
+      color: #71808c;
+      background: transparent;
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    .right-stack {
+      display: grid;
+      gap: 14px;
+    }
+
+    .runtime-panel { min-height: 376px; }
+
+    .segmented {
+      display: inline-grid;
+      grid-template-columns: repeat(2, 1fr);
+      border: 1px solid #9aa8a8;
+      background: #dcded8;
+    }
+
+    .segment {
+      min-width: 58px;
+      height: 25px;
+      padding: 0 9px;
+      color: #5f6e77;
+      background: transparent;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .segment.active {
+      color: var(--paper);
+      background: var(--ink);
+    }
+
+    .runtime-grid {
+      display: grid;
+      grid-template-columns: 1.15fr .85fr;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .runtime-cell {
+      padding: 13px 14px;
+      border-right: 1px solid var(--line);
+    }
+
+    .runtime-cell:last-child { border-right: 0; }
+
+    .metric-line {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .metric-line span {
+      color: #65757e;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .metric-line strong {
+      font: 700 20px/1 "IBM Plex Mono", monospace;
+    }
+
+    .trend {
+      position: relative;
+      height: 74px;
+      margin-top: 10px;
+      border-top: 1px solid #cfd5d2;
+      border-bottom: 1px solid #cfd5d2;
+      background:
+        linear-gradient(#d7dcda 1px, transparent 1px);
+      background-size: 100% 24px;
+    }
+
+    .trend svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    .trend-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 4px;
+      color: #7e8a90;
+      font: 8px/1 "IBM Plex Mono", monospace;
+    }
+
+    .mini-stats {
+      display: grid;
+      gap: 11px;
+      margin-top: 11px;
+    }
+
+    .mini-stat {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+
+    .mini-stat span { color: #687780; font-size: 9px; }
+    .mini-stat strong { font: 600 10px/1 "IBM Plex Mono", monospace; }
+
+    .bar {
+      grid-column: 1 / -1;
+      height: 5px;
+      background: #d5d9d4;
+      overflow: hidden;
+    }
+
+    .bar > i {
+      display: block;
+      height: 100%;
+      background: var(--teal);
+    }
+
+    .bar > i.green { background: var(--green-dark); }
+
+    .runtime-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9px;
+    }
+
+    .runtime-table th {
+      padding: 7px 10px;
+      color: #687780;
+      background: #e4e3dc;
+      text-align: left;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      font-weight: 600;
+    }
+
+    .runtime-table td {
+      padding: 7px 10px;
+      border-top: 1px solid #d5d8d4;
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    .runtime-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--green-dark);
+      font-weight: 600;
+    }
+
+    .runtime-state i {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green-dark);
+    }
+
+    .runtime-state.warn { color: var(--amber-dark); }
+    .runtime-state.warn i { background: var(--amber); }
+
+    .queue-panel { min-height: 261px; }
+
+    .queue-list { padding: 9px 12px 12px; }
+
+    .queue-row {
+      display: grid;
+      grid-template-columns: 36px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      min-height: 45px;
+      border-bottom: 1px solid #d1d6d2;
+    }
+
+    .queue-row:last-child { border-bottom: 0; }
+
+    .queue-num {
+      color: #5c6c75;
+      font: 600 11px/1 "IBM Plex Mono", monospace;
+    }
+
+    .queue-copy strong { display: block; font-size: 10px; }
+    .queue-copy span { display: block; margin-top: 3px; color: #748089; font-size: 9px; }
+
+    .queue-age {
+      color: var(--amber-dark);
+      font: 500 9px/1 "IBM Plex Mono", monospace;
+    }
+
+    .alert-rail {
+      min-width: 0;
+      border-left: 1px solid var(--line-dark);
+      background: #081521;
+      box-shadow: -16px 0 34px rgba(0, 0, 0, .13);
+    }
+
+    .rail-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 59px;
+      padding: 0 16px;
+      border-bottom: 1px solid #203547;
+    }
+
+    .rail-header h2 {
+      font-family: "Source Serif 4", serif;
+      font-size: 17px;
+    }
+
+    .live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 22px;
+      padding: 0 8px;
+      border: 1px solid #2a6347;
+      color: #8be3aa;
+      background: #0c281b;
+      font: 600 9px/1 "IBM Plex Mono", monospace;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .live-pill i {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 1.8s ease-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 45% { box-shadow: 0 0 0 0 rgba(55, 214, 122, .35); }
+      100% { box-shadow: 0 0 0 7px rgba(55, 214, 122, 0); }
+    }
+
+    .rail-controls {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid #1e3345;
+    }
+
+    .rail-select {
+      height: 30px;
+      padding: 0 9px;
+      border: 1px solid #2f4659;
+      color: #a6b7c3;
+      background: #0b1a27;
+      font-size: 10px;
+    }
+
+    .clear-button {
+      padding: 0 9px;
+      border: 1px solid #2f4659;
+      color: #8297a8;
+      background: #0b1a27;
+      font-size: 10px;
+    }
+
+    .alert-list { padding: 0 12px 18px; }
+
+    .alert {
+      position: relative;
+      padding: 13px 0 12px;
+      border-bottom: 1px solid #203445;
+    }
+
+    .alert-top {
+      display: grid;
+      grid-template-columns: 17px 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .alert-icon {
+      width: 15px;
+      height: 15px;
+      color: var(--teal);
+    }
+
+    .alert.warn .alert-icon { color: var(--amber); }
+    .alert.error .alert-icon { color: #ee756b; }
+
+    .alert-title {
+      overflow: hidden;
+      color: #dce6e9;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .alert-time {
+      color: #61778a;
+      font: 9px/1 "IBM Plex Mono", monospace;
+    }
+
+    .alert p {
+      margin: 7px 0 0 25px;
+      color: #8da0af;
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .alert-meta {
+      display: flex;
+      gap: 7px;
+      margin: 8px 0 0 25px;
+    }
+
+    .meta-tag {
+      padding: 2px 6px;
+      border: 1px solid #294156;
+      color: #74899a;
+      font: 8px/1.2 "IBM Plex Mono", monospace;
+    }
+
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 10;
+      display: grid;
+      grid-template-columns: 8px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      min-width: 320px;
+      padding: 12px 13px;
+      border: 1px solid #587184;
+      background: #0b1b29;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, .4);
+      transform: translateY(22px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s ease-out, transform .2s ease-out;
+    }
+
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .toast i {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .toast strong { display: block; font-size: 11px; }
+    .toast span { display: block; margin-top: 2px; color: #7f94a5; font-size: 9px; }
+    .toast code { color: var(--amber); font: 9px/1 "IBM Plex Mono", monospace; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .001ms !important;
+        transition-duration: .001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <div class="system-strip">
+      <span>MC/OPS <strong>PRIMARY</strong> · SOURCE-AWARE CONTROL PLANE</span>
+      <span>SYNC <strong>00:42 AGO</strong></span>
+      <span>POSTGRES <strong>HEALTHY</strong></span>
+      <span>UTC−04:00 · 2026-09-08 10:37:01</span>
+    </div>
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <div class="brand-copy">
+          <strong>Mission Control</strong>
+          <span>Unified operations console</span>
+        </div>
+      </div>
+
+      <nav class="primary-nav" aria-label="Primary">
+        <button class="nav-item active">Overview</button>
+        <button class="nav-item">Tasks</button>
+        <button class="nav-item">Projects</button>
+        <button class="nav-item">Universe</button>
+        <button class="nav-item">Reports</button>
+      </nav>
+
+      <div class="top-actions">
+        <label class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.2-3.2"></path></svg>
+          <input id="globalSearch" aria-label="Search" placeholder="Search tasks, projects, alerts">
+          <span class="kbd">⌘K</span>
+        </label>
+        <button class="icon-button" aria-label="Notifications" title="Notifications">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg>
+          <span class="dot"></span>
+        </button>
+        <button class="icon-button" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1L7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg>
+        </button>
+        <div class="user-avatar" title="Ryan Sockalosky">RS</div>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <main class="main">
+        <div class="headline-row">
+          <div>
+            <h1>Operational Dashboard</h1>
+            <p class="subtitle">Prioritized work, system reliability, and live source events across the control plane.</p>
+          </div>
+          <div class="headline-actions">
+            <button class="button" id="refreshButton">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6v6h-6"></path><path d="M4 18v-6h6"></path><path d="M6.5 9A7 7 0 0 1 18 6l2 2"></path><path d="M17.5 15A7 7 0 0 1 6 18l-2-2"></path></svg>
+              Sync now
+            </button>
+            <button class="button primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+              Quick add
+            </button>
+          </div>
+        </div>
+
+        <div class="filter-row">
+          <div class="chips" aria-label="Dashboard filters">
+            <button class="chip active" data-filter="all">All work</button>
+            <button class="chip" data-filter="critical">Critical</button>
+            <button class="chip" data-filter="overdue">Overdue</button>
+            <button class="chip" data-filter="github">GitHub</button>
+            <button class="chip" data-filter="todo">Microsoft To Do</button>
+            <button class="chip" data-filter="blocked">Blocked</button>
+          </div>
+          <div class="filter-meta"><span id="visibleCount">18</span> records · sorted by operational risk</div>
+        </div>
+
+        <div class="content-grid">
+          <section class="panel risk-panel" aria-labelledby="risk-heading">
+            <div class="panel-header">
+              <div class="panel-title">
+                <span class="status-dot"></span>
+                <h2 id="risk-heading">Priority &amp; Risk Focus</h2>
+                <span>live scoring</span>
+              </div>
+              <span class="count-badge">18</span>
+            </div>
+
+            <div class="risk-summary">
+              <div class="risk-metric"><strong>04</strong><span>Overdue</span></div>
+              <div class="risk-metric"><strong>07</strong><span>Blocked</span></div>
+              <div class="risk-metric"><strong>03</strong><span>Due today</span></div>
+              <div class="risk-metric"><strong>91</strong><span>Risk score p95</span></div>
+            </div>
+
+            <div class="group">
+              <button class="group-toggle" aria-expanded="true">
+                <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+                <span class="group-name">Overdue <span class="priority critical">critical</span></span>
+                <span class="group-count">04 items</span>
+              </button>
+              <div class="group-body">
+                <div class="work-item" data-tags="critical overdue github blocked">
+                  <span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 9h8M8 13h5"></path><path d="M5 4h14v16H5z"></path></svg></span>
+                  <div><div class="item-title">Resolve PostgreSQL baseline migration conflict</div><div class="item-sub"><span>#1819</span><span>2d overdue</span><span>release blocker</span></div></div>
+                  <span class="owner">Infrastructure</span>
+                  <span class="priority critical">P0 · 98</span>
+                  <button class="item-menu" aria-label="More actions">•••</button>
+                </div>
+                <div class="work-item" data-tags="critical overdue todo blocked">
+                  <span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"></path></svg></span>
+                  <div><div class="item-title">Restore failed backup checksum rehearsal</div><div class="item-sub"><span>Work</span><span>19h overdue</span><span>server-mini</span></div></div>
+                  <span class="owner">Operations</span>
+                  <span class="priority critical">P0 · 95</span>
+                  <button class="item-menu" aria-label="More actions">•••</button>
+                </div>
+                <div class="work-item" data-tags="overdue github">
+                  <span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M8 12h8M12 8v8"></path></svg></span>
+                  <div><div class="item-title">Review semantic package compatibility matrix</div><div class="item-sub"><span>ideation#1348</span><span>8h overdue</span></div></div>
+                  <span class="owner">Generic Graph</span>
+                  <span class="priority high">P1 · 86</span>
+                  <button class="item-menu" aria-label="More actions">•••</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="group">
+              <button class="group-toggle" aria-expanded="true">
+                <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+                <span class="group-name">Blocked <span class="priority high">dependencies</span></span>
+                <span class="group-count">07 items</span>
+              </button>
+              <div class="group-body">
+                <div class="work-item" data-tags="blocked github">
+                  <span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h10v18H7z"></path><path d="M10 8h4M10 12h4"></path></svg></span>
+                  <div><div class="item-title">Finalize provider-neutral graph semantics</div><div class="item-sub"><span>PR #1489</span><span>awaiting review</span></div></div>
+                  <span class="owner">Ideation</span>
+                  <span class="priority high">P1 · 83</span>
+                  <button class="item-menu" aria-label="More actions">•••</button>
+                </div>
+                <div class="work-item" data-tags="blocked todo">
+                  <span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"></path></svg></span>
+                  <div><div class="item-title">Schedule server-mini restore check</div><div class="item-sub"><span>Work</span><span>waiting on SSH access</span></div></div>
+                  <span class="owner">Homelab</span>
+                  <span class="priority high">P1 · 79</span>
+                  <button class="item-menu" aria-label="More actions">•••</button>
+                </div>
+                <div class="work-item" data-tags="blocked github">
+                  <span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 18h16M6 15l4-4 3 2 5-7"></path></svg></span>
+                  <div><div class="item-title">Enable semantic clustering rollout gate</div><div class="item-sub"><span>#1666</span><span>blocked by #1348</span></div></div>
+                  <span class="owner">Universe</span>
+                  <span class="priority medium">P2 · 72</span>
+                  <button class="item-menu" aria-label="More actions">•••</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="group">
+              <button class="group-toggle" aria-expanded="true">
+                <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"></path></svg>
+                <span class="group-name">Due Today <span class="priority medium">next</span></span>
+                <span class="group-count">03 items</span>
+              </button>
+              <div class="group-body">
+                <div class="work-item" data-tags="todo">
+                  <span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"></path></svg></span>
+                  <div><div class="item-title">Cut replacement mount for office sensor</div><div class="item-sub"><span>Personal</span><span>due 18:00</span></div></div>
+                  <span class="owner">3D Printing</span>
+                  <span class="priority medium">P2 · 64</span>
+                  <button class="item-menu" aria-label="More actions">•••</button>
+                </div>
+                <div class="work-item" data-tags="github">
+                  <span class="source-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M8 12h8"></path></svg></span>
+                  <div><div class="item-title">Reconcile retained semantic roadmap issues</div><div class="item-sub"><span>#977 · #1136</span><span>due 20:00</span></div></div>
+                  <span class="owner">Mission Control</span>
+                  <span class="priority medium">P2 · 59</span>
+                  <button class="item-menu" aria-label="More actions">•••</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="right-stack">
+            <section class="panel runtime-panel" aria-labelledby="runtime-heading">
+              <div class="panel-header">
+                <div class="panel-title">
+                  <span class="status-dot green"></span>
+                  <h2 id="runtime-heading">Agent Runtime</h2>
+                  <span>last 6h</span>
+                </div>
+                <div class="segmented" aria-label="Runtime view">
+                  <button class="segment active" data-runtime="live">Live</button>
+                  <button class="segment" data-runtime="daily">24 hours</button>
+                </div>
+              </div>
+
+              <div class="runtime-grid">
+                <div class="runtime-cell">
+                  <div class="metric-line"><span>Executions</span><strong id="executionTotal">1,284</strong></div>
+                  <div class="trend" aria-label="Execution trend line">
+                    <svg viewBox="0 0 340 74" preserveAspectRatio="none">
+                      <path d="M0 58 L22 54 L44 57 L66 45 L88 48 L110 33 L132 39 L154 27 L176 31 L198 20 L220 23 L242 15 L264 24 L286 12 L308 18 L340 8" fill="none" stroke="#0d7778" stroke-width="2"></path>
+                      <path d="M0 58 L22 54 L44 57 L66 45 L88 48 L110 33 L132 39 L154 27 L176 31 L198 20 L220 23 L242 15 L264 24 L286 12 L308 18 L340 8 L340 74 L0 74 Z" fill="rgba(24,166,166,.10)"></path>
+                    </svg>
+                  </div>
+                  <div class="trend-labels"><span>04:00</span><span>07:00</span><span>10:00</span></div>
+                </div>
+                <div class="runtime-cell">
+                  <div class="metric-line"><span>Reliability</span><strong>99.7%</strong></div>
+                  <div class="mini-stats">
+                    <div class="mini-stat"><span>Success</span><strong>1,280</strong><div class="bar"><i class="green" style="width:99.7%"></i></div></div>
+                    <div class="mini-stat"><span>p95 latency</span><strong>842ms</strong><div class="bar"><i style="width:61%"></i></div></div>
+                    <div class="mini-stat"><span>Queue age</span><strong>12s</strong><div class="bar"><i style="width:18%"></i></div></div>
+                  </div>
+                </div>
+              </div>
+
+              <table class="runtime-table">
+                <thead><tr><th>Agent</th><th>State</th><th>Runs</th><th>p95</th><th>Last seen</th></tr></thead>
+                <tbody>
+                  <tr><td>semantic-worker</td><td><span class="runtime-state"><i></i>healthy</span></td><td>526</td><td>611ms</td><td>4s</td></tr>
+                  <tr><td>connector-sync</td><td><span class="runtime-state"><i></i>healthy</span></td><td>410</td><td>902ms</td><td>12s</td></tr>
+                  <tr><td>houston</td><td><span class="runtime-state warn"><i></i>degraded</span></td><td>221</td><td>1.8s</td><td>1m</td></tr>
+                  <tr><td>reconciler</td><td><span class="runtime-state"><i></i>healthy</span></td><td>127</td><td>488ms</td><td>8s</td></tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="panel queue-panel" aria-labelledby="queue-heading">
+              <div class="panel-header">
+                <div class="panel-title">
+                  <h2 id="queue-heading">Queue Pressure</h2>
+                  <span>bounded workers</span>
+                </div>
+                <span class="count-badge">12</span>
+              </div>
+              <div class="queue-list">
+                <div class="queue-row"><span class="queue-num">01</span><div class="queue-copy"><strong>Semantic index backfill</strong><span>6 batches · 3,200 entities</span></div><span class="queue-age">00:42</span></div>
+                <div class="queue-row"><span class="queue-num">02</span><div class="queue-copy"><strong>Microsoft To Do write-back</strong><span>4 leased changes · retry 1/3</span></div><span class="queue-age">01:08</span></div>
+                <div class="queue-row"><span class="queue-num">03</span><div class="queue-copy"><strong>GitHub notification reconcile</strong><span>2 repositories · 38 events</span></div><span class="queue-age">02:11</span></div>
+                <div class="queue-row"><span class="queue-num">04</span><div class="queue-copy"><strong>Universe projection refresh</strong><span>waiting on semantic cursor</span></div><span class="queue-age">04:36</span></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </main>
+
+      <aside class="alert-rail" aria-labelledby="alerts-heading">
+        <div class="rail-header">
+          <h2 id="alerts-heading">Real-time Alerts</h2>
+          <span class="live-pill"><i></i>live</span>
+        </div>
+        <div class="rail-controls">
+          <button class="rail-select">All sources · newest first</button>
+          <button class="clear-button" id="clearAlerts">Clear read</button>
+        </div>
+        <div class="alert-list" id="alertList">
+          <article class="alert error">
+            <div class="alert-top">
+              <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"></path><path d="M10.3 3.7 2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z"></path></svg>
+              <span class="alert-title">PostgreSQL migration preflight blocked</span>
+              <span class="alert-time">now</span>
+            </div>
+            <p>Baseline timestamp differs from the applied production journal. Deployment correctly halted before mutation.</p>
+            <div class="alert-meta"><span class="meta-tag">postgres</span><span class="meta-tag">deploy</span><span class="meta-tag">action required</span></div>
+          </article>
+
+          <article class="alert warn">
+            <div class="alert-top">
+              <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+              <span class="alert-title">Houston p95 crossed 1.5 seconds</span>
+              <span class="alert-time">3m</span>
+            </div>
+            <p>Approval-path latency is elevated. Error rate remains within policy; no requests were dropped.</p>
+            <div class="alert-meta"><span class="meta-tag">houston</span><span class="meta-tag">latency</span></div>
+          </article>
+
+          <article class="alert">
+            <div class="alert-top">
+              <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"></path></svg>
+              <span class="alert-title">Semantic backfill checkpoint committed</span>
+              <span class="alert-time">8m</span>
+            </div>
+            <p>Batch 41 of 47 completed. Cursor persisted; 3,200 entities remain in the bounded queue.</p>
+            <div class="alert-meta"><span class="meta-tag">semantic-worker</span><span class="meta-tag">progress</span></div>
+          </article>
+
+          <article class="alert">
+            <div class="alert-top">
+              <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16M12 4v16"></path></svg>
+              <span class="alert-title">12 tasks imported from Microsoft To Do</span>
+              <span class="alert-time">12m</span>
+            </div>
+            <p>Work list delta applied. Four local edits are queued for deterministic write-back.</p>
+            <div class="alert-meta"><span class="meta-tag">connector-sync</span><span class="meta-tag">microsoft-todo</span></div>
+          </article>
+
+          <article class="alert warn">
+            <div class="alert-top">
+              <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path></svg>
+              <span class="alert-title">GitHub review requested on ideation#1489</span>
+              <span class="alert-time">19m</span>
+            </div>
+            <p>Provider-neutral graph semantics is waiting on one policy-analysis finding before merge.</p>
+            <div class="alert-meta"><span class="meta-tag">github</span><span class="meta-tag">review</span></div>
+          </article>
+
+          <article class="alert">
+            <div class="alert-top">
+              <svg class="alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M7 7h10v10"></path></svg>
+              <span class="alert-title">Grafana datasource health confirmed</span>
+              <span class="alert-time">31m</span>
+            </div>
+            <p>Prometheus and Alertmanager endpoints are active. No dropped endpoints detected.</p>
+            <div class="alert-meta"><span class="meta-tag">observability</span><span class="meta-tag">healthy</span></div>
+          </article>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <i></i>
+    <div><strong>Control plane synchronized</strong><span>12 sources reconciled without conflict.</span></div>
+    <code>00:00</code>
+  </div>
+
+  <script>
+    const groups = document.querySelectorAll('.group');
+    groups.forEach((group) => {
+      const toggle = group.querySelector('.group-toggle');
+      toggle.addEventListener('click', () => {
+        const collapsed = group.classList.toggle('collapsed');
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+      });
+    });
+
+    const chips = document.querySelectorAll('.chip');
+    const items = document.querySelectorAll('.work-item');
+    const visibleCount = document.getElementById('visibleCount');
+    chips.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        chips.forEach((candidate) => candidate.classList.remove('active'));
+        chip.classList.add('active');
+        const filter = chip.dataset.filter;
+        let visible = 0;
+        items.forEach((item) => {
+          const matches = filter === 'all' || item.dataset.tags.split(' ').includes(filter);
+          item.style.display = matches ? 'grid' : 'none';
+          if (matches) visible += 1;
+        });
+        visibleCount.textContent = String(visible).padStart(2, '0');
+      });
+    });
+
+    const segments = document.querySelectorAll('.segment');
+    segments.forEach((segment) => {
+      segment.addEventListener('click', () => {
+        segments.forEach((candidate) => candidate.classList.remove('active'));
+        segment.classList.add('active');
+        document.getElementById('executionTotal').textContent =
+          segment.dataset.runtime === 'daily' ? '4,912' : '1,284';
+      });
+    });
+
+    const toast = document.getElementById('toast');
+    let toastTimer;
+    document.getElementById('refreshButton').addEventListener('click', () => {
+      clearTimeout(toastTimer);
+      toast.classList.add('show');
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2800);
+    });
+
+    document.getElementById('clearAlerts').addEventListener('click', () => {
+      const alerts = [...document.querySelectorAll('.alert')];
+      alerts.slice(2).forEach((alert) => alert.remove());
+    });
+
+    document.getElementById('globalSearch').addEventListener('input', (event) => {
+      const query = event.target.value.trim().toLowerCase();
+      items.forEach((item) => {
+        item.style.display = !query || item.textContent.toLowerCase().includes(query) ? 'grid' : 'none';
+      });
+    });
+  </script>
+</body>
+</html>

@@ -10,6 +10,7 @@ import {
   Coins,
   Database,
   ExternalLink,
+  FileSearch,
   HeartPulse,
   Loader2,
   ListChecks,
@@ -267,16 +268,20 @@ export function FinanceOverview() {
             />
           )}
           <section aria-labelledby="finance-attention-heading">
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <h2 id="finance-attention-heading" className="text-sm font-semibold text-[var(--text-primary)]">
                 Needs attention
               </h2>
               <div className="flex flex-wrap items-center justify-end gap-3">
                 <Link href="/finance/quick-review" className="flex min-h-10 items-center gap-1 rounded-lg bg-[var(--accent)] px-3 text-xs font-semibold text-white focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
-                  <ListChecks size={14} /> Quick review
+                  <ListChecks size={14} aria-hidden="true" /> Quick review
+                </Link>
+                <Link href="/finance/payee-documents" className="flex min-h-9 items-center gap-1 text-xs font-medium text-[var(--accent-400)] underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+                  <FileSearch size={13} aria-hidden="true" />
+                  Review document expectations <ArrowUpRight size={13} aria-hidden="true" />
                 </Link>
                 <Link href="/finance/review" className="flex min-h-10 items-center gap-1 text-xs font-medium text-[var(--accent-400)] hover:underline focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
-                  Review exceptions <ArrowUpRight size={13} />
+                  Review exceptions <ArrowUpRight size={13} aria-hidden="true" />
                 </Link>
               </div>
             </div>

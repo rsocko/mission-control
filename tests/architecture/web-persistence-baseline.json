@@ -40,10 +40,10 @@
     "note": "Zero normal production web/API SQLite evaluation under PostgreSQL, per plan.md's final target, with only a minimal, audited, fail-closed exception list (throwing before any SQLite import/effect) surviving."
   },
   "counts": {
-    "apiRoutes": 289,
+    "apiRoutes": 290,
     "tierARoutes": 0,
     "tierBRoutes": 7,
-    "cleanRoutes": 282,
+    "cleanRoutes": 283,
     "directTaintSourceRoutes": 0,
     "transitiveOnlyTaintSourceRoutes": 0,
     "directDbNamespaceRoutes": 2,
@@ -141,6 +141,7 @@
     "src/app/api/finance/notifications/[id]/dismiss/route.ts",
     "src/app/api/finance/notifications/route.ts",
     "src/app/api/finance/overview/route.ts",
+    "src/app/api/finance/payee-document-review/route.ts",
     "src/app/api/finance/quick-review/actions/route.ts",
     "src/app/api/finance/quick-review/research/route.ts",
     "src/app/api/finance/quick-review/rule-suggestion/route.ts",
@@ -441,6 +442,7 @@
     "src/app/api/finance/notifications/[id]/dismiss/route.ts",
     "src/app/api/finance/notifications/route.ts",
     "src/app/api/finance/overview/route.ts",
+    "src/app/api/finance/payee-document-review/route.ts",
     "src/app/api/finance/quick-review/actions/route.ts",
     "src/app/api/finance/quick-review/research/route.ts",
     "src/app/api/finance/quick-review/rule-suggestion/route.ts",

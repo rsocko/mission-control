@@ -674,6 +674,48 @@ describe('POST /api/notifications/[id]/actions/[actionId]', () => {
     expect(data.result.url).toBe('https://example.com');
   });
 
+  it('returns a task draft without archiving the notification', async () => {
+    mockDb.select.mockImplementationOnce(() => chainable([{
+      id: 'n1',
+      title: 'Replace water filter',
+      body: 'The kitchen filter is due for replacement.',
+      connectorType: 'home-assistant',
+      category: 'home',
+      metadata: '{}',
+    }]));
+    mockDb.select.mockImplementationOnce(() => chainable([{
+      id: 'a1',
+      notificationId: 'n1',
+      actionType: 'create_task',
+      label: 'Create a Task',
+      payload: '{"priority":"high"}',
+    }]));
+
+    const { POST } = await import('@/app/api/notifications/[id]/actions/[actionId]/route');
+    const req = new Request('http://localhost/api/notifications/n1/actions/a1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ id: 'n1', actionId: 'a1' }) });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      success: true,
+      result: {
+        type: 'create_task',
+        taskData: {
+          title: 'Replace water filter',
+          body: 'The kitchen filter is due for replacement.',
+          priority: 'high',
+          sourceNotificationId: 'n1',
+        },
+      },
+    });
+    expect(mockWebPersistence.updateNotificationFromAction).not.toHaveBeenCalled();
+  });
+
   it('rejects unsafe open_url protocols', async () => {
     mockDb.select.mockImplementationOnce(() => chainable([{
       id: 'n1', title: 'Test', body: null, connectorType: 'unknown', category: 'system', metadata: '{}',

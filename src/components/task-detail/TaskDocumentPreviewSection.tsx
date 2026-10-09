@@ -54,7 +54,7 @@ function DocumentPreview({
         alt={`Preview of ${title}`}
         className={cn(
           'h-full w-full bg-black/20 object-contain',
-          expanded ? 'min-h-[70vh]' : fillAvailableSpace ? 'min-h-[60vh]' : 'min-h-64',
+          expanded ? 'min-h-[70vh]' : fillAvailableSpace ? 'min-h-[60vh]' : 'min-h-[32rem]',
         )}
       />
     );
@@ -76,7 +76,7 @@ function DocumentPreview({
           : 'allow-forms allow-popups allow-same-origin allow-scripts'}
       className={cn(
         'w-full border-0 bg-white',
-        expanded ? 'h-full min-h-[70vh]' : fillAvailableSpace ? 'h-[70vh] min-h-[32rem]' : 'h-72',
+        expanded ? 'h-full min-h-[70vh]' : fillAvailableSpace ? 'h-[70vh] min-h-[32rem]' : 'h-[min(62vh,46rem)] min-h-[32rem]',
       )}
     />
   );
@@ -137,7 +137,7 @@ export function TaskDocumentPreviewSection({
   return (
     <div className={cn(
       'border-t border-[var(--border-subtle)] pt-3',
-      (mode === 'panel' || mode === 'mobile') && 'order-7',
+      (mode === 'panel' || mode === 'mobile') && (isDocumentIntelligence ? 'order-0' : 'order-7'),
       mode === 'dialog' && 'col-start-2 row-start-6',
       mode === 'workspace' && 'col-start-2 row-start-6',
       fillAvailableSpace && 'border-t-0 pt-0',
@@ -202,7 +202,21 @@ export function TaskDocumentPreviewSection({
                 <MetadataItem label="Action" value={metadata.actionType} capitalize />
               )}
               {metadata.urgency && (
-                <MetadataItem label="Urgency" value={metadata.urgency} capitalize />
+                <MetadataItem
+                  label="Priority"
+                  value={{
+                    critical: 'P0 · Critical',
+                    high: 'P1 · High',
+                    medium: 'P2 · Medium',
+                    low: 'P3 · Low',
+                  }[metadata.urgency] || metadata.urgency}
+                />
+              )}
+              {typeof metadata.confidence === 'number' && (
+                <MetadataItem label="OWL confidence" value={`${Math.round(metadata.confidence * 100)}%`} />
+              )}
+              {metadata.reviewState && (
+                <MetadataItem label="Review state" value={metadata.reviewState.replace(/_/g, ' ')} capitalize />
               )}
               {formattedDueDate && (
                 <MetadataItem label="Due date" value={formattedDueDate} />

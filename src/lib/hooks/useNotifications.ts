@@ -174,6 +174,25 @@ export interface GroupedNotifications {
   older: NotificationItem[];
 }
 
+const TASK_PRIORITIES = new Set(['critical', 'high', 'medium', 'low', 'none']);
+
+function openTaskDraft(taskData: Record<string, unknown>) {
+  if (typeof taskData.title !== 'string' || !taskData.title.trim()) return;
+
+  const priority = typeof taskData.priority === 'string' && TASK_PRIORITIES.has(taskData.priority)
+    ? taskData.priority
+    : undefined;
+  window.dispatchEvent(new CustomEvent('mission-control:open-quick-add', {
+    detail: {
+      prefill: {
+        title: taskData.title.trim(),
+        description: typeof taskData.body === 'string' ? taskData.body : undefined,
+        priority,
+      },
+    },
+  }));
+}
+
 function groupByTime(items: NotificationItem[]): GroupedNotifications {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -414,7 +433,10 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
 
       // Handle navigation results from actions (e.g. open_url, navigate)
       if (data.success && data.result) {
-        if (data.result.url) {
+        if (data.result.type === 'create_task' && data.result.taskData) {
+          cancelExternalNavigation(externalWindow);
+          openTaskDraft(data.result.taskData);
+        } else if (data.result.url) {
           if (data.result.target === '_blank' || data.result.type === 'open_url') {
             await completeExternalNavigation(externalWindow, data.result.url);
           } else {

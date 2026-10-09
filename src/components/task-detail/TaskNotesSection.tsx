@@ -71,11 +71,12 @@ export function TaskNotesSection({
               <button
                 type="button"
                 onClick={onEditStart}
-                className="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                className="flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                 aria-label="Edit notes"
                 disabled={!canEditDescription}
               >
                 <Pencil size={13} aria-hidden="true" />
+                <span className="text-xs font-medium">Edit</span>
               </button>
             </Tooltip>
           )}

@@ -8,6 +8,7 @@ import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import { parseTaskMetadataCompat } from '@/lib/tasks/metadata-compat';
 
 const MAX_PREVIEW_BYTES = 100 * 1024 * 1024;
+const PREVIEW_BROWSER_CACHE_SECONDS = 5 * 60;
 
 function parseRecord(value: unknown): Record<string, unknown> {
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
@@ -118,10 +119,11 @@ export async function GET(
 
     return new Response(bytes, {
       headers: {
-        'Cache-Control': 'private, no-store',
+        'Cache-Control': `private, max-age=${PREVIEW_BROWSER_CACHE_SECONDS}`,
         'Content-Disposition': `inline; filename="document-${documentId}.pdf"`,
         'Content-Length': String(bytes.byteLength),
         'Content-Type': 'application/pdf',
+        'Vary': 'Cookie',
         'X-Content-Type-Options': 'nosniff',
       },
     });

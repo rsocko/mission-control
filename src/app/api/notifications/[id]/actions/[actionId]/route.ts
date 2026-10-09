@@ -288,12 +288,8 @@ export async function POST(
       }
 
       case 'create_task': {
-        // Mark as resolved, return task creation payload
-        await persistence.updateNotificationFromAction({
-          notificationId: id,
-          state: 'archived',
-          now,
-        });
+        // Return a draft for the client task form. The notification remains active
+        // until the user explicitly resolves it.
         return NextResponse.json({
           success: true,
           result: {

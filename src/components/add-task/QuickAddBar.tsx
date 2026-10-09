@@ -19,7 +19,7 @@ import {
 import { extractPendingTasks as extractPendingTasksFromPaste, normalizePendingTaskText as normalizePasteText, splitCompoundTask } from '@/lib/paste-parser';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { AddTaskModal } from './AddTaskModal';
+import { AddTaskModal, type TaskPrefill } from './AddTaskModal';
 import dynamic from 'next/dynamic';
 import type { TokenInputHandle } from './TokenInput';
 
@@ -283,6 +283,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const [parsed, setParsed] = useState<ParsedTask | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [modalPrefill, setModalPrefill] = useState<TaskPrefill | undefined>();
   const [mobileCaptureSemantics, setMobileCaptureSemantics] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [inlineToast, setInlineToast] = useState<InlineToast | null>(null);
@@ -686,10 +687,22 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   // On mobile the bar is visually hidden, so we open the full AddTaskModal directly.
   useEffect(() => {
     const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        defaultTags?: string[];
+        prefill?: TaskPrefill;
+      }>).detail;
+      if (detail?.prefill?.title?.trim()) {
+        setInput(detail.prefill.title.trim());
+        setParsed(null);
+        setModalPrefill(detail.prefill);
+        setMobileCaptureSemantics(false);
+        setShowModal(true);
+        return;
+      }
+
       // Check if we're on a narrow viewport (bar is hidden via `hidden sm:block`)
       const isMobile = window.innerWidth < 640;
       if (isMobile) {
-        const detail = (event as CustomEvent<{ defaultTags?: string[] }>).detail;
         const defaultTagTokens = detail?.defaultTags
           ?.map(tag => `#${tag.trim().replace(/\s+/g, '-')}`)
           .filter(token => token.length > 1)
@@ -2179,9 +2192,15 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
             initialListId={quickAddCtx.listFilter || undefined}
             initialTemplateId={selectedTemplateId || undefined}
             initialAddToMyDay={myDayActive}
+            prefill={modalPrefill}
             enableQuickAddSemantics={mobileCaptureSemantics}
             onClose={() => {
+              if (modalPrefill) {
+                setInput('');
+                setParsed(null);
+              }
               setShowModal(false);
+              setModalPrefill(undefined);
               setMobileCaptureSemantics(false);
               setSelectedTemplateId(null);
             }}
@@ -2190,6 +2209,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
               setCurrentInputParentTaskId(undefined);
               setParsed(null);
               setShowModal(false);
+              setModalPrefill(undefined);
               setMobileCaptureSemantics(false);
               setSelectedTemplateId(null);
               onTaskAdded?.();

@@ -1096,18 +1096,21 @@ export function NotificationDetail({
         if (seed) {
           setPromotion(seed);
         } else if (
-          (notification.connectorType === 'home-assistant'
+          result.result?.type !== 'create_task'
+          && (notification.connectorType === 'home-assistant'
             || notification.connectorType === 'paperclip')
           && action.requiresConfirmation
         ) {
           setAcceptedSourceActionFor(notification.id);
         }
-        toast.success(
-          result.result?.confirmation
+        if (result.result?.type !== 'create_task') {
+          toast.success(
+            result.result?.confirmation
             || (notification.connectorType === 'home-assistant'
               ? `${action.label} request accepted`
               : `${action.label} completed`),
-        );
+          );
+        }
       } else {
         toast.error(result.error || `${action.label} failed`);
       }
@@ -1602,7 +1605,13 @@ function ActionButton({
       `}
     >
       {isLoading ? <LoaderCircle size={12} className="animate-spin" /> : <Icon size={12} />}
-      <span>{isLoading && action.actionType === 'restart_home_assistant' ? 'Restarting…' : action.label}</span>
+      <span>
+        {isLoading && action.actionType === 'restart_home_assistant'
+          ? 'Restarting…'
+          : action.actionType === 'create_task'
+            ? `${action.label.replace(/…$/, '')}…`
+            : action.label}
+      </span>
       {action.opensExternal && <ExternalLink size={9} className="opacity-60" />}
       {isAiSuggested && (
         <span className="absolute -top-1.5 -right-1.5 flex items-center gap-0.5 text-[9px] bg-purple-900/60 text-purple-300 px-1 py-0 rounded-full border border-purple-700/40">

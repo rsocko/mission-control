@@ -11,7 +11,7 @@ export interface DocumentTask {
   sourceUrl: string | null;
   createdAt: string;
   updatedAt: string;
-  metadata: string | null;
+  metadata: string | Record<string, unknown> | null;
 }
 
 export interface DocumentTaskMetadata {
@@ -73,11 +73,13 @@ const VIEW_ACTION_TYPES: Partial<Record<DocumentView, ReadonlySet<string>>> = {
   filing: new Set(['file']),
 };
 
-export function parseDocumentTaskMetadata(metadata: string | null | undefined): DocumentTaskMetadata {
+export function parseDocumentTaskMetadata(
+  metadata: string | Record<string, unknown> | null | undefined,
+): DocumentTaskMetadata {
   if (!metadata) return {};
   try {
-    const parsed: unknown = JSON.parse(metadata);
-    if (!parsed || typeof parsed !== 'object') return {};
+    const parsed: unknown = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     const value = parsed as Record<string, unknown>;
     return {
       actionType: typeof value.actionType === 'string' ? value.actionType : undefined,

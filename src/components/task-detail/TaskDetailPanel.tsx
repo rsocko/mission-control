@@ -98,7 +98,6 @@ export function TaskDetailPanel({
   portalDialog = false,
   minPanelWidth = 280,
   fillContainer = false,
-  documentPreviewClassName,
   focusPanelOnMount = false,
   allowPopout = true,
   notesOpenRequest = null,
@@ -1114,7 +1113,6 @@ export function TaskDetailPanel({
           connectorType={task.connectorType}
           metadata={parsedMetadata}
           dueDate={task.dueDate}
-          className={documentPreviewClassName}
           sourceActions={task.connectorType === 'document-intelligence' ? (
             <OwlTaskActions
               key={`${task.id}:${parsedMetadata.owlUpdatedAt || task.updatedAt}`}

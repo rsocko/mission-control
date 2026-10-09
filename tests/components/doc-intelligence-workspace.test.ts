@@ -69,6 +69,39 @@ describe('document workspace semantics', () => {
     expect(filtered.map((item) => item.id)).toEqual(['review']);
   });
 
+  it('counts and filters API tasks with already-parsed metadata', () => {
+    const apiTasks = [
+      task('pay-api', {}, {
+        metadata: {
+          actionType: 'pay',
+          urgency: 'high',
+          correspondent: 'Acme',
+        },
+      }),
+      task('review-api', {}, {
+        metadata: {
+          actionType: 'review',
+          urgency: 'medium',
+          correspondent: 'Beta',
+        },
+      }),
+    ];
+
+    expect(countDocumentViews(apiTasks, NOW)).toMatchObject({
+      all: 2,
+      payments: 1,
+      'review-sign': 1,
+    });
+    expect(filterDocumentTasks(apiTasks, {
+      view: 'all',
+      actionType: 'pay',
+      category: 'all',
+      urgency: 'all',
+      correspondent: 'all',
+      query: '',
+    }, NOW).map((item) => item.id)).toEqual(['pay-api']);
+  });
+
   it('keeps deadlines first regardless of the selected secondary sort', () => {
     const sorted = sortDocumentTasks(tasks, 'amount', 'asc');
     const descending = sortDocumentTasks(tasks, 'amount', 'desc');
@@ -116,6 +149,7 @@ describe('document workspace semantics', () => {
 
   it('tolerates malformed connector metadata', () => {
     expect(parseDocumentTaskMetadata('{broken')).toEqual({});
+    expect(parseDocumentTaskMetadata([] as unknown as Record<string, unknown>)).toEqual({});
     expect(parseDocumentTaskMetadata(JSON.stringify({
       actionType: 42,
       amount: '12.50',

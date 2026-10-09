@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ArrowLeft,
   Archive,
   CalendarClock,
   CalendarPlus,
   CheckCircle2,
+  ChevronRight,
   Clock,
   CreditCard,
   FileCheck2,
@@ -17,6 +19,7 @@ import {
   Loader2,
   MessageSquareText,
   PenLine,
+  Plus,
   RefreshCw,
   ShieldAlert,
   SlidersHorizontal,
@@ -31,6 +34,7 @@ import { SortDropdown, type SortOption } from '@/components/toolbar/SortDropdown
 import { CollapsibleSection } from '@/components/dashboard/CollapsibleSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SearchInput } from '@/components/ui/SearchInput';
+import { Dropdown } from '@/components/ui/Dropdown';
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
 import { cn } from '@/lib/utils/cn';
@@ -48,7 +52,7 @@ import {
   type DocumentView,
   type SortDirection,
 } from './document-workspace';
-import type { TaskFieldUpdate } from '@/components/task-detail/task-detail-types';
+import type { TaskDetailMode, TaskFieldUpdate } from '@/components/task-detail/task-detail-types';
 
 type ActionTypeFilter = 'all' | 'pay' | 'respond' | 'file' | 'archive' | 'review' | 'sign' | 'schedule';
 type UrgencyFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
@@ -74,6 +78,13 @@ const URGENCY_COLORS: Record<string, string> = {
   high: 'text-orange-400 bg-orange-400/10 border-orange-400/30',
   medium: 'text-amber-300 bg-amber-300/10 border-amber-300/30',
   low: 'text-sky-400 bg-sky-400/10 border-sky-400/30',
+};
+
+const URGENCY_PRIORITY: Record<string, { code: string; label: string }> = {
+  critical: { code: 'P0', label: 'Critical urgency' },
+  high: { code: 'P1', label: 'High urgency' },
+  medium: { code: 'P2', label: 'Medium urgency' },
+  low: { code: 'P3', label: 'Low urgency' },
 };
 
 const VIEW_DEFINITIONS: ViewDefinition[] = [
@@ -116,9 +127,9 @@ export default function DocIntelligencePage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reviewAlerts, setReviewAlerts] = useState<Array<{ id: string; title: string; reviewUrl: string }>>([]);
   const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
+  const [detailMode, setDetailMode] = useState<Exclude<TaskDetailMode, 'mobile'>>('panel');
   const [selectedView, setSelectedView] = useState<DocumentView>('all');
   const [actionTypeFilter, setActionTypeFilter] = useState<ActionTypeFilter>('all');
-  const [categoryFilter, setCategoryFilter] = useState('all');
   const [urgencyFilter, setUrgencyFilter] = useState<UrgencyFilter>('all');
   const [correspondentFilter, setCorrespondentFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -204,11 +215,11 @@ export default function DocIntelligencePage() {
   const filteredTasks = useMemo(() => filterDocumentTasks(tasks, {
     view: selectedView,
     actionType: actionTypeFilter,
-    category: categoryFilter,
+    category: 'all',
     urgency: urgencyFilter,
     correspondent: correspondentFilter,
     query: searchQuery,
-  }), [tasks, selectedView, actionTypeFilter, categoryFilter, urgencyFilter, correspondentFilter, searchQuery]);
+  }), [tasks, selectedView, actionTypeFilter, urgencyFilter, correspondentFilter, searchQuery]);
 
   const sortedTasks = useMemo(
     () => sortDocumentTasks(filteredTasks, sortBy, sortDirection),
@@ -217,20 +228,14 @@ export default function DocIntelligencePage() {
   const taskGroups = useMemo(() => groupDocumentTasks(sortedTasks, groupBy), [sortedTasks, groupBy]);
   const viewCounts = useMemo(() => countDocumentViews(tasks), [tasks]);
   const actionTypeCounts = useMemo(() => countByMetadata(tasks, 'actionType'), [tasks]);
-  const categoryCounts = useMemo(() => countByMetadata(tasks, 'category'), [tasks]);
   const urgencyCounts = useMemo(() => countByMetadata(tasks, 'urgency'), [tasks]);
   const correspondentCounts = useMemo(() => countByMetadata(tasks, 'correspondent'), [tasks]);
   const correspondents = useMemo(
     () => Object.entries(correspondentCounts).sort(([left], [right]) => left.localeCompare(right)),
     [correspondentCounts],
   );
-  const categories = useMemo(
-    () => Object.entries(categoryCounts).sort(([left], [right]) => left.localeCompare(right)),
-    [categoryCounts],
-  );
   const activeFilters = [
     actionTypeFilter !== 'all' ? ACTION_TYPE_META[actionTypeFilter]?.label : null,
-    categoryFilter !== 'all' ? categoryFilter : null,
     urgencyFilter !== 'all' ? `${urgencyFilter} urgency` : null,
     correspondentFilter !== 'all' ? correspondentFilter : null,
   ].filter((value): value is string => !!value);
@@ -258,7 +263,6 @@ export default function DocIntelligencePage() {
   function clearFilters() {
     setSelectedView('all');
     setActionTypeFilter('all');
-    setCategoryFilter('all');
     setUrgencyFilter('all');
     setCorrespondentFilter('all');
     setSearchQuery('');
@@ -343,6 +347,18 @@ export default function DocIntelligencePage() {
             className="min-w-[180px] max-w-md flex-1 rounded-lg bg-[var(--surface-2)] px-2.5 py-1.5 focus-within:border-[var(--accent)]"
           />
 
+          <DocumentFilterBuilder
+            selectedView={selectedView}
+            onViewChange={changeView}
+            actionTypeFilter={actionTypeFilter}
+            onActionTypeChange={setActionTypeFilter}
+            urgencyFilter={urgencyFilter}
+            onUrgencyChange={setUrgencyFilter}
+            correspondentFilter={correspondentFilter}
+            onCorrespondentChange={setCorrespondentFilter}
+            correspondents={correspondents}
+          />
+
           <button
             type="button"
             onClick={() => setMobileFiltersOpen((open) => !open)}
@@ -393,9 +409,6 @@ export default function DocIntelligencePage() {
             actionTypeFilter={actionTypeFilter}
             onActionTypeChange={setActionTypeFilter}
             actionTypeCounts={actionTypeCounts}
-            categoryFilter={categoryFilter}
-            onCategoryChange={setCategoryFilter}
-            categories={categories}
             urgencyFilter={urgencyFilter}
             onUrgencyChange={setUrgencyFilter}
             urgencyCounts={urgencyCounts}
@@ -415,9 +428,6 @@ export default function DocIntelligencePage() {
             actionTypeFilter={actionTypeFilter}
             onActionTypeChange={setActionTypeFilter}
             actionTypeCounts={actionTypeCounts}
-            categoryFilter={categoryFilter}
-            onCategoryChange={setCategoryFilter}
-            categories={categories}
             urgencyFilter={urgencyFilter}
             onUrgencyChange={setUrgencyFilter}
             urgencyCounts={urgencyCounts}
@@ -489,7 +499,9 @@ export default function DocIntelligencePage() {
                   reason === 'task-removed' ? { history: 'replace' } : undefined,
                 )}
                 onUpdate={handleTaskUpdate}
-                mode="panel"
+                mode={detailMode}
+                onModeChange={setDetailMode}
+                portalDialog
                 minPanelWidth={420}
                 fillContainer
               />
@@ -520,9 +532,6 @@ function DocumentFilters({
   actionTypeFilter,
   onActionTypeChange,
   actionTypeCounts,
-  categoryFilter,
-  onCategoryChange,
-  categories,
   urgencyFilter,
   onUrgencyChange,
   urgencyCounts,
@@ -536,9 +545,6 @@ function DocumentFilters({
   actionTypeFilter: ActionTypeFilter;
   onActionTypeChange: (filter: ActionTypeFilter) => void;
   actionTypeCounts: Record<string, number>;
-  categoryFilter: string;
-  onCategoryChange: (filter: string) => void;
-  categories: Array<[string, number]>;
   urgencyFilter: UrgencyFilter;
   onUrgencyChange: (filter: UrgencyFilter) => void;
   urgencyCounts: Record<string, number>;
@@ -553,12 +559,37 @@ function DocumentFilters({
 
   return (
     <div className="space-y-1">
+      {correspondents.length > 0 && (
+        <CollapsibleSection
+          title="Correspondent"
+          collapsed={!!collapsedSections.correspondent}
+          onToggle={() => toggleSection('correspondent')}
+        >
+          <div className="px-1 pb-3">
+            <Select value={correspondentFilter} onValueChange={onCorrespondentChange}>
+              <SelectTrigger className="w-full" aria-label="Filter by correspondent">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All correspondents</SelectItem>
+                {correspondents.map(([name, count]) => (
+                  <SelectItem key={name} value={name}>{name} ({count})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CollapsibleSection>
+      )}
+
       <CollapsibleSection
-        title="Views"
+        title="Quick views"
         collapsed={!!collapsedSections.views}
         onToggle={() => toggleSection('views')}
       >
         <div className="space-y-0.5 px-1 pb-2">
+          <p className="px-2 pb-1 text-[11px] leading-4 text-[var(--text-muted)]">
+            Shortcuts that combine related action types or due dates.
+          </p>
           {VIEW_DEFINITIONS.map(({ id, label, icon: Icon }) => (
             <FilterRow
               key={id}
@@ -571,34 +602,6 @@ function DocumentFilters({
           ))}
         </div>
       </CollapsibleSection>
-
-      {categories.length > 0 && (
-        <CollapsibleSection
-          title="Category"
-          collapsed={!!collapsedSections.category}
-          onToggle={() => toggleSection('category')}
-        >
-          <div className="space-y-0.5 px-1 pb-2">
-            <FilterRow
-              label="All categories"
-              count={categories.reduce((sum, [, count]) => sum + count, 0)}
-              active={categoryFilter === 'all'}
-              icon={<Filter size={13} />}
-              onClick={() => onCategoryChange('all')}
-            />
-            {categories.map(([category, count]) => (
-              <FilterRow
-                key={category}
-                label={category}
-                count={count}
-                active={categoryFilter === category}
-                icon={<Filter size={13} />}
-                onClick={() => onCategoryChange(category)}
-              />
-            ))}
-          </div>
-        </CollapsibleSection>
-      )}
 
       <CollapsibleSection
         title="Action type"
@@ -645,7 +648,7 @@ function DocumentFilters({
           {(['critical', 'high', 'medium', 'low'] as const).map((urgency) => (
             <FilterRow
               key={urgency}
-              label={`${urgency.charAt(0).toUpperCase()}${urgency.slice(1)}`}
+              label={`${URGENCY_PRIORITY[urgency].code} · ${urgency.charAt(0).toUpperCase()}${urgency.slice(1)}`}
               count={urgencyCounts[urgency] ?? 0}
               active={urgencyFilter === urgency}
               icon={<span className={cn('h-2 w-2 rounded-full', {
@@ -660,27 +663,6 @@ function DocumentFilters({
         </div>
       </CollapsibleSection>
 
-      {correspondents.length > 0 && (
-        <CollapsibleSection
-          title="Correspondent"
-          collapsed={!!collapsedSections.correspondent}
-          onToggle={() => toggleSection('correspondent')}
-        >
-          <div className="px-1 pb-3">
-            <Select value={correspondentFilter} onValueChange={onCorrespondentChange}>
-              <SelectTrigger className="w-full" aria-label="Filter by correspondent">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All correspondents</SelectItem>
-                {correspondents.map(([name, count]) => (
-                  <SelectItem key={name} value={name}>{name} ({count})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CollapsibleSection>
-      )}
     </div>
   );
 }
@@ -735,10 +717,194 @@ function ActiveFilterChip({ label }: { label: string }) {
   );
 }
 
+type DocumentBuilderCategory = 'actionType' | 'urgency' | 'correspondent' | 'timing';
+
+function DocumentFilterBuilder({
+  selectedView,
+  onViewChange,
+  actionTypeFilter,
+  onActionTypeChange,
+  urgencyFilter,
+  onUrgencyChange,
+  correspondentFilter,
+  onCorrespondentChange,
+  correspondents,
+}: {
+  selectedView: DocumentView;
+  onViewChange: (view: DocumentView) => void;
+  actionTypeFilter: ActionTypeFilter;
+  onActionTypeChange: (filter: ActionTypeFilter) => void;
+  urgencyFilter: UrgencyFilter;
+  onUrgencyChange: (filter: UrgencyFilter) => void;
+  correspondentFilter: string;
+  onCorrespondentChange: (filter: string) => void;
+  correspondents: Array<[string, number]>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [category, setCategory] = useState<DocumentBuilderCategory | null>(null);
+  const [filterSearch, setFilterSearch] = useState('');
+
+  const categories: Array<{
+    id: DocumentBuilderCategory;
+    label: string;
+    icon: LucideIcon;
+  }> = [
+    { id: 'actionType', label: 'Action type', icon: FileCheck2 },
+    { id: 'urgency', label: 'Priority', icon: ShieldAlert },
+    { id: 'correspondent', label: 'Correspondent', icon: MessageSquareText },
+    { id: 'timing', label: 'Due date', icon: CalendarClock },
+  ];
+
+  const options: Array<{
+    value: string;
+    label: string;
+    detail?: string;
+    selected: boolean;
+  }> = category === 'actionType'
+    ? Object.entries(ACTION_TYPE_META).map(([value, meta]) => ({
+        value,
+        label: meta.label,
+        selected: actionTypeFilter === value,
+      }))
+    : category === 'urgency'
+      ? (['critical', 'high', 'medium', 'low'] as const).map((value) => ({
+          value,
+          label: `${URGENCY_PRIORITY[value].code} · ${value.charAt(0).toUpperCase()}${value.slice(1)}`,
+          selected: urgencyFilter === value,
+        }))
+      : category === 'correspondent'
+        ? correspondents.map(([value, count]) => ({
+            value,
+            label: value,
+            detail: String(count),
+            selected: correspondentFilter === value,
+          }))
+        : category === 'timing'
+          ? [
+              { value: 'due-soon', label: 'Due in the next 7 days', selected: selectedView === 'due-soon' },
+              { value: 'overdue', label: 'Overdue', selected: selectedView === 'overdue' },
+            ]
+          : [];
+  const normalizedSearch = filterSearch.trim().toLocaleLowerCase();
+  const visibleCategories = categories.filter((item) => (
+    !normalizedSearch || item.label.toLocaleLowerCase().includes(normalizedSearch)
+  ));
+  const visibleOptions = options.filter((item) => (
+    !normalizedSearch || item.label.toLocaleLowerCase().includes(normalizedSearch)
+  ));
+
+  function close() {
+    setOpen(false);
+    setCategory(null);
+    setFilterSearch('');
+  }
+
+  function apply(value: string) {
+    if (category === 'actionType') onActionTypeChange(value as ActionTypeFilter);
+    if (category === 'urgency') onUrgencyChange(value as UrgencyFilter);
+    if (category === 'correspondent') onCorrespondentChange(value);
+    if (category === 'timing') onViewChange(value as DocumentView);
+    close();
+  }
+
+  return (
+    <Dropdown
+      trigger={(
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)]"
+        >
+          <Plus size={13} className="text-[var(--accent-400)]" aria-hidden="true" />
+          Add Filter
+        </button>
+      )}
+      isOpen={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) {
+          setCategory(null);
+          setFilterSearch('');
+        }
+      }}
+      align="left"
+      width="w-72"
+      role="dialog"
+      ariaLabel={category ? `Select ${categories.find((item) => item.id === category)?.label} filter` : 'Add a document filter'}
+      className="p-1.5"
+    >
+      <div className="flex items-center gap-2 px-1 py-1">
+        {category && (
+          <button
+            type="button"
+            onClick={() => {
+              setCategory(null);
+              setFilterSearch('');
+            }}
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)]"
+            aria-label="Back to document filter types"
+          >
+            <ArrowLeft size={14} />
+          </button>
+        )}
+        <SearchInput
+          value={filterSearch}
+          onChange={setFilterSearch}
+          placeholder={category ? `Search ${categories.find((item) => item.id === category)?.label.toLocaleLowerCase()}…` : 'Search filters…'}
+          clearLabel="Clear filter search"
+          className="min-w-0 flex-1"
+        />
+      </div>
+      <div className="max-h-64 overflow-y-auto py-1">
+        {category
+          ? visibleOptions.map((option) => (
+              <button
+                type="button"
+                key={option.value}
+                onClick={() => apply(option.value)}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs',
+                  option.selected
+                    ? 'bg-[var(--accent)]/10 text-[var(--accent-300)]'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)]',
+                )}
+              >
+                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                {option.detail && (
+                  <span className="tabular-nums text-[var(--text-muted)]">{option.detail}</span>
+                )}
+                {option.selected && <CheckCircle2 size={13} aria-hidden="true" />}
+              </button>
+            ))
+          : visibleCategories.map(({ id, label, icon: Icon }) => (
+              <button
+                type="button"
+                key={id}
+                onClick={() => {
+                  setCategory(id);
+                  setFilterSearch('');
+                }}
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)]"
+              >
+                <Icon size={14} className="text-[var(--text-muted)]" aria-hidden="true" />
+                <span className="flex-1">{label}</span>
+                <ChevronRight size={13} className="text-[var(--text-muted)]" aria-hidden="true" />
+              </button>
+            ))}
+        {(category ? visibleOptions : visibleCategories).length === 0 && (
+          <p className="px-3 py-5 text-center text-xs text-[var(--text-muted)]">No matching filters</p>
+        )}
+      </div>
+    </Dropdown>
+  );
+}
+
 function ActionRow({ task, isSelected, onClick }: { task: DocumentTask; isSelected: boolean; onClick: () => void }) {
   const metadata = parseDocumentTaskMetadata(task.metadata);
   const actionType = metadata.actionType || 'review';
   const urgency = metadata.urgency || 'medium';
+  const urgencyPriority = URGENCY_PRIORITY[urgency] ?? { code: '—', label: 'Urgency not set' };
   const ActionIcon = ACTION_TYPE_META[actionType]?.icon || FileText;
   const actionColor = ACTION_TYPE_META[actionType]?.color || 'text-[var(--text-muted)]';
 
@@ -769,20 +935,26 @@ function ActionRow({ task, isSelected, onClick }: { task: DocumentTask; isSelect
           )}
           <div className="mt-2 flex items-center gap-2">
             <span className={cn(
-              'inline-flex rounded border px-1.5 py-0.5 text-xs font-medium capitalize',
+              'inline-flex rounded border px-1.5 py-0.5 text-xs font-semibold tabular-nums',
               URGENCY_COLORS[urgency] || 'text-[var(--text-muted)]',
-            )}>
-              {urgency}
+            )} title={urgencyPriority.label} aria-label={urgencyPriority.label}>
+              {urgencyPriority.code}
             </span>
             {metadata.correspondent && (
               <span className="truncate text-xs text-[var(--text-muted)]">{metadata.correspondent}</span>
             )}
-            {task.dueDate && (
-              <span className="ml-auto flex shrink-0 items-center gap-0.5 text-xs text-[var(--text-muted)]">
-                <Clock size={10} />
-                {formatShortDate(task.dueDate)}
+            <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px] text-[var(--text-muted)]">
+              <span className="flex items-center gap-0.5" title="Created date">
+                <CalendarPlus size={10} aria-hidden="true" />
+                {formatShortDate(task.createdAt)}
               </span>
-            )}
+              {task.dueDate && (
+                <span className="flex items-center gap-0.5 font-medium text-[var(--text-secondary)]" title="Due date">
+                  <Clock size={10} aria-hidden="true" />
+                  {formatShortDate(task.dueDate)}
+                </span>
+              )}
+            </span>
           </div>
         </div>
       </div>

@@ -115,6 +115,34 @@ describe('document workspace semantics', () => {
     ]);
   });
 
+  it('sorts the full result set by created date in either direction', () => {
+    const createdTasks = [
+      task('middle', { actionType: 'archive', category: 'records' }, {
+        dueDate: '2026-08-20',
+        createdAt: '2024-06-15T12:00:00Z',
+      }),
+      task('newest', { actionType: 'pay', category: 'finance' }, {
+        dueDate: '2026-08-19',
+        createdAt: '2025-03-10T12:00:00Z',
+      }),
+      task('oldest', { actionType: 'respond', category: 'correspondence' }, {
+        dueDate: '2026-09-01',
+        createdAt: '2023-01-05T12:00:00Z',
+      }),
+    ];
+
+    expect(sortDocumentTasks(createdTasks, 'createdAt', 'asc').map((item) => item.id)).toEqual([
+      'oldest',
+      'middle',
+      'newest',
+    ]);
+    expect(sortDocumentTasks(createdTasks, 'createdAt', 'desc').map((item) => item.id)).toEqual([
+      'newest',
+      'middle',
+      'oldest',
+    ]);
+  });
+
   it('uses action type and category only after deadlines tie', () => {
     const tied = [
       task('archive', { actionType: 'archive', category: 'records' }, { dueDate: '2026-08-25' }),

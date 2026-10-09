@@ -207,6 +207,7 @@ describe('document workspace semantics', () => {
       documentTitle: undefined,
       documentType: undefined,
       documentUrl: undefined,
+      documentCreatedAt: undefined,
       previewUrl: undefined,
       previewType: undefined,
       previewLabel: undefined,

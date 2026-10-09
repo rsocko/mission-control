@@ -12,6 +12,10 @@ import {
 } from './sqlite-notification-creation';
 import type { CreateNotificationInput } from './notification-delivery';
 import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
+import {
+  financeConnectorScopedReference,
+  financeIdentityNamespaceFromCredentials,
+} from '@/lib/connectors/monarch-money/identity';
 import type {
   FinanceInsightNotificationIngestItem,
   FinanceInsightNotificationReconcileItem,
@@ -22,6 +26,8 @@ import {
   type FinanceOperatorHealthSnapshot,
   type FinanceOperatorPersistence,
   type FinanceOperatorReadinessInputs,
+  type FinanceOperatorAttributionAccount,
+  type FinanceOperatorAttributionPreviewProjection,
 } from './finance-operator';
 import { syncFinanceProviderPresentation } from './sqlite-finance-insight-notification-lifecycle';
 
@@ -227,6 +233,25 @@ function defaultHandles(): SqliteFinanceOperatorHandles {
   return { sqlite, db };
 }
 
+function financeIdentityNamespace(
+  handles: SqliteFinanceOperatorHandles,
+  connectorId: string,
+): string {
+  const row = handles.sqlite.prepare(`
+    SELECT credentials
+    FROM connector_configs
+    WHERE id = ? AND deleted_at IS NULL
+  `).get(connectorId) as { credentials: string | null } | undefined;
+  if (!row) {
+    throw new FinanceOperatorPersistenceError('finance_connector_not_found', 404);
+  }
+  const namespace = financeIdentityNamespaceFromCredentials(row.credentials);
+  if (!namespace) {
+    throw new FinanceOperatorPersistenceError('finance_identity_state_unavailable');
+  }
+  return namespace;
+}
+
 export function createSqliteFinanceOperatorPersistence(
   handles: SqliteFinanceOperatorHandles = defaultHandles(),
   options: SqliteFinanceOperatorOptions = {},
@@ -293,6 +318,17 @@ export function createSqliteFinanceOperatorPersistence(
             startedAt: string | null;
           }
         | undefined;
+      const projection = handles.sqlite.prepare(`
+        SELECT status, successful_generation_id AS generationId,
+               last_successful_at AS lastSuccessfulAt, source_as_of AS sourceAsOf,
+               item_count AS itemCount, coverage_start AS coverageStart,
+               coverage_end AS coverageEnd, window_count AS windowCount,
+               bridge_contract_version AS bridgeContractVersion,
+               last_error_code AS lastErrorCode, updated_at AS updatedAt
+        FROM finance_insight_transaction_projection_state
+        WHERE connector_id = ?
+        LIMIT 1
+      `).get(connectorId) as FinanceOperatorHealthSnapshot['projection'] | undefined;
       const capture = handles.sqlite.prepare(`
         SELECT last_capture_outcome AS status,
                last_capture_attempt_at AS lastAttemptAt,
@@ -345,6 +381,7 @@ export function createSqliteFinanceOperatorPersistence(
             }
           : null,
         activeJob: activeJob ?? null,
+        projection: projection ?? null,
         capture: capture ?? null,
         evaluation: evaluation
           ? {
@@ -356,6 +393,120 @@ export function createSqliteFinanceOperatorPersistence(
               retryable: evaluation.retryable === 1,
             }
           : null,
+      };
+    },
+
+    async listAttributionAccounts(connectorId): Promise<readonly FinanceOperatorAttributionAccount[]> {
+      const namespace = financeIdentityNamespace(handles, connectorId);
+      const rows = handles.sqlite.prepare(`
+        SELECT upstream_account_id AS upstreamAccountId,
+               display_name AS displayName, type, mask,
+               is_active AS active
+        FROM finance_accounts
+        WHERE connector_id = ?
+          AND (
+            is_active = 1
+            OR EXISTS (
+              SELECT 1
+              FROM finance_transactions transactions
+              WHERE transactions.connector_instance_id = finance_accounts.connector_id
+                AND transactions.account_id = finance_accounts.upstream_account_id
+                AND transactions.lifecycle_status = 'active'
+            )
+          )
+        ORDER BY is_active DESC, display_name COLLATE NOCASE, upstream_account_id
+      `).all(connectorId) as Array<{
+        upstreamAccountId: string;
+        displayName: string;
+        type: string;
+        mask: string | null;
+        active: number;
+      }>;
+      return rows.map((row) => ({
+        accountRef: financeConnectorScopedReference(
+          namespace,
+          'account',
+          row.upstreamAccountId,
+        ),
+        displayName: row.displayName,
+        type: row.type,
+        mask: row.mask,
+        active: row.active === 1,
+      }));
+    },
+
+    async readAttributionPreview({ connectorId, limit }): Promise<FinanceOperatorAttributionPreviewProjection> {
+      const namespace = financeIdentityNamespace(handles, connectorId);
+      const count = handles.sqlite.prepare(`
+        SELECT COUNT(*) AS count
+        FROM finance_transactions
+        WHERE connector_instance_id = ? AND lifecycle_status = 'active'
+      `).get(connectorId) as { count: number };
+      const rows = handles.sqlite.prepare(`
+        SELECT upstream_transaction_id AS upstreamTransactionId,
+               date AS occurredOn, merchant_name AS merchantName,
+               account_id AS accountId, last_seen_at AS observedAt,
+               assigned_kid_id AS assignedKidId,
+               kid_assignment_method AS kidAssignmentMethod,
+               manual_decision_action AS manualDecisionAction,
+               manual_decided_at AS manualDecidedAt,
+               first_seen_at AS firstSeenAt
+        FROM finance_transactions
+        WHERE connector_instance_id = ? AND lifecycle_status = 'active'
+        ORDER BY date DESC, upstream_transaction_id
+        LIMIT ?
+      `).all(connectorId, limit) as Array<{
+        upstreamTransactionId: string;
+        occurredOn: string;
+        merchantName: string | null;
+        accountId: string | null;
+        observedAt: string;
+        assignedKidId: string | null;
+        kidAssignmentMethod: string | null;
+        manualDecisionAction: string | null;
+        manualDecidedAt: string | null;
+        firstSeenAt: string;
+      }>;
+      return {
+        items: rows.map((row) => {
+          if (!row.accountId) {
+            throw new FinanceOperatorPersistenceError(
+              'finance_attribution_projection_unavailable',
+            );
+          }
+          const decidedAt = row.manualDecidedAt ?? row.firstSeenAt;
+          const existingManualDecision = row.kidAssignmentMethod !== 'manual'
+            ? null
+            : row.manualDecisionAction === 'assign-kid' && row.assignedKidId
+              ? {
+                  action: 'assign-kid' as const,
+                  kidId: row.assignedKidId,
+                  decidedAt,
+                }
+              : {
+                  action: 'parent-expense' as const,
+                  kidId: null,
+                  decidedAt,
+                };
+          return {
+            sourceRef: financeConnectorScopedReference(
+              namespace,
+              'source',
+              row.upstreamTransactionId,
+            ),
+            occurredOn: row.occurredOn,
+            merchantName: row.merchantName ?? 'Unknown merchant',
+            accountRef: financeConnectorScopedReference(
+              namespace,
+              'account',
+              row.accountId,
+            ),
+            observedAt: row.observedAt,
+            existingManualDecision,
+          };
+        }),
+        total: count.count,
+        truncated: count.count > rows.length,
       };
     },
 

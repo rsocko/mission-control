@@ -23,6 +23,7 @@ export interface DocumentTaskMetadata {
   documentTitle?: string;
   documentType?: string;
   documentUrl?: string;
+  documentCreatedAt?: string;
   previewUrl?: string;
   previewType?: 'pdf' | 'iframe' | 'external' | 'image';
   previewLabel?: string;
@@ -90,6 +91,7 @@ export function parseDocumentTaskMetadata(
       documentTitle: typeof value.documentTitle === 'string' ? value.documentTitle : undefined,
       documentType: typeof value.documentType === 'string' ? value.documentType : undefined,
       documentUrl: typeof value.documentUrl === 'string' ? value.documentUrl : undefined,
+      documentCreatedAt: typeof value.documentCreatedAt === 'string' ? value.documentCreatedAt : undefined,
       previewUrl: typeof value.previewUrl === 'string' ? value.previewUrl : undefined,
       previewType: value.previewType === 'pdf'
         || value.previewType === 'iframe'

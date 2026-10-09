@@ -40,10 +40,10 @@
     "note": "Zero normal production web/API SQLite evaluation under PostgreSQL, per plan.md's final target, with only a minimal, audited, fail-closed exception list (throwing before any SQLite import/effect) surviving."
   },
   "counts": {
-    "apiRoutes": 290,
+    "apiRoutes": 291,
     "tierARoutes": 0,
     "tierBRoutes": 7,
-    "cleanRoutes": 283,
+    "cleanRoutes": 284,
     "directTaintSourceRoutes": 0,
     "transitiveOnlyTaintSourceRoutes": 0,
     "directDbNamespaceRoutes": 2,
@@ -101,6 +101,7 @@
     "src/app/api/connectors/[id]/finance/attention-repair/route.ts",
     "src/app/api/connectors/[id]/finance/attribution-exceptions/[exceptionId]/route.ts",
     "src/app/api/connectors/[id]/finance/attribution-exceptions/route.ts",
+    "src/app/api/connectors/[id]/finance/attribution-readiness/route.ts",
     "src/app/api/connectors/[id]/finance/recovery/route.ts",
     "src/app/api/connectors/[id]/health/route.ts",
     "src/app/api/connectors/[id]/label-normalize/route.ts",
@@ -403,6 +404,7 @@
     "src/app/api/connectors/[id]/finance/attention-repair/route.ts",
     "src/app/api/connectors/[id]/finance/attribution-exceptions/[exceptionId]/route.ts",
     "src/app/api/connectors/[id]/finance/attribution-exceptions/route.ts",
+    "src/app/api/connectors/[id]/finance/attribution-readiness/route.ts",
     "src/app/api/connectors/[id]/finance/recovery/route.ts",
     "src/app/api/connectors/[id]/health/route.ts",
     "src/app/api/connectors/[id]/label-normalize/route.ts",

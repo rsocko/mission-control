@@ -242,6 +242,7 @@ if (connectionString) {
         sync: null,
         attribution: null,
         activeJob: null,
+        projection: null,
         capture: null,
         evaluation: null,
       });

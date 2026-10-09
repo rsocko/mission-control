@@ -16,8 +16,10 @@ This runbook composes the repair delivered by PR #1563 with the scheduler and
 Finance Insight controls delivered by its stacked readiness PR. Complete the
 steps in order. Keep the Tyrion connector disabled and all notification,
 presentation, action, and Finance Insight delivery gates off until the steps
-that explicitly enable them. Readiness calls query only local metadata and do
-not contact Monarch or Tyrion.
+that explicitly enable them. Metadata readiness calls query only local state
+and do not contact Monarch or Tyrion. The explicitly invoked attribution
+preview contacts Tyrion but does not persist attribution, notifications,
+tasks, actions, or delivery work.
 
 All operator mutations require the existing trusted Finance mutation boundary
 and an `Idempotency-Key` of 16-160 safe characters. Responses and audit rows
@@ -73,6 +75,33 @@ Mission Control v2 sends a required opaque `accountRef` and never sends Monarch
 account IDs, masks, connector identity namespaces, or identity key versions.
 The persisted service token is authentication only.
 
+Open **Attribution policy readiness** in the Tyrion connector editor. The
+account list pairs the operator-visible display name/type/mask hint with the
+exact already-derived `account-v1:` reference. Copy those references into
+explicit Tyrion account rules through the linked private Tyrion configuration
+UI. The Mission Control response never contains raw provider account IDs or the
+identity namespace. Do not derive references independently, substitute Bridge
+account IDs, or configure a guessed default assignment.
+
+After saving the Tyrion policy, set
+`TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` to that exact active version and
+redeploy both Mission Control web and worker. Then run **Run no-write preview**
+in Settings, or invoke the trusted endpoint:
+
+```bash
+curl --fail-with-body -X POST \
+  "$MC_ORIGIN/api/connectors/$CONNECTOR_ID/finance/attribution-readiness" \
+  -H "X-MC-API-Key: ${MC_API_KEY}"
+```
+
+The preview reads at most 5,000 current local transactions, sends bounded
+100-item-or-smaller batches to Tyrion, and returns aggregate status, reason,
+method, confidence, and review-state counts only. It must report
+`complete=true`, `truncated=false`, `ready=true`, and zero pending review before
+another canary is authorized. A truncated or empty projection is never ready.
+Any intentionally accepted residual review outcome requires a separate
+documented release decision; do not infer acceptance from nonzero rule counts.
+
 ## 3. Metadata-only readiness
 
 ```bash
@@ -83,6 +112,14 @@ curl --fail-with-body \
 
 Before repair, record the returned stable blockers and metadata counts. Do not
 continue if the response contains private finance content or key material.
+
+Also inspect `insights.projection` in the connector health response. A usable
+Finance Insight history projection reports `status=succeeded`,
+`windowCount=37`, current `sourceAsOf`, non-null coverage and item count, and no
+`lastErrorCode`. When capture reports `transaction_projection_unavailable`,
+use the projection's stable `lastErrorCode` to repair the separate 37-month
+history sync before canary authorization; a fresh 90-day operational sync does
+not prove this projection succeeded.
 
 The readiness, health, recovery, attribution-review, manual KID, and cutover
 web paths use the same backend-selected Finance persistence composition as the

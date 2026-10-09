@@ -6,7 +6,6 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { parse } from 'yaml';
 import {
-  estimatedPostgresTestWeight,
   partitionPostgresIntegrationTests,
   POSTGRES_TEST_RUNTIME_MS,
 } from './select-postgres-integration-shard.mjs';
@@ -143,10 +142,16 @@ for (const file of workflowFiles) {
   assert.ok(workflow.on && typeof workflow.on === 'object', `${file} must declare event triggers`);
   assert.ok(!('pull_request_target' in workflow.on), `${file} must not use pull_request_target`);
   assert.ok(!('workflow_call' in workflow.on), `${file} must not be reusable by another workflow`);
+  const sourceWithoutApprovedSecrets = [
+    '${{ secrets.DOCKERHUB_USERNAME }}',
+    '${{ secrets.DOCKERHUB_TOKEN }}',
+  ].reduce((remainingSource, approvedSecret) => {
+    return remainingSource.replaceAll(approvedSecret, '');
+  }, source);
   assert.doesNotMatch(
-    source,
+    sourceWithoutApprovedSecrets,
     /\$\{\{(?:(?!\}\})[\s\S])*\bsecrets\b/iu,
-    `${file} must not reference protected secrets`,
+    `${file} must not reference unapproved protected secrets`,
   );
   assert.equal(
     workflow.env?.NPM_CONFIG_REGISTRY,
@@ -226,6 +231,7 @@ for (const file of workflowFiles) {
       {
         docs_only: '${{ steps.classify.outputs.docs_only }}',
         impeccable_changed: '${{ steps.classify.outputs.impeccable_changed }}',
+        postgres_scope: '${{ steps.classify.outputs.postgres_scope }}',
         vendor_changed: '${{ steps.classify.outputs.vendor_changed }}',
         workflow_policy_changed: '${{ steps.classify.outputs.workflow_policy_changed }}',
       },
@@ -241,9 +247,11 @@ for (const file of workflowFiles) {
       'git diff --no-renames --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}"',
       'docs/*|README.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|DESIGN.md|PRODUCT.md|SECURITY.md|SUPPORT.md',
       '.github/agents/*|.github/hooks/impeccable.json|.github/skills/impeccable/*|.github/workflows/ci.yml|.impeccable/live/config.json|scripts/validate-impeccable.mjs|src/app/layout.tsx',
+      'public/*|src/app/*.css|src/app/*/components/*|src/app/*/error.tsx|src/app/*/layout.tsx|src/app/*/loading.tsx|src/app/*/not-found.tsx|src/app/*/page.tsx|src/components/*|src/lib/hooks/*|tests/components/*|tests/lib/constants/connector-icons.test.ts',
       '.gitattributes|vendor/generic-graph-workbench/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json',
       '.github/workflows/*|.impeccable/live/config.json|package.json|package-lock.json|scripts/validate-workflows.mjs',
       'echo "impeccable_changed=${impeccable_changed}" >> "$GITHUB_OUTPUT"',
+      'echo "postgres_scope=${postgres_scope}" >> "$GITHUB_OUTPUT"',
       'echo "vendor_changed=${vendor_changed}" >> "$GITHUB_OUTPUT"',
       'echo "workflow_policy_changed=${workflow_policy_changed}" >> "$GITHUB_OUTPUT"',
       'if [[ "${found_change}" != "true" ]]',
@@ -368,8 +376,8 @@ for (const file of workflowFiles) {
     );
     assert.equal(
       postgresIntegrationShards.name,
-      'PostgreSQL integration worker (${{ matrix.shard }}/4)',
-      'PostgreSQL integration shards must not claim the required check name',
+      'PostgreSQL integration worker',
+      'PostgreSQL integration worker must not claim the required check name',
     );
     for (const invariant of [
       'always()',
@@ -378,18 +386,13 @@ for (const file of workflowFiles) {
     ]) {
       assert.ok(
         postgresIntegrationShards.if.includes(invariant),
-        `PostgreSQL integration shards must enforce ${invariant}`,
+        `PostgreSQL integration worker must enforce ${invariant}`,
       );
     }
-    assert.deepEqual(
-      postgresIntegrationShards.strategy?.matrix?.shard,
-      [1, 2, 3, 4],
-      'ci.yml must run four PostgreSQL integration shards',
-    );
     assert.equal(
-      postgresIntegrationShards.strategy?.['fail-fast'],
-      false,
-      'PostgreSQL integration shards must all report their result',
+      postgresIntegrationShards.strategy,
+      undefined,
+      'PostgreSQL integration must use one worker',
     );
     assert.equal(
       postgresIntegrationShards.steps?.some((step) => step.name?.startsWith('Skip ')),
@@ -400,6 +403,14 @@ for (const file of workflowFiles) {
       postgresIntegrationShards.services?.postgres?.image,
       'pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f',
       'PostgreSQL integration must use the approved pgvector image digest',
+    );
+    assert.deepEqual(
+      postgresIntegrationShards.services?.postgres?.credentials,
+      {
+        username: '${{ secrets.DOCKERHUB_USERNAME }}',
+        password: '${{ secrets.DOCKERHUB_TOKEN }}',
+      },
+      'PostgreSQL integration must authenticate its Docker Hub service pull',
     );
     assert.equal(
       postgresIntegrationShards['timeout-minutes'],
@@ -431,26 +442,46 @@ for (const file of workflowFiles) {
     assert.equal(
       postgresIntegrationTests?.run,
       `set -euo pipefail
-mapfile -t test_files < <(
-  node scripts/select-postgres-integration-shard.mjs "\${{ matrix.shard }}" 4
-)
+case "\${POSTGRES_SCOPE}" in
+  full)
+    mapfile -t test_files < <(
+      node scripts/select-postgres-integration-shard.mjs 1 1
+    )
+    ;;
+  smoke)
+    test_files=(
+      tests/db/postgres-connection.integration.test.ts
+      tests/db/postgres-schema.integration.test.ts
+      tests/db/postgres-web-sync-composition.integration.test.ts
+    )
+    ;;
+  *)
+    echo "Invalid PostgreSQL integration scope: \${POSTGRES_SCOPE}" >&2
+    exit 1
+    ;;
+esac
 test "\${#test_files[@]}" -gt 0
 npm test -- --run --no-file-parallelism "\${test_files[@]}"
 `,
-      'PostgreSQL integration shards must use the runtime-weighted file partition',
+      'PostgreSQL integration must choose the full suite or conservative smoke coverage',
+    );
+    assert.equal(
+      postgresIntegrationTests?.env?.POSTGRES_SCOPE,
+      "${{ github.event_name == 'pull_request' && needs.changes.outputs.postgres_scope || 'full' }}",
+      'PostgreSQL integration must run fully outside pull requests',
     );
     const postgresTestFiles = (await readdir(path.resolve('tests', 'db')))
       .filter((testFile) => /^postgres-.*\.integration\.test\.ts$/u.test(testFile))
       .sort();
-    const postgresTestShards = partitionPostgresIntegrationTests(postgresTestFiles, 4);
+    const postgresTestShards = partitionPostgresIntegrationTests(postgresTestFiles, 1);
     assert.ok(
       postgresTestShards.every((testFiles) => testFiles.length > 0),
-      'Every PostgreSQL integration shard must contain tests',
+      'The PostgreSQL integration worker must contain tests',
     );
     assert.deepEqual(
       postgresTestShards.flat().sort(),
       postgresTestFiles,
-      'Runtime-weighted PostgreSQL shards must cover every integration test exactly once',
+      'The PostgreSQL integration worker must cover every integration test exactly once',
     );
     assert.deepEqual(
       Object.keys(POSTGRES_TEST_RUNTIME_MS)
@@ -458,17 +489,10 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
       [],
       'PostgreSQL runtime weights must not reference deleted integration tests',
     );
-    const postgresShardWeights = postgresTestShards.map((testFiles) =>
-      testFiles.reduce((total, testFile) => total + estimatedPostgresTestWeight(testFile), 0)
-    );
     assert.equal(
       postgresTestShards[0].includes('postgres-packaged-workflow-parity.integration.test.ts'),
       true,
-      'The longest PostgreSQL integration test must anchor the first shard',
-    );
-    assert.ok(
-      Math.max(...postgresShardWeights.slice(1)) < postgresShardWeights[0],
-      'Other PostgreSQL shards must remain lighter than the irreducible longest-test shard',
+      'The PostgreSQL integration worker must include the longest integration test',
     );
     const pgvectorBenchmark = postgresIntegrationShards.steps?.find(
       (step) => step.name === 'Run pgvector 100k benchmark gate',
@@ -482,7 +506,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     assert.equal(
       pgvectorContainer?.if,
-      "github.event_name == 'workflow_dispatch' && matrix.shard == 3",
+      "github.event_name == 'workflow_dispatch'",
       'PostgreSQL container discovery must run only with the manual benchmark',
     );
     assert.equal(
@@ -492,8 +516,8 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     assert.equal(
       pgvectorBenchmark?.if,
-      "github.event_name == 'workflow_dispatch' && matrix.shard == 3",
-      'The pgvector benchmark must run only on a light shard of manually dispatched CI',
+      "github.event_name == 'workflow_dispatch'",
+      'The pgvector benchmark must run only in manually dispatched CI',
     );
     assert.equal(
       pgvectorBenchmark?.env?.MC_BENCHMARK_DIMENSIONS,

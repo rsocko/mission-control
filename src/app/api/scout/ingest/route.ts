@@ -276,6 +276,7 @@ function buildScoutTags(slugs: readonly string[], now: string): ScoutTagInsert[]
 // ─── POST Handler ───────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   try {
     // Auth check
     if (!hasValidApiKey(request)) {
@@ -848,6 +849,25 @@ export async function POST(request: Request) {
           : [];
       }),
     );
+
+    await repositories.syncRuns.append({
+      id: crypto.randomUUID(),
+      connectorId: CONNECTOR_INSTANCE_ID,
+      success: true,
+      tasksAdded: created,
+      tasksUpdated: updated,
+      tasksRemoved: 0,
+      tasksPushed: 0,
+      localOnlyProtected: 0,
+      notificationsAdded: 0,
+      errors: [],
+      details: [],
+      syncedAt,
+      durationMs: Math.max(1, Date.now() - startedAt),
+      jobId: null,
+      identityMode: null,
+      identityModeRevision: null,
+    });
 
     logger.info(`[scout-ingest] Processed ${validatedItems.length} items: ${created} created, ${updated} updated, ${triaged} triaged, ${skipped} skipped`);
 

@@ -52,7 +52,11 @@ import {
   type DocumentView,
   type SortDirection,
 } from './document-workspace';
-import type { TaskDetailMode, TaskFieldUpdate } from '@/components/task-detail/task-detail-types';
+import type {
+  TaskDetailCloseReason,
+  TaskDetailMode,
+  TaskFieldUpdate,
+} from '@/components/task-detail/task-detail-types';
 
 type ActionTypeFilter = 'all' | 'pay' | 'respond' | 'file' | 'archive' | 'review' | 'sign' | 'schedule';
 type UrgencyFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
@@ -246,6 +250,19 @@ export default function DocIntelligencePage() {
   function changeView(view: DocumentView) {
     setSelectedView(view);
     localStorage.setItem(STORAGE_KEYS.view, view);
+  }
+
+  function selectDocumentTask(taskId: string) {
+    setDetailMode('panel');
+    taskSelection.selectTask(taskId);
+  }
+
+  function closeDocumentTask(reason?: TaskDetailCloseReason) {
+    setDetailMode('panel');
+    setSelectedTaskId(
+      null,
+      reason === 'task-removed' ? { history: 'replace' } : undefined,
+    );
   }
 
   function handleSortChange(nextSort: string, nextDirection: SortDirection) {
@@ -479,7 +496,7 @@ export default function DocIntelligencePage() {
                         key={task.id}
                         task={task}
                         isSelected={task.id === selectedTaskId}
-                        onClick={() => taskSelection.selectTask(task.id)}
+                        onClick={() => selectDocumentTask(task.id)}
                       />
                     ))}
                   </div>
@@ -493,11 +510,9 @@ export default function DocIntelligencePage() {
           <section className="flex min-w-0 flex-1 overflow-hidden bg-[var(--surface-0)]" aria-label="Document action details">
             <div className="h-full min-w-0 flex-1">
               <TaskDetailPanel
+                key={selectedTaskId}
                 taskId={selectedTaskId}
-                onClose={(reason) => setSelectedTaskId(
-                  null,
-                  reason === 'task-removed' ? { history: 'replace' } : undefined,
-                )}
+                onClose={closeDocumentTask}
                 onUpdate={handleTaskUpdate}
                 mode={detailMode}
                 onModeChange={setDetailMode}

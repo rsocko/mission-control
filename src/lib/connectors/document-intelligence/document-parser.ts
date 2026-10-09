@@ -130,6 +130,7 @@ export function mapActionToTask(
     title: buildTaskTitle(action),
     description: action.summary,
     status: mapActionStatus(action.status),
+    statusReason: mapActionStatusReason(action.status),
     priority: mapUrgency(action.urgency),
     dueDate: action.due_date || undefined,
     createdAt: action.created_at || new Date().toISOString(),
@@ -597,6 +598,19 @@ function mapActionStatus(status: DocAction['status']): TaskItem['status'] {
     case 'pending':
       return 'todo';
     default: return 'todo';
+  }
+}
+
+function mapActionStatusReason(status: DocAction['status']): TaskItem['statusReason'] {
+  switch (status) {
+    case 'completed':
+    case 'done':
+      return 'completed';
+    case 'dismissed':
+    case 'not_an_action':
+      return 'not_planned';
+    default:
+      return undefined;
   }
 }
 

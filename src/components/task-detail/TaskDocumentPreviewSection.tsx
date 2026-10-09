@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ExternalLink, FileText, Maximize2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
@@ -17,6 +17,7 @@ export interface TaskDocumentPreviewSectionProps {
   dueDate?: string | null;
   className?: string;
   fillAvailableSpace?: boolean;
+  sourceActions?: ReactNode;
 }
 
 function normalizePreviewUrl(value: string | undefined): string | null {
@@ -106,6 +107,7 @@ export function TaskDocumentPreviewSection({
   dueDate,
   className,
   fillAvailableSpace = false,
+  sourceActions,
 }: TaskDocumentPreviewSectionProps) {
   const [expanded, setExpanded] = useState(false);
   const isDocumentIntelligence = connectorType === 'document-intelligence';
@@ -126,6 +128,8 @@ export function TaskDocumentPreviewSection({
     || previewType === 'iframe'
     || previewType === 'image';
   const owlUrl = normalizeDocHubUrl(metadata.docHubDocumentUrl || metadata.docHubUrl);
+  const paperlessLabel = (metadata.previewLabel || 'Open in Paperless-ngx')
+    .replace(/^View in /, 'Open in ');
   const formattedDueDate = dueDate
     ? parseLocalDate(dueDate)?.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
     : null;
@@ -220,7 +224,7 @@ export function TaskDocumentPreviewSection({
               className="flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-100 hover:text-[var(--text-primary)]"
             >
               <ExternalLink size={11} />
-              {metadata.previewLabel || 'Open Doc'}
+              {paperlessLabel}
             </a>
             {owlUrl ? (
               <a
@@ -243,6 +247,8 @@ export function TaskDocumentPreviewSection({
               </button>
             ) : null}
           </div>
+
+          {sourceActions}
 
           {canEmbed && typeof document !== 'undefined' && createPortal(
             <Modal
@@ -286,7 +292,7 @@ export function TaskDocumentPreviewSection({
                     className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--accent-hover)]"
                   >
                     <ExternalLink size={11} />
-                    Open original
+                    {paperlessLabel}
                   </a>
                 </div>
               </div>

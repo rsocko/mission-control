@@ -37,7 +37,7 @@ export interface TaskSourceActionsSectionProps {
   canDeleteTask: boolean;
   deleteLabel: string;
   onDelete: () => void;
-  /** Connector-specific actions that should remain separate from global lifecycle values. */
+  /** Connector-specific actions that do not belong to another content surface. */
   sourceSpecificActions?: ReactNode;
 }
 
@@ -71,13 +71,13 @@ export function TaskSourceActionsSection({
 
   return (
     <section className={cn(
-      'overflow-visible rounded-xl border border-[var(--border)] bg-[var(--surface-0)]/45',
+      'min-w-0 overflow-visible rounded-xl border border-[var(--border)] bg-[var(--surface-0)]/45',
       (mode === 'panel' || mode === 'mobile') && 'order-7',
       mode === 'dialog' && 'col-start-2 row-start-4',
       mode === 'workspace' && 'col-start-2 row-start-4',
     )}>
-      <h3 className="flex min-h-11 items-center border-b border-[var(--border-subtle)] px-3 text-sm font-semibold text-[var(--text-heading)]">Source &amp; actions</h3>
-      <div className="flex flex-wrap items-center gap-2 p-3">
+      <h3 className="flex min-h-11 items-center border-b border-[var(--border-subtle)] px-3 text-sm font-semibold text-[var(--text-heading)]">Source</h3>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 p-3">
         {sourceSpecificActions}
         {dispositionOptions.length > 0 && (
           <div className="w-full rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] p-2.5">
@@ -120,10 +120,10 @@ export function TaskSourceActionsSection({
 
         {/* Move to source (cross-source) — always available, even for read-only connectors */}
         {hasWritableConnectors && (
-          <div className="flex items-center">
+          <div className="flex min-w-0 items-center">
             <button
               onClick={onOpenMoveDialog}
-              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--accent-600)] bg-[var(--accent-600)] px-2.5 text-xs font-medium text-white transition-colors hover:border-[var(--accent-500)] hover:bg-[var(--accent-500)]"
+              className="flex min-h-9 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-[var(--accent-600)] bg-[var(--accent-600)] px-2.5 text-xs font-medium text-white transition-colors hover:border-[var(--accent-500)] hover:bg-[var(--accent-500)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
             >
               <ArrowLeftRight size={13} />
               Move source
@@ -133,13 +133,13 @@ export function TaskSourceActionsSection({
 
         {/* Source link */}
         {deepLink && (
-          <div className="flex items-center">
+          <div className="flex min-w-0 items-center">
             <Tooltip content={`Open in ${deepLink.label}`}>
               <a
                 href={deepLink.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                className="inline-flex min-h-9 max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               >
                 {deepLink.icon
                   ? <Image src={deepLink.icon} alt="" width={14} height={14} className="flex-shrink-0" />

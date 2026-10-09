@@ -1262,7 +1262,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
     });
 
     const warning = (await screen.findByText('Duplicate candidate')).closest('section')!;
-    const source = screen.getByRole('heading', { name: 'Source & actions' }).closest('section')!;
+    const source = screen.getByRole('heading', { name: 'Source' }).closest('section')!;
     expectBefore(warning, source);
   });
 
@@ -1318,7 +1318,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
     const planning = screen.getByRole('heading', { name: 'Planning' }).closest('section')!;
     const subtasks = screen.getByRole('heading', { name: 'Subtasks' }).closest('section')!;
     const relationships = container.querySelector('[data-task-relationships-slot]')!;
-    const source = screen.getByRole('heading', { name: 'Source & actions' }).closest('section')!;
+    const source = screen.getByRole('heading', { name: 'Source' }).closest('section')!;
     const attachments = screen.getByText('Attachment list').parentElement!;
 
     expect(notes).toHaveClass('order-1');
@@ -2050,6 +2050,45 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(screen.queryByRole('button', { name: 'Mark Complete' })).not.toBeInTheDocument();
   });
 
+  it("maps an OWL Won't do selection to Mission Control Not Planned", async () => {
+    const documentTask = {
+      ...task,
+      connectorType: 'document-intelligence',
+      supportedStatusValues: ['todo', 'done', 'cancelled'],
+      metadata: JSON.stringify({
+        previewUrl: 'https://paperless.example/documents/1',
+        documentUrl: 'https://paperless.example/documents/1',
+        documentId: 1,
+        previewType: 'external',
+      }),
+    };
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1' && init?.method === 'PATCH') return json({ success: true });
+      if (url === '/api/tasks/task-1') return json({ task: documentTask });
+      if (url === '/api/features') return json({ taskDestinations: [] });
+      if (url === '/api/hub-projects?includeHidden=true') return json({ projects: [] });
+      if (url === '/api/connectors') return json({ connectors: [] });
+      if (url.includes('detect-duplicates')) return json({ duplicates: [] });
+      return json({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Task status' }));
+    fireEvent.click(screen.getByRole('option', { name: "Won't do" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tasks/task-1',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'cancelled', statusReason: 'not_planned' }),
+      }),
+    ));
+    expect(screen.getByText('Not Planned')).toBeInTheDocument();
+  });
+
   it.each([
     { label: 'active editable', status: 'todo', canEditStatus: true, expectedCompleteActions: 1, expectedDisabled: false },
     { label: 'read-only', status: 'todo', canEditStatus: false, expectedCompleteActions: 1, expectedDisabled: true },
@@ -2082,7 +2121,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
 
-    expect(await screen.findByRole('link', { name: 'Open Doc' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Open in Paperless-ngx' })).toBeInTheDocument();
     const completeActions = screen.queryAllByRole('button', { name: 'Mark Complete' });
     expect(completeActions).toHaveLength(expectedCompleteActions);
     if (completeActions[0]) expect(completeActions[0]).toHaveProperty('disabled', expectedDisabled);

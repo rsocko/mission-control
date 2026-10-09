@@ -853,7 +853,13 @@ export function TaskDetailPanel({
             statusSaveLabel: saveLabel('status'),
             microStatusBlockedReason: blockedReason('microStatus'),
             microStatusSaveLabel: saveLabel('microStatus'),
-            onStatusChange: (status) => { void mutations.handleStatusChange(status); },
+            onStatusChange: (status) => {
+              if (task.connectorType === 'document-intelligence' && status === 'cancelled') {
+                void mutations.handleCloseWithReason('not_planned');
+                return;
+              }
+              void mutations.handleStatusChange(status);
+            },
             onComplete: mutations.handleComplete,
             showMicroStatusPicker: mutations.showMicroStatusPicker,
             onToggleMicroStatusPicker: mutations.toggleMicroStatusPicker,
@@ -1097,7 +1103,19 @@ export function TaskDetailPanel({
           canDeleteTask={canDeleteTask}
           deleteLabel={taskRemovalLabel(task.editPolicy)}
           onDelete={mutations.handleDelete}
-          sourceSpecificActions={task.connectorType === 'document-intelligence' ? (
+          sourceSpecificActions={task.connectorType === 'github-issues' && /^[^/:]+\/[^/:]+:[1-9]\d*$/.test(task.sourceId ?? '') ? (
+            <GitHubPullRequests key={task.id} taskId={task.id} />
+          ) : undefined}
+        />
+
+        <TaskDocumentPreviewSection
+          taskId={taskId}
+          mode={mode}
+          connectorType={task.connectorType}
+          metadata={parsedMetadata}
+          dueDate={task.dueDate}
+          className={documentPreviewClassName}
+          sourceActions={task.connectorType === 'document-intelligence' ? (
             <OwlTaskActions
               key={`${task.id}:${parsedMetadata.owlUpdatedAt || task.updatedAt}`}
               taskId={task.id}
@@ -1116,18 +1134,7 @@ export function TaskDetailPanel({
                 });
               }}
             />
-          ) : task.connectorType === 'github-issues' && /^[^/:]+\/[^/:]+:[1-9]\d*$/.test(task.sourceId ?? '') ? (
-            <GitHubPullRequests key={task.id} taskId={task.id} />
           ) : undefined}
-        />
-
-        <TaskDocumentPreviewSection
-          taskId={taskId}
-          mode={mode}
-          connectorType={task.connectorType}
-          metadata={parsedMetadata}
-          dueDate={task.dueDate}
-          className={documentPreviewClassName}
         />
 
         <TaskAttachmentCard

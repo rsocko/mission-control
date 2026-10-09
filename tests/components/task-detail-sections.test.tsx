@@ -325,7 +325,7 @@ describe('TaskDocumentPreviewSection', () => {
     expect(screen.getByText('$42.50')).toBeInTheDocument();
     expect(screen.getByText('high')).toBeInTheDocument();
     expect(screen.getByTitle('Preview of Invoice 4711')).toHaveAttribute('src', 'https://docs.example/1');
-    expect(screen.getByRole('link', { name: /View in Paperless-ngx/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Open in Paperless-ngx/ })).toHaveAttribute(
       'href',
       'https://paperless.example/documents/1',
     );
@@ -416,7 +416,7 @@ describe('TaskDocumentPreviewSection', () => {
       '/api/tasks/task%2F42/document-preview',
     );
     expect(preview).not.toHaveAttribute('sandbox');
-    expect(screen.getByRole('link', { name: /Open Doc/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Open in Paperless-ngx/ })).toHaveAttribute(
       'href',
       'https://paperless.example/documents/42/details',
     );
@@ -475,6 +475,7 @@ describe('TaskSourceActionsSection', () => {
       'bg-[var(--accent-600)]',
       'text-white',
     );
+    expect(screen.getByRole('heading', { name: 'Source' })).toBeInTheDocument();
     const deepLink = screen.getByRole('link', { name: /Open in GitHub/ });
     expect(deepLink).toHaveAttribute(
       'href',

@@ -109,7 +109,8 @@ describe('FinanceQuickReview', () => {
 
     render(<FinanceQuickReview />);
     fireEvent.click(await screen.findByRole('button', { name: /Correct/ }));
-    fireEvent.change(screen.getByLabelText('Kids attribution'), { target: { value: 'kid-alex' } });
+    fireEvent.click(screen.getByLabelText('Kids attribution'));
+    fireEvent.click(screen.getByRole('option', { name: 'Alex' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save correction' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -142,7 +143,8 @@ describe('FinanceQuickReview', () => {
 
     render(<FinanceQuickReview />);
     fireEvent.click(await screen.findByRole('button', { name: /Correct/ }));
-    fireEvent.change(screen.getByLabelText('Kids attribution'), { target: { value: 'kid-alex' } });
+    fireEvent.click(screen.getByLabelText('Kids attribution'));
+    fireEvent.click(screen.getByRole('option', { name: 'Alex' }));
     fireEvent.click(screen.getByRole('button', { name: 'Preview reusable Kids rule' }));
 
     expect(await screen.findByText(/This advisory has not been applied/)).toBeInTheDocument();

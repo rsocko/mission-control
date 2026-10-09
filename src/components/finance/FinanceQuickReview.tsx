@@ -13,7 +13,6 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
-  ChevronDown,
   CircleHelp,
   CloudOff,
   ExternalLink,
@@ -27,6 +26,13 @@ import {
   WandSparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import {
   FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
@@ -486,19 +492,30 @@ export function FinanceQuickReview() {
               ))}
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-              <label className="text-xs text-[var(--text-secondary)]">
-                Ranking
-                <select
+              <div className="text-xs text-[var(--text-secondary)]">
+                <span id="finance-review-ranking-label">Ranking</span>
+                <Select
                   value={filters.preset}
-                  onChange={(event) => setFilters((current) => ({
+                  onValueChange={(value) => setFilters((current) => ({
                     ...current,
-                    preset: event.target.value as FinanceReviewFilters['preset'],
+                    preset: value as FinanceReviewFilters['preset'],
                   }))}
-                  className="mt-1 min-h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 text-sm text-[var(--text-primary)]"
                 >
-                  {PRESETS.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}
-                </select>
-              </label>
+                  <SelectTrigger
+                    aria-labelledby="finance-review-ranking-label"
+                    className="mt-1 w-full bg-[var(--surface-1)]"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRESETS.map((preset) => (
+                      <SelectItem key={preset.value} value={preset.value}>
+                        {preset.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <label className="text-xs text-[var(--text-secondary)]">
                 Start date
                 <input
@@ -844,20 +861,30 @@ function FieldSelect({
   options: Array<{ id: string; label: string }>;
   onChange: (value: string) => void;
 }) {
+  const emptyValue = '__none__';
+
   return (
-    <label className="text-xs text-[var(--text-secondary)]">
-      {label}
-      <span className="relative mt-1 block">
-        <select
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className="min-h-10 w-full appearance-none rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 pr-9 text-sm text-[var(--text-primary)]"
+    <div className="text-xs text-[var(--text-secondary)]">
+      <span id={`finance-review-${label.toLowerCase().replaceAll(' ', '-')}-label`}>{label}</span>
+      <Select
+        value={value || emptyValue}
+        onValueChange={(nextValue) => onChange(nextValue === emptyValue ? '' : nextValue)}
+      >
+        <SelectTrigger
+          aria-labelledby={`finance-review-${label.toLowerCase().replaceAll(' ', '-')}-label`}
+          className="mt-1 w-full bg-[var(--surface-0)]"
         >
-          {options.map((option) => <option key={option.id || '__none__'} value={option.id}>{option.label}</option>)}
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-3 top-3 size-4 text-[var(--text-muted)]" />
-      </span>
-    </label>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.id || emptyValue} value={option.id || emptyValue}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
 

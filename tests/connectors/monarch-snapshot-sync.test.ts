@@ -60,6 +60,7 @@ function transaction(id: string, overrides: Record<string, unknown> = {}) {
     notes: null,
     tags: [],
     tagReferences: [],
+    reviewStatus: 'needs_review',
     ...overrides,
   };
 }

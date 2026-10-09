@@ -278,6 +278,7 @@ function installSyntheticFinanceProvider(): void {
             notes: null,
             tags: ['synthetic'],
             tagReferences: [{ id: 'synthetic-tag', name: 'Synthetic' }],
+            reviewStatus: 'needs_review',
           }]
         : [];
       return jsonResponse({

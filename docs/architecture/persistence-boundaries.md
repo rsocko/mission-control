@@ -21,11 +21,15 @@ backend error strings are adapter details. Existing direct SQLite access will be
 migrated incrementally behind compatibility facades rather than rewritten all
 at once.
 
-These boundaries now support the core SQLite and PostgreSQL persistence
+These boundaries support the core SQLite and PostgreSQL persistence
 compositions. PostgreSQL is the approved production target and is selected
-explicitly; SQLite remains the default compatibility backend. Existing direct
-SQLite workflows are still being migrated incrementally and fail explicitly
-under PostgreSQL instead of falling back or creating a split-backend workflow.
+explicitly; SQLite remains the default compatibility backend. PostgreSQL has no
+route that statically reaches SQLite. The exact-current Tier B allowlist contains
+only the two routes that reach `src/db/runtime.ts`, whose SQLite initialization
+branch dynamically imports the durable-run SQLite adapter. Backend selection
+prevents that branch from loading under PostgreSQL. Unsupported backend-specific
+operations fail explicitly instead of falling back or creating a split-backend
+workflow.
 
 ## Current dependency inventory
 

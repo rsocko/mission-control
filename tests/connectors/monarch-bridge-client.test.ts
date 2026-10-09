@@ -66,6 +66,8 @@ describe('MonarchBridgeClient', () => {
         notes: null,
         tags: [],
         tagReferences: [],
+        reviewStatus: 'needs_review',
+        reviewAssignee: 'Parent',
       }],
       total: 1,
       page: { limit: 500, nextCursor: null },
@@ -83,7 +85,10 @@ describe('MonarchBridgeClient', () => {
       notes: null,
       isPending: true,
       isRecurring: false,
+      reviewStatus: 'needs_review',
+      reviewAssignee: 'Parent',
     });
+
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/transactions?'),
       expect.objectContaining({
@@ -93,6 +98,56 @@ describe('MonarchBridgeClient', () => {
         }),
       }),
     );
+  });
+
+  it('filters native Monarch review state and validates exact merchant/review mutations', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        contractVersion: '1.0',
+        provenance: { provider: 'live', fetchedAt: '2026-10-08T12:00:00.000Z' },
+        transactions: [],
+        total: 0,
+        page: { limit: 25, nextCursor: null },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        contractVersion: '1.0',
+        status: 'updated',
+        transactionId: 'tx-1',
+        merchantName: 'Invented Market',
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        contractVersion: '1.0',
+        status: 'reviewed',
+        transactionId: 'tx-1',
+        reviewStatus: 'reviewed',
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new MonarchBridgeClient(config);
+
+    await client.getTransactionsPage({
+      startDate: '2026-10-01',
+      endDate: '2026-10-08',
+      limit: 25,
+      needsReview: true,
+    });
+    await client.updateMerchant('tx-1', 'Invented Market');
+    await client.markReviewed('tx-1');
+
+    expect(fetchMock.mock.calls[0][0]).toContain('needs_review=true');
+    expect(fetchMock.mock.calls[1]).toEqual([
+      'http://localhost:8100/transactions/tx-1/merchant',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ merchantName: 'Invented Market' }),
+      }),
+    ]);
+    expect(fetchMock.mock.calls[2]).toEqual([
+      'http://localhost:8100/transactions/tx-1/review',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ reviewed: true }),
+      }),
+    ]);
   });
 
   it('sends the v1 category payload and validates the echoed identifiers', async () => {

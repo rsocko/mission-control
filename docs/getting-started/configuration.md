@@ -130,6 +130,11 @@ arguments are never authoritative and an approval cannot be replayed.
 
 :::info[Azure OpenAI]
 For Azure, set `AI_PROVIDER=azure` plus `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT`.
+
+Finance Quick Review vendor research requires `AI_PROVIDER=openai`, a valid
+`OPENAI_API_KEY`, and an `AI_MODEL` that supports Responses API web search.
+Other configured providers remain available for Houston but return an explicit
+`vendor_research_provider_unavailable` response for vendor research.
 :::
 
 :::info[Azure through Bifrost]

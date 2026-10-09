@@ -40,6 +40,7 @@ export const AI_FEATURE_DEFAULTS: Record<AIFeatureId, SensitivityClass> = {
   'stats-observations': 'standard',
   'semantic-embedding': 'restricted',
   'provider-health-check': 'standard',
+  'finance-vendor-research': 'standard',
 };
 
 export const DEFAULT_AI_ROUTING_POLICY: AIRoutingPolicyConfig = {

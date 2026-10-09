@@ -202,7 +202,10 @@ tasks, actions, presentations, or delivery work.
    `scheduler.queued=0`, `scheduler.running=0`, and every notification,
    delivery, presentation, and action gate is false.
 2. Choose one new operator idempotency key and retain it for every retry of this
-   repair. Do not place credentials or connector data in the key.
+   repair. Do not place credentials or connector data in the key. A failed plan
+   is resumable: after deploying a repair, retry the exact same connector ID,
+   key, horizon, and window limit. Do not rotate the key merely because a prior
+   attempt failed.
 3. Run the complete bounded repair:
 
 ```bash
@@ -223,6 +226,19 @@ coverage dates, and the expected aggregate item count. Stop on
 `finance_insight_repair_active_work`,
 `finance_insight_repair_gates_enabled`, any backfill error, or any unexpected
 field.
+
+On a backfill error, stop and read trusted attribution readiness. Inspect
+`historyBackfill.status`, `completedWindows`, `totalWindows`, `lastErrorCode`,
+and `updatedAt`; these are aggregate operation metadata and do not contain the
+operator key, plan ID, provider records, or finance content. The stable error
+families identify configuration, identity, plan, safety, provider, persistence,
+proof, or promotion failures. Keep the connector disabled and quarantined and
+keep every gate false while investigating. Retry the exact key only after the
+reported stage is repaired. If the same stage/code repeats, stop; do not rotate
+the key, run a canary, release quarantine, or substitute an ordinary sync. Use
+a new key only when intentionally starting a different repair request after the
+existing plan completed successfully, or when changing the horizon or other
+immutable plan inputs.
 
 4. Replay the exact request with the same connector ID, idempotency key,
    horizon, and window limit. Require the same plan ID and identical completed

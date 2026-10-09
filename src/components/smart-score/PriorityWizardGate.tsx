@@ -6,31 +6,66 @@ import { PrioritySetupWizard } from '@/components/smart-score';
 import { uiLogger } from '@/lib/client-logger';
 
 /**
- * Wrapper that shows the Priority Setup Wizard on first launch
- * when no priority entities have been configured yet.
+ * Shows priority setup after a connector exists, unless the user has already
+ * completed or dismissed it in this installation.
  */
 export function PriorityWizardGate() {
   const [showWizard, setShowWizard] = useState(false);
 
   useEffect(() => {
-    // Check if wizard has been completed or dismissed
     const dismissed = localStorage.getItem('mc_priority_wizard_dismissed');
     if (dismissed === 'true') return;
 
-    // Check if any entities exist
-    fetch('/api/priority-entities')
-      .then((r) => r.json())
-      .then((data) => {
-        if (!data.entities || data.entities.length === 0) {
+    const controller = new AbortController();
+
+    Promise.all([
+      fetch('/api/connectors', { signal: controller.signal }),
+      fetch('/api/priority-entities', { signal: controller.signal }),
+      fetch('/api/smart-score/settings', { signal: controller.signal }),
+    ])
+      .then(async ([connectorsResponse, entitiesResponse, settingsResponse]) => {
+        if (!connectorsResponse.ok || !entitiesResponse.ok || !settingsResponse.ok) {
+          throw new Error('Failed to load priority setup state');
+        }
+
+        const [connectorsData, entitiesData, settingsData] = await Promise.all([
+          connectorsResponse.json(),
+          entitiesResponse.json(),
+          settingsResponse.json(),
+        ]);
+        const hasConnector = Array.isArray(connectorsData.connectors)
+          && connectorsData.connectors.some(
+            (connector: { deletedAt?: string | null }) => !connector.deletedAt,
+          );
+        const hasEntities = Array.isArray(entitiesData.entities)
+          && entitiesData.entities.length > 0;
+        const hasFinishedSetup = settingsData.settings?.priority_wizard_completed === 'true'
+          || settingsData.settings?.priority_wizard_dismissed === 'true';
+
+        if (hasConnector && !hasEntities && !hasFinishedSetup) {
           setShowWizard(true);
         }
       })
-      .catch((err) => { uiLogger.error('Failed to check priority entities', { err }); });
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        uiLogger.error('Failed to check priority setup state', { err });
+      });
+
+    return () => controller.abort();
   }, []);
 
   const handleClose = () => {
     setShowWizard(false);
     localStorage.setItem('mc_priority_wizard_dismissed', 'true');
+    fetch('/api/smart-score/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'priority_wizard_dismissed', value: 'true' }),
+    }).then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    }).catch((err) => {
+      uiLogger.warn('Failed to persist priority setup dismissal', { err });
+    });
   };
 
   return (

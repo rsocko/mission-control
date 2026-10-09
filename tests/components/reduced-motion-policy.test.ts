@@ -43,7 +43,10 @@ describe('reduced motion policy', () => {
   });
 
   it('configures Motion to honor the user preference across the app', () => {
-    expect(motionProviderSource).toContain('<MotionConfig reducedMotion="user">');
+    expect(motionProviderSource).toContain('usePrefersReducedMotion()');
+    expect(motionProviderSource).toContain(
+      "reducedMotion={prefersReducedMotion ? 'always' : 'never'}",
+    );
     expect(layoutSource).toContain('<AppMotionProvider>');
     expect(layoutSource).toContain('</AppMotionProvider>');
   });

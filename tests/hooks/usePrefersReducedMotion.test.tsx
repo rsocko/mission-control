@@ -34,4 +34,35 @@ describe('usePrefersReducedMotion', () => {
 
     expect(result.current).toBe(true);
   });
+
+  it('rechecks the preference when the window regains focus', () => {
+    const { result } = renderHook(() => usePrefersReducedMotion());
+
+    act(() => {
+      matches = true;
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    expect(result.current).toBe(true);
+  });
+
+  it('rechecks the preference when a visible page resumes', () => {
+    const { result } = renderHook(() => usePrefersReducedMotion());
+    const visibilityState = vi.spyOn(document, 'visibilityState', 'get');
+
+    act(() => {
+      matches = true;
+      visibilityState.mockReturnValue('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(result.current).toBe(true);
+
+    act(() => {
+      matches = false;
+      window.dispatchEvent(new Event('pageshow'));
+    });
+
+    expect(result.current).toBe(false);
+  });
 });

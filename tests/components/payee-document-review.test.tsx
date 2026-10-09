@@ -120,8 +120,8 @@ describe('PayeeDocumentReview', () => {
     }));
     render(<PayeeDocumentReview client={clientFor(readySnapshot, decide)} />);
 
-    const select = await screen.findByLabelText('Paperless correspondent');
-    fireEvent.change(select, { target: { value: '41' } });
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Paperless correspondent' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Invented Utility Company' }));
     fireEvent.click(screen.getByRole('button', { name: 'Map to correspondent' }));
 
     await waitFor(() => expect(decide).toHaveBeenCalledWith({

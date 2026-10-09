@@ -18,6 +18,13 @@ import {
 } from 'lucide-react';
 import { AgentAttribution } from '@/components/domains/AgentAttribution';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import {
   httpPayeeDocumentReviewClient,
@@ -451,22 +458,31 @@ function OwlPolicy({
           )}
         </div>
 
-        <label className="block text-xs font-medium text-[var(--text-secondary)]">
-          Paperless correspondent
-          <select
+        <div className="text-xs font-medium text-[var(--text-secondary)]">
+          <p>Paperless correspondent</p>
+          <Select
             value={selectedCorrespondentRef}
-            onChange={(event) => onCorrespondentChange(event.target.value)}
+            onValueChange={onCorrespondentChange}
             disabled={saving || documentPolicy.status === 'unavailable'}
-            className="mt-1.5 min-h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 text-sm text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-60"
           >
-            <option value="">Choose a correspondent</option>
-            {correspondents.map((correspondent) => (
-              <option key={correspondent.correspondentRef} value={correspondent.correspondentRef}>
-                {correspondent.name}
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger
+              aria-label="Paperless correspondent"
+              className="mt-1.5 min-h-10 w-full bg-[var(--surface-0)] text-sm"
+            >
+              <SelectValue placeholder="Choose a correspondent" />
+            </SelectTrigger>
+            <SelectContent>
+              {correspondents.map((correspondent) => (
+                <SelectItem
+                  key={correspondent.correspondentRef}
+                  value={correspondent.correspondentRef}
+                >
+                  {correspondent.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
         <button
           type="button"

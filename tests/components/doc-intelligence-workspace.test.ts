@@ -102,48 +102,64 @@ describe('document workspace semantics', () => {
     }, NOW).map((item) => item.id)).toEqual(['pay-api']);
   });
 
-  it('keeps deadlines first regardless of the selected secondary sort', () => {
-    const sorted = sortDocumentTasks(tasks, 'amount', 'asc');
-    const descending = sortDocumentTasks(tasks, 'amount', 'desc');
+  it('uses the selected field as the primary sort in either direction', () => {
+    const sortableTasks = [
+      task('critical', {
+        actionType: 'archive',
+        category: 'records',
+        urgency: 'critical',
+        amount: 25,
+        correspondent: 'Zulu',
+      }, {
+        dueDate: '2026-08-30',
+        createdAt: '2024-06-15T12:00:00Z',
+      }),
+      task('low', {
+        actionType: 'pay',
+        category: 'finance',
+        urgency: 'low',
+        amount: 100,
+        correspondent: 'Alpha',
+      }, {
+        dueDate: '2026-08-20',
+        createdAt: '2025-03-10T12:00:00Z',
+      }),
+      task('medium-missing', {
+        actionType: 'respond',
+        category: 'correspondence',
+        urgency: 'medium',
+      }, {
+        dueDate: null,
+        createdAt: 'not-a-date',
+      }),
+    ];
+
+    const expectations = [
+      ['priority', ['critical', 'medium-missing', 'low'], ['low', 'medium-missing', 'critical']],
+      ['dueDate', ['low', 'critical', 'medium-missing'], ['critical', 'low', 'medium-missing']],
+      ['amount', ['critical', 'low', 'medium-missing'], ['low', 'critical', 'medium-missing']],
+      ['correspondent', ['low', 'critical', 'medium-missing'], ['critical', 'low', 'medium-missing']],
+      ['createdAt', ['critical', 'low', 'medium-missing'], ['low', 'critical', 'medium-missing']],
+    ] as const;
+
+    for (const [sortBy, ascending, descending] of expectations) {
+      expect(sortDocumentTasks(sortableTasks, sortBy, 'asc').map((item) => item.id)).toEqual(ascending);
+      expect(sortDocumentTasks(sortableTasks, sortBy, 'desc').map((item) => item.id)).toEqual(descending);
+    }
+  });
+
+  it('preserves selected-field order inside groups', () => {
+    const sorted = sortDocumentTasks(tasks, 'amount', 'desc');
     const grouped = groupDocumentTasks(sorted, 'correspondent');
 
-    expect(sorted.map((item) => item.id)).toEqual(['pay', 'review', 'sign']);
-    expect(descending.map((item) => item.id)).toEqual(['pay', 'review', 'sign']);
     expect(grouped.map((group) => [group.label, group.tasks.length])).toEqual([
       ['Acme', 2],
       ['Beta', 1],
     ]);
+    expect(grouped[0]?.tasks.map((item) => item.id)).toEqual(['pay', 'sign']);
   });
 
-  it('sorts the full result set by created date in either direction', () => {
-    const createdTasks = [
-      task('middle', { actionType: 'archive', category: 'records' }, {
-        dueDate: '2026-08-20',
-        createdAt: '2024-06-15T12:00:00Z',
-      }),
-      task('newest', { actionType: 'pay', category: 'finance' }, {
-        dueDate: '2026-08-19',
-        createdAt: '2025-03-10T12:00:00Z',
-      }),
-      task('oldest', { actionType: 'respond', category: 'correspondence' }, {
-        dueDate: '2026-09-01',
-        createdAt: '2023-01-05T12:00:00Z',
-      }),
-    ];
-
-    expect(sortDocumentTasks(createdTasks, 'createdAt', 'asc').map((item) => item.id)).toEqual([
-      'oldest',
-      'middle',
-      'newest',
-    ]);
-    expect(sortDocumentTasks(createdTasks, 'createdAt', 'desc').map((item) => item.id)).toEqual([
-      'newest',
-      'middle',
-      'oldest',
-    ]);
-  });
-
-  it('uses action type and category only after deadlines tie', () => {
+  it('uses deadline, action type, and category as deterministic tie-breakers', () => {
     const tied = [
       task('archive', { actionType: 'archive', category: 'records' }, { dueDate: '2026-08-25' }),
       task('pay-tied', { actionType: 'pay', category: 'finance' }, { dueDate: '2026-08-25' }),

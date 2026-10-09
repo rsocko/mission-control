@@ -190,19 +190,46 @@ export function sortDocumentTasks(
   sortBy: DocumentSort,
   direction: SortDirection,
 ): DocumentTask[] {
-  const multiplier = direction === 'asc' ? 1 : -1;
   return [...tasks].sort((left, right) => {
     const leftMetadata = parseDocumentTaskMetadata(left.metadata);
     const rightMetadata = parseDocumentTaskMetadata(right.metadata);
-    if (sortBy === 'createdAt') {
-      const createdAtComparison = compareNullable(
+
+    let selectedComparison = 0;
+    if (sortBy === 'priority') {
+      selectedComparison = (
+        (PRIORITY_ORDER[leftMetadata.urgency ?? left.priority] ?? 5)
+        - (PRIORITY_ORDER[rightMetadata.urgency ?? right.priority] ?? 5)
+      ) * (direction === 'asc' ? 1 : -1);
+    } else if (sortBy === 'dueDate') {
+      selectedComparison = compareNullable(
+        localDateTimestamp(left.dueDate),
+        localDateTimestamp(right.dueDate),
+        (a, b) => a - b,
+        direction,
+      );
+    } else if (sortBy === 'amount') {
+      selectedComparison = compareNullable(
+        leftMetadata.amount,
+        rightMetadata.amount,
+        (a, b) => a - b,
+        direction,
+      );
+    } else if (sortBy === 'correspondent') {
+      selectedComparison = compareNullable(
+        leftMetadata.correspondent,
+        rightMetadata.correspondent,
+        (a, b) => a.localeCompare(b),
+        direction,
+      );
+    } else {
+      selectedComparison = compareNullable(
         localDateTimestamp(left.createdAt),
         localDateTimestamp(right.createdAt),
         (a, b) => a - b,
         direction,
       );
-      if (createdAtComparison) return createdAtComparison;
     }
+    if (selectedComparison) return selectedComparison;
 
     const dueDateComparison = compareNullable(
       localDateTimestamp(left.dueDate),
@@ -224,31 +251,7 @@ export function sortDocumentTasks(
     );
     if (categoryComparison) return categoryComparison;
 
-    let comparison = 0;
-    if (sortBy === 'priority') {
-      comparison = (PRIORITY_ORDER[leftMetadata.urgency ?? left.priority] ?? 5)
-        - (PRIORITY_ORDER[rightMetadata.urgency ?? right.priority] ?? 5);
-    } else if (sortBy === 'dueDate') {
-      comparison = compareNullable(
-        localDateTimestamp(left.dueDate),
-        localDateTimestamp(right.dueDate),
-        (a, b) => a - b,
-        direction,
-      );
-    } else if (sortBy === 'amount') {
-      comparison = compareNullable(leftMetadata.amount, rightMetadata.amount, (a, b) => a - b, direction);
-    } else if (sortBy === 'correspondent') {
-      comparison = compareNullable(
-        leftMetadata.correspondent,
-        rightMetadata.correspondent,
-        (a, b) => a.localeCompare(b),
-        direction,
-      );
-    }
-    const directedComparison = sortBy === 'priority'
-      ? comparison * multiplier
-      : comparison;
-    return directedComparison || left.title.localeCompare(right.title);
+    return left.title.localeCompare(right.title);
   });
 }
 

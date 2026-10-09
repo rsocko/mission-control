@@ -169,3 +169,80 @@ describe('useNotifications — sync refresh', () => {
     )).toHaveLength(2);
   });
 });
+
+describe('useNotifications — task creation actions', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('opens Quick Add with the returned task draft', async () => {
+    const notification = {
+      id: 'ha-notification',
+      title: 'Replace water filter',
+      body: 'The kitchen filter is due for replacement.',
+      level: 'action_needed',
+      category: 'home',
+      state: 'unread',
+      receivedAt: '2026-10-09T18:00:00Z',
+      connectorType: 'home-assistant',
+      connectorInstanceId: 'ha-home',
+      sourceId: 'water-filter',
+      groupKey: null,
+      actionUrl: null,
+      actions: [{
+        id: 'create-task',
+        notificationId: 'ha-notification',
+        actionType: 'create_task',
+        label: 'Create a Task',
+        opensExternal: false,
+      }],
+      isActionable: true,
+      metadata: {},
+      sortAt: '2026-10-09T18:00:00Z',
+    };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith('/api/notifications?')) {
+        return new Response(JSON.stringify(mockResponse({ notifications: [notification] })), { status: 200 });
+      }
+      if (url === '/api/notifications/ha-notification/actions/create-task') {
+        return new Response(JSON.stringify({
+          success: true,
+          result: {
+            type: 'create_task',
+            taskData: {
+              title: 'Replace water filter',
+              body: 'The kitchen filter is due for replacement.',
+              priority: 'high',
+            },
+          },
+        }), { status: 200 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const onOpenQuickAdd = vi.fn();
+    window.addEventListener('mission-control:open-quick-add', onOpenQuickAdd);
+
+    const { result } = renderHook(() => useNotifications());
+    await waitFor(() => expect(result.current.notifications).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.executeAction('ha-notification', 'create-task');
+    });
+
+    expect(onOpenQuickAdd).toHaveBeenCalledOnce();
+    expect((onOpenQuickAdd.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      prefill: {
+        title: 'Replace water filter',
+        description: 'The kitchen filter is due for replacement.',
+        priority: 'high',
+      },
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/notifications/ha-notification/actions/create-task',
+      expect.objectContaining({ method: 'POST' }),
+    );
+
+    window.removeEventListener('mission-control:open-quick-add', onOpenQuickAdd);
+  });
+});

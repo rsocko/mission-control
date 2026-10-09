@@ -553,4 +553,31 @@ describe('NotificationsPanel V2', () => {
       );
     });
   });
+
+  it('signals that create task opens a follow-up form', () => {
+    const createTaskNotification = makeNotification({
+      actions: [{
+        id: 'create-task',
+        notificationId: 'notification-1',
+        actionType: 'create_task',
+        label: 'Create a Task',
+        variant: 'primary',
+        isPrimary: true,
+        sortOrder: 0,
+        payload: {},
+        opensExternal: false,
+        requiresConfirmation: false,
+        createdBy: 'system',
+      }],
+    });
+
+    render(
+      <NotificationCard
+        notification={createTaskNotification}
+        onExecuteAction={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Create a Task…' })).toBeInTheDocument();
+  });
 });

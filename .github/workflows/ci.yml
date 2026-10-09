@@ -27,6 +27,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       impeccable_changed: ${{ steps.classify.outputs.impeccable_changed }}
+      postgres_scope: ${{ steps.classify.outputs.postgres_scope }}
       vendor_changed: ${{ steps.classify.outputs.vendor_changed }}
       workflow_policy_changed: ${{ steps.classify.outputs.workflow_policy_changed }}
     steps:
@@ -47,6 +48,7 @@ jobs:
 
           docs_only=true
           impeccable_changed=false
+          postgres_scope=smoke
           vendor_changed=false
           workflow_policy_changed=false
           found_change=false
@@ -55,6 +57,7 @@ jobs:
              ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
             docs_only=false
             impeccable_changed=true
+            postgres_scope=full
             vendor_changed=true
             workflow_policy_changed=true
           else
@@ -73,6 +76,15 @@ jobs:
                   ;;
               esac
               case "${path}" in
+                public/*|src/app/*.css|src/app/*/components/*|src/app/*/error.tsx|src/app/*/layout.tsx|src/app/*/loading.tsx|src/app/*/not-found.tsx|src/app/*/page.tsx|src/components/*|src/lib/hooks/*|tests/components/*|tests/lib/constants/connector-icons.test.ts)
+                  ;;
+                docs/*|README.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|DESIGN.md|PRODUCT.md|SECURITY.md|SUPPORT.md)
+                  ;;
+                *)
+                  postgres_scope=full
+                  ;;
+              esac
+              case "${path}" in
                 .gitattributes|vendor/generic-graph-workbench/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json)
                   vendor_changed=true
                   ;;
@@ -88,11 +100,13 @@ jobs:
           if [[ "${found_change}" != "true" ]]; then
             docs_only=false
             impeccable_changed=true
+            postgres_scope=full
             vendor_changed=true
             workflow_policy_changed=true
           fi
           echo "docs_only=${docs_only}" >> "$GITHUB_OUTPUT"
           echo "impeccable_changed=${impeccable_changed}" >> "$GITHUB_OUTPUT"
+          echo "postgres_scope=${postgres_scope}" >> "$GITHUB_OUTPUT"
           echo "vendor_changed=${vendor_changed}" >> "$GITHUB_OUTPUT"
           echo "workflow_policy_changed=${workflow_policy_changed}" >> "$GITHUB_OUTPUT"
 
@@ -504,7 +518,7 @@ jobs:
         run: npm run test:persisted-state
 
   postgres-integration-shards:
-    name: PostgreSQL integration worker (${{ matrix.shard }}/4)
+    name: PostgreSQL integration worker
     if: >-
       always() &&
       (needs.changes.result != 'success' ||
@@ -515,10 +529,6 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
@@ -574,7 +584,7 @@ jobs:
         run: npm run build:worker
 
       - name: Locate pgvector service container
-        if: github.event_name == 'workflow_dispatch' && matrix.shard == 3
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
@@ -584,18 +594,34 @@ jobs:
 
       - name: Run PostgreSQL integration tests
         env:
+          POSTGRES_SCOPE: ${{ github.event_name == 'pull_request' && needs.changes.outputs.postgres_scope || 'full' }}
           MC_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t test_files < <(
-            node scripts/select-postgres-integration-shard.mjs "${{ matrix.shard }}" 4
-          )
+          case "${POSTGRES_SCOPE}" in
+            full)
+              mapfile -t test_files < <(
+                node scripts/select-postgres-integration-shard.mjs 1 1
+              )
+              ;;
+            smoke)
+              test_files=(
+                tests/db/postgres-connection.integration.test.ts
+                tests/db/postgres-schema.integration.test.ts
+                tests/db/postgres-web-sync-composition.integration.test.ts
+              )
+              ;;
+            *)
+              echo "Invalid PostgreSQL integration scope: ${POSTGRES_SCOPE}" >&2
+              exit 1
+              ;;
+          esac
           test "${#test_files[@]}" -gt 0
           npm test -- --run --no-file-parallelism "${test_files[@]}"
 
       - name: Run pgvector 100k benchmark gate
-        if: github.event_name == 'workflow_dispatch' && matrix.shard == 3
+        if: github.event_name == 'workflow_dispatch'
         env:
           MC_BENCHMARK_DIMENSIONS: 1536
           MC_BENCHMARK_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable

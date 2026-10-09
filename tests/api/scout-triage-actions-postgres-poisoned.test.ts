@@ -199,6 +199,7 @@ const scoutPersistence: ScoutIngestionReconciliationPersistence = {
 vi.mock('@/lib/persistence/worker-runtime', () => ({
   getWorkerPersistenceRepositories: async () => ({
     scoutIngestionReconciliation: scoutPersistence,
+    syncRuns: { append: async () => undefined },
   }),
 }));
 vi.mock('@/lib/persistence/runtime', () => ({

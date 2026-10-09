@@ -20,6 +20,15 @@ describe('connector icon mappings', () => {
 
   it('uses the local Copilot icon for Scout', () => {
     expect(CONNECTOR_ICONS.scout).toBe('/icons/connectors/scout.svg');
+
+    const icon = readFileSync(
+      resolve(process.cwd(), 'public/icons/connectors/scout.svg'),
+      'utf8',
+    );
+    expect(icon).toContain('viewBox="0 23.3 512.1 465.4"');
+    expect(icon).toContain('stop-color:#00aeff');
+    expect(icon).toContain('stop-color:#8c48ff');
+    expect(icon).not.toContain('M18.365 10.283');
   });
 
   it('uses the vendored official Paperclip logo across connector surfaces', () => {

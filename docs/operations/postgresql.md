@@ -152,6 +152,13 @@ The 100,000-entity semantic retrieval path requires PostgreSQL 17 and pgvector
 pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
 ```
 
+CI authenticates this Docker Hub service pull to avoid anonymous registry rate
+limits. The required Actions and Dependabot secret names, setup locations,
+fork behavior, and rotation procedure are documented in
+[Docker Hub authentication](../public/continuous-integration.md#docker-hub-authentication).
+The image remains pinned by digest; registry authentication does not change the
+approved artifact.
+
 Creating an extension is a database-administrator operation. Run it through the
 deployment's administrative channel before starting Mission Control, then verify
 the exact installed version:

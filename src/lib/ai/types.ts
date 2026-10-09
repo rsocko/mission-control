@@ -60,6 +60,7 @@ export const AI_FEATURE_IDS = [
   'stats-observations',
   'semantic-embedding',
   'provider-health-check',
+  'finance-vendor-research',
 ] as const;
 export type AIFeatureId = (typeof AI_FEATURE_IDS)[number];
 

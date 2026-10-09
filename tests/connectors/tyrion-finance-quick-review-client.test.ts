@@ -82,6 +82,31 @@ describe('TyrionFinanceReviewClient', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects sensitive context injected by Tyrion after a disclosure-free request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      contractVersion: '1.0',
+      query: {
+        vendorName: 'Invented Market',
+        coarseLocation: null,
+        amount: 184.62,
+        occurredOn: '2026-10-08',
+      },
+      outputPolicy: {
+        factsRequireSources: true,
+        inferencesMustBeLabeled: true,
+        fraudAssertionAllowed: false,
+      },
+    }), { status: 200 }));
+
+    await expect(new TyrionFinanceReviewClient(TOKEN, fetchMock).prepareResearch({
+      contractVersion: '1.0',
+      vendorName: 'Invented Market',
+      coarseLocation: null,
+      sensitiveContext: null,
+      disclosure: { shown: false, confirmedAt: null },
+    })).rejects.toMatchObject({ code: 'invalid_contract', status: 502 });
+  });
+
   it('uses the separate advisory rule-suggestion operation', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       contractVersion: '1.0',

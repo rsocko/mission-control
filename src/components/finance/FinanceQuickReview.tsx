@@ -70,6 +70,10 @@ interface CorrectionDraft {
   payee: string;
 }
 
+function clearResume() {
+  sessionStorage.removeItem(RESUME_KEY);
+}
+
 interface ApiErrorBody {
   error?: string;
   code?: string;
@@ -149,7 +153,6 @@ export function FinanceQuickReview() {
     () => navigator.onLine,
     () => true,
   );
-  const [researchPrompt, setResearchPrompt] = useState('');
   const [includeSensitiveContext, setIncludeSensitiveContext] = useState(false);
   const [researchDisclosureOpen, setResearchDisclosureOpen] = useState(false);
   const [researchPending, setResearchPending] = useState(false);
@@ -185,6 +188,7 @@ export function FinanceQuickReview() {
       const body = await response.json().catch(() => null) as unknown;
       if (!response.ok) {
         const apiError = body as ApiErrorBody | null;
+        if (apiError?.code === 'review_session_expired') clearResume();
         setError({
           error: apiError?.error ?? 'Finance quick review could not be loaded.',
           code: apiError?.code,
@@ -319,7 +323,7 @@ export function FinanceQuickReview() {
           resumeToken: session.resumeToken,
           reviewRef: item.reviewRef,
           stateToken: item.stateToken,
-          request: researchPrompt.trim() || null,
+          request: null,
           publicContext: {
             normalizedVendorName: item.research.normalizedVendorName,
             coarseLocation: item.research.coarseLocation,
@@ -413,6 +417,9 @@ export function FinanceQuickReview() {
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {error?.retryable && (
               <Button onClick={() => void startSession(mode, filters, true)}>Try again</Button>
+            )}
+            {error?.code === 'review_session_expired' && (
+              <Button onClick={() => void startSession(mode, filters, false)}>Start new session</Button>
             )}
             <Button asChild variant="secondary"><Link href="/finance">Back to Finance</Link></Button>
           </div>
@@ -667,7 +674,10 @@ export function FinanceQuickReview() {
                       label="Category"
                       value={draft.categoryId}
                       onChange={(value) => setDraft((current) => ({ ...current, categoryId: value }))}
-                      options={[{ id: '', label: 'Uncategorized' }, ...item.corrections.categories]}
+                      options={[
+                        ...(item.category ? [] : [{ id: '', label: 'Uncategorized' }]),
+                        ...item.corrections.categories,
+                      ]}
                     />
                     <label className="text-xs text-[var(--text-secondary)] sm:col-span-2">
                       Payee
@@ -736,17 +746,6 @@ export function FinanceQuickReview() {
                     Tyrion recommends research: {item.research.reason}
                   </p>
                 )}
-                <label className="mt-3 block text-xs text-[var(--text-secondary)]">
-                  Ask a specific question (optional)
-                  <textarea
-                    value={researchPrompt}
-                    maxLength={500}
-                    rows={2}
-                    onChange={(event) => setResearchPrompt(event.target.value)}
-                    placeholder="What type of business is this vendor?"
-                    className="mt-1 w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-                  />
-                </label>
                 <label className="mt-2 flex min-h-10 items-center gap-2 text-xs text-[var(--text-secondary)]">
                   <input
                     type="checkbox"

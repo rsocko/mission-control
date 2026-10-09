@@ -46,6 +46,8 @@ interface ServerSession {
   skipped: number;
   expiresAt: number;
   completedActions: Map<string, FinanceReviewSession>;
+  pendingActions: Map<string, Promise<FinanceReviewSession>>;
+  actionInFlight: boolean;
 }
 
 const sessions = new Map<string, ServerSession>();
@@ -120,10 +122,28 @@ function signalsFor(
   if (attribution.status === 'unassigned' || attribution.confidence === 'unknown') {
     signals.push('kid-attribution-ambiguous');
   }
+
   if (!transaction.category) signals.push('category-mismatch');
   if (!transaction.merchant.name.trim()) signals.push('unknown-merchant');
   if (transaction.reviewStatus === 'needs_review') signals.push('monarch-needs-review');
   return signals;
+}
+
+export function merchantNameForRank(merchantName: string): string {
+  return merchantName.trim() || 'Unknown merchant';
+}
+
+export function assertQuickReviewCategoryCorrectionSupported(
+  categoryId: string | null | undefined,
+  currentCategoryId: string | null,
+): void {
+  if (categoryId === null && currentCategoryId !== null) {
+    throw new QuickReviewSessionError(
+      'category_removal_unavailable',
+      'Removing a Monarch category is not supported by the current Bridge contract',
+      422,
+    );
+  }
 }
 
 function reasonLabel(reason: string): string {
@@ -187,6 +207,36 @@ export async function runQuickReviewWriteSequence(operations: {
   await operations.markReviewed();
 }
 
+export async function runExclusiveQuickReviewAction<T>(input: {
+  idempotencyKey: string;
+  completed: Map<string, T>;
+  pending: Map<string, Promise<T>>;
+  isActive: () => boolean;
+  setActive: (active: boolean) => void;
+  operation: () => Promise<T>;
+}): Promise<T> {
+  const replay = input.completed.get(input.idempotencyKey);
+  if (replay) return replay;
+  const pending = input.pending.get(input.idempotencyKey);
+  if (pending) return pending;
+  if (input.isActive()) {
+    throw new QuickReviewSessionError(
+      'review_action_in_progress',
+      'Another review action is still in progress',
+      409,
+    );
+  }
+  input.setActive(true);
+  const operation = Promise.resolve().then(input.operation);
+  input.pending.set(input.idempotencyKey, operation);
+  try {
+    return await operation;
+  } finally {
+    input.pending.delete(input.idempotencyKey);
+    input.setActive(false);
+  }
+}
+
 export async function startQuickReviewSession(
   request: FinanceReviewSessionRequest,
   signal?: AbortSignal,
@@ -247,6 +297,8 @@ export async function startQuickReviewSession(
       skipped: 0,
       expiresAt: Date.now() + SESSION_TTL_MS,
       completedActions: new Map(),
+      pendingActions: new Map(),
+      actionInFlight: false,
     };
     sessionStore().set(session.resumeToken, session);
     return response(session);
@@ -256,7 +308,7 @@ export async function startQuickReviewSession(
     return {
       sourceRef: sourceRefs.get(transaction.id)!,
       occurredOn: transaction.date,
-      merchantName: transaction.merchant.name,
+      merchantName: merchantNameForRank(transaction.merchant.name),
       isPending: transaction.isPending,
       monarchReviewStatus: transaction.reviewStatus,
       attribution,
@@ -324,7 +376,7 @@ export async function startQuickReviewSession(
         amount: transaction.amount,
         currency,
         accountName: transaction.account.displayName,
-        payee: transaction.merchant.name,
+        payee: merchantNameForRank(transaction.merchant.name),
         category: transaction.category
           ? { id: transaction.category.id, label: transaction.category.name }
           : null,
@@ -358,7 +410,7 @@ export async function startQuickReviewSession(
             reason === 'unknown-merchant' || reason === 'new-merchant' || reason === 'category-mismatch'
           )),
           reason: rankedItem.reasons.includes('unknown-merchant') ? 'Merchant is unfamiliar' : null,
-          normalizedVendorName: transaction.merchant.name.replace(/\s+/g, ' ').trim(),
+          normalizedVendorName: merchantNameForRank(transaction.merchant.name).replace(/\s+/g, ' ').trim(),
           coarseLocation: null,
         },
       },
@@ -377,6 +429,8 @@ export async function startQuickReviewSession(
     skipped: 0,
     expiresAt: Date.now() + SESSION_TTL_MS,
     completedActions: new Map(),
+    pendingActions: new Map(),
+    actionInFlight: false,
   };
   sessionStore().set(session.resumeToken, session);
   return response(session);
@@ -388,8 +442,22 @@ export async function applyQuickReviewAction(
   signal?: AbortSignal,
 ): Promise<FinanceReviewSession> {
   const session = requireSession(request);
-  const replay = session.completedActions.get(request.idempotencyKey);
-  if (replay) return replay;
+  return runExclusiveQuickReviewAction({
+    idempotencyKey: request.idempotencyKey,
+    completed: session.completedActions,
+    pending: session.pendingActions,
+    isActive: () => session.actionInFlight,
+    setActive: (active) => { session.actionInFlight = active; },
+    operation: () => executeQuickReviewAction(session, request, actorType, signal),
+  });
+}
+
+async function executeQuickReviewAction(
+  session: ServerSession,
+  request: FinanceReviewActionRequest,
+  actorType: 'parent-admin' | 'service',
+  signal?: AbortSignal,
+): Promise<FinanceReviewSession> {
   const target = session.targets[session.cursor];
   if (
     !target
@@ -411,6 +479,10 @@ export async function applyQuickReviewAction(
   let updateMerchant: (() => Promise<void>) | undefined;
   let updateKidAttribution: (() => Promise<void>) | undefined;
   if (request.action === 'correct' && request.correction) {
+    assertQuickReviewCategoryCorrectionSupported(
+      request.correction.categoryId,
+      target.transaction.category?.id ?? null,
+    );
     const needsLocalTarget = request.correction.kidId !== undefined
       || (
         request.correction.categoryId !== undefined

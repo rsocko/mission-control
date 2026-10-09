@@ -294,7 +294,8 @@ export const tyrionQuickReviewResearchRequestSchema = z.object({
   vendorName: normalizedTyrionNameSchema,
   coarseLocation: coarseLocationSchema.nullable(),
   sensitiveContext: z.object({
-    amount: z.number().finite().min(-999_999_999.99).max(999_999_999.99),
+    amount: z.number().finite().min(-999_999_999.99).max(999_999_999.99)
+      .transform((value) => Math.round(value * 100) / 100),
     occurredOn: calendarDateSchema,
   }).strict().nullable(),
   disclosure: z.object({

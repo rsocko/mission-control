@@ -236,4 +236,25 @@ describe('FinanceQuickReview', () => {
     })).toBeInTheDocument();
     expect(screen.getByText(/did not create sample transactions/i)).toBeInTheDocument();
   });
+
+  it('recovers from an expired resume token by starting a new session', async () => {
+    sessionStorage.setItem('mc.financeQuickReview.resume.v1', JSON.stringify({
+      resumeToken: 'expired_resume_token_123',
+    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({
+        error: 'Review session expired',
+        code: 'review_session_expired',
+        retryable: false,
+      }, 409))
+      .mockResolvedValueOnce(response(session));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<FinanceQuickReview />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start new session' }));
+
+    expect(await screen.findByRole('heading', { name: 'Invented Market' })).toBeInTheDocument();
+    const request = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(request.resumeToken).toBeNull();
+  });
 });

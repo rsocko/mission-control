@@ -113,14 +113,33 @@ export class TyrionFinanceReviewClient {
     return response;
   }
 
-  prepareResearch(request: TyrionQuickReviewResearchRequest, signal?: AbortSignal) {
-    return this.post(
+  async prepareResearch(request: TyrionQuickReviewResearchRequest, signal?: AbortSignal) {
+    const parsedRequest = tyrionQuickReviewResearchRequestSchema.safeParse(request);
+    if (!parsedRequest.success) {
+      throw new TyrionFinanceReviewError('invalid_request', 'Invalid Tyrion quick review request', 400, false);
+    }
+    const response = await this.post(
       'research',
-      request,
+      parsedRequest.data,
       tyrionQuickReviewResearchRequestSchema,
       tyrionQuickReviewResearchResponseSchema,
       signal,
     );
+    const expected = {
+      vendorName: parsedRequest.data.vendorName,
+      coarseLocation: parsedRequest.data.coarseLocation,
+      amount: parsedRequest.data.sensitiveContext?.amount ?? null,
+      occurredOn: parsedRequest.data.sensitiveContext?.occurredOn ?? null,
+    };
+    if (JSON.stringify(response.query) !== JSON.stringify(expected)) {
+      throw new TyrionFinanceReviewError(
+        'invalid_contract',
+        'Tyrion research preparation did not match the disclosed request',
+        502,
+        false,
+      );
+    }
+    return response;
   }
 
   suggestRule(request: TyrionQuickReviewRuleRequest, signal?: AbortSignal) {

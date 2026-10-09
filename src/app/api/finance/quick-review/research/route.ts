@@ -10,6 +10,10 @@ import {
   getQuickReviewResearchContext,
   QuickReviewSessionError,
 } from '@/lib/finance/quick-review-service';
+import {
+  researchVendor,
+  VendorResearchError,
+} from '@/lib/finance/vendor-research';
 
 export async function POST(request: Request) {
   if (!isTrustedFinanceReadRequest(request)) {
@@ -26,7 +30,7 @@ export async function POST(request: Request) {
   }
   try {
     const context = getQuickReviewResearchContext(parsed.data);
-    await new TyrionFinanceReviewClient().prepareResearch(
+    const prepared = await new TyrionFinanceReviewClient().prepareResearch(
       {
         contractVersion: '1.0',
         vendorName: context.vendorName,
@@ -46,11 +50,11 @@ export async function POST(request: Request) {
       },
       request.signal,
     );
-    return NextResponse.json({
-      error: 'Vendor research preparation succeeded, but no sourced research provider is configured.',
-      code: 'vendor_research_provider_unavailable',
-      retryable: false,
-    }, { status: 503 });
+    return NextResponse.json(await researchVendor({
+      reviewRef: parsed.data.reviewRef,
+      prepared,
+      signal: request.signal,
+    }));
   } catch (error) {
     if (error instanceof QuickReviewSessionError) {
       return NextResponse.json({
@@ -60,6 +64,13 @@ export async function POST(request: Request) {
       }, { status: error.status });
     }
     if (error instanceof TyrionFinanceReviewError) {
+      return NextResponse.json({
+        error: error.message,
+        code: error.code,
+        retryable: error.retryable,
+      }, { status: error.status });
+    }
+    if (error instanceof VendorResearchError) {
       return NextResponse.json({
         error: error.message,
         code: error.code,

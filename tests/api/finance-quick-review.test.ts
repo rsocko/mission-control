@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   applyAction: vi.fn(),
   prepareResearch: vi.fn(),
   researchContext: vi.fn(),
+  researchVendor: vi.fn(),
 }));
 
 vi.mock('@/lib/connectors/monarch-money/finance-request', () => ({
@@ -28,6 +29,20 @@ vi.mock('@/lib/connectors/monarch-money/quick-review-client', () => ({
   },
 }));
 
+vi.mock('@/lib/finance/vendor-research', () => ({
+  VendorResearchError: class VendorResearchError extends Error {
+    constructor(
+      readonly code: string,
+      message: string,
+      readonly status: number,
+      readonly retryable: boolean,
+    ) {
+      super(message);
+    }
+  },
+  researchVendor: mocks.researchVendor,
+}));
+
 const filters = {
   preset: 'impact-confidence',
   startDate: null,
@@ -46,6 +61,23 @@ beforeEach(() => {
     coarseLocation: null,
     amount: 184.62,
     occurredOn: '2026-10-08',
+  });
+  mocks.researchVendor.mockResolvedValue({
+    contractVersion: '1.0',
+    reviewRef: 'review_ref_1234567890',
+    researchedAt: '2026-10-08T21:00:00.000Z',
+    facts: [],
+    inferences: [],
+    suggestions: {
+      businessIdentity: null,
+      location: null,
+      businessType: null,
+      plausiblePurchase: null,
+      category: null,
+      kidsClues: [],
+    },
+    riskIndicators: [],
+    sources: [],
   });
 });
 
@@ -116,7 +148,7 @@ describe('finance quick review API boundary', () => {
     expect(mocks.prepareResearch).not.toHaveBeenCalled();
   });
 
-  it('returns an explicit provider dependency after privacy-safe preparation', async () => {
+  it('executes sourced research after privacy-safe preparation', async () => {
     mocks.prepareResearch.mockResolvedValue({
       contractVersion: '1.0',
       query: {
@@ -151,9 +183,65 @@ describe('finance quick review API boundary', () => {
       }),
     }));
 
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      reviewRef: 'review_ref_1234567890',
+    });
+    expect(mocks.researchVendor).toHaveBeenCalledWith({
+      reviewRef: 'review_ref_1234567890',
+      prepared: expect.objectContaining({
+        query: expect.objectContaining({ vendorName: 'Invented Market' }),
+      }),
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('preserves an explicit unavailable response when web search is not configured', async () => {
+    const { VendorResearchError } = await import('@/lib/finance/vendor-research');
+    mocks.prepareResearch.mockResolvedValue({
+      contractVersion: '1.0',
+      query: {
+        vendorName: 'Invented Market',
+        coarseLocation: null,
+        amount: null,
+        occurredOn: null,
+      },
+      outputPolicy: {
+        factsRequireSources: true,
+        inferencesMustBeLabeled: true,
+        fraudAssertionAllowed: false,
+      },
+    });
+    mocks.researchVendor.mockRejectedValue(new VendorResearchError(
+      'vendor_research_provider_unavailable',
+      'Vendor research requires OpenAI web search',
+      503,
+      false,
+    ));
+    const { POST } = await import('@/app/api/finance/quick-review/research/route');
+    const response = await POST(new Request('https://mc.example/api/finance/quick-review/research', {
+      method: 'POST',
+      body: JSON.stringify({
+        contractVersion: '1.0',
+        sessionRef: 'session_ref_123456789',
+        resumeToken: 'resume_token_123456789',
+        reviewRef: 'review_ref_1234567890',
+        stateToken: 'state_token_123456789',
+        request: null,
+        publicContext: {
+          normalizedVendorName: 'Invented Market',
+          coarseLocation: null,
+          amount: null,
+          date: null,
+          sensitiveContextApproved: false,
+        },
+      }),
+    }));
+
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
       code: 'vendor_research_provider_unavailable',
+      retryable: false,
     });
   });
 });

@@ -7,6 +7,10 @@ import emojilib from 'emojilib';
 import { cn } from '@/lib/utils/cn';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import {
+  iconMaskCacheKey,
+  loadIconifyMasks,
+} from '@/components/ui/icon-picker/iconify';
+import {
   type IconSource,
   type ParsedIcon,
   POPULAR_LUCIDE,
@@ -208,6 +212,7 @@ export default function IconsPage() {
   const [iconSize, setIconSize] = useState<IconSize>('md');
   const [dashIcons, setDashIcons] = useState<string[]>([]);
   const [siIcons, setSiIcons] = useState<string[]>([]);
+  const [iconMasks, setIconMasks] = useState<Record<string, string | null>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const searchRequestId = useRef(0);
@@ -354,6 +359,25 @@ export default function IconsPage() {
   const displayGroups = isSearching ? sourceGroups : defaultDisplay;
   const totalResults = displayGroups.reduce((sum, g) => sum + g.icons.length, 0);
   const sourcesWithResults = displayGroups.length;
+
+  useEffect(() => {
+    let active = true;
+    const iconifyGroups = displayGroups.filter((group) =>
+      ['lucide', 'mdi', 'ph'].includes(group.source),
+    );
+    if (iconifyGroups.length === 0) return;
+
+    void Promise.all(
+      iconifyGroups.map((group) => loadIconifyMasks(group.source, group.icons)),
+    ).then((groups) => {
+      if (!active) return;
+      setIconMasks((current) => Object.assign({}, current, ...groups));
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [displayGroups]);
 
   // Copy handler
   async function handleCopy(source: IconSource, name: string) {
@@ -553,6 +577,7 @@ export default function IconsPage() {
                       name={name}
                       color={color}
                       size={ICON_SIZE_MAP[iconSize]}
+                      maskUrl={iconMasks[iconMaskCacheKey(group.source, name)]}
                       onClick={() => handleCopy(group.source, name)}
                     />
                   ))}
@@ -578,14 +603,19 @@ function IconTile({
   name,
   color,
   size,
+  maskUrl,
   onClick,
 }: {
   source: IconSource;
   name: string;
   color: string;
   size: number;
+  maskUrl?: string | null;
   onClick: () => void;
 }) {
+  const isIconifyIcon = ['lucide', 'mdi', 'ph'].includes(source);
+  const renderedSize = size * 0.75;
+
   return (
     <button
       type="button"
@@ -594,11 +624,45 @@ function IconTile({
       title={source === 'emoji' ? name : `${source}:${name}`}
     >
       <div className="flex items-center justify-center" style={{ width: size, height: size }}>
-        <IconRenderer
-          value={source === 'emoji' ? name : `${source}:${name}`}
-          size={size * 0.75}
-          color={source !== 'dash' ? color : undefined}
-        />
+        {isIconifyIcon && maskUrl ? (
+          <span
+            role="img"
+            aria-label={`${source}:${name}`}
+            className="inline-block shrink-0"
+            style={{
+              width: renderedSize,
+              height: renderedSize,
+              backgroundColor: color,
+              maskImage: `url("${maskUrl}")`,
+              WebkitMaskImage: `url("${maskUrl}")`,
+              maskPosition: 'center',
+              WebkitMaskPosition: 'center',
+              maskRepeat: 'no-repeat',
+              WebkitMaskRepeat: 'no-repeat',
+              maskSize: 'contain',
+              WebkitMaskSize: 'contain',
+            }}
+          />
+        ) : isIconifyIcon && maskUrl === undefined ? (
+          <span
+            aria-hidden="true"
+            className="animate-pulse rounded bg-[#1e1e2e]"
+            style={{ width: renderedSize, height: renderedSize }}
+          />
+        ) : (
+          <IconRenderer
+            value={source === 'emoji' ? name : `${source}:${name}`}
+            size={renderedSize}
+            color={source !== 'dash' ? color : undefined}
+            fallback={(
+              <span
+                aria-hidden="true"
+                className="rounded bg-[#1e1e2e]"
+                style={{ width: renderedSize, height: renderedSize }}
+              />
+            )}
+          />
+        )}
       </div>
       <span className="text-[9px] text-gray-600 group-hover:text-gray-400 truncate w-full text-center font-mono transition-colors">
         {name.length > 12 ? `${name.slice(0, 12)}…` : name}

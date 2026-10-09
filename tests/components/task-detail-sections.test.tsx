@@ -323,7 +323,7 @@ describe('TaskDocumentPreviewSection', () => {
 
     expect(screen.getByText('Invoice 4711')).toBeInTheDocument();
     expect(screen.getByText('$42.50')).toBeInTheDocument();
-    expect(screen.getByText('high')).toBeInTheDocument();
+    expect(screen.getByText('P1 · High')).toBeInTheDocument();
     expect(screen.getByTitle('Preview of Invoice 4711')).toHaveAttribute('src', 'https://docs.example/1');
     expect(screen.getByRole('link', { name: /Open in Paperless-ngx/ })).toHaveAttribute(
       'href',

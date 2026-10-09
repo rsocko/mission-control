@@ -65,14 +65,58 @@ describe('OWL task lifecycle controls', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('Quick source feedback'));
-    fireEvent.change(screen.getByLabelText('Urgency'), { target: { value: 'low' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save urgency' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'OWL urgency' }));
+    fireEvent.click(screen.getByRole('option', { name: 'P3 · Low' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save source corrections' }));
 
     await waitFor(() => {
       expect(screen.getByText('Paperless mutation failed')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Urgency correction sent to OWL.')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 source correction saved in OWL.')).not.toBeInTheDocument();
+  });
+
+  it('saves changed OWL fields as one correction batch', async () => {
+    const onTaskUpdate = vi.fn();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      task: {
+        status: 'todo',
+        statusReason: null,
+        snoozedUntil: null,
+        priority: 'high',
+        metadata: { actionType: 'sign', urgency: 'critical', amount: 75 },
+        updatedAt: '2026-08-24T13:00:00.000Z',
+        syncStatus: 'synced',
+      },
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(
+      <OwlTaskActions
+        taskId="task-1"
+        metadata={{ actionType: 'pay', urgency: 'high', amount: 50 }}
+        onTaskUpdate={onTaskUpdate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'OWL action type' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Sign' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'OWL urgency' }));
+    fireEvent.click(screen.getByRole('option', { name: 'P0 · Critical' }));
+    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '75' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save source corrections' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/tasks/task-1/owl', expect.objectContaining({
+      body: JSON.stringify({ action: 'correct', field: 'action_type', value: 'sign' }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/task-1/owl', expect.objectContaining({
+      body: JSON.stringify({ action: 'correct', field: 'urgency', value: 'critical' }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/tasks/task-1/owl', expect.objectContaining({
+      body: JSON.stringify({ action: 'correct', field: 'amount', value: 75 }),
+    }));
+    expect(onTaskUpdate).toHaveBeenCalledOnce();
+    expect(await screen.findByText('3 source corrections saved in OWL.')).toBeInTheDocument();
   });
 
   it('renders source-only controls without duplicating Mission Control completion', async () => {

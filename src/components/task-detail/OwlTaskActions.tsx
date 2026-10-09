@@ -23,10 +23,10 @@ const ACTION_TYPES = [
 ] as const;
 
 const URGENCY_VALUES = [
-  ['critical', 'Critical'],
-  ['high', 'High'],
-  ['medium', 'Medium'],
-  ['low', 'Low'],
+  ['critical', 'P0 · Critical'],
+  ['high', 'P1 · High'],
+  ['medium', 'P2 · Medium'],
+  ['low', 'P3 · Low'],
 ] as const;
 
 export interface OwlTaskActionsProps {
@@ -62,6 +62,10 @@ export function OwlTaskActions({
   const [amount, setAmount] = useState(
     typeof metadata.amount === 'number' ? String(metadata.amount) : '',
   );
+  const initialAmount = typeof metadata.amount === 'number' ? String(metadata.amount) : '';
+  const correctionsChanged = actionType !== (metadata.actionType || 'review')
+    || urgency !== (metadata.urgency || 'medium')
+    || amount !== initialAmount;
   const primaryActionUrl = normalizeActionUrl(metadata.primaryActionUrl);
   const reviewUrl = normalizeActionUrl(metadata.reviewUrl || metadata.docHubUrl);
 
@@ -95,6 +99,60 @@ export function OwlTaskActions({
 
   function snooze(until: Date, label: string) {
     void submit('snooze', { action: 'snooze', until: until.toISOString() }, `Snoozed in OWL until ${label}.`);
+  }
+
+  async function saveCorrections() {
+    const correctedAmount = amount.trim() === '' ? null : Number(amount);
+    if (correctedAmount !== null && (!Number.isFinite(correctedAmount) || correctedAmount < 0)) {
+      setMessage({ kind: 'error', text: 'Amount must be zero or greater.' });
+      return;
+    }
+
+    const corrections = [
+      ...(actionType !== (metadata.actionType || 'review')
+        ? [{ field: 'action_type', value: actionType }]
+        : []),
+      ...(urgency !== (metadata.urgency || 'medium')
+        ? [{ field: 'urgency', value: urgency }]
+        : []),
+      ...(amount !== initialAmount
+        ? [{ field: 'amount', value: correctedAmount }]
+        : []),
+    ];
+    if (corrections.length === 0) return;
+
+    setBusyAction('corrections');
+    setMessage(null);
+    let latestTask: OwlTaskActionUpdate | null = null;
+    let savedCount = 0;
+    try {
+      for (const correction of corrections) {
+        const result = await postOwlTaskAction(taskId, {
+          action: 'correct',
+          field: correction.field,
+          value: correction.value,
+        });
+        if (!result.ok || !result.task) {
+          const prefix = savedCount > 0 ? `${savedCount} correction${savedCount === 1 ? '' : 's'} saved. ` : '';
+          setMessage({ kind: 'error', text: `${prefix}${result.error || 'OWL did not accept the remaining update.'}` });
+          if (latestTask) onTaskUpdate(latestTask);
+          return;
+        }
+        latestTask = result.task;
+        savedCount++;
+      }
+      if (latestTask) onTaskUpdate(latestTask);
+      setMessage({
+        kind: 'success',
+        text: `${savedCount} source correction${savedCount === 1 ? '' : 's'} saved in OWL.`,
+      });
+    } catch {
+      const prefix = savedCount > 0 ? `${savedCount} correction${savedCount === 1 ? '' : 's'} saved. ` : '';
+      setMessage({ kind: 'error', text: `${prefix}Could not reach Mission Control. Try again.` });
+      if (latestTask) onTaskUpdate(latestTask);
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   const inputClass = 'min-h-10 w-full min-w-0 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] px-2.5 text-sm text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]';
@@ -242,11 +300,11 @@ export function OwlTaskActions({
         No action needed
       </button>
 
-      <details className="rounded-lg border border-[var(--border-subtle)]">
-        <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
-          Quick source feedback
+      <details className="rounded-lg border border-[var(--border-subtle)]" open>
+        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-[var(--text-secondary)]">
+          Correct OWL fields
         </summary>
-        <div className="grid min-w-0 grid-cols-1 gap-3 border-t border-[var(--border-subtle)] p-3">
+        <div className="grid min-w-0 grid-cols-1 gap-3 border-t border-[var(--border-subtle)] p-3 sm:grid-cols-3">
           <div className="flex flex-col gap-1">
             <label htmlFor={`owl-action-type-${taskId}`} className="text-xs text-[var(--text-muted)]">
               Action type
@@ -268,19 +326,6 @@ export function OwlTaskActions({
                 ))}
               </SelectContent>
             </Select>
-            <button
-              type="button"
-              disabled={busyAction !== null}
-              onClick={() => void submit(
-                'action-type',
-                { action: 'correct', field: 'action_type', value: actionType },
-                'Action type correction sent to OWL.',
-              )}
-              className={buttonClass}
-            >
-              {busyAction === 'action-type' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              Save type
-            </button>
           </div>
 
           <div className="flex flex-col gap-1">
@@ -304,19 +349,6 @@ export function OwlTaskActions({
                 ))}
               </SelectContent>
             </Select>
-            <button
-              type="button"
-              disabled={busyAction !== null}
-              onClick={() => void submit(
-                'urgency',
-                { action: 'correct', field: 'urgency', value: urgency },
-                'Urgency correction sent to OWL.',
-              )}
-              className={buttonClass}
-            >
-              {busyAction === 'urgency' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              Save urgency
-            </button>
           </div>
 
           <div className="flex flex-col gap-1">
@@ -333,25 +365,16 @@ export function OwlTaskActions({
               onChange={(event) => setAmount(event.target.value)}
               className={inputClass}
             />
+          </div>
+          <div className="sm:col-span-3">
             <button
               type="button"
-              disabled={busyAction !== null}
-              onClick={() => {
-                const correctedAmount = amount.trim() === '' ? null : Number(amount);
-                if (correctedAmount !== null && (!Number.isFinite(correctedAmount) || correctedAmount < 0)) {
-                  setMessage({ kind: 'error', text: 'Amount must be zero or greater.' });
-                  return;
-                }
-                void submit(
-                  'amount',
-                  { action: 'correct', field: 'amount', value: correctedAmount },
-                  'Amount correction sent to OWL.',
-                );
-              }}
-              className={buttonClass}
+              disabled={busyAction !== null || !correctionsChanged}
+              onClick={() => { void saveCorrections(); }}
+              className={`${buttonClass} w-full border-[var(--accent)]/30 bg-[var(--accent)]/10 text-[var(--accent-300)]`}
             >
-              {busyAction === 'amount' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-              Save amount
+              {busyAction === 'corrections' ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+              Save source corrections
             </button>
           </div>
         </div>

@@ -119,10 +119,11 @@ export function TaskDetailHeader({
               <button
                 type="button"
                 onClick={popOutTask}
-                className="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                className="flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
                 aria-label="Pop out task"
               >
                 <AppWindow size={15} aria-hidden="true" />
+                <span className="text-xs font-medium">Pop out</span>
               </button>
             </Tooltip>
           )}
@@ -145,6 +146,9 @@ export function TaskDetailHeader({
                 aria-label={mode === 'workspace' ? 'Exit full workspace' : mode === 'dialog' ? 'Use full workspace' : 'Expand task details'}
               >
                 {mode === 'workspace' ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                <span className="sr-only">
+                  {mode === 'workspace' ? 'Exit workspace' : mode === 'dialog' ? 'Full workspace' : 'Expand'}
+                </span>
               </button>
             </Tooltip>
           )}

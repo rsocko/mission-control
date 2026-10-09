@@ -1093,7 +1093,7 @@ export function TaskDetailPanel({
           currentSourceListId={task.sourceListId}
           onMoveToList={onMoveToList}
           supportsMoveToList={supportsMoveToList}
-          hasWritableConnectors={writableConnectors.length > 0}
+          hasWritableConnectors={task.connectorType !== 'document-intelligence' && writableConnectors.length > 0}
           onOpenMoveDialog={() => setShowMoveDialog(true)}
           deepLink={
             linkedResourceDeepLink

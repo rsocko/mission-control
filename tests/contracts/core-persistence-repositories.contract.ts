@@ -244,12 +244,20 @@ export function describeCorePersistenceRepositoriesContract(
       )).resolves.toMatchObject({
         state: { retained: true },
       });
+      await expect(harness.repositories.connectors.patchSettingsState(
+        coreConnectorFixture.id,
+        'tyrionAttributionPolicy',
+        { pinnedPolicyVersion: 3 },
+      )).resolves.toMatchObject({
+        state: { pinnedPolicyVersion: 3 },
+      });
       await expect(harness.repositories.connectors.get(coreConnectorFixture.id))
         .resolves.toMatchObject({
           settings: {
             nested: { portable: true },
             authenticatedUser: 'octocat',
             checkpoint: { retained: true },
+            tyrionAttributionPolicy: { pinnedPolicyVersion: 3 },
           },
         });
     });

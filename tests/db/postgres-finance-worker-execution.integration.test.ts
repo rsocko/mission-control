@@ -62,7 +62,6 @@ const ORIGINAL_BACKEND = process.env.MC_DATABASE_BACKEND;
 const ORIGINAL_POSTGRES_URL = process.env.MC_POSTGRES_URL;
 const ORIGINAL_SSL_MODE = process.env.MC_POSTGRES_SSL_MODE;
 const ORIGINAL_MODE = process.env.MC_MODE;
-const ORIGINAL_POLICY_VERSION = process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION;
 const ORIGINAL_SHADOW_INGEST = process.env.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED;
 const IDENTITY_NAMESPACE = 'a'.repeat(64);
 
@@ -396,6 +395,7 @@ async function seedConnector(connectorId: string): Promise<void> {
         bridgeUrl: 'https://synthetic-finance-provider.test',
         maxRetries: 0,
         householdCurrency: 'USD',
+        tyrionAttributionPolicy: { pinnedPolicyVersion: 7 },
       }),
       now,
     ],
@@ -488,7 +488,6 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
     process.env.MC_POSTGRES_SSL_MODE = new URL(connectionString!).searchParams.get('sslmode')
       ?? 'disable';
     process.env.MC_MODE = 'live';
-    process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION = '7';
     process.env.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED = 'true';
     const [{ initializeDatabaseWithRetry }, runtime] = await Promise.all([
       import('@/db/startup'),
@@ -933,7 +932,6 @@ afterAll(async () => {
   restoreEnvironment('MC_POSTGRES_URL', ORIGINAL_POSTGRES_URL);
   restoreEnvironment('MC_POSTGRES_SSL_MODE', ORIGINAL_SSL_MODE);
   restoreEnvironment('MC_MODE', ORIGINAL_MODE);
-  restoreEnvironment('TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION', ORIGINAL_POLICY_VERSION);
   restoreEnvironment(
     'TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED',
     ORIGINAL_SHADOW_INGEST,

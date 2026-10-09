@@ -14,7 +14,13 @@ interface ReadinessResponse {
     enabled: boolean;
     configurationUrl: string;
   };
-  expectedPolicyVersion: number | null;
+  policySelection: {
+    mode: 'follow-current' | 'pinned';
+    pinnedPolicyVersion: number | null;
+  };
+  activePolicyVersion: number | null;
+  policyUpdatedAt: string | null;
+  policyDiscoveryError: string | null;
   accountSummary: {
     total: number;
     active: number;
@@ -66,7 +72,17 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [previewing, setPreviewing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [mode, setMode] = useState<'follow-current' | 'pinned'>('follow-current');
+  const [pin, setPin] = useState('');
+  const [savedMessage, setSavedMessage] = useState('');
   const [error, setError] = useState('');
+
+  function applyReadiness(body: ReadinessResponse) {
+    setReadiness(body);
+    setMode(body.policySelection.mode);
+    setPin(body.policySelection.pinnedPolicyVersion?.toString() ?? '');
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -79,7 +95,7 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
         return body as ReadinessResponse;
       })
       .then((body) => {
-        if (!cancelled) setReadiness(body);
+        if (!cancelled) applyReadiness(body);
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
@@ -93,6 +109,43 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
       cancelled = true;
     };
   }, [connectorId]);
+
+  async function savePolicySelection() {
+    const parsedPin = Number(pin);
+    if (mode === 'pinned' && (!Number.isSafeInteger(parsedPin) || parsedPin < 1)) {
+      setError('Enter a positive whole-number policy version.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    setSavedMessage('');
+    try {
+      const response = await fetch(
+        `/api/connectors/${connectorId}/finance/attribution-readiness`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pinnedPolicyVersion: mode === 'pinned' ? parsedPin : null,
+          }),
+        },
+      );
+      const body = await response.json().catch(() => null) as unknown;
+      if (!response.ok) {
+        throw new Error(responseError(body, 'Policy selection could not be saved'));
+      }
+      applyReadiness(body as ReadinessResponse);
+      setSavedMessage(
+        mode === 'pinned'
+          ? `Pinned to policy ${parsedPin}.`
+          : 'Following Tyrion’s current policy.',
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Policy selection could not be saved');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function runPreview() {
     setPreviewing(true);
@@ -168,14 +221,132 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
 
       {readiness && (
         <>
+          <fieldset className="space-y-2">
+            <legend className="text-xs font-medium text-[var(--text-primary)]">
+              Policy version
+            </legend>
+            <label className="flex cursor-pointer items-start gap-2 text-xs text-[var(--text-secondary)]">
+              <input
+                type="radio"
+                name={`attribution-policy-mode-${connectorId}`}
+                value="follow-current"
+                checked={mode === 'follow-current'}
+                onChange={() => {
+                  setMode('follow-current');
+                  setSavedMessage('');
+                }}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium text-[var(--text-primary)]">
+                  Follow Tyrion&apos;s current policy
+                </span>
+                <span className="mt-0.5 block leading-5 text-[var(--text-muted)]">
+                  Each preview or sync locks the current version for that entire operation.
+                  Newly saved Tyrion policies are used without redeploying Mission Control.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2 text-xs text-[var(--text-secondary)]">
+              <input
+                type="radio"
+                name={`attribution-policy-mode-${connectorId}`}
+                value="pinned"
+                checked={mode === 'pinned'}
+                onChange={() => {
+                  setMode('pinned');
+                  setSavedMessage('');
+                }}
+                className="mt-0.5"
+              />
+              <span className="min-w-0">
+                <span className="font-medium text-[var(--text-primary)]">
+                  Pin a specific policy version
+                </span>
+                <span className="mt-0.5 block leading-5 text-[var(--text-muted)]">
+                  Operations fail closed when Tyrion&apos;s active version does not match.
+                </span>
+              </span>
+            </label>
+            {mode === 'pinned' && (
+              <label className="block max-w-48 text-xs font-medium text-[var(--text-secondary)]">
+                Policy version
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  required
+                  value={pin}
+                  onChange={(event) => {
+                    setPin(event.target.value);
+                    setSavedMessage('');
+                  }}
+                  aria-describedby={`policy-pin-help-${connectorId}`}
+                  className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1.5 text-sm text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                />
+                <span
+                  id={`policy-pin-help-${connectorId}`}
+                  className="mt-1 block font-normal leading-5 text-[var(--text-muted)]"
+                >
+                  Enter the positive version number shown in Tyrion.
+                </span>
+              </label>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={savePolicySelection}
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              >
+                {saving && <Loader2 size={12} className="animate-spin" />}
+                {saving ? 'Saving policy mode...' : 'Save policy mode'}
+              </button>
+              <span aria-live="polite" className="text-xs text-green-400">
+                {savedMessage}
+              </span>
+            </div>
+          </fieldset>
+
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
-            <span>Policy fence: {readiness.expectedPolicyVersion ?? 'not configured'}</span>
+            <span>
+              Active Tyrion policy: {readiness.activePolicyVersion ?? 'unavailable'}
+            </span>
+            <span>
+              Mission Control mode: {readiness.policySelection.mode === 'pinned'
+                ? `pinned to ${readiness.policySelection.pinnedPolicyVersion}`
+                : 'follow current'}
+            </span>
             <span>
               {readiness.accountSummary.total} synchronized account
               {readiness.accountSummary.total === 1 ? '' : 's'}
               {' '}({readiness.accountSummary.active} active)
             </span>
           </div>
+
+          {readiness.policyDiscoveryError && (
+            <div
+              role="status"
+              className="rounded-md border border-amber-800/40 bg-amber-950/20 p-2 text-xs text-amber-300"
+            >
+              Tyrion&apos;s active policy is currently unavailable (
+              {readiness.policyDiscoveryError}). You can still change the saved mode,
+              but follow-current operations will fail closed until discovery recovers.
+            </div>
+          )}
+
+          {readiness.policySelection.mode === 'pinned'
+            && readiness.activePolicyVersion !== null
+            && readiness.activePolicyVersion !== readiness.policySelection.pinnedPolicyVersion && (
+            <div
+              role="status"
+              className="rounded-md border border-amber-800/40 bg-amber-950/20 p-2 text-xs text-amber-300"
+            >
+              Tyrion is currently on policy {readiness.activePolicyVersion}. Preview and sync
+              will remain blocked until it matches pinned policy{' '}
+              {readiness.policySelection.pinnedPolicyVersion}, or you switch to follow current.
+            </div>
+          )}
 
           {readiness.accountSummary.total === 0 ? (
             <p className="rounded-md border border-dashed border-[var(--border)] p-3 text-xs text-[var(--text-muted)]">

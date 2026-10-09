@@ -6,6 +6,7 @@ export const TYRION_ATTRIBUTION_CONTRACT_VERSION = '2.0';
 export const TYRION_ATTRIBUTION_ENGINE_VERSION = '2.0.0';
 export const TYRION_ATTRIBUTION_PROVENANCE = 'mission-control-normalized-v2';
 export const TYRION_ATTRIBUTION_PATH = '/api/internal/v2/attribution/batch';
+export const TYRION_ATTRIBUTION_POLICY_PATH = '/api/internal/v2/attribution/policy';
 export const TYRION_ATTRIBUTION_MAX_ITEMS = 100;
 export const TYRION_ATTRIBUTION_MAX_BODY_BYTES = 65_536;
 export const TYRION_ATTRIBUTION_MAX_RESPONSE_BYTES = 262_144;
@@ -134,6 +135,13 @@ export const attributionBatchResponseSchema = z.object({
     .max(TYRION_ATTRIBUTION_MAX_ITEMS),
 }).strict();
 
+export const attributionPolicyResponseSchema = z.object({
+  contractVersion: z.literal(TYRION_ATTRIBUTION_CONTRACT_VERSION),
+  engineVersion: z.literal(TYRION_ATTRIBUTION_ENGINE_VERSION),
+  policyVersion: z.number().int().positive(),
+  policyUpdatedAt: timestampSchema,
+}).strict();
+
 export const attributionErrorResponseSchema = z.object({
   error: z.object({
     code: z.string().min(1).max(128),
@@ -145,4 +153,5 @@ export type AttributionBatchItem = z.infer<typeof attributionBatchItemSchema>;
 export type AttributionBatchRequest = z.infer<typeof attributionBatchRequestSchema>;
 export type AttributionBatchResult = z.infer<typeof attributionBatchResultSchema>;
 export type AttributionBatchResponse = z.infer<typeof attributionBatchResponseSchema>;
+export type AttributionPolicyResponse = z.infer<typeof attributionPolicyResponseSchema>;
 export type ManualDecision = z.infer<typeof manualDecisionSchema>;

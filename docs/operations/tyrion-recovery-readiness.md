@@ -59,13 +59,19 @@ household currency. Currency is ordinary connector/application state in
 Legacy connectors without it report `needs-configuration` and unrelated edits
 preserve that state.
 
-Configure the service token through the existing credential mechanism and set
-`TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` to Tyrion's exact active policy
-version. This static positive fence is required for both normal sync and the
-operator readiness preflight. Do not infer it from attribution
-`contractVersion: "2.0"`: the contract version and mutable policy CAS version
-are independent. Production currently uses policy version `2`. Keep
-`TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED=true`, while leaving:
+Configure the service token through the existing credential mechanism. In
+**Attribution policy readiness**, choose whether this connector follows
+Tyrion's current policy or pins a specific positive policy version. Follow
+current is the default: every preview or sync resolves the active policy once,
+then sends that exact version as the CAS fence for every batch in the
+operation. A configured pin bypasses discovery and retains strict mismatch
+failure. The attribution `contractVersion: "2.0"` and mutable policy version
+remain independent.
+
+Deploy Tyrion's protected `GET /api/internal/v2/attribution/policy` discovery
+endpoint before deploying this Mission Control version.
+
+Keep `TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED=true`, while leaving:
 
 - `TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED` off
 - `TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED` off
@@ -97,10 +103,11 @@ decisions remain attached to each request and must be returned as manual
 results. Do not enable the connector, release quarantine, or mutate live policy
 as part of this compatibility transition.
 
-After saving the Tyrion policy, set
-`TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` to that exact active version and
-redeploy both Mission Control web and worker. Then run **Run no-write preview**
-in Settings, or invoke the trusted endpoint:
+After saving the Tyrion policy, run **Run no-write preview** in Settings, or
+invoke the trusted endpoint below. Follow-current mode accepts the newly active
+policy on the next operation without changing environment state or redeploying
+Mission Control. Pinned mode continues to fail closed until the configured pin
+matches:
 
 ```bash
 curl --fail-with-body -X POST \

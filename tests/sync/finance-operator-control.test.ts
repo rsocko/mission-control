@@ -12,7 +12,6 @@ vi.unmock('crypto');
 const directory = mkdtempSync(join(tmpdir(), 'mc-finance-operator-'));
 process.env.MC_DB_PATH = join(directory, 'operator.db');
 process.env.FINANCE_MANAGER_API_TOKEN = 'invented-service-token';
-process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION = '7';
 process.env.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED = 'true';
 delete process.env.TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED;
 delete process.env.TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED;
@@ -108,7 +107,6 @@ afterAll(() => {
   rmSync(directory, { recursive: true, force: true });
   delete process.env.MC_DB_PATH;
   delete process.env.FINANCE_MANAGER_API_TOKEN;
-  delete process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION;
   delete process.env.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED;
 });
 

@@ -14,6 +14,7 @@ const tempDirectory = mkdtempSync(join(tmpdir(), 'mc-finance-snapshot-'));
 const databasePath = join(tempDirectory, 'finance.db');
 let sqlite: Database.Database;
 let synchronizer: SnapshotSynchronizer;
+let createSynchronizer: (config: ConnectorConfig) => SnapshotSynchronizer;
 let updateFinanceCategory:
   typeof import('@/lib/connectors/monarch-money/snapshot-sync')['updateFinanceCategory'];
 let applyManualAttributionDecision:
@@ -43,6 +44,7 @@ const connectorConfig: ConnectorConfig = {
     overlapDays: 7,
     pageSize: 500,
     maxRetries: 0,
+    tyrionAttributionPolicy: { pinnedPolicyVersion: 7 },
   },
   syncedLists: [],
 };
@@ -99,7 +101,6 @@ function mockPages(pages: unknown[][], fetchedAt: string[] = []) {
 
 beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
-  process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION = '7';
   vi.resetModules();
   const dbModule = await importInitializedSqliteDatabase();
   sqlite = dbModule.sqlite;
@@ -113,6 +114,7 @@ beforeAll(async () => {
   `).run(connectorConfig.id, configuredAt, configuredAt);
   const snapshotModule = await import('@/lib/connectors/monarch-money/snapshot-sync');
   synchronizer = new snapshotModule.FinanceSnapshotSynchronizer(connectorConfig);
+  createSynchronizer = (config) => new snapshotModule.FinanceSnapshotSynchronizer(config);
   updateFinanceCategory = snapshotModule.updateFinanceCategory;
   applyManualAttributionDecision = (
     await import('@/lib/connectors/monarch-money/attribution-service')
@@ -125,7 +127,6 @@ afterEach(() => {
 });
 
 afterAll(() => {
-  delete process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION;
   sqlite.close();
   rmSync(tempDirectory, { recursive: true, force: true });
 });
@@ -424,6 +425,13 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
   });
 
   it('attributes a normalized page without sending private finance fields', async () => {
+    const followCurrentSynchronizer = createSynchronizer({
+      ...connectorConfig,
+      settings: {
+        ...connectorConfig.settings,
+        tyrionAttributionPolicy: undefined,
+      },
+    });
     const attributionBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
@@ -431,6 +439,14 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
         return page([transaction('attributed-transaction', {
           merchant: { name: 'Invented merchant', logoUrl: null },
         })], null);
+      }
+      if (url.pathname.endsWith('/attribution/policy')) {
+        return Response.json({
+          contractVersion: '2.0',
+          engineVersion: '2.0.0',
+          policyVersion: 7,
+          policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+        });
       }
       expect(new Headers(init?.headers).get('authorization'))
         .toBe('Bearer invented-test-token');
@@ -461,7 +477,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       }), { headers: { 'content-type': 'application/json' } });
     }));
 
-    await expect(synchronizer.sync({ full: false })).resolves.toMatchObject({
+    await expect(followCurrentSynchronizer.sync({ full: false })).resolves.toMatchObject({
       itemsAdded: 1,
     });
     const firstAttributionBody = attributionBodies[0] as {

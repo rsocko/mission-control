@@ -19,7 +19,6 @@ export type SyncOperatorErrorCode =
   | 'sync_job_active'
   | 'household_currency_unavailable'
   | 'finance_service_token_unavailable'
-  | 'attribution_policy_fence_unavailable'
   | 'finance_insight_shadow_ingest_disabled'
   | 'finance_delivery_gate_enabled'
   | 'finance_notification_gate_enabled'

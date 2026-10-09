@@ -194,7 +194,6 @@ SQLite values take precedence over environment defaults.
 | `TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED` | `false` | Enables server-only staged publication, evaluation retry, and bounded occurrence shadow ingestion; notification delivery still requires the per-connector cutover fence |
 | `TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED` | `false` | Enables immediate notifications for eligible fresh large transactions and recurring amount increases |
 | `TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED` | `false` | Enables the grouped high-confidence monthly movers digest after 09:00 on day 2 in the configured household timezone |
-| `TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` | — | Required positive static fence for normal attribution sync and operator readiness; production currently uses policy version `2`, which is independent of attribution contract version `2.0` |
 | `TYRION_ATTRIBUTION_TIMEOUT_MS` | `10000` | Bounded Tyrion attribution request timeout, capped at 30 seconds |
 | `MONARCH_WEB_URL` | `https://app.monarchmoney.com` | Public Monarch origin used for comprehensive finance workflow links |
 | `TYRION_OPERATIONS_URL` | `https://tyrion.example` | Allowlisted public Tyrion operations root used for configuration and the server-constructed `?source=mission-control` reconnect action |
@@ -209,6 +208,13 @@ SQLite values take precedence over environment defaults.
 | `HOME_ASSISTANT_URL` | `http://localhost:8123` | Home Assistant instance |
 | `HOME_ASSISTANT_TOKEN` | — | HA long-lived access token |
 | `HOME_ASSISTANT_ENTITIES` | — | Comma-separated entity globs to monitor |
+
+Tyrion attribution policy selection is connector application state, not an
+environment variable. By default, each preview or sync resolves Tyrion's
+current policy once and uses that exact version for every batch in the
+operation. Settings can optionally pin a positive policy version for stricter
+rollout control. Changing either mode takes effect on the next operation and
+does not require a Mission Control redeploy.
 
 ### Home Assistant alert ownership
 

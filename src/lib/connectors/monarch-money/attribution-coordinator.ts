@@ -234,11 +234,12 @@ export class FinanceAttributionCoordinator {
             ...(this.financeConfig.credentials ?? {}),
             identityNamespace,
           },
+          settings: this.financeConfig.settings,
         });
       }
       if (!this.client) this.client = new TyrionAttributionClient(this.config);
       if (this.policyFence === null) {
-        this.policyFence = this.config.expectedPolicyVersion;
+        this.policyFence = await this.client.resolvePolicyVersion(signal);
       }
       prepared = prepareItems(
         this.config,

@@ -38,6 +38,7 @@ export interface FinanceWebTransaction {
   attributionConfidence: 'definite' | 'likely' | 'none' | null;
   attributionMethod:
     | 'manual'
+    | 'account-default'
     | 'account-rule'
     | 'merchant-rule'
     | 'historical-pattern'

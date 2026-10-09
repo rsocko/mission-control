@@ -27,7 +27,6 @@ export const tyrionBridgeAccountRefSchema = z.string()
 const reasonSchema = z.enum([
   'no-match',
   'low-confidence',
-  'account-rule-conflict',
   'merchant-rule-conflict',
   'historical-attribution-tie',
   'engine-unavailable',
@@ -86,7 +85,7 @@ export const attributionBatchResultSchema = z.object({
   confidence: z.enum(['definite', 'likely', 'none']),
   method: z.enum([
     'manual',
-    'account-rule',
+    'account-default',
     'merchant-rule',
     'historical-pattern',
     'unassigned',

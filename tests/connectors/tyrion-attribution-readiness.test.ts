@@ -97,7 +97,7 @@ function result(
   sourceRef: string,
   input: {
     status: 'attributed' | 'unassigned';
-    method: 'account-rule' | 'unassigned';
+    method: 'account-default' | 'unassigned';
     reviewStatus: 'not-required' | 'pending';
     reasons: string[];
   },
@@ -169,7 +169,7 @@ describe('Tyrion attribution policy readiness', () => {
           ? {
               ...result(item.sourceRef, {
                 status: 'attributed',
-                method: 'account-rule',
+                method: 'account-default',
                 reviewStatus: 'not-required',
                 reasons: [],
               }),
@@ -179,7 +179,7 @@ describe('Tyrion attribution policy readiness', () => {
             }
           : result(item.sourceRef, {
               status: 'attributed',
-              method: 'account-rule',
+              method: 'account-default',
               reviewStatus: 'not-required',
               reasons: [],
             })),
@@ -199,7 +199,7 @@ describe('Tyrion attribution policy readiness', () => {
       counts: {
         status: { attributed: 2 },
         reason: {},
-        method: { 'account-rule': 1, manual: 1 },
+        method: { 'account-default': 1, manual: 1 },
         reviewStatus: { 'not-required': 2 },
       },
     });
@@ -224,7 +224,7 @@ describe('Tyrion attribution policy readiness', () => {
         engineVersion: '2.0.0',
         results: request.items.map((item) => result(item.sourceRef, {
           status: 'attributed',
-          method: 'account-rule',
+          method: 'account-default',
           reviewStatus: 'not-required',
           reasons: [],
         })),

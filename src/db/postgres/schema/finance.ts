@@ -51,7 +51,7 @@ export const financeTransactions = pgTable('finance_transactions', {
     .default('pending'),
   attributionConfidence: text('attribution_confidence').$type<'definite' | 'likely' | 'none'>(),
   attributionMethod: text('attribution_method')
-    .$type<'manual' | 'account-rule' | 'merchant-rule' | 'historical-pattern' | 'unassigned' | 'unavailable'>(),
+    .$type<'manual' | 'account-default' | 'account-rule' | 'merchant-rule' | 'historical-pattern' | 'unassigned' | 'unavailable'>(),
   attributionExplanation: text('attribution_explanation'),
   attributionReasons: jsonb('attribution_reasons')
     .$type<string[]>()

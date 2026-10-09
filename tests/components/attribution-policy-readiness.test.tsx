@@ -32,7 +32,7 @@ describe('AttributionPolicyReadiness', () => {
             counts: {
               status: { attributed: 2 },
               reason: {},
-              method: { manual: 1, 'account-rule': 1 },
+              method: { manual: 1, 'account-default': 1 },
               confidence: { definite: 2 },
               reviewStatus: { 'not-required': 2 },
             },

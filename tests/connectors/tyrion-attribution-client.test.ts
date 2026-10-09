@@ -50,8 +50,8 @@ function success(sourceRef = item.sourceRef, policyVersion = 2) {
       status: 'attributed',
       kidId: 'kid-one',
       confidence: 'definite',
-      method: 'account-rule',
-      explanation: 'Matched a configured account rule',
+      method: 'account-default',
+      explanation: 'Matched the configured account default',
       reviewStatus: 'not-required',
       reasons: [],
       decisionSource: 'automated',
@@ -177,6 +177,58 @@ describe('Tyrion attribution v2 client', () => {
       contractVersion: '2.0',
       policyVersion: 7,
     });
+  });
+
+  it('accepts final account-default and rule-based result semantics only', async () => {
+    const parentShared = {
+      ...success(),
+      results: [{
+        ...success().results[0],
+        status: 'unassigned',
+        kidId: null,
+        confidence: 'definite',
+        method: 'account-default',
+        explanation: 'Matched the Parent/shared account default',
+      }],
+    };
+    const ruleBasedNoMatch = {
+      ...success(),
+      results: [{
+        ...success().results[0],
+        status: 'unassigned',
+        kidId: null,
+        confidence: 'none',
+        method: 'unassigned',
+        explanation: 'No attribution rule matched',
+        reviewStatus: 'pending',
+        reasons: ['no-match'],
+      }],
+    };
+    for (const response of [parentShared, ruleBasedNoMatch]) {
+      const client = new TyrionAttributionClient(
+        config,
+        vi.fn().mockResolvedValue(Response.json(response)) as typeof fetch,
+      );
+      await expect(client.attribute(request())).resolves.toBeDefined();
+    }
+
+    const legacyMethod = {
+      ...success(),
+      results: [{ ...success().results[0], method: 'account-rule' }],
+    };
+    const removedReason = {
+      ...success(),
+      results: [{ ...success().results[0], reasons: ['account-rule-conflict'] }],
+    };
+    for (const response of [legacyMethod, removedReason]) {
+      const client = new TyrionAttributionClient(
+        config,
+        vi.fn().mockResolvedValue(Response.json(response)) as typeof fetch,
+      );
+      await expect(client.attribute(request())).rejects.toMatchObject({
+        code: 'invalid_attribution_contract',
+      });
+    }
   });
 
   it('enforces item and body bounds and emits sanitized stable service errors', async () => {

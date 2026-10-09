@@ -33,7 +33,6 @@ export interface FinanceAttributionResult {
   method:
     | 'manual'
     | 'account-default'
-    | 'account-rule'
     | 'merchant-rule'
     | 'historical-pattern'
     | 'unassigned'

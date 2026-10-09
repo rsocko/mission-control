@@ -58,7 +58,6 @@ export type FinanceAssistantAttributionConfidence = 'definite' | 'likely' | 'non
 export type FinanceAssistantAttributionMethod =
   | 'manual'
   | 'account-default'
-  | 'account-rule'
   | 'merchant-rule'
   | 'historical-pattern'
   | 'unassigned'

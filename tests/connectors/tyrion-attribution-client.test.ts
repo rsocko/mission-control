@@ -212,15 +212,15 @@ describe('Tyrion attribution v2 client', () => {
       await expect(client.attribute(request())).resolves.toBeDefined();
     }
 
-    const legacyMethod = {
+    const unsupportedMethod = {
       ...success(),
-      results: [{ ...success().results[0], method: 'account-rule' }],
+      results: [{ ...success().results[0], method: 'unsupported-method' }],
     };
-    const removedReason = {
+    const unsupportedReason = {
       ...success(),
-      results: [{ ...success().results[0], reasons: ['account-rule-conflict'] }],
+      results: [{ ...success().results[0], reasons: ['unsupported-reason'] }],
     };
-    for (const response of [legacyMethod, removedReason]) {
+    for (const response of [unsupportedMethod, unsupportedReason]) {
       const client = new TyrionAttributionClient(
         config,
         vi.fn().mockResolvedValue(Response.json(response)) as typeof fetch,

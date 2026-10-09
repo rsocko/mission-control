@@ -131,7 +131,6 @@ const transactionSchema = z.object({
     method: z.enum([
       'manual',
       'account-default',
-      'account-rule',
       'merchant-rule',
       'historical-pattern',
       'unassigned',

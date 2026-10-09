@@ -81,7 +81,6 @@ describe('finance attention contract — pure decision helpers', () => {
   it('allowlists only the documented human-reviewable attribution reasons', () => {
     for (const reason of [
       'attribution_ambiguous',
-      'account-rule-conflict',
       'historical-attribution-tie',
       'low-confidence',
       'manual_decision_conflict',

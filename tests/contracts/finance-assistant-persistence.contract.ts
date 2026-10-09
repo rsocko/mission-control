@@ -34,7 +34,7 @@ export interface FinanceAssistantSeedTransaction {
   lifecycleStatus?: 'active' | 'deleted';
   attributionStatus?: 'attributed' | 'unassigned' | 'pending' | 'unavailable';
   confidence?: 'definite' | 'likely' | 'none' | null;
-  method?: 'manual' | 'account-rule' | 'merchant-rule' | 'historical-pattern' | null;
+  method?: 'manual' | 'account-default' | 'merchant-rule' | 'historical-pattern' | null;
   sourceFingerprint?: string;
   lastSeenAt?: string;
   manualDecidedAt?: string | null;

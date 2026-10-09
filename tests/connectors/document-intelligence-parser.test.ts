@@ -104,6 +104,50 @@ describe('mapActionToTask', () => {
     expect(task.metadata.documentTitle).toBe('Invoice #123');
   });
 
+  it('uses the Paperless document creation date while preserving the OWL action timestamp', () => {
+    const task = mapActionToTask(
+      makeAction({
+        created_at: '2026-10-09T00:42:33.618552Z',
+        document_created_at: '2026-09-24T00:00:00Z',
+      }),
+      CONNECTOR_TYPE,
+      CONNECTOR_ID,
+    );
+
+    expect(task.createdAt).toBe('2026-09-24T00:00:00Z');
+    expect(task.metadata).toMatchObject({
+      documentCreatedAt: '2026-09-24T00:00:00Z',
+      owlCreatedAt: '2026-10-09T00:42:33.618552Z',
+    });
+  });
+
+  it('falls back to the OWL action timestamp for legacy responses', () => {
+    const task = mapActionToTask(
+      makeAction({
+        created_at: '2026-10-09T00:42:33.618552Z',
+        document_created_at: null,
+      }),
+      CONNECTOR_TYPE,
+      CONNECTOR_ID,
+    );
+
+    expect(task.createdAt).toBe('2026-10-09T00:42:33.618552Z');
+  });
+
+  it('falls back to the OWL action timestamp when the document date is invalid', () => {
+    const task = mapActionToTask(
+      makeAction({
+        created_at: '2026-10-09T00:42:33.618552Z',
+        document_created_at: 'not-a-date',
+      }),
+      CONNECTOR_TYPE,
+      CONNECTOR_ID,
+    );
+
+    expect(task.createdAt).toBe('2026-10-09T00:42:33.618552Z');
+    expect(task.metadata.documentCreatedAt).toBeUndefined();
+  });
+
   it('maps all action types correctly', () => {
     const types: DocAction['action_type'][] = ['pay', 'respond', 'sign', 'schedule', 'file', 'archive', 'review'];
     for (const actionType of types) {

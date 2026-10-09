@@ -33,6 +33,7 @@ export interface DocAction {
   source_actions?: DocSourceAction[] | null;
   status: 'pending' | 'acknowledged' | 'completed' | 'done' | 'dismissed' | 'snoozed' | 'not_an_action';
   created_at: string;
+  document_created_at?: string | null;
   updated_at?: string;
   snoozed_until?: string | null;
   document_url?: string;
@@ -115,6 +116,7 @@ export function mapActionToTask(
   connectorInstanceId: string,
   docHubBaseUrl?: string,
 ): TaskItem {
+  const documentCreatedAt = normalizeDocumentCreatedAt(action.document_created_at);
   const hubLinks = docHubBaseUrl
     ? buildDocHubTaskLinks(docHubBaseUrl, action.id, action.document_id)
     : { actionUrl: null, documentUrl: null };
@@ -133,7 +135,7 @@ export function mapActionToTask(
     statusReason: mapActionStatusReason(action.status),
     priority: mapUrgency(action.urgency),
     dueDate: action.due_date || undefined,
-    createdAt: action.created_at || new Date().toISOString(),
+    createdAt: documentCreatedAt || action.created_at || new Date().toISOString(),
     updatedAt: action.updated_at || action.created_at || new Date().toISOString(),
     completedAt: action.status === 'completed' || action.status === 'done'
       ? action.updated_at || action.created_at
@@ -158,6 +160,7 @@ export function mapActionToTask(
       documentTitle: action.document_title,
       documentType: action.document_type,
       documentUrl: action.document_url,
+      documentCreatedAt,
       urgency: action.urgency,
       actionReady: isActionReady(action),
       reviewState: action.review_state,
@@ -168,6 +171,7 @@ export function mapActionToTask(
       recommendedCta: action.recommended_cta,
       sourceActions: resolveSourceActions(action),
       owlStatus: action.status,
+      owlCreatedAt: action.created_at,
       owlDisposition: action.status === 'dismissed' || action.status === 'not_an_action'
         ? action.status
         : undefined,
@@ -184,6 +188,11 @@ export function mapActionToTask(
     syncStatus: 'synced',
     lastSyncedAt: new Date().toISOString(),
   };
+}
+
+function normalizeDocumentCreatedAt(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  return Number.isFinite(Date.parse(value)) ? value : undefined;
 }
 
 export function mapActionToReviewNotification(

@@ -10,6 +10,7 @@ import {
   Coins,
   Database,
   ExternalLink,
+  FileSearch,
   HeartPulse,
   Loader2,
   RefreshCw,
@@ -266,13 +267,19 @@ export function FinanceOverview() {
             />
           )}
           <section aria-labelledby="finance-attention-heading">
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <h2 id="finance-attention-heading" className="text-sm font-semibold text-[var(--text-primary)]">
                 Needs attention
               </h2>
-              <Link href="/finance/review" className="flex items-center gap-1 text-xs font-medium text-[var(--accent-400)] hover:underline focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
-                Review exceptions <ArrowUpRight size={13} />
-              </Link>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <Link href="/finance/payee-documents" className="flex min-h-9 items-center gap-1 text-xs font-medium text-[var(--accent-400)] underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+                  <FileSearch size={13} aria-hidden="true" />
+                  Review document expectations <ArrowUpRight size={13} aria-hidden="true" />
+                </Link>
+                <Link href="/finance/review" className="flex min-h-9 items-center gap-1 text-xs font-medium text-[var(--accent-400)] underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+                  Review exceptions <ArrowUpRight size={13} aria-hidden="true" />
+                </Link>
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <AttentionCard label="Pending exceptions" value={overview.attention.pendingExceptions} icon={ShieldAlert} />

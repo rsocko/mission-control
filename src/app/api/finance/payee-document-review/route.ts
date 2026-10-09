@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     }
     if (error instanceof PayeeDocumentReviewUpstreamError) {
       return NextResponse.json(
-        { error: error.message, code: `${error.source}_upstream_error` },
+        { error: error.message, code: 'owl_upstream_error' },
         { status: error.status === 404 ? 409 : 502 },
       );
     }

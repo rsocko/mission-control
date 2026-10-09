@@ -17,26 +17,18 @@ runtime code contains no sample household data.
 
 ## Source contracts
 
-The adapter must normalize both sources into the Mission Control contract in
-`src/lib/payee-document-review/contract.ts`.
+The adapter normalizes OWL's aggregate Mission Control read model into the
+browser contract in `src/lib/payee-document-review/contract.ts`. Mission Control
+does not fetch Tyrion directly for this UI and never receives Tyrion's opaque
+`payeeRef`. OWL ingests the protected Tyrion projection separately and exposes
+only bounded evidence on its review queue: classification, observation
+count/window, interval evidence, confidence, basis, provenance,
+Monarch-recurring evidence, and source timestamp.
 
-Tyrion's settled `PayeePatternProjectionV1` is read-only and separate from
-document expectation signals:
-
-- Internal read:
-  `GET /api/internal/v1/finance/insights/payee-patterns/{generationId}?connectorRef={connectorRef}`
-- Connector replay:
-  `GET /api/connector/v1/payee-patterns/{sourceGeneration}?connectorRef={connectorRef}`
-- Envelope:
-  `{ contractVersion: "1", connectorRef, sourceGeneration, sourceAsOf, completeness, payees[] }`
-- Payee evidence includes opaque `payeeRef`, display name, activity,
-  classification, observation count/window, optional interval evidence,
-  confidence, basis, transaction/Monarch-recurring provenance, and optional
-  confirmed Monarch recurrence.
-
-Mission Control does not mutate Tyrion through this flow. It displays only
-bounded aggregate evidence: classification, confidence, observation count and
-window, and interval summary.
+The UI labels those fields as read-only Tyrion financial evidence while keeping
+OWL's document decision, mappings, notes, and policy link in a separate panel.
+This source separation does not imply shared identity or direct MC-to-Tyrion
+transport.
 
 OWL's settled Mission Control contract requires the server-only
 `OWL_MISSION_CONTROL_API_TOKEN` bearer:
@@ -51,18 +43,15 @@ record's `owl_deep_link`; it does not call OWL's history endpoint.
 
 The deployed adapter requires:
 
-- `TYRION_PAYEE_PATTERN_API_URL`: the complete internal or replay resource URL,
-  including the generation path segment and `connectorRef` query value;
-- `TYRION_PAYEE_PATTERN_API_TOKEN`: the server-only Tyrion bearer;
 - `OWL_MISSION_CONTROL_URL`: the OWL service origin/base path; and
 - `OWL_MISSION_CONTROL_API_TOKEN`: the server-only OWL bearer.
 
-The current join assumption is explicit and isolated in `server-adapter.ts`:
-OWL review `id` is the same opaque identity as Tyrion `payeeRef`. Names and
-`display_hint` are never used as identity. The bounded UI maps one whole-payee
-candidate by sending `account_candidate_id: null`; account-specific mapping
-remains an OWL specialist workflow. Mapping preserves OWL `expectation_ids` and
-notes, while `no_documents_expected` preserves current mappings and notes.
+Mission Control uses only OWL review `id` as candidate identity. It never joins
+on or exposes a Tyrion identity, and names or `display_hint` are display evidence
+only. The bounded UI maps one whole-payee candidate by sending
+`account_candidate_id: null`; account-specific mapping remains an OWL specialist
+workflow. Mapping preserves OWL `expectation_ids` and notes, while
+`no_documents_expected` preserves current mappings and notes.
 OWL collection reads follow 100-item offset pages up to a 5,000-item safety
 limit.
 

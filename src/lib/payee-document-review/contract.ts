@@ -17,7 +17,6 @@ export const documentPolicyStatusSchema = z.enum([
 ]);
 
 export const payeePatternEvidenceSchema = z.object({
-  payeeRef: z.string().min(1),
   displayName: z.string().min(1),
   activity: payeeActivitySchema,
   classification: payeeClassificationSchema,

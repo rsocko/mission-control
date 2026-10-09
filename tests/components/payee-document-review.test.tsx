@@ -22,9 +22,8 @@ vi.mock('next/image', () => ({
 }));
 
 const candidate: PayeeDocumentReviewItem = {
-  candidateId: 'payee-ref-17',
+  candidateId: 'owl-candidate-17',
   pattern: {
-    payeeRef: 'payee-ref-17',
     displayName: 'Invented Utilities',
     activity: 'active',
     classification: 'recurring-variable',
@@ -55,7 +54,7 @@ const candidate: PayeeDocumentReviewItem = {
     correspondentRef: null,
     correspondentName: null,
     expectationSummary: null,
-    owlPolicyUrl: 'https://owl.example/reviews/payee-ref-17',
+    owlPolicyUrl: 'https://owl.example/reviews/owl-candidate-17',
   },
 };
 
@@ -106,7 +105,7 @@ describe('PayeeDocumentReview', () => {
     expect(screen.getByText('8')).toBeInTheDocument();
     expect(screen.queryByText(/transaction id|account number|raw transaction/i)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Edit detailed expectation policy in OWL/ }))
-      .toHaveAttribute('href', 'https://owl.example/reviews/payee-ref-17');
+      .toHaveAttribute('href', 'https://owl.example/reviews/owl-candidate-17');
   });
 
   it('maps a candidate through the injected adapter and announces success', async () => {
@@ -126,7 +125,7 @@ describe('PayeeDocumentReview', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Map to correspondent' }));
 
     await waitFor(() => expect(decide).toHaveBeenCalledWith({
-      candidateId: 'payee-ref-17',
+      candidateId: 'owl-candidate-17',
       decision: 'map-correspondent',
       correspondentRef: '41',
     }));
@@ -153,7 +152,7 @@ describe('PayeeDocumentReview', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark no documents expected' }));
     await waitFor(() => expect(decide).toHaveBeenCalledWith({
-      candidateId: 'payee-ref-17',
+      candidateId: 'owl-candidate-17',
       decision: 'no-documents-expected',
     }));
   });

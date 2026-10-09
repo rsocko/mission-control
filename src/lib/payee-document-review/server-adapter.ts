@@ -18,8 +18,9 @@ export class PayeeDocumentReviewAdapterUnavailableError extends Error {
 }
 
 export class PayeeDocumentReviewUpstreamError extends Error {
+  readonly source = 'owl';
+
   constructor(
-    readonly source: 'tyrion' | 'owl',
     message: string,
     readonly status?: number,
   ) {
@@ -27,47 +28,62 @@ export class PayeeDocumentReviewUpstreamError extends Error {
   }
 }
 
-const tyrionProjectionSchema = z.object({
-  contractVersion: z.literal('1'),
-  connectorRef: z.string().min(1),
-  sourceGeneration: z.string().min(1),
-  sourceAsOf: z.string().min(1),
-  completeness: z.string(),
-  payees: z.array(z.object({
-    payeeRef: z.string().min(1),
-    displayName: z.string().min(1),
-    activity: z.enum(['active', 'inactive', 'unknown']),
-    classification: z.enum([
-      'recurring-fixed',
-      'recurring-variable',
-      'regular',
-      'infrequent',
-      'single-observation',
-      'unknown',
-    ]),
-    observationCount: z.number().int().nonnegative(),
-    observationWindow: z.object({
-      firstObservedOn: z.string().min(1),
-      lastObservedOn: z.string().min(1),
-    }),
-    intervalEvidence: z.object({
-      sampleCount: z.number().int().nonnegative(),
-      medianDays: z.number().nonnegative(),
-      minimumDays: z.number().nonnegative(),
-      maximumDays: z.number().nonnegative(),
-    }).nullable(),
-    confidence: z.number().min(0).max(1).nullable(),
-    basis: z.array(z.string()),
-    provenance: z.object({
-      transactionHistory: z.literal(true),
-      monarchRecurring: z.boolean(),
-    }),
-    monarchConfirmedRecurring: z.object({
-      active: z.boolean(),
-      cadence: z.string().nullable(),
-    }).nullable(),
+const classificationSchema = z.enum([
+  'recurring-fixed',
+  'recurring-variable',
+  'regular',
+  'infrequent',
+  'single-observation',
+  'unknown',
+]);
+
+const observationWindowSchema = z.union([
+  z.object({
+    first_observed_on: z.string().min(1),
+    last_observed_on: z.string().min(1),
+  }).transform((value) => ({
+    firstObservedOn: value.first_observed_on,
+    lastObservedOn: value.last_observed_on,
   })),
-});
+  z.object({
+    firstObservedOn: z.string().min(1),
+    lastObservedOn: z.string().min(1),
+  }),
+]);
+
+const intervalEvidenceSchema = z.union([
+  z.object({
+    sample_count: z.number().int().nonnegative(),
+    median_days: z.number().nonnegative(),
+    minimum_days: z.number().nonnegative(),
+    maximum_days: z.number().nonnegative(),
+  }).transform((value) => ({
+    sampleCount: value.sample_count,
+    medianDays: value.median_days,
+    minimumDays: value.minimum_days,
+    maximumDays: value.maximum_days,
+  })),
+  z.object({
+    sampleCount: z.number().int().nonnegative(),
+    medianDays: z.number().nonnegative(),
+    minimumDays: z.number().nonnegative(),
+    maximumDays: z.number().nonnegative(),
+  }),
+]).nullable();
+
+const provenanceSchema = z.union([
+  z.object({
+    transaction_history: z.literal(true),
+    monarch_recurring: z.boolean(),
+  }).transform((value) => ({
+    transactionHistory: value.transaction_history,
+    monarchRecurring: value.monarch_recurring,
+  })),
+  z.object({
+    transactionHistory: z.literal(true),
+    monarchRecurring: z.boolean(),
+  }),
+]);
 
 const owlMappingSchema = z.object({
   account_candidate_id: z.string().nullable(),
@@ -77,7 +93,19 @@ const owlMappingSchema = z.object({
 const owlReviewSchema = z.object({
   id: z.string().min(1),
   active: z.boolean(),
-  display_hint: z.string(),
+  display_hint: z.string().min(1),
+  classification: classificationSchema,
+  observation_count: z.number().int().nonnegative(),
+  observation_window: observationWindowSchema,
+  interval_evidence: intervalEvidenceSchema,
+  confidence: z.number().min(0).max(1).nullable(),
+  basis: z.array(z.string()),
+  provenance: provenanceSchema,
+  monarch_confirmed_recurring: z.object({
+    active: z.boolean(),
+    cadence: z.string().nullable(),
+  }).nullable(),
+  source_as_of: z.string().min(1),
   review_status: z.string(),
   document_decision: z.enum([
     'unknown',
@@ -100,7 +128,6 @@ const owlCorrespondentsSchema = z.array(z.object({
   owl_deep_link: z.string().url().nullable(),
 }));
 
-type TyrionProjection = z.infer<typeof tyrionProjectionSchema>;
 type OwlReview = z.infer<typeof owlReviewSchema>;
 type OwlCorrespondent = z.infer<typeof owlCorrespondentsSchema>[number];
 
@@ -108,13 +135,11 @@ const OWL_PAGE_LIMIT = 100;
 const MAX_OWL_RESULTS = 5_000;
 
 interface AdapterConfiguration {
-  tyrionProjectionUrl: URL;
-  tyrionToken: string;
   owlBaseUrl: URL;
   owlToken: string;
 }
 
-function approvedUrl(value: string, name: string): URL {
+function approvedUrl(value: string): URL {
   const url = new URL(value);
   const hostname = url.hostname.toLowerCase();
   const localHttp = url.protocol === 'http:'
@@ -125,35 +150,27 @@ function approvedUrl(value: string, name: string): URL {
     || url.password
     || url.hash
   ) {
-    throw new Error(`${name} must be an approved HTTPS or local HTTP URL`);
+    throw new Error('OWL_MISSION_CONTROL_URL must be an approved HTTPS or local HTTP URL');
   }
   return url;
 }
 
 function configuration(): AdapterConfiguration | null {
-  const tyrionProjectionUrl = process.env.TYRION_PAYEE_PATTERN_API_URL?.trim();
-  const tyrionToken = process.env.TYRION_PAYEE_PATTERN_API_TOKEN?.trim();
   const owlBaseUrl = process.env.OWL_MISSION_CONTROL_URL?.trim();
   const owlToken = process.env.OWL_MISSION_CONTROL_API_TOKEN?.trim();
-  if (!tyrionProjectionUrl || !tyrionToken || !owlBaseUrl || !owlToken) return null;
+  if (!owlBaseUrl || !owlToken) return null;
 
-  const normalizedOwlBaseUrl = approvedUrl(owlBaseUrl, 'OWL_MISSION_CONTROL_URL');
+  const normalizedOwlBaseUrl = approvedUrl(owlBaseUrl);
   normalizedOwlBaseUrl.pathname = normalizedOwlBaseUrl.pathname.replace(/\/+$/, '') + '/';
   normalizedOwlBaseUrl.search = '';
 
   return {
-    tyrionProjectionUrl: approvedUrl(
-      tyrionProjectionUrl,
-      'TYRION_PAYEE_PATTERN_API_URL',
-    ),
-    tyrionToken,
     owlBaseUrl: normalizedOwlBaseUrl,
     owlToken,
   };
 }
 
 async function fetchJson(
-  source: PayeeDocumentReviewUpstreamError['source'],
   url: URL,
   token: string,
   init: RequestInit = {},
@@ -175,27 +192,20 @@ async function fetchJson(
       error instanceof TypeError
       || (error instanceof DOMException && error.name === 'TimeoutError')
     ) {
-      throw new PayeeDocumentReviewUpstreamError(
-        source,
-        `${source === 'tyrion' ? 'Tyrion' : 'OWL'} could not be reached.`,
-      );
+      throw new PayeeDocumentReviewUpstreamError('OWL could not be reached.');
     }
     throw error;
   }
   if (!response.ok) {
     throw new PayeeDocumentReviewUpstreamError(
-      source,
-      `${source === 'tyrion' ? 'Tyrion' : 'OWL'} returned ${response.status}.`,
+      `OWL returned ${response.status}.`,
       response.status,
     );
   }
   try {
     return await response.json();
   } catch (error) {
-    throw new Error(
-      `${source === 'tyrion' ? 'Tyrion' : 'OWL'} returned invalid JSON`,
-      { cause: error },
-    );
+    throw new Error('OWL returned invalid JSON', { cause: error });
   }
 }
 
@@ -213,7 +223,7 @@ async function fetchOwlPages<T>(
     const url = owlUrl(config, pathname);
     url.searchParams.set('limit', String(OWL_PAGE_LIMIT));
     url.searchParams.set('offset', String(offset));
-    const page = schema.parse(await fetchJson('owl', url, config.owlToken));
+    const page = schema.parse(await fetchJson(url, config.owlToken));
     items.push(...page);
     if (page.length < OWL_PAGE_LIMIT) return items;
   }
@@ -238,49 +248,39 @@ function fetchOwlCorrespondents(
   );
 }
 
-async function loadSources(config: AdapterConfiguration): Promise<{
-  tyrion: TyrionProjection;
-  owlReviews: OwlReview[];
-  correspondents: OwlCorrespondent[];
-}> {
-  const [tyrionPayload, owlReviewsPayload, correspondentsPayload] = await Promise.all([
-    fetchJson('tyrion', config.tyrionProjectionUrl, config.tyrionToken),
-    fetchOwlReviews(config),
-    fetchOwlCorrespondents(config),
-  ]);
-
-  return {
-    tyrion: tyrionProjectionSchema.parse(tyrionPayload),
-    owlReviews: owlReviewsPayload,
-    correspondents: correspondentsPayload,
-  };
-}
-
 function normalizeItem(
-  payee: TyrionProjection['payees'][number],
-  review: OwlReview | undefined,
+  review: OwlReview,
   correspondentNames: ReadonlyMap<number, string>,
 ): PayeeDocumentReviewItem {
-  const firstMapping = review?.mappings[0];
-  const status = !review
-    ? 'unreviewed'
-    : review.document_decision === 'no_documents_expected'
-      ? 'not-expected'
-      : firstMapping
-        ? 'mapped'
-        : 'unreviewed';
+  const firstMapping = review.mappings[0];
+  const status = review.document_decision === 'no_documents_expected'
+    ? 'not-expected'
+    : firstMapping
+      ? 'mapped'
+      : 'unreviewed';
 
   return {
-    candidateId: payee.payeeRef,
-    pattern: payee,
+    candidateId: review.id,
+    pattern: {
+      displayName: review.display_hint,
+      activity: review.active ? 'active' : 'inactive',
+      classification: review.classification,
+      observationCount: review.observation_count,
+      observationWindow: review.observation_window,
+      intervalEvidence: review.interval_evidence,
+      confidence: review.confidence,
+      basis: review.basis,
+      provenance: review.provenance,
+      monarchConfirmedRecurring: review.monarch_confirmed_recurring,
+    },
     documentPolicy: {
       status,
       correspondentRef: firstMapping ? String(firstMapping.correspondent_id) : null,
       correspondentName: firstMapping
         ? correspondentNames.get(firstMapping.correspondent_id) ?? null
         : null,
-      expectationSummary: review?.notes ?? null,
-      owlPolicyUrl: review?.owl_deep_link ?? null,
+      expectationSummary: review.notes,
+      owlPolicyUrl: review.owl_deep_link,
     },
   };
 }
@@ -288,24 +288,26 @@ function normalizeItem(
 async function loadSnapshot(
   config: AdapterConfiguration,
 ): Promise<PayeeDocumentReviewSnapshot> {
-  const { tyrion, owlReviews, correspondents } = await loadSources(config);
-  const reviewsById = new Map(owlReviews.map((review) => [review.id, review]));
+  const [reviews, correspondents] = await Promise.all([
+    fetchOwlReviews(config),
+    fetchOwlCorrespondents(config),
+  ]);
   const correspondentNames = new Map(
     correspondents.map((correspondent) => [correspondent.id, correspondent.name]),
   );
-  const items = tyrion.payees
-    .filter((payee) => payee.activity !== 'inactive')
-    .map((payee) => normalizeItem(
-      payee,
-      reviewsById.get(payee.payeeRef),
-      correspondentNames,
-    ));
+  const activeReviews = reviews.filter((review) => review.active);
+  const sourceAsOf = activeReviews.reduce<string | null>(
+    (latest, review) => !latest || review.source_as_of > latest
+      ? review.source_as_of
+      : latest,
+    null,
+  );
 
   return {
     contractVersion: '1',
-    state: items.length > 0 ? 'ready' : 'empty',
-    sourceAsOf: tyrion.sourceAsOf,
-    items,
+    state: activeReviews.length > 0 ? 'ready' : 'empty',
+    sourceAsOf,
+    items: activeReviews.map((review) => normalizeItem(review, correspondentNames)),
     correspondents: correspondents
       .filter((correspondent) => correspondent.lifecycle_status !== 'inactive')
       .map((correspondent) => ({
@@ -324,7 +326,6 @@ async function currentOwlReview(
   const review = (await fetchOwlReviews(config)).find((item) => item.id === candidateId);
   if (!review) {
     throw new PayeeDocumentReviewUpstreamError(
-      'owl',
       'OWL does not have a matching payee review candidate.',
       404,
     );
@@ -370,7 +371,6 @@ function createHttpAdapter(config: AdapterConfiguration): PayeeDocumentReviewAda
           throw new Error('OWL correspondent identity must be a positive integer');
         }
         updatedReviewPayload = await fetchJson(
-          'owl',
           owlUrl(config, `/api/mc/v1/payee-document-reviews/${candidatePath}/mapping`),
           config.owlToken,
           jsonRequest('PUT', {
@@ -384,7 +384,6 @@ function createHttpAdapter(config: AdapterConfiguration): PayeeDocumentReviewAda
         );
       } else {
         updatedReviewPayload = await fetchJson(
-          'owl',
           owlUrl(
             config,
             `/api/mc/v1/payee-document-reviews/${candidatePath}/no-documents-expected`,
@@ -430,13 +429,13 @@ const unavailableAdapter: PayeeDocumentReviewAdapter = {
       items: [],
       correspondents: [],
       unavailableReason:
-        'Tyrion payee patterns and OWL document policy are not connected to this Mission Control deployment yet.',
+        'OWL payee document review is not connected to this Mission Control deployment yet.',
     };
   },
 
   async decide() {
     throw new PayeeDocumentReviewAdapterUnavailableError(
-      'Payee document review decisions are unavailable until the OWL policy adapter is connected.',
+      'Payee document review decisions are unavailable until OWL is connected.',
     );
   },
 };

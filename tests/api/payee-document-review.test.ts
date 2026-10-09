@@ -18,8 +18,6 @@ function trustedBrowserRequest(method = 'GET', body?: unknown) {
 }
 
 afterEach(() => {
-  delete process.env.TYRION_PAYEE_PATTERN_API_URL;
-  delete process.env.TYRION_PAYEE_PATTERN_API_TOKEN;
   delete process.env.OWL_MISSION_CONTROL_URL;
   delete process.env.OWL_MISSION_CONTROL_API_TOKEN;
   vi.restoreAllMocks();

@@ -1,52 +1,31 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const tyrionProjection = {
-  contractVersion: '1',
-  connectorRef: 'connector-ref-one',
-  sourceGeneration: 'generation-one',
-  sourceAsOf: '2026-08-13T10:00:00.000Z',
-  completeness: 'complete',
-  payees: [{
-    payeeRef: 'payee-ref-17',
-    displayName: 'Invented Utilities',
-    activity: 'active',
-    classification: 'recurring-variable',
-    observationCount: 8,
-    observationWindow: {
-      firstObservedOn: '2026-01-12',
-      lastObservedOn: '2026-08-12',
-    },
-    intervalEvidence: {
-      sampleCount: 7,
-      medianDays: 30,
-      minimumDays: 28,
-      maximumDays: 32,
-    },
-    confidence: 0.86,
-    basis: ['interval-cluster'],
-    provenance: {
-      transactionHistory: true,
-      monarchRecurring: true,
-    },
-    monarchConfirmedRecurring: {
-      active: true,
-      cadence: 'monthly',
-    },
-  }],
-};
-
 const owlReview = {
-  id: 'payee-ref-17',
+  id: 'owl-candidate-17',
   active: true,
   display_hint: 'Invented Utilities',
   classification: 'recurring-variable',
   observation_count: 8,
-  observation_window: {},
-  interval_evidence: {},
+  observation_window: {
+    first_observed_on: '2026-01-12',
+    last_observed_on: '2026-08-12',
+  },
+  interval_evidence: {
+    sample_count: 7,
+    median_days: 30,
+    minimum_days: 28,
+    maximum_days: 32,
+  },
   confidence: 0.86,
-  basis: [],
-  provenance: {},
-  monarch_confirmed_recurring: {},
+  basis: ['interval-cluster'],
+  provenance: {
+    transaction_history: true,
+    monarch_recurring: true,
+  },
+  monarch_confirmed_recurring: {
+    active: true,
+    cadence: 'monthly',
+  },
   source_as_of: '2026-08-13T10:00:00.000Z',
   review_status: 'unreviewed',
   document_decision: 'unknown',
@@ -54,7 +33,7 @@ const owlReview = {
   expectation_ids: ['monthly-statement'],
   notes: null,
   reviewed_at: null,
-  owl_deep_link: 'https://owl.example/payee-document-reviews/payee-ref-17',
+  owl_deep_link: 'https://owl.example/payee-document-reviews/owl-candidate-17',
   source_actions: [],
 };
 
@@ -73,16 +52,11 @@ function response(body: unknown, status = 200) {
 }
 
 function installConfiguration() {
-  process.env.TYRION_PAYEE_PATTERN_API_URL =
-    'https://tyrion.example/api/internal/v1/finance/insights/payee-patterns/generation-one?connectorRef=connector-ref-one';
-  process.env.TYRION_PAYEE_PATTERN_API_TOKEN = 'tyrion-secret';
   process.env.OWL_MISSION_CONTROL_URL = 'https://owl.example';
   process.env.OWL_MISSION_CONTROL_API_TOKEN = 'owl-secret';
 }
 
 afterEach(() => {
-  delete process.env.TYRION_PAYEE_PATTERN_API_URL;
-  delete process.env.TYRION_PAYEE_PATTERN_API_TOKEN;
   delete process.env.OWL_MISSION_CONTROL_URL;
   delete process.env.OWL_MISSION_CONTROL_API_TOKEN;
   vi.unstubAllGlobals();
@@ -90,12 +64,11 @@ afterEach(() => {
 });
 
 describe('PayeeDocumentReviewAdapter', () => {
-  it('joins sources only by opaque identity and keeps service tokens server-side', async () => {
+  it('normalizes the OWL aggregate read model and keeps its token server-side', async () => {
     installConfiguration();
     const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
       void init;
       const url = String(input);
-      if (url.includes('tyrion.example')) return response(tyrionProjection);
       if (url.includes('/correspondents')) return response(correspondents);
       return response([owlReview]);
     });
@@ -108,9 +81,9 @@ describe('PayeeDocumentReviewAdapter', () => {
 
     expect(snapshot).toMatchObject({
       state: 'ready',
-      sourceAsOf: tyrionProjection.sourceAsOf,
+      sourceAsOf: owlReview.source_as_of,
       items: [{
-        candidateId: 'payee-ref-17',
+        candidateId: 'owl-candidate-17',
         pattern: {
           displayName: 'Invented Utilities',
           observationCount: 8,
@@ -122,11 +95,11 @@ describe('PayeeDocumentReviewAdapter', () => {
       }],
       correspondents: [{ correspondentRef: '41', name: 'Invented Utility Company' }],
     });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.map((call) => {
       const init = call[1] as RequestInit;
       return new Headers(init.headers).get('Authorization');
-    })).toEqual(expect.arrayContaining(['Bearer tyrion-secret', 'Bearer owl-secret']));
+    })).toEqual(['Bearer owl-secret', 'Bearer owl-secret']);
     expect(JSON.stringify(snapshot)).not.toContain('secret');
   });
 
@@ -134,7 +107,6 @@ describe('PayeeDocumentReviewAdapter', () => {
     installConfiguration();
     const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes('tyrion.example')) return response(tyrionProjection);
       if (url.includes('/correspondents')) return response(correspondents);
       if (url.endsWith('/mapping')) {
         return response({
@@ -164,7 +136,7 @@ describe('PayeeDocumentReviewAdapter', () => {
     );
 
     const result = await getPayeeDocumentReviewAdapter().decide({
-      candidateId: 'payee-ref-17',
+      candidateId: 'owl-candidate-17',
       decision: 'map-correspondent',
       correspondentRef: '41',
     });
@@ -178,19 +150,18 @@ describe('PayeeDocumentReviewAdapter', () => {
     });
     expect(result).toMatchObject({
       acknowledged: true,
-      candidateId: 'payee-ref-17',
+      candidateId: 'owl-candidate-17',
       documentPolicy: {
-      status: 'mapped',
-      correspondentRef: '41',
+        status: 'mapped',
+        correspondentRef: '41',
       },
     });
-    expect(fetchMock.mock.calls.filter((call) => (
-      String(call[0]).includes('tyrion.example')
-      && (call[1] as RequestInit | undefined)?.method
-    ))).toHaveLength(0);
+    expect(fetchMock.mock.calls.every((call) => (
+      new URL(String(call[0])).hostname === 'owl.example'
+    ))).toBe(true);
   });
 
-  it('loads every bounded OWL page before joining reviews and correspondents', async () => {
+  it('loads every bounded OWL review and correspondent page', async () => {
     installConfiguration();
     const firstCorrespondentPage = Array.from({ length: 100 }, (_, index) => ({
       id: index + 1,
@@ -200,11 +171,10 @@ describe('PayeeDocumentReviewAdapter', () => {
     }));
     const firstReviewPage = Array.from({ length: 100 }, (_, index) => ({
       ...owlReview,
-      id: index === 0 ? 'payee-ref-17' : `payee-ref-${index + 100}`,
+      id: index === 0 ? 'owl-candidate-17' : `owl-candidate-${index + 100}`,
     }));
     const fetchMock = vi.fn(async (input: string | URL) => {
       const url = new URL(String(input));
-      if (url.hostname === 'tyrion.example') return response(tyrionProjection);
       const offset = url.searchParams.get('offset');
       if (url.pathname.endsWith('/correspondents')) {
         return response(offset === '0' ? firstCorrespondentPage : [correspondents[0]]);

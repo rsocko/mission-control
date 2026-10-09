@@ -42,8 +42,8 @@
   "counts": {
     "apiRoutes": 291,
     "tierARoutes": 0,
-    "tierBRoutes": 7,
-    "cleanRoutes": 284,
+    "tierBRoutes": 2,
+    "cleanRoutes": 289,
     "directTaintSourceRoutes": 0,
     "transitiveOnlyTaintSourceRoutes": 0,
     "directDbNamespaceRoutes": 2,
@@ -62,7 +62,7 @@
     "src/db/persistence/sqlite-notification-delivery-repository.ts"
   ],
   "dynamicSources": [
-    "src/lib/connectors/github-issues/backup-verifier.ts",
+    "src/lib/connectors/github-issues/sqlite-backup-verifier.ts",
     "src/lib/runtime/worker-healthcheck.ts"
   ],
   "apiRoutes": [
@@ -360,12 +360,7 @@
   ],
   "tierARoutes": [],
   "tierBRoutes": [
-    "src/app/api/connectors/github-bulk-transfer/route.ts",
     "src/app/api/scout/ingest/route.ts",
-    "src/app/api/sync/retained/resolve/route.ts",
-    "src/app/api/tasks/[id]/move/route.ts",
-    "src/app/api/tasks/[id]/owl/route.ts",
-    "src/app/api/tasks/move/execute/route.ts",
     "src/app/api/triage/[id]/route.ts"
   ],
   "cleanRoutes": [
@@ -415,6 +410,7 @@
     "src/app/api/connectors/[id]/test/route.ts",
     "src/app/api/connectors/[id]/validate-repo/route.ts",
     "src/app/api/connectors/[id]/work-todo/route.ts",
+    "src/app/api/connectors/github-bulk-transfer/route.ts",
     "src/app/api/connectors/github-repos/route.ts",
     "src/app/api/connectors/paperclip/auth/route.ts",
     "src/app/api/connectors/route.ts",
@@ -579,6 +575,7 @@
     "src/app/api/sync/cleanup/route.ts",
     "src/app/api/sync/deletions/[id]/route.ts",
     "src/app/api/sync/health/route.ts",
+    "src/app/api/sync/retained/resolve/route.ts",
     "src/app/api/sync/route.ts",
     "src/app/api/sync/stream/route.ts",
     "src/app/api/sync/tasks/resolve/route.ts",
@@ -598,6 +595,8 @@
     "src/app/api/tasks/[id]/hard-delete/route.ts",
     "src/app/api/tasks/[id]/linked-sources/route.ts",
     "src/app/api/tasks/[id]/move-to-list/route.ts",
+    "src/app/api/tasks/[id]/move/route.ts",
+    "src/app/api/tasks/[id]/owl/route.ts",
     "src/app/api/tasks/[id]/promote/route.ts",
     "src/app/api/tasks/[id]/pull-requests/route.ts",
     "src/app/api/tasks/[id]/relationship-candidates/route.ts",
@@ -613,6 +612,7 @@
     "src/app/api/tasks/detect-duplicates/route.ts",
     "src/app/api/tasks/filter-options/route.ts",
     "src/app/api/tasks/group-counts/route.ts",
+    "src/app/api/tasks/move/execute/route.ts",
     "src/app/api/tasks/move/preview/route.ts",
     "src/app/api/tasks/quick-sort-stats/route.ts",
     "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",

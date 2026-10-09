@@ -192,7 +192,7 @@ export const TRUSTED_TASK_COLUMN_APPEND_EVENTS = {
       tag: '0134_low_next_avengers',
       path: 'drizzle/0134_low_next_avengers.sql',
       sha256: '17663f924c30e22f47247f7d837e26a0c8617ad1f9fe1d0a6f84bd779696d2b0',
-      firstReachableCommit: '0bb240d16e42305ecea944bec9fea3c8fce3ee07',
+      firstReachableCommit: 'b088326eb198a257c0c1209a51cd0e25087b5b4b',
     },
   },
 } as const satisfies Readonly<Record<string, TaskColumnAppendEvent>>;

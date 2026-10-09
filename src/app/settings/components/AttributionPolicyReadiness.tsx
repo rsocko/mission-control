@@ -271,19 +271,21 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
             {mode === 'pinned' && (
               <label className="block max-w-48 text-xs font-medium text-[var(--text-secondary)]">
                 Policy version
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  required
-                  value={pin}
-                  onChange={(event) => {
-                    setPin(event.target.value);
-                    setSavedMessage('');
-                  }}
-                  aria-describedby={`policy-pin-help-${connectorId}`}
-                  className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1.5 text-sm text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                />
+                <span className="input-glow mt-1 block rounded-md border border-[var(--border)] bg-[var(--surface-0)]">
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    required
+                    value={pin}
+                    onChange={(event) => {
+                      setPin(event.target.value);
+                      setSavedMessage('');
+                    }}
+                    aria-describedby={`policy-pin-help-${connectorId}`}
+                    className="w-full rounded-md border-0 bg-transparent px-2 py-1.5 text-sm text-[var(--text-primary)] outline-none"
+                  />
+                </span>
                 <span
                   id={`policy-pin-help-${connectorId}`}
                   className="mt-1 block font-normal leading-5 text-[var(--text-muted)]"

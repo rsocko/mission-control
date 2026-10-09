@@ -71,17 +71,31 @@ are independent. Production currently uses policy version `2`. Keep
 - `TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED` off
 - Finance Insight cutover delivery off
 
-Mission Control v2 sends a required opaque `accountRef` and never sends Monarch
-account IDs, masks, connector identity namespaces, or identity key versions.
-The persisted service token is authentication only.
+Mission Control v2 sends `accountRef` as the stable Tyrion Bridge Account DTO
+`id` verbatim. It does not derive an `account-v1:` value from the connector
+identity namespace. Tyrion validates the case-sensitive direct reference as
+1-128 characters matching `[A-Za-z0-9][A-Za-z0-9._:-]*`. Direct account IDs are
+private homelab contract data: they may cross the private attribution boundary,
+but must not be logged or returned by readiness or preview responses. Mission
+Control still derives opaque transaction source references for response
+correlation. The persisted service token is authentication only.
 
-Open **Attribution policy readiness** in the Tyrion connector editor. The
-account list pairs the operator-visible display name/type/mask hint with the
-exact already-derived `account-v1:` reference. Copy those references into
-explicit Tyrion account rules through the linked private Tyrion configuration
-UI. The Mission Control response never contains raw provider account IDs or the
-identity namespace. Do not derive references independently, substitute Bridge
-account IDs, or configure a guessed default assignment.
+Open **Attribution policy readiness** in the Tyrion connector editor, then use
+the linked private Tyrion configuration UI to set each active account's Default
+attribution to a specific child, Parent/shared, or Rule-based. Tyrion owns the
+account catalog and editor; there is no reference copy/paste handoff. This is a
+default rather than an absolute assignment. Evaluation preserves a
+per-transaction manual decision first, then applies explicit merchant or other
+rules, then the account default, then historical fallback when available.
+Rule-based has no account default and unmatched transactions remain `no-match`.
+
+Existing account and transaction projections already persist the Tyrion Bridge
+account ID, so this change requires no schema migration or destructive reset.
+The next disabled/quarantined sync and the no-write preview send those existing
+IDs directly and re-evaluate prior automated attribution. Authoritative manual
+decisions remain attached to each request and must be returned as manual
+results. Do not enable the connector, release quarantine, or mutate live policy
+as part of this compatibility transition.
 
 After saving the Tyrion policy, set
 `TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` to that exact active version and
@@ -96,7 +110,10 @@ curl --fail-with-body -X POST \
 
 The preview reads at most 5,000 current local transactions, sends bounded
 100-item-or-smaller batches to Tyrion, and returns aggregate status, reason,
-method, confidence, and review-state counts only. It must report
+method, confidence, and review-state counts only. Preview requests include the
+same existing manual decisions as normal attribution, while preview responses
+never expose transaction rows, direct account IDs, merchant names, or manual
+decision payloads. It must report
 `complete=true`, `truncated=false`, `ready=true`, and zero pending review before
 another canary is authorized. A truncated or empty projection is never ready.
 Any intentionally accepted residual review outcome requires a separate

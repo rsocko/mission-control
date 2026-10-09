@@ -10,7 +10,6 @@ import type { FinanceWorkerPersistence } from '@/db/persistence/finance-worker';
 import type { ConnectorConfig } from '@/types';
 import {
   createAttributionRequests,
-  createAttributionAccountRef,
   createAttributionSourceRef,
   normalizeAttributionMerchant,
   resolveTyrionAttributionConfig,
@@ -146,7 +145,7 @@ function prepareItems(
         sourceRef: createAttributionSourceRef(config, connectorId, transaction.id),
         occurredOn: transaction.date,
         merchantName: normalizeAttributionMerchant(transaction.merchant.name),
-        accountRef: createAttributionAccountRef(config, transaction.account.id),
+        accountRef: transaction.account.id,
         observedAt,
         existingManualDecision: manualDecision,
       },

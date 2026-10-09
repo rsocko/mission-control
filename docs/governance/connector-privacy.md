@@ -11,6 +11,10 @@ process that data and for complying with the upstream service's terms.
 - A connector should request only permissions needed for enabled capabilities.
 - Logs must omit tokens, message bodies, personal data, and raw upstream
   payloads unless a documented, opt-in diagnostic mode safely redacts them.
+- Stable direct identifiers exchanged between private homelab services remain
+  private contract data. For example, Mission Control sends Tyrion Bridge
+  account IDs verbatim to Tyrion attribution, but does not log them or return
+  them from readiness and aggregate preview responses.
 - Fixtures, examples, screenshots, and tests must use synthetic identities and
   content.
 

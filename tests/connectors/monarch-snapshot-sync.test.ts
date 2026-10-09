@@ -475,8 +475,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       'occurredOn',
       'sourceRef',
     ]);
-    expect(firstAttributionBody.items[0]!.accountRef)
-      .toMatch(/^account-v1:[A-Za-z0-9_-]{43}$/);
+    expect(firstAttributionBody.items[0]!.accountRef).toBe('account-1');
     expect(JSON.stringify(attributionBodies[0])).not.toMatch(
       /amount|accountId|mask|notes|tags|category|attributed-transaction/,
     );
@@ -534,8 +533,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
     await expect(synchronizer.sync({ full: false })).resolves.toMatchObject({
       itemsAdded: 1,
     });
-    expect(attributionBodies[0]?.items[0]?.accountRef)
-      .toMatch(/^account-v1:[A-Za-z0-9_-]{43}$/);
+    expect(attributionBodies[0]?.items[0]?.accountRef).toBe('account-1');
     expect(attributionBodies[0]?.items[1]?.accountRef)
       .toBe(attributionBodies[0]?.items[0]?.accountRef);
     expect(sqlite.prepare(`

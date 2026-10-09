@@ -263,9 +263,12 @@ remain absent from public routers. Tyrion fixes the service actor and household
 identity server-side; Mission Control sends no identity, signature, timestamp,
 nonce, or replay metadata. The bearer token is authentication only. Mission
 Control persists a random identity namespace in protected connector credentials
-and uses ordinary SHA-256 derivation to create stable opaque connector-scoped
-source and account references. Raw Monarch identifiers never cross the Tyrion
-service boundary, and the namespace is never returned to browser clients.
+and uses ordinary SHA-256 derivation to create the stable opaque
+connector-scoped transaction source references used for response correlation.
+The required `accountRef` is instead the stable Tyrion Bridge Account DTO `id`
+verbatim; Mission Control never derives a second account identity. Direct
+account IDs are private homelab contract data and must not be logged or returned
+by readiness responses. The namespace is never returned to browser clients.
 
 Finance Insight source facts use the same protected connector namespace to
 replace raw Monarch transaction, recurring, category, category-group, account,

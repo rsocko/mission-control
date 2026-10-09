@@ -103,6 +103,14 @@ describe('L12b finance connector/operator web parity', () => {
     }
   });
 
+  it('keeps direct attribution account references and aggregate readiness in backend parity', () => {
+    for (const path of ADAPTERS) {
+      const contents = source(path);
+      expect(contents, path).toContain('async readAttributionAccountSummary(');
+      expect(contents, path).toContain('accountRef: row.accountId');
+    }
+  });
+
   it('keeps the only L12a seam on the generic connector repository', () => {
     const core = source('src/db/persistence/core-repositories.ts');
     expect(core).toContain('recordTestResult(');

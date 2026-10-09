@@ -124,17 +124,6 @@ export function createAttributionSourceRef(
   );
 }
 
-export function createAttributionAccountRef(
-  config: Pick<TyrionAttributionConfig, 'identityNamespace'>,
-  accountId: string,
-): string {
-  return financeConnectorScopedReference(
-    config.identityNamespace,
-    'account',
-    accountId,
-  );
-}
-
 export function createAttributionHeaders(
   config: Pick<TyrionAttributionConfig, 'serviceToken'>,
 ): Headers {

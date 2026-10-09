@@ -97,12 +97,9 @@ export interface FinanceOperatorHealthSnapshot {
 
 export const FINANCE_ATTRIBUTION_PREVIEW_MAX = 5_000;
 
-export interface FinanceOperatorAttributionAccount {
-  accountRef: string;
-  displayName: string;
-  type: string;
-  mask: string | null;
-  active: boolean;
+export interface FinanceOperatorAttributionAccountSummary {
+  total: number;
+  active: number;
 }
 
 export interface FinanceOperatorAttributionPreviewItem {
@@ -253,13 +250,12 @@ export interface FinanceOperatorPersistence {
   /** Bounded health/operator read for the existing redacted health response. */
   readHealthSnapshot(connectorId: string): Promise<FinanceOperatorHealthSnapshot>;
   /**
-   * Lists operator-safe account labels paired with their already-derived
-   * opaque Tyrion references. Raw provider IDs and identity credentials never
-   * leave the adapter.
+   * Counts synchronized accounts without returning private direct account
+   * identifiers or provider metadata to the readiness surface.
    */
-  listAttributionAccounts(
+  readAttributionAccountSummary(
     connectorId: string,
-  ): Promise<readonly FinanceOperatorAttributionAccount[]>;
+  ): Promise<FinanceOperatorAttributionAccountSummary>;
   /**
    * Reads a bounded, already-scoped transaction projection for a no-write
    * Tyrion policy preview.

@@ -74,7 +74,7 @@ export function describeFinanceWebPersistenceContract(
       expect(transactions[0]).toMatchObject({
         id: FINANCE_WEB_TRANSACTION_ID,
         amount: -25,
-        attributionReasons: ['account-rule'],
+        attributionReasons: ['merchant-rule-conflict'],
         attributionRetryable: false,
         isPending: false,
         tags: ['Household'],

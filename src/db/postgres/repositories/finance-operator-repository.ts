@@ -21,7 +21,7 @@ import {
   type FinanceOperatorHealthSnapshot,
   type FinanceOperatorPersistence,
   type FinanceOperatorReadinessInputs,
-  type FinanceOperatorAttributionAccount,
+  type FinanceOperatorAttributionAccountSummary,
   type FinanceOperatorAttributionPreviewProjection,
 } from '@/db/persistence/finance-operator';
 import { ingestPostgresConnectorNotificationInTransaction } from './connector-execution-repositories';
@@ -611,18 +611,13 @@ export function createPostgresFinanceOperatorPersistence(
       };
     },
 
-    async listAttributionAccounts(connectorId): Promise<readonly FinanceOperatorAttributionAccount[]> {
-      const namespace = await financeIdentityNamespace(pool, connectorId);
-      const rows = await query<{
-        upstreamAccountId: string;
-        displayName: string;
-        type: string;
-        mask: string | null;
-        active: boolean;
+    async readAttributionAccountSummary(connectorId): Promise<FinanceOperatorAttributionAccountSummary> {
+      const [row] = await query<{
+        total: string;
+        active: string;
       }>(pool, `
-        SELECT upstream_account_id AS "upstreamAccountId",
-               display_name AS "displayName", type, mask,
-               is_active AS active
+        SELECT COUNT(*) AS total,
+               COUNT(*) FILTER (WHERE is_active = true) AS active
         FROM finance_accounts
         WHERE connector_id = $1
           AND (
@@ -635,19 +630,11 @@ export function createPostgresFinanceOperatorPersistence(
                 AND transactions.lifecycle_status = 'active'
             )
           )
-        ORDER BY is_active DESC, LOWER(display_name), upstream_account_id
       `, [connectorId]);
-      return rows.map((row) => ({
-        accountRef: financeConnectorScopedReference(
-          namespace,
-          'account',
-          row.upstreamAccountId,
-        ),
-        displayName: row.displayName,
-        type: row.type,
-        mask: row.mask,
-        active: row.active,
-      }));
+      return {
+        total: Number(row?.total ?? 0),
+        active: Number(row?.active ?? 0),
+      };
     },
 
     async readAttributionPreview({ connectorId, limit }): Promise<FinanceOperatorAttributionPreviewProjection> {
@@ -712,11 +699,7 @@ export function createPostgresFinanceOperatorPersistence(
             ),
             occurredOn: row.occurredOn,
             merchantName: row.merchantName ?? 'Unknown merchant',
-            accountRef: financeConnectorScopedReference(
-              namespace,
-              'account',
-              row.accountId,
-            ),
+            accountRef: row.accountId,
             observedAt: row.observedAt,
             existingManualDecision,
           };

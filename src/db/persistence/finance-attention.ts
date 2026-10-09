@@ -34,7 +34,6 @@ export const FINANCE_ATTENTION_TASK_CONNECTOR_INSTANCE_ID = 'mission-control';
 
 const HUMAN_REVIEWABLE_ATTRIBUTION_REASONS = new Set([
   'attribution_ambiguous',
-  'account-rule-conflict',
   'historical-attribution-tie',
   'low-confidence',
   'manual_decision_conflict',

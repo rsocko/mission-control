@@ -26,7 +26,7 @@ import {
   type FinanceOperatorHealthSnapshot,
   type FinanceOperatorPersistence,
   type FinanceOperatorReadinessInputs,
-  type FinanceOperatorAttributionAccount,
+  type FinanceOperatorAttributionAccountSummary,
   type FinanceOperatorAttributionPreviewProjection,
 } from './finance-operator';
 import { syncFinanceProviderPresentation } from './sqlite-finance-insight-notification-lifecycle';
@@ -396,12 +396,10 @@ export function createSqliteFinanceOperatorPersistence(
       };
     },
 
-    async listAttributionAccounts(connectorId): Promise<readonly FinanceOperatorAttributionAccount[]> {
-      const namespace = financeIdentityNamespace(handles, connectorId);
-      const rows = handles.sqlite.prepare(`
-        SELECT upstream_account_id AS upstreamAccountId,
-               display_name AS displayName, type, mask,
-               is_active AS active
+    async readAttributionAccountSummary(connectorId): Promise<FinanceOperatorAttributionAccountSummary> {
+      return handles.sqlite.prepare(`
+        SELECT COUNT(*) AS total,
+               COALESCE(SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END), 0) AS active
         FROM finance_accounts
         WHERE connector_id = ?
           AND (
@@ -414,25 +412,7 @@ export function createSqliteFinanceOperatorPersistence(
                 AND transactions.lifecycle_status = 'active'
             )
           )
-        ORDER BY is_active DESC, display_name COLLATE NOCASE, upstream_account_id
-      `).all(connectorId) as Array<{
-        upstreamAccountId: string;
-        displayName: string;
-        type: string;
-        mask: string | null;
-        active: number;
-      }>;
-      return rows.map((row) => ({
-        accountRef: financeConnectorScopedReference(
-          namespace,
-          'account',
-          row.upstreamAccountId,
-        ),
-        displayName: row.displayName,
-        type: row.type,
-        mask: row.mask,
-        active: row.active === 1,
-      }));
+      `).get(connectorId) as FinanceOperatorAttributionAccountSummary;
     },
 
     async readAttributionPreview({ connectorId, limit }): Promise<FinanceOperatorAttributionPreviewProjection> {
@@ -496,11 +476,7 @@ export function createSqliteFinanceOperatorPersistence(
             ),
             occurredOn: row.occurredOn,
             merchantName: row.merchantName ?? 'Unknown merchant',
-            accountRef: financeConnectorScopedReference(
-              namespace,
-              'account',
-              row.accountId,
-            ),
+            accountRef: row.accountId,
             observedAt: row.observedAt,
             existingManualDecision,
           };

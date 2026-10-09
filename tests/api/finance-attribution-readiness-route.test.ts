@@ -48,8 +48,8 @@ beforeEach(() => {
 });
 
 describe('finance attribution readiness route', () => {
-  it('returns the trusted account handoff without accepting an untrusted read', async () => {
-    mocks.getReadiness.mockResolvedValue({ accounts: [] });
+  it('returns trusted aggregate readiness without accepting an untrusted read', async () => {
+    mocks.getReadiness.mockResolvedValue({ accountSummary: { total: 0, active: 0 } });
     const trusted = await GET(
       new NextRequest(
         'http://localhost/api/connectors/finance-connector/finance/attribution-readiness',
@@ -57,7 +57,9 @@ describe('finance attribution readiness route', () => {
       context(),
     );
     expect(trusted.status).toBe(200);
-    await expect(trusted.json()).resolves.toEqual({ accounts: [] });
+    await expect(trusted.json()).resolves.toEqual({
+      accountSummary: { total: 0, active: 0 },
+    });
 
     mocks.trustedRead.mockReturnValue(false);
     const forbidden = await GET(

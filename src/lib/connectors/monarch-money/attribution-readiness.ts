@@ -61,8 +61,8 @@ function mapError(error: unknown): FinanceAttributionReadinessError {
 export async function getFinanceAttributionPolicyReadiness(connectorId: string) {
   try {
     const { connector, repositories } = await financeConnector(connectorId);
-    const [accounts, projection] = await Promise.all([
-      repositories.finance.operator.listAttributionAccounts(connectorId),
+    const [accountSummary, projection] = await Promise.all([
+      repositories.finance.operator.readAttributionAccountSummary(connectorId),
       repositories.finance.insights.projection.readState(connectorId),
     ]);
     let expectedPolicyVersion: number | null = null;
@@ -82,7 +82,7 @@ export async function getFinanceAttributionPolicyReadiness(connectorId: string) 
         configurationUrl: resolveFinanceExternalLinks().tyrionConfiguration,
       },
       expectedPolicyVersion,
-      accounts,
+      accountSummary,
       historyProjection: projection
         ? {
             status: projection.status,

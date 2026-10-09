@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createAttributionHeaders,
   createAttributionRequests,
-  createAttributionAccountRef,
   createAttributionSourceRef,
   resolveTyrionAttributionConfig,
   TyrionAttributionClient,
@@ -25,7 +24,7 @@ const item: AttributionBatchItem = {
   sourceRef: 'source-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
   occurredOn: '2026-08-08',
   merchantName: 'Invented merchant',
-  accountRef: 'account-v1:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+  accountRef: 'bridge-account-1',
   observedAt: '2026-08-08T12:00:00.000Z',
   existingManualDecision: null,
 };
@@ -51,8 +50,8 @@ function success(sourceRef = item.sourceRef, policyVersion = 2) {
       status: 'attributed',
       kidId: 'kid-one',
       confidence: 'definite',
-      method: 'account-rule',
-      explanation: 'Matched a configured account rule',
+      method: 'account-default',
+      explanation: 'Matched the configured account default',
       reviewStatus: 'not-required',
       reasons: [],
       decisionSource: 'automated',
@@ -72,14 +71,11 @@ describe('Tyrion attribution v2 client', () => {
     expect([...headers.keys()].filter((name) => name.startsWith('x-tyrion'))).toEqual([]);
   });
 
-  it('derives stable opaque connector-scoped references from protected state', () => {
+  it('derives only transaction source references from protected state', () => {
     const source = createAttributionSourceRef(config, 'connector-a', 'private-transaction-id');
-    const account = createAttributionAccountRef(config, 'private-account-id');
 
     expect(source).toMatch(/^source-v1:[A-Za-z0-9_-]{43}$/);
-    expect(account).toMatch(/^account-v1:[A-Za-z0-9_-]{43}$/);
     expect(source).not.toContain('private-transaction-id');
-    expect(account).not.toContain('private-account-id');
     expect(createAttributionSourceRef(config, 'connector-a', 'private-transaction-id'))
       .toBe(source);
     expect(createAttributionSourceRef({
@@ -87,6 +83,31 @@ describe('Tyrion attribution v2 client', () => {
       identityNamespace: 'b'.repeat(64),
     }, 'connector-a', 'private-transaction-id'))
       .not.toBe(source);
+  });
+
+  it('sends the exact Bridge account ID and enforces the shared direct-reference boundary', async () => {
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as AttributionBatchRequest;
+      expect(body.items[0]?.accountRef).toBe('Bridge.Account:Primary-1');
+      return Response.json(success());
+    });
+    const client = new TyrionAttributionClient(config, fetchMock as typeof fetch);
+
+    await expect(client.attribute(request({
+      items: [{ ...item, accountRef: 'Bridge.Account:Primary-1' }],
+    }))).resolves.toBeDefined();
+    for (const accountRef of [
+      ' bridge-account-1',
+      'bridge account 1',
+      '_bridge-account-1',
+      'bridge/account-1',
+      'a'.repeat(129),
+    ]) {
+      await expect(client.attribute(request({
+        items: [{ ...item, accountRef }],
+      }))).rejects.toMatchObject({ code: 'invalid_request' });
+    }
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('sends only the strict minimized DTO and validates ordered metadata correlation', async () => {
@@ -156,6 +177,58 @@ describe('Tyrion attribution v2 client', () => {
       contractVersion: '2.0',
       policyVersion: 7,
     });
+  });
+
+  it('accepts final account-default and rule-based result semantics only', async () => {
+    const parentShared = {
+      ...success(),
+      results: [{
+        ...success().results[0],
+        status: 'unassigned',
+        kidId: null,
+        confidence: 'definite',
+        method: 'account-default',
+        explanation: 'Matched the Parent/shared account default',
+      }],
+    };
+    const ruleBasedNoMatch = {
+      ...success(),
+      results: [{
+        ...success().results[0],
+        status: 'unassigned',
+        kidId: null,
+        confidence: 'none',
+        method: 'unassigned',
+        explanation: 'No attribution rule matched',
+        reviewStatus: 'pending',
+        reasons: ['no-match'],
+      }],
+    };
+    for (const response of [parentShared, ruleBasedNoMatch]) {
+      const client = new TyrionAttributionClient(
+        config,
+        vi.fn().mockResolvedValue(Response.json(response)) as typeof fetch,
+      );
+      await expect(client.attribute(request())).resolves.toBeDefined();
+    }
+
+    const unsupportedMethod = {
+      ...success(),
+      results: [{ ...success().results[0], method: 'unsupported-method' }],
+    };
+    const unsupportedReason = {
+      ...success(),
+      results: [{ ...success().results[0], reasons: ['unsupported-reason'] }],
+    };
+    for (const response of [unsupportedMethod, unsupportedReason]) {
+      const client = new TyrionAttributionClient(
+        config,
+        vi.fn().mockResolvedValue(Response.json(response)) as typeof fetch,
+      );
+      await expect(client.attribute(request())).rejects.toMatchObject({
+        code: 'invalid_attribution_contract',
+      });
+    }
   });
 
   it('enforces item and body bounds and emits sanitized stable service errors', async () => {

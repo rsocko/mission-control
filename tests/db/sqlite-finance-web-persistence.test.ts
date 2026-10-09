@@ -81,7 +81,7 @@ async function createHarness(): Promise<FinanceWebContractHarness> {
         ) VALUES (?, ?, 'upstream-transaction', '2026-08-10', -25,
           'Invented merchant', 'finance-web-kid', 'pending', 0, 0,
           '["Household"]', '["tag-1"]', 'active', 'source-fingerprint',
-          '["account-rule"]', 0, ?, ?, ?)
+          '["merchant-rule-conflict"]', 0, ?, ?, ?)
       `).run(
         FINANCE_WEB_TRANSACTION_ID,
         FINANCE_WEB_CONNECTOR_ID,

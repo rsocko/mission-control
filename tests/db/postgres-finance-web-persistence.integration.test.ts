@@ -126,7 +126,7 @@ async function createHarness(): Promise<FinanceWebContractHarness> {
         ) VALUES ($1, $2, 'upstream-transaction', '2026-08-10', -25,
           'Invented merchant', 'finance-web-kid', 'pending', false, false,
           '["Household"]'::jsonb, '["tag-1"]'::jsonb, 'active', 'source-fingerprint',
-          '["account-rule"]'::jsonb, false, $3, $3, $3)
+          '["merchant-rule-conflict"]'::jsonb, false, $3, $3, $3)
       `, [FINANCE_WEB_TRANSACTION_ID, FINANCE_WEB_CONNECTOR_ID, FINANCE_WEB_BASE_TIME]);
       await database.query(`
         INSERT INTO finance_transactions (

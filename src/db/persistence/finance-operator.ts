@@ -67,6 +67,20 @@ export interface FinanceOperatorEvaluationSnapshot {
   retryable: boolean;
 }
 
+export interface FinanceOperatorProjectionSnapshot {
+  status: 'idle' | 'running' | 'succeeded' | 'failed';
+  generationId: string | null;
+  lastSuccessfulAt: string | null;
+  sourceAsOf: string | null;
+  itemCount: number | null;
+  coverageStart: string | null;
+  coverageEnd: string | null;
+  windowCount: number | null;
+  bridgeContractVersion: string | null;
+  lastErrorCode: string | null;
+  updatedAt: string | null;
+}
+
 /**
  * A bounded read. It claims no work, takes no lease, and mutates nothing.
  */
@@ -74,8 +88,44 @@ export interface FinanceOperatorHealthSnapshot {
   sync: FinanceOperatorSyncSnapshot | null;
   attribution: FinanceOperatorAttributionSnapshot | null;
   activeJob: FinanceOperatorActiveJobSnapshot | null;
+  projection: FinanceOperatorProjectionSnapshot | null;
   capture: FinanceOperatorCaptureSnapshot | null;
   evaluation: FinanceOperatorEvaluationSnapshot | null;
+}
+
+// ─── Attribution policy readiness ─────────────────────────────────────────
+
+export const FINANCE_ATTRIBUTION_PREVIEW_MAX = 5_000;
+
+export interface FinanceOperatorAttributionAccount {
+  accountRef: string;
+  displayName: string;
+  type: string;
+  mask: string | null;
+  active: boolean;
+}
+
+export interface FinanceOperatorAttributionPreviewItem {
+  sourceRef: string;
+  occurredOn: string;
+  merchantName: string;
+  accountRef: string;
+  observedAt: string;
+  existingManualDecision:
+    | { action: 'assign-kid'; kidId: string; decidedAt: string }
+    | { action: 'parent-expense'; kidId: null; decidedAt: string }
+    | null;
+}
+
+export interface FinanceOperatorAttributionPreviewInput {
+  connectorId: string;
+  limit: number;
+}
+
+export interface FinanceOperatorAttributionPreviewProjection {
+  items: readonly FinanceOperatorAttributionPreviewItem[];
+  total: number;
+  truncated: boolean;
 }
 
 // ─── Cutover readiness ──────────────────────────────────────────────────────
@@ -202,6 +252,21 @@ export interface FinanceOperatorPersistence {
   isLegacyAnomalyProductionEnabled(): Promise<boolean>;
   /** Bounded health/operator read for the existing redacted health response. */
   readHealthSnapshot(connectorId: string): Promise<FinanceOperatorHealthSnapshot>;
+  /**
+   * Lists operator-safe account labels paired with their already-derived
+   * opaque Tyrion references. Raw provider IDs and identity credentials never
+   * leave the adapter.
+   */
+  listAttributionAccounts(
+    connectorId: string,
+  ): Promise<readonly FinanceOperatorAttributionAccount[]>;
+  /**
+   * Reads a bounded, already-scoped transaction projection for a no-write
+   * Tyrion policy preview.
+   */
+  readAttributionPreview(
+    input: FinanceOperatorAttributionPreviewInput,
+  ): Promise<FinanceOperatorAttributionPreviewProjection>;
   /**
    * Reads the cutover readiness inputs. Raises
    * `finance_connector_not_found` (404) when the connector is absent or

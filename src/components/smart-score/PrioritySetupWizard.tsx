@@ -605,7 +605,7 @@ export function PrioritySetupWizard({ onComplete, onDismiss }: PrioritySetupWiza
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'priority_wizard_completed', value: 'true' }),
-      }).catch((err) => { uiLogger.warn('Failed to persist wizard completion to API', { err }); }); // Non-critical — localStorage is the primary guard
+      }).catch((err) => { uiLogger.warn('Failed to persist wizard completion to API', { err }); });
 
       toast.success('Priority scoring is live!');
       onComplete();
@@ -631,7 +631,7 @@ export function PrioritySetupWizard({ onComplete, onDismiss }: PrioritySetupWiza
           <div className="flex shrink-0 items-start justify-between gap-4">
             <div>
               <span className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-full text-xs font-semibold text-blue-400 bg-blue-900/20 border border-blue-500/15">
-                <Star className="w-3.5 h-3.5" /> First-launch setup
+                <Star className="w-3.5 h-3.5" /> Priority setup
               </span>
               <h2 className="mt-4 text-2xl font-semibold">
                 Priority Entities

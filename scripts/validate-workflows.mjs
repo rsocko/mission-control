@@ -142,10 +142,16 @@ for (const file of workflowFiles) {
   assert.ok(workflow.on && typeof workflow.on === 'object', `${file} must declare event triggers`);
   assert.ok(!('pull_request_target' in workflow.on), `${file} must not use pull_request_target`);
   assert.ok(!('workflow_call' in workflow.on), `${file} must not be reusable by another workflow`);
+  const sourceWithoutApprovedSecrets = [
+    '${{ secrets.DOCKERHUB_USERNAME }}',
+    '${{ secrets.DOCKERHUB_TOKEN }}',
+  ].reduce((remainingSource, approvedSecret) => {
+    return remainingSource.replaceAll(approvedSecret, '');
+  }, source);
   assert.doesNotMatch(
-    source,
+    sourceWithoutApprovedSecrets,
     /\$\{\{(?:(?!\}\})[\s\S])*\bsecrets\b/iu,
-    `${file} must not reference protected secrets`,
+    `${file} must not reference unapproved protected secrets`,
   );
   assert.equal(
     workflow.env?.NPM_CONFIG_REGISTRY,
@@ -397,6 +403,14 @@ for (const file of workflowFiles) {
       postgresIntegrationShards.services?.postgres?.image,
       'pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f',
       'PostgreSQL integration must use the approved pgvector image digest',
+    );
+    assert.deepEqual(
+      postgresIntegrationShards.services?.postgres?.credentials,
+      {
+        username: '${{ secrets.DOCKERHUB_USERNAME }}',
+        password: '${{ secrets.DOCKERHUB_TOKEN }}',
+      },
+      'PostgreSQL integration must authenticate its Docker Hub service pull',
     );
     assert.equal(
       postgresIntegrationShards['timeout-minutes'],

@@ -26,7 +26,6 @@ import {
 import { toast } from '@/lib/toast';
 import { AgentAttribution } from '@/components/domains/AgentAttribution';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
-import { TaskDocumentPreviewSection } from '@/components/task-detail/TaskDocumentPreviewSection';
 import { GroupByDropdown, type GroupOption } from '@/components/toolbar/GroupByDropdown';
 import { SortDropdown, type SortOption } from '@/components/toolbar/SortDropdown';
 import { CollapsibleSection } from '@/components/dashboard/CollapsibleSection';
@@ -229,15 +228,6 @@ export default function DocIntelligencePage() {
     () => Object.entries(categoryCounts).sort(([left], [right]) => left.localeCompare(right)),
     [categoryCounts],
   );
-  const selectedTask = useMemo(
-    () => tasks.find((task) => task.id === selectedTaskId) ?? null,
-    [selectedTaskId, tasks],
-  );
-  const selectedTaskMetadata = useMemo(
-    () => parseDocumentTaskMetadata(selectedTask?.metadata),
-    [selectedTask],
-  );
-
   const activeFilters = [
     actionTypeFilter !== 'all' ? ACTION_TYPE_META[actionTypeFilter]?.label : null,
     categoryFilter !== 'all' ? categoryFilter : null,
@@ -491,7 +481,7 @@ export default function DocIntelligencePage() {
 
         {selectedTaskId ? (
           <section className="flex min-w-0 flex-1 overflow-hidden bg-[var(--surface-0)]" aria-label="Document action details">
-            <div className="h-full min-w-0 flex-1 2xl:max-w-[440px] 2xl:shrink-0">
+            <div className="h-full min-w-0 flex-1">
               <TaskDetailPanel
                 taskId={selectedTaskId}
                 onClose={(reason) => setSelectedTaskId(
@@ -502,21 +492,8 @@ export default function DocIntelligencePage() {
                 mode="panel"
                 minPanelWidth={420}
                 fillContainer
-                documentPreviewClassName="2xl:hidden"
               />
             </div>
-            {selectedTask && selectedTaskMetadata.previewUrl && (
-              <div className="hidden min-w-0 flex-1 overflow-y-auto border-l border-[var(--border)] p-5 2xl:block">
-                <TaskDocumentPreviewSection
-                  taskId={selectedTask.id}
-                  mode="panel"
-                  connectorType={selectedTask.connectorType}
-                  metadata={selectedTaskMetadata}
-                  dueDate={selectedTask.dueDate}
-                  fillAvailableSpace
-                />
-              </div>
-            )}
           </section>
         ) : (
           <section className="hidden min-w-0 flex-1 items-center justify-center bg-[var(--surface-0)] sm:flex">

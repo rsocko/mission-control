@@ -51,6 +51,7 @@ import {
   supportedCurrencyCodes,
 } from '@/lib/finance/currency';
 import { ConnectorPushRules } from '@/components/settings/ConnectorPushRules';
+import { AttributionPolicyReadiness } from './AttributionPolicyReadiness';
 import {
   ConnectorClassificationBadge,
   ConnectorDataHandlingEditor,
@@ -2016,6 +2017,10 @@ function DefaultConnectorEditPanel({
                 Used for bounded Tyrion insight presentation and notification amounts.
               </p>
             </div>
+            <AttributionPolicyReadiness
+              key={connector.id}
+              connectorId={connector.id}
+            />
             </>
           )}
 

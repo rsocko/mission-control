@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
 import {
+  financeConnectorScopedReference,
+  financeIdentityNamespaceFromCredentials,
+} from '@/lib/connectors/monarch-money/identity';
+import {
   materializeNotificationActions,
   registerDefaultNotificationProviders,
   resolveNotificationProvider,
@@ -17,6 +21,8 @@ import {
   type FinanceOperatorHealthSnapshot,
   type FinanceOperatorPersistence,
   type FinanceOperatorReadinessInputs,
+  type FinanceOperatorAttributionAccount,
+  type FinanceOperatorAttributionPreviewProjection,
 } from '@/db/persistence/finance-operator';
 import { ingestPostgresConnectorNotificationInTransaction } from './connector-execution-repositories';
 
@@ -163,6 +169,25 @@ async function enabledFinanceConnectorIds(client: Client): Promise<string[]> {
     ORDER BY id
   `, [[...FINANCE_PROVIDER_ALIASES]]);
   return rows.map((row) => row.id);
+}
+
+async function financeIdentityNamespace(
+  client: Client,
+  connectorId: string,
+): Promise<string> {
+  const [row] = await query<{ credentials: unknown }>(client, `
+    SELECT credentials
+    FROM connector_configs
+    WHERE id = $1 AND deleted_at IS NULL
+  `, [connectorId]);
+  if (!row) {
+    throw new FinanceOperatorPersistenceError('finance_connector_not_found', 404);
+  }
+  const namespace = financeIdentityNamespaceFromCredentials(row.credentials);
+  if (!namespace) {
+    throw new FinanceOperatorPersistenceError('finance_identity_state_unavailable');
+  }
+  return namespace;
 }
 
 interface StoredNotificationRow {
@@ -488,6 +513,19 @@ export function createPostgresFinanceOperatorPersistence(
         ORDER BY created_at DESC
         LIMIT 1
       `, [connectorId]);
+      const [projection] = await query<
+        NonNullable<FinanceOperatorHealthSnapshot['projection']>
+      >(pool, `
+        SELECT status, successful_generation_id AS "generationId",
+               last_successful_at AS "lastSuccessfulAt", source_as_of AS "sourceAsOf",
+               item_count AS "itemCount", coverage_start AS "coverageStart",
+               coverage_end AS "coverageEnd", window_count AS "windowCount",
+               bridge_contract_version AS "bridgeContractVersion",
+               last_error_code AS "lastErrorCode", updated_at AS "updatedAt"
+        FROM finance_insight_transaction_projection_state
+        WHERE connector_id = $1
+        LIMIT 1
+      `, [connectorId]);
       const [capture] = await query<{
         status: string | null;
         lastAttemptAt: string | null;
@@ -548,6 +586,17 @@ export function createPostgresFinanceOperatorPersistence(
               startedAt: activeJob.startedAt,
             }
           : null,
+        projection: projection
+            ? {
+                ...projection,
+                itemCount: projection.itemCount === null
+                  ? null
+                  : Number(projection.itemCount),
+                windowCount: projection.windowCount === null
+                  ? null
+                  : Number(projection.windowCount),
+              }
+            : null,
         capture: capture ?? null,
         evaluation: evaluation
           ? {
@@ -559,6 +608,121 @@ export function createPostgresFinanceOperatorPersistence(
               retryable: evaluation.retryable === true,
             }
           : null,
+      };
+    },
+
+    async listAttributionAccounts(connectorId): Promise<readonly FinanceOperatorAttributionAccount[]> {
+      const namespace = await financeIdentityNamespace(pool, connectorId);
+      const rows = await query<{
+        upstreamAccountId: string;
+        displayName: string;
+        type: string;
+        mask: string | null;
+        active: boolean;
+      }>(pool, `
+        SELECT upstream_account_id AS "upstreamAccountId",
+               display_name AS "displayName", type, mask,
+               is_active AS active
+        FROM finance_accounts
+        WHERE connector_id = $1
+          AND (
+            is_active = true
+            OR EXISTS (
+              SELECT 1
+              FROM finance_transactions transactions
+              WHERE transactions.connector_instance_id = finance_accounts.connector_id
+                AND transactions.account_id = finance_accounts.upstream_account_id
+                AND transactions.lifecycle_status = 'active'
+            )
+          )
+        ORDER BY is_active DESC, LOWER(display_name), upstream_account_id
+      `, [connectorId]);
+      return rows.map((row) => ({
+        accountRef: financeConnectorScopedReference(
+          namespace,
+          'account',
+          row.upstreamAccountId,
+        ),
+        displayName: row.displayName,
+        type: row.type,
+        mask: row.mask,
+        active: row.active,
+      }));
+    },
+
+    async readAttributionPreview({ connectorId, limit }): Promise<FinanceOperatorAttributionPreviewProjection> {
+      const namespace = await financeIdentityNamespace(pool, connectorId);
+      const [countRow] = await query<{ count: string }>(pool, `
+        SELECT COUNT(*) AS count
+        FROM finance_transactions
+        WHERE connector_instance_id = $1 AND lifecycle_status = 'active'
+      `, [connectorId]);
+      const rows = await query<{
+        upstreamTransactionId: string;
+        occurredOn: string;
+        merchantName: string | null;
+        accountId: string | null;
+        observedAt: string;
+        assignedKidId: string | null;
+        kidAssignmentMethod: string | null;
+        manualDecisionAction: string | null;
+        manualDecidedAt: string | null;
+        firstSeenAt: string;
+      }>(pool, `
+        SELECT upstream_transaction_id AS "upstreamTransactionId",
+               date AS "occurredOn", merchant_name AS "merchantName",
+               account_id AS "accountId", last_seen_at AS "observedAt",
+               assigned_kid_id AS "assignedKidId",
+               kid_assignment_method AS "kidAssignmentMethod",
+               manual_decision_action AS "manualDecisionAction",
+               manual_decided_at AS "manualDecidedAt",
+               first_seen_at AS "firstSeenAt"
+        FROM finance_transactions
+        WHERE connector_instance_id = $1 AND lifecycle_status = 'active'
+        ORDER BY date DESC, upstream_transaction_id
+        LIMIT $2
+      `, [connectorId, limit]);
+      const total = Number(countRow?.count ?? 0);
+      return {
+        items: rows.map((row) => {
+          if (!row.accountId) {
+            throw new FinanceOperatorPersistenceError(
+              'finance_attribution_projection_unavailable',
+            );
+          }
+          const decidedAt = row.manualDecidedAt ?? row.firstSeenAt;
+          const existingManualDecision = row.kidAssignmentMethod !== 'manual'
+            ? null
+            : row.manualDecisionAction === 'assign-kid' && row.assignedKidId
+              ? {
+                  action: 'assign-kid' as const,
+                  kidId: row.assignedKidId,
+                  decidedAt,
+                }
+              : {
+                  action: 'parent-expense' as const,
+                  kidId: null,
+                  decidedAt,
+                };
+          return {
+            sourceRef: financeConnectorScopedReference(
+              namespace,
+              'source',
+              row.upstreamTransactionId,
+            ),
+            occurredOn: row.occurredOn,
+            merchantName: row.merchantName ?? 'Unknown merchant',
+            accountRef: financeConnectorScopedReference(
+              namespace,
+              'account',
+              row.accountId,
+            ),
+            observedAt: row.observedAt,
+            existingManualDecision,
+          };
+        }),
+        total,
+        truncated: total > rows.length,
       };
     },
 

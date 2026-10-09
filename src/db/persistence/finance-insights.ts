@@ -36,6 +36,8 @@ export interface FinanceInsightProjectionState {
   windowCount: number | null;
   windowsDigest: string | null;
   bridgeContractVersion: string | null;
+  lastErrorCode: string | null;
+  updatedAt: string | null;
 }
 
 export interface FinanceInsightProjectionAttemptStartCommand {

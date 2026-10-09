@@ -160,6 +160,7 @@ export interface TaskDetailMetadata {
   documentTitle?: string;
   documentType?: string;
   documentId?: string | number;
+  documentCreatedAt?: string;
   docHubUrl?: string;
   docHubDocumentUrl?: string;
   correspondent?: string;
@@ -181,6 +182,7 @@ export interface TaskDetailMetadata {
     url: string;
   }>;
   owlStatus?: string;
+  owlCreatedAt?: string;
   owlDisposition?: string;
   owlSnoozedUntil?: string;
   owlUpdatedAt?: string;

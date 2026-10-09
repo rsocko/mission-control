@@ -44,7 +44,10 @@ import {
   reconcileGitHubTaskHierarchy,
 } from './github-hierarchy-reconciliation';
 import type { GitHubHierarchyObservation } from './github-hierarchy-reconciliation';
-import { needsMicrosoftTodoLinkedResourceHydration } from './task-metadata-hydration';
+import {
+  needsDocumentCreatedAtHydration,
+  needsMicrosoftTodoLinkedResourceHydration,
+} from './task-metadata-hydration';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 /** How many tasks to process per batch before yielding to the event loop.
@@ -625,6 +628,11 @@ export async function upsertTasks(
               existingMetadata,
               remoteTask.metadata,
             );
+            const needsDocumentDateHydration = needsDocumentCreatedAtHydration(
+              existing.connectorType,
+              existingMetadata,
+              remoteTask.metadata,
+            );
             const needsGitHubCanonicalHydration = existing.connectorType === 'github-issues'
               && typeof existingMetadata.nodeId === 'string'
               && typeof existingMetadata.url !== 'string'
@@ -635,6 +643,7 @@ export async function upsertTasks(
               || forceTerminalSync
               || needsRemoteHydration
               || needsLinkedResourceHydration
+              || needsDocumentDateHydration
               || needsGitHubCanonicalHydration
               || stableLocatorChanged
               || replacementIds.has(remoteTask.sourceId)
@@ -1176,6 +1185,10 @@ async function applyRemoteUpdate(
       : existingTask.statusReason,
     priority: indexedTask.priority,
     dueDate: resolvedDueDate,
+    ...(existingTask.connectorType === 'document-intelligence'
+      && typeof remoteMetadata.documentCreatedAt === 'string'
+      ? { createdAt: remote.createdAt }
+      : {}),
     updatedAt: indexedTask.updatedAt,
     // Prefer the remote completedAt when provided. If the remote doesn't return one
     // (many connectors omit it) but the task is still done, keep the locally-recorded

@@ -97,15 +97,16 @@ export function OwlTaskActions({
     void submit('snooze', { action: 'snooze', until: until.toISOString() }, `Snoozed in OWL until ${label}.`);
   }
 
-  const inputClass = 'min-h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] px-2.5 text-sm text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]';
-  const buttonClass = 'inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] disabled:cursor-wait disabled:opacity-60';
+  const inputClass = 'min-h-10 w-full min-w-0 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] px-2.5 text-sm text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]';
+  const buttonClass = 'inline-flex min-h-10 max-w-full min-w-0 items-center justify-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 text-center text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-wait disabled:opacity-60';
 
   return (
-    <div className="w-full space-y-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)]/55 p-3">
+    <div className="w-full min-w-0 space-y-3 border-t border-[var(--border-subtle)] px-3 py-3">
       <div>
-        <p className="text-xs font-semibold text-[var(--text-primary)]">OWL action outcome</p>
+        <p className="text-xs font-semibold text-[var(--text-primary)]">OWL-only actions</p>
         <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-          These actions update OWL and its Paperless-backed action queue.
+          Snooze or correct the source record here. Task status above writes through to OWL:
+          {' '}Done becomes completed, and Won&apos;t do becomes dismissed.
         </p>
       </div>
 
@@ -116,7 +117,7 @@ export function OwlTaskActions({
               href={primaryActionUrl}
               target={primaryActionUrl.startsWith('http') ? '_blank' : undefined}
               rel={primaryActionUrl.startsWith('http') ? 'noopener noreferrer' : undefined}
-              className="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
+              className="inline-flex min-h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 text-center text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-soft)]"
             >
               <ExternalLink size={13} aria-hidden="true" />
               {metadata.primaryActionLabel || 'Open action'}
@@ -159,22 +160,6 @@ export function OwlTaskActions({
         </div>
       )}
 
-      <button
-        type="button"
-        disabled={busyAction !== null}
-        onClick={() => void submit(
-          'complete',
-          { action: 'complete' },
-          'Marked done in OWL.',
-        )}
-        className={`${buttonClass} border-emerald-500/30 text-emerald-300`}
-      >
-        {busyAction === 'complete'
-          ? <Loader2 size={13} className="animate-spin" />
-          : <CheckCircle2 size={13} />}
-        Mark done in OWL
-      </button>
-
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -210,8 +195,8 @@ export function OwlTaskActions({
         </button>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <label className="flex flex-1 flex-col gap-1 text-xs text-[var(--text-muted)]">
+      <div className="grid min-w-0 gap-2">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-[var(--text-muted)]">
           Custom source-side snooze
           <input
             type="datetime-local"
@@ -232,7 +217,7 @@ export function OwlTaskActions({
             }
             snooze(until, until.toLocaleString());
           }}
-          className={buttonClass}
+          className={`${buttonClass} w-full`}
         >
           Snooze in OWL
         </button>
@@ -261,7 +246,7 @@ export function OwlTaskActions({
         <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
           Quick source feedback
         </summary>
-        <div className="grid gap-3 border-t border-[var(--border-subtle)] p-3 sm:grid-cols-3">
+        <div className="grid min-w-0 grid-cols-1 gap-3 border-t border-[var(--border-subtle)] p-3">
           <div className="flex flex-col gap-1">
             <label htmlFor={`owl-action-type-${taskId}`} className="text-xs text-[var(--text-muted)]">
               Action type

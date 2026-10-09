@@ -75,7 +75,7 @@ describe('OWL task lifecycle controls', () => {
     expect(screen.queryByText('Urgency correction sent to OWL.')).not.toBeInTheDocument();
   });
 
-  it('renders contextual CTA and source actions without coupling CTA to completion', async () => {
+  it('renders source-only controls without duplicating Mission Control completion', async () => {
     const onTaskUpdate = vi.fn();
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       success: true,
@@ -117,6 +117,8 @@ describe('OWL task lifecycle controls', () => {
       'href',
       'https://owl.example/needs-review/task-1',
     );
+    expect(screen.getByText(/Done becomes completed/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mark done in OWL' })).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'File in Paperless' }));

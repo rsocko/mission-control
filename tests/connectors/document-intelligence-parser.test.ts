@@ -134,6 +134,29 @@ describe('mapActionToTask', () => {
     expect(mapActionToTask(makeAction({ status: 'not_an_action' }), CONNECTOR_TYPE, CONNECTOR_ID).status).toBe('cancelled');
   });
 
+  it('preserves OWL terminal semantics as Mission Control status reasons', () => {
+    expect(mapActionToTask(
+      makeAction({ status: 'completed' }),
+      CONNECTOR_TYPE,
+      CONNECTOR_ID,
+    ).statusReason).toBe('completed');
+    expect(mapActionToTask(
+      makeAction({ status: 'dismissed' }),
+      CONNECTOR_TYPE,
+      CONNECTOR_ID,
+    ).statusReason).toBe('not_planned');
+    expect(mapActionToTask(
+      makeAction({ status: 'not_an_action' }),
+      CONNECTOR_TYPE,
+      CONNECTOR_ID,
+    ).statusReason).toBe('not_planned');
+    expect(mapActionToTask(
+      makeAction({ status: 'pending' }),
+      CONNECTOR_TYPE,
+      CONNECTOR_ID,
+    ).statusReason).toBeUndefined();
+  });
+
   it('uses updated_at and preserves OWL disposition and snooze metadata', () => {
     const updatedAt = '2026-08-21T14:30:00Z';
     const snoozedUntil = '2026-08-23T13:00:00Z';

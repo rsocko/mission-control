@@ -52,6 +52,7 @@ vi.mock('@/lib/logger', () => ({
 const workerRepositories = vi.hoisted(() => ({
   current: null as unknown,
 }));
+const mockAppendSyncRun = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('@/lib/persistence/worker-runtime', () => ({
   getWorkerPersistenceRepositories: async () => workerRepositories.current,
@@ -145,11 +146,28 @@ describe('POST /api/scout/ingest', () => {
     vi.clearAllMocks();
     ingestion = new FakeScoutIngestion();
     workerRepositories.current = {
+      syncRuns: { append: mockAppendSyncRun },
       scoutIngestionReconciliation: { ingestion },
     };
 
     const mod = await import('@/app/api/scout/ingest/route');
     POST = mod.POST;
+  });
+
+  it('records completed pushes in sync history', async () => {
+    const res = await POST(makeRequest({ items: [validItem()] }));
+
+    expect(res.status).toBe(200);
+    expect(mockAppendSyncRun).toHaveBeenCalledWith(expect.objectContaining({
+      connectorId: 'scout-primary',
+      success: true,
+      tasksAdded: 1,
+      tasksUpdated: 0,
+      tasksRemoved: 0,
+      errors: [],
+      durationMs: expect.any(Number),
+    }));
+    expect(mockAppendSyncRun.mock.calls[0][0].durationMs).toBeGreaterThan(0);
   });
 
   describe('validation', () => {

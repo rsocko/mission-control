@@ -190,7 +190,55 @@ Require `status: quarantined`, then repeat metadata readiness and require
 `sync_quarantine_active_job`, let the current job finish; do not force a second
 job or bypass the fence.
 
-## 6. Run exactly one controlled canary
+## 6. Repair the quarantined 37-month history projection
+
+Only use this operation after scheduler quarantine is active. It is the narrow
+exception that can read the configured disabled connector by explicit ID.
+It does not enqueue a sync job, run attribution, or create notifications,
+tasks, actions, presentations, or delivery work.
+
+1. Read Finance operations metadata again and require all of the following:
+   `connector.enabled=false`, `scheduler.state=quarantined`,
+   `scheduler.queued=0`, `scheduler.running=0`, and every notification,
+   delivery, presentation, and action gate is false.
+2. Choose one new operator idempotency key and retain it for every retry of this
+   repair. Do not place credentials or connector data in the key.
+3. Run the complete bounded repair:
+
+```bash
+REPAIR_KEY="tyrion-history-repair-$(date -u +%Y%m%dT%H%M%SZ)"
+
+curl --fail-with-body -X POST \
+  "$MC_ORIGIN/api/finance/sync" \
+  -H "X-MC-API-Key: ${MC_API_KEY}" \
+  -H "Content-Type: application/json" \
+  --data "{\"connectorId\":\"$CONNECTOR_ID\",\"insightBackfill\":{\"idempotencyKey\":\"$REPAIR_KEY\",\"horizonMonths\":37,\"maxWindows\":4}}"
+```
+
+Require only sanitized `insightBackfill` operation metadata in the response:
+`status=completed`, `completedWindows=4`, `totalWindows=4`, the expected
+coverage dates, and the expected aggregate item count. Stop on
+`finance_insight_repair_connector_enabled`,
+`finance_insight_repair_quarantine_required`,
+`finance_insight_repair_active_work`,
+`finance_insight_repair_gates_enabled`, any backfill error, or any unexpected
+field.
+
+4. Replay the exact request with the same connector ID, idempotency key,
+   horizon, and window limit. Require the same plan ID and identical completed
+   metadata. This replay must make no provider requests and no additional
+   writes.
+5. Repeat the Finance operations metadata read. Require the connector to remain
+   disabled and quarantined, zero queued/running jobs, unchanged gates, no
+   canary, and zero task/notification/action/presentation/delivery deltas.
+6. Read connector health and require `insights.projection.status=succeeded`,
+   `windowCount=37`, current `sourceAsOf`, non-null coverage and item count, and
+   `lastErrorCode=null`.
+
+Do not authorize a canary until all six checks pass. Never substitute an
+ordinary manual/full sync: those continue to reject a disabled connector.
+
+## 7. Run exactly one controlled canary
 
 Require sync readiness `ready: true`, with notification/delivery/presentation/
 actions gates false, before authorization.
@@ -220,7 +268,7 @@ Poll metadata readiness until the canary is terminal. Require:
 Readiness and verification must not call Monarch. Only the explicitly
 authorized canary performs provider sync.
 
-## 7. Canary rollback or scheduler release
+## 8. Canary rollback or scheduler release
 
 On failure, unexpected notification delta, degraded attribution, stale/partial
 projection, policy mismatch, private error content, or worker/artifact change,
@@ -255,7 +303,7 @@ Enable the connector separately in Settings only after release and confirm one
 poll schedule is registered. Stop and quarantine again if more than one
 scheduled or active job appears.
 
-## 8. Stage Finance Insight cutover and delivery
+## 9. Stage Finance Insight cutover and delivery
 
 Let a normal post-release sync complete with shadow ingestion on and all
 delivery gates off. Copy the exact `publication.sourceGeneration` from:

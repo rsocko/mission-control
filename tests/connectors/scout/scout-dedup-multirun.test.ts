@@ -54,6 +54,7 @@ vi.mock('@/lib/logger', () => ({
 const workerRepositories = vi.hoisted(() => ({
   current: null as unknown,
 }));
+const mockAppendSyncRun = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('@/lib/persistence/worker-runtime', () => ({
   getWorkerPersistenceRepositories: async () => workerRepositories.current,
@@ -132,6 +133,7 @@ describe('Scout Multi-Run Deduplication', () => {
     vi.clearAllMocks();
     ingestion = new FakeScoutIngestion();
     workerRepositories.current = {
+      syncRuns: { append: mockAppendSyncRun },
       scoutIngestionReconciliation: { ingestion },
     };
 

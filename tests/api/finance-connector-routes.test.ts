@@ -5,7 +5,8 @@ const mocks = vi.hoisted(() => ({
   configFromRow: vi.fn(),
   runSync: vi.fn(),
   runExclusive: vi.fn(),
-  runBackfill: vi.fn(),
+  runProjectionRepair: vi.fn(),
+  getControlStatus: vi.fn(),
   getHealth: vi.fn(),
   getDatasetHealth: vi.fn(),
   verifyRecovery: vi.fn(),
@@ -76,7 +77,11 @@ vi.mock('@/lib/persistence/runtime', () => ({
 
 vi.mock('@/lib/connectors/monarch-money/transaction-backfill', () => ({
   FinanceInsightBackfillError: class FinanceInsightBackfillError extends Error {},
-  runFinanceInsightTransactionBackfill: mocks.runBackfill,
+  runFinanceInsightTransactionProjectionRepair: mocks.runProjectionRepair,
+}));
+
+vi.mock('@/lib/sync/operator-control', () => ({
+  getFinanceSyncControlStatus: mocks.getControlStatus,
 }));
 
 vi.mock('@/lib/mode', () => ({
@@ -113,6 +118,36 @@ describe('finance connector routes', () => {
       datasets: [],
     });
     mocks.readHealthSnapshot.mockResolvedValue(emptyHealthSnapshot());
+    mocks.getControlStatus.mockResolvedValue({
+      connector: {
+        id: 'persisted-finance',
+        enabled: false,
+        configurationState: { status: 'configured', currency: 'USD' },
+      },
+      scheduler: {
+        state: 'quarantined',
+        quarantineId: 'invented-quarantine',
+        quarantinedAt: '2026-08-10T12:00:00.000Z',
+        releasedAt: null,
+        queued: 0,
+        running: 0,
+      },
+      gates: {
+        shadowIngestEnabled: true,
+        immediateNotificationsEnabled: false,
+        monthlyDigestEnabled: false,
+        deliveryEnabled: false,
+        presentationEnabled: false,
+        actionsEnabled: false,
+      },
+      canary: {
+        status: 'not-started',
+        jobId: null,
+        counts: null,
+        resultCode: null,
+      },
+      readiness: { ready: true, blockers: [] },
+    });
     mocks.recordTestResult.mockResolvedValue({ recorded: true });
     mocks.getRecoveryView.mockReturnValue(null);
   });
@@ -208,8 +243,40 @@ describe('finance connector routes', () => {
     }));
   });
 
+  it('keeps ordinary manual sync disabled for a disabled connector', async () => {
+    mocks.getPersistedConfig.mockResolvedValue({
+      id: 'persisted-finance',
+      type: 'finance-manager',
+      enabled: false,
+    });
+    const { POST } = await import('@/app/api/finance/sync/route');
+    const response = await POST(new Request('http://localhost/api/finance/sync', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        host: 'localhost',
+        origin: 'http://localhost',
+        'sec-fetch-site': 'same-origin',
+        'x-mc-api-key': 'test-finance-api-key',
+      },
+      body: JSON.stringify({ connectorId: 'persisted-finance', full: true }),
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Finance connector is not configured',
+    });
+    expect(mocks.runSync).not.toHaveBeenCalled();
+    expect(mocks.runProjectionRepair).not.toHaveBeenCalled();
+  });
+
   it('runs bounded Finance insight backfill through the protected connector lease', async () => {
-    mocks.runBackfill.mockResolvedValue({
+    mocks.getPersistedConfig.mockResolvedValue({
+      id: 'persisted-finance',
+      type: 'finance-manager',
+      enabled: false,
+    });
+    mocks.runProjectionRepair.mockResolvedValue({
       planId: 'invented-plan',
       status: 'running',
       completedWindows: 1,
@@ -246,17 +313,140 @@ describe('finance connector routes', () => {
       'persisted-finance',
       expect.any(Function),
     );
-    expect(mocks.runBackfill).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.runProjectionRepair).toHaveBeenCalledWith(expect.objectContaining({
       config: expect.objectContaining({ id: 'persisted-finance' }),
       idempotencyKey: 'invented-operator-key',
       horizonMonths: 37,
       maxWindows: 1,
       signal: request.signal,
+      assertSafe: expect.any(Function),
     }));
+    expect(mocks.runSync).not.toHaveBeenCalled();
+    expect(mocks.getControlStatus).toHaveBeenCalledWith('persisted-finance');
+  });
+
+  it.each([
+    [
+      'non-quarantined connector',
+      { connector: { enabled: false }, scheduler: { state: 'scheduled', queued: 0, running: 0 } },
+      'finance_insight_repair_quarantine_required',
+    ],
+    [
+      'queued work',
+      { connector: { enabled: false }, scheduler: { state: 'quarantined', queued: 1, running: 0 } },
+      'finance_insight_repair_active_work',
+    ],
+    [
+      'running work',
+      { connector: { enabled: false }, scheduler: { state: 'quarantined', queued: 0, running: 1 } },
+      'finance_insight_repair_active_work',
+    ],
+    [
+      'enabled connector',
+      { connector: { enabled: true }, scheduler: { state: 'quarantined', queued: 0, running: 0 } },
+      'finance_insight_repair_connector_enabled',
+    ],
+    [
+      'enabled delivery gate',
+      {
+        connector: { enabled: false },
+        scheduler: { state: 'quarantined', queued: 0, running: 0 },
+        gates: { deliveryEnabled: true },
+      },
+      'finance_insight_repair_gates_enabled',
+    ],
+  ])('rejects Finance insight repair for a %s', async (_label, patch, errorCode) => {
+    mocks.getPersistedConfig.mockResolvedValue({
+      id: 'persisted-finance',
+      type: 'finance-manager',
+      enabled: patch.connector.enabled,
+    });
+    mocks.getControlStatus.mockImplementation(async () => {
+      const base = {
+        connector: {
+          id: 'persisted-finance',
+          enabled: false,
+          configurationState: { status: 'configured', currency: 'USD' },
+        },
+        scheduler: {
+          state: 'quarantined',
+          quarantineId: 'invented-quarantine',
+          quarantinedAt: '2026-08-10T12:00:00.000Z',
+          releasedAt: null,
+          queued: 0,
+          running: 0,
+        },
+        gates: {
+          shadowIngestEnabled: true,
+          immediateNotificationsEnabled: false,
+          monthlyDigestEnabled: false,
+          deliveryEnabled: false,
+          presentationEnabled: false,
+          actionsEnabled: false,
+        },
+        canary: { status: 'not-started', jobId: null, counts: null, resultCode: null },
+        readiness: { ready: true, blockers: [] },
+      };
+      return {
+        ...base,
+        connector: { ...base.connector, ...patch.connector },
+        scheduler: { ...base.scheduler, ...patch.scheduler },
+        gates: { ...base.gates, ...('gates' in patch ? patch.gates : {}) },
+      };
+    });
+    mocks.runExclusive.mockImplementation(async (_connectorId, operation) => operation());
+    const { POST } = await import('@/app/api/finance/sync/route');
+    const response = await POST(new Request('http://localhost/api/finance/sync', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        host: 'localhost',
+        origin: 'http://localhost',
+        'sec-fetch-site': 'same-origin',
+        'x-mc-api-key': 'test-finance-api-key',
+      },
+      body: JSON.stringify({
+        connectorId: 'persisted-finance',
+        insightBackfill: { idempotencyKey: 'invented-operator-key' },
+      }),
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: errorCode });
+    expect(mocks.runProjectionRepair).not.toHaveBeenCalled();
     expect(mocks.runSync).not.toHaveBeenCalled();
   });
 
+  it('requires an explicit connector ID for projection repair', async () => {
+    const { POST } = await import('@/app/api/finance/sync/route');
+    const response = await POST(new Request('http://localhost/api/finance/sync', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        host: 'localhost',
+        origin: 'http://localhost',
+        'sec-fetch-site': 'same-origin',
+        'x-mc-api-key': 'test-finance-api-key',
+      },
+      body: JSON.stringify({
+        insightBackfill: { idempotencyKey: 'invented-operator-key' },
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'finance_insight_repair_connector_id_required',
+    });
+    expect(mocks.listEnabledConnectorIds).not.toHaveBeenCalled();
+    expect(mocks.runProjectionRepair).not.toHaveBeenCalled();
+  });
+
   it('returns conflict when another connector operation holds the backfill lease', async () => {
+    mocks.getPersistedConfig.mockResolvedValue({
+      id: 'persisted-finance',
+      type: 'finance-manager',
+      enabled: false,
+    });
     const { ConnectorOperationBusyError } = await import('@/lib/sync/connector-lock');
     mocks.runExclusive.mockRejectedValue(
       new ConnectorOperationBusyError('Sync already in progress for this connector'),
@@ -279,7 +469,7 @@ describe('finance connector routes', () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
-      error: 'Connector has an active operation',
+      error: 'finance_insight_repair_active_work',
     });
   });
 

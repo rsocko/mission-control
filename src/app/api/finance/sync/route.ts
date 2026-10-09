@@ -7,10 +7,24 @@ import { FINANCE_PROVIDER_ALIASES, normalizeFinanceProviderAlias } from '@/lib/f
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import {
   FinanceInsightBackfillError,
-  runFinanceInsightTransactionBackfill,
+  runFinanceInsightTransactionProjectionRepair,
 } from '@/lib/connectors/monarch-money/transaction-backfill';
+import {
+  assertFinanceInsightProjectionRepairSafe,
+  FinanceInsightProjectionRepairError,
+} from '@/lib/connectors/monarch-money/projection-repair-safety';
 
-async function getFinanceConnectorConfig(connectorId?: string) {
+class FinanceInsightRepairRequestError extends Error {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+  ) {
+    super(code);
+    this.name = 'FinanceInsightRepairRequestError';
+  }
+}
+
+async function getEnabledFinanceConnectorConfig(connectorId?: string) {
   const repositories = await getWorkerPersistenceRepositories();
   let resolvedId = connectorId;
   if (!resolvedId) {
@@ -31,10 +45,29 @@ async function getFinanceConnectorConfig(connectorId?: string) {
   return config;
 }
 
+async function getRepairFinanceConnectorConfig(connectorId: string | undefined) {
+  if (!connectorId?.trim()) {
+    throw new FinanceInsightRepairRequestError(
+      'finance_insight_repair_connector_id_required',
+      400,
+    );
+  }
+  const repositories = await getWorkerPersistenceRepositories();
+  const config = await repositories.connectors.get(connectorId);
+  if (!config || normalizeFinanceProviderAlias(config.type) === null) {
+    throw new FinanceInsightRepairRequestError(
+      'finance_insight_repair_connector_not_configured',
+      404,
+    );
+  }
+  return config;
+}
+
 export async function POST(request: Request) {
   if (!trustedFinanceMutationActor(request)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+  let projectionRepairRequested = false;
   try {
     const body = await request.json().catch(() => ({})) as {
       connectorId?: unknown;
@@ -42,8 +75,8 @@ export async function POST(request: Request) {
       insightBackfill?: unknown;
     };
     const connectorId = typeof body.connectorId === 'string' ? body.connectorId : undefined;
-    const config = await getFinanceConnectorConfig(connectorId);
     if (body.insightBackfill !== undefined) {
+      projectionRepairRequested = true;
       if (
         body.full === true
         || typeof body.insightBackfill !== 'object'
@@ -56,24 +89,31 @@ export async function POST(request: Request) {
         );
       }
       const backfill = body.insightBackfill as Record<string, unknown>;
+      const config = await getRepairFinanceConnectorConfig(connectorId);
+      await assertFinanceInsightProjectionRepairSafe(config.id);
       const result = await syncScheduler.runExclusiveConnectorOperation(
         config.id,
-        () => runFinanceInsightTransactionBackfill({
-          config,
-          idempotencyKey: typeof backfill.idempotencyKey === 'string'
-            ? backfill.idempotencyKey
-            : '',
-          horizonMonths: typeof backfill.horizonMonths === 'number'
-            ? backfill.horizonMonths
-            : undefined,
-          maxWindows: typeof backfill.maxWindows === 'number'
-            ? backfill.maxWindows
-            : undefined,
-          signal: request.signal,
-        }),
+        async () => {
+          await assertFinanceInsightProjectionRepairSafe(config.id);
+          return runFinanceInsightTransactionProjectionRepair({
+            config,
+            idempotencyKey: typeof backfill.idempotencyKey === 'string'
+              ? backfill.idempotencyKey
+              : '',
+            horizonMonths: typeof backfill.horizonMonths === 'number'
+              ? backfill.horizonMonths
+              : undefined,
+            maxWindows: typeof backfill.maxWindows === 'number'
+              ? backfill.maxWindows
+              : undefined,
+            signal: request.signal,
+            assertSafe: () => assertFinanceInsightProjectionRepairSafe(config.id),
+          });
+        },
       );
       return NextResponse.json({ insightBackfill: result });
     }
+    const config = await getEnabledFinanceConnectorConfig(connectorId);
     const result = await syncScheduler.runSync(config.id, {
       full: body.full === true,
       signal: request.signal,
@@ -82,9 +122,21 @@ export async function POST(request: Request) {
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof ConnectorOperationBusyError) {
+      if (projectionRepairRequested) {
+        return NextResponse.json(
+          { error: 'finance_insight_repair_active_work' },
+          { status: 409 },
+        );
+      }
       return ApiErrors.conflict('Connector has an active operation');
     }
     if (error instanceof FinanceInsightBackfillError) {
+      return NextResponse.json({ error: error.code }, { status: error.status });
+    }
+    if (
+      error instanceof FinanceInsightProjectionRepairError
+      || error instanceof FinanceInsightRepairRequestError
+    ) {
       return NextResponse.json({ error: error.code }, { status: error.status });
     }
     if (error instanceof Error && /not configured|required when multiple/.test(error.message)) {

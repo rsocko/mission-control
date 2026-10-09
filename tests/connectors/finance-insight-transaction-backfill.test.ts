@@ -26,6 +26,8 @@ let planFinanceInsightBackfillWindows:
   typeof import('@/lib/connectors/monarch-money/transaction-backfill')['planFinanceInsightBackfillWindows'];
 let runFinanceInsightTransactionBackfill:
   typeof import('@/lib/connectors/monarch-money/transaction-backfill')['runFinanceInsightTransactionBackfill'];
+let runFinanceInsightTransactionProjectionRepair:
+  typeof import('@/lib/connectors/monarch-money/transaction-backfill')['runFinanceInsightTransactionProjectionRepair'];
 
 const config: ConnectorConfig = {
   id: 'finance-backfill-test',
@@ -98,6 +100,7 @@ beforeAll(async () => {
   ({
     planFinanceInsightBackfillWindows,
     runFinanceInsightTransactionBackfill,
+    runFinanceInsightTransactionProjectionRepair,
   } = await import('@/lib/connectors/monarch-money/transaction-backfill'));
 });
 
@@ -183,6 +186,7 @@ describe.sequential('Finance insight transaction backfill', () => {
       coverageStart: '2021-02-01',
       coverageEnd: '2024-02-29',
     });
+
     expect(attributionCoordinatorConstructor).toHaveBeenCalledWith(
       config.id,
       expect.objectContaining({
@@ -285,6 +289,73 @@ describe.sequential('Finance insight transaction backfill', () => {
       status: 409,
     });
     expect(fetchedWindows).toHaveLength(4);
+  });
+
+  it('repairs and idempotently replays the projection without attribution side effects', async () => {
+    sqlite.prepare(`
+      UPDATE connector_configs SET enabled = 0 WHERE id = ?
+    `).run(config.id);
+    const disabledConfig = { ...config, enabled: false };
+    const fetchedWindows: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      const start = url.searchParams.get('start_date')!;
+      fetchedWindows.push(start);
+      return page(
+        [transaction(`repair-${start}`, start)],
+        null,
+        1,
+        '2024-02-29T12:00:00.000Z',
+      );
+    }));
+    const assertSafe = vi.fn(async () => undefined);
+    const request = {
+      config: disabledConfig,
+      idempotencyKey: 'invented-projection-repair-key',
+      horizonMonths: 37,
+      maxWindows: 4,
+      clock: () => new Date('2024-02-29T12:05:00.000Z'),
+      assertSafe,
+    };
+
+    const first = await runFinanceInsightTransactionProjectionRepair(request);
+    const replay = await runFinanceInsightTransactionProjectionRepair(request);
+
+    expect(first).toMatchObject({
+      status: 'completed',
+      completedWindows: 4,
+      totalWindows: 4,
+      itemCount: 4,
+    });
+    expect(replay).toEqual(first);
+    expect(fetchedWindows).toHaveLength(4);
+    expect(assertSafe).toHaveBeenCalled();
+    expect(attributionCoordinatorConstructor).not.toHaveBeenCalled();
+    expect(sqlite.prepare(`
+      SELECT enabled FROM connector_configs WHERE id = ?
+    `).get(config.id)).toEqual({ enabled: 0 });
+    expect(sqlite.prepare(`
+      SELECT status, window_count AS windowCount, item_count AS itemCount
+      FROM finance_insight_transaction_projection_state
+      WHERE connector_id = ?
+    `).get(config.id)).toEqual({
+      status: 'succeeded',
+      windowCount: 37,
+      itemCount: 4,
+    });
+    for (const table of [
+      'tasks',
+      'notifications',
+      'notification_actions',
+      'finance_insight_attribution_runs',
+    ]) {
+      const exists = sqlite.prepare(`
+        SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?
+      `).get(table);
+      if (!exists) continue;
+      expect(sqlite.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get())
+        .toEqual({ count: 0 });
+    }
   });
 
   it('restarts an interrupted window from page one without committing a partial proof', async () => {

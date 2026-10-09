@@ -10,6 +10,7 @@ related:
   - "[Data Model](../../architecture/data-model.md)"
   - "[Portable Persistence Boundaries](../../architecture/persistence-boundaries.md)"
   - "[PostgreSQL Deployment](../../operations/postgresql.md)"
+  - "[Compatibility Policy](../../governance/compatibility.md)"
 ---
 
 # Database Scaling and Migration Strategy
@@ -95,6 +96,12 @@ Operator settings and failure behavior are documented in the
 defines the import rehearsal evidence required before planning activation.
 
 ## Compatibility and Portability Rules
+
+The normative support tiers, required parity, allowed divergence, change gates,
+and deprecation lifecycle are defined in the
+[compatibility policy](../../governance/compatibility.md). This strategy
+explains why both backends exist and how production moves between them; it does
+not require equal performance or identical backend-specific storage.
 
 New persistence work must use a focused repository or application-service port.
 Driver handles, ORM transaction objects, SQL fragments, PRAGMAs, and backend

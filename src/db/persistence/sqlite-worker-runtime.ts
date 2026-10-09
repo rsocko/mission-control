@@ -8,7 +8,7 @@ import {
   assertCanRegisterSqliteGitHubRepointBackupVerifier,
   clearSqliteGitHubRepointBackupVerifier,
   registerSqliteGitHubRepointBackupVerifier,
-} from '@/lib/connectors/github-issues/backup-verifier';
+} from '@/lib/connectors/github-issues/sqlite-backup-verifier';
 import {
   assertCanRegisterFinanceTransactionQuery,
   clearFinanceTransactionQuery,

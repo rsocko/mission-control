@@ -39,11 +39,12 @@ describe('connector transfer/sync control-plane taint decrement', () => {
     );
   });
 
-  it('keeps only the still-unmigrated candidates in their prior graph tiers', () => {
-    expect(graph.cleanRoutes).toContain(EXCLUDED_ROUTES[0]);
-    expect(graph.tierBRoutes).toContain(EXCLUDED_ROUTES[1]);
-    expect(graph.cleanRoutes).toContain(EXCLUDED_ROUTES[2]);
-    expect(graph.tierBRoutes).toContain(EXCLUDED_ROUTES[3]);
+  it('keeps the excluded candidates clean after later boundary work', () => {
+    for (const route of EXCLUDED_ROUTES) {
+      expect(graph.cleanRoutes).toContain(route);
+      expect(graph.tierARoutes).not.toContain(route);
+      expect(graph.tierBRoutes).not.toContain(route);
+    }
   });
 
   it('pins the SQLite-poisoned PostgreSQL route proofs', () => {

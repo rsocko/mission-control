@@ -66,6 +66,8 @@ function transaction(id: string, date: string) {
     notes: null,
     tags: [],
     tagReferences: [],
+    reviewStatus: 'needs_review' as const,
+    reviewAssignee: null,
   };
 }
 

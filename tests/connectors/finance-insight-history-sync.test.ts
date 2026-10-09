@@ -58,6 +58,8 @@ function transaction(id: string, date: string) {
       { id: 'tag-one', name: 'First' },
       { id: 'tag-one', name: 'Duplicate' },
     ],
+    reviewStatus: 'needs_review' as const,
+    reviewAssignee: null,
   };
 }
 

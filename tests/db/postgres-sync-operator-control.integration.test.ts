@@ -6,6 +6,9 @@ import { PostgresSyncJobRepository } from '@/db/postgres/sync/job-repository';
 import {
   PostgresSyncOperatorControlRepository,
 } from '@/db/postgres/sync/operator-control-repository';
+import {
+  assertFinanceInsightProjectionRepairStatus,
+} from '@/lib/connectors/monarch-money/projection-repair-safety';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 
 const connectionString = process.env.MC_TEST_POSTGRES_URL;
@@ -83,6 +86,11 @@ describePostgres('PostgreSQL sync operator-control integration', () => {
 
   it('quarantines idempotently and preserves the operator status shape', async () => {
     const connectorId = await createFinanceConnector();
+    const scheduled = await operator.getStatus(connectorId);
+    expect(() => assertFinanceInsightProjectionRepairStatus(scheduled))
+      .toThrowError(expect.objectContaining({
+      code: 'finance_insight_repair_quarantine_required',
+    }));
     await jobs.registerSchedule(connectorId, 240);
     await jobs.enqueue(connectorId, { source: 'schedule' });
     const input = {
@@ -101,10 +109,12 @@ describePostgres('PostgreSQL sync operator-control integration', () => {
       cancelledQueuedCount: 1,
       replayed: true,
     });
-    await expect(operator.getStatus(connectorId)).resolves.toMatchObject({
+    const status = await operator.getStatus(connectorId);
+    expect(status).toMatchObject({
       connector: { id: connectorId, enabled: false },
       scheduler: { state: 'quarantined', queued: 0, running: 0 },
     });
+    expect(() => assertFinanceInsightProjectionRepairStatus(status)).not.toThrow();
     expect(
       (await jobs.getSchedules()).filter((schedule) => schedule.connectorId === connectorId),
     ).toEqual([]);

@@ -30,6 +30,7 @@ import {
   MONARCH_TRANSACTION_MAX_BACKFILL_DAYS,
 } from './constants';
 import { createFinanceIdentityNamespace } from './identity';
+import { FinanceInsightProjectionRepairError } from './projection-repair-safety';
 
 export const FINANCE_INSIGHT_TRANSACTION_HISTORY_MAX_MONTHS = 37;
 export const FINANCE_INSIGHT_BACKFILL_MAX_WINDOWS_PER_RUN = 4;
@@ -125,6 +126,9 @@ function resolveBackfillCurrency(config: ConnectorConfig): string {
 
 function normalizedBackfillError(error: unknown): FinanceInsightBackfillError {
   if (error instanceof FinanceInsightBackfillError) return error;
+  if (error instanceof FinanceInsightProjectionRepairError) {
+    return new FinanceInsightBackfillError(error.code, error.status);
+  }
   if (
     error instanceof FinanceInsightBackfillDeliveryEnabledError
     || error instanceof FinanceInsightBackfillWindowIncompleteError
@@ -353,18 +357,22 @@ async function captureWindow(input: {
   config: ConnectorConfig;
   plan: FinanceInsightBackfillPlan;
   window: FinanceInsightBackfillWindow;
+  projectionOnly?: boolean;
+  assertSafe?: () => Promise<void>;
   signal?: AbortSignal;
 }): Promise<{ added: number; updated: number; itemCount: number }> {
   const connectorId = input.config.id;
   const generationRef = stableWindowGeneration(input.plan.id, input.window);
   const insights = input.finance.insights;
   const client = new MonarchBridgeClient(input.config);
-  const attribution = new FinanceAttributionCoordinator(connectorId, {
-    financeConfig: input.config,
-    persistence: input.finance,
-    generationId: generationRef,
-    fenceMode: 'row-generation',
-  });
+  const attribution = input.projectionOnly
+    ? null
+    : new FinanceAttributionCoordinator(connectorId, {
+        financeConfig: input.config,
+        persistence: input.finance,
+        generationId: generationRef,
+        fenceMode: 'row-generation',
+      });
   const seenIds = new Set<string>();
   const seenCursors = new Set<string>();
   let cursor: string | undefined;
@@ -374,6 +382,7 @@ async function captureWindow(input: {
   let updated = 0;
   try {
     for (let pageNumber = 0; pageNumber < BACKFILL_MAX_PAGES_PER_WINDOW; pageNumber++) {
+      await input.assertSafe?.();
       throwIfAborted(input.signal);
       const page = await client.getTransactionsPage({
         startDate: input.window.start,
@@ -431,7 +440,7 @@ async function captureWindow(input: {
       });
       added += counts.added;
       updated += counts.updated;
-      await attribution.attributePage(page.transactions, fetchedAt, input.signal);
+      await attribution?.attributePage(page.transactions, fetchedAt, input.signal);
       if (!page.page.nextCursor) break;
       if (
         seenCursors.has(page.page.nextCursor)
@@ -471,22 +480,25 @@ async function captureWindow(input: {
     } catch (error) {
       throw normalizedBackfillError(error);
     }
-    await attribution.finish(completedAt);
+    await input.assertSafe?.();
+    await attribution?.finish(completedAt);
     return { added, updated, itemCount };
   } catch (error) {
-    await attribution.finish(new Date().toISOString());
+    await attribution?.finish(new Date().toISOString());
     throw normalizedBackfillError(error);
   }
 }
 
-export async function runFinanceInsightTransactionBackfill(input: {
+type FinanceInsightTransactionBackfillInput = {
   config: ConnectorConfig;
   idempotencyKey: string;
   horizonMonths?: number;
   maxWindows?: number;
   signal?: AbortSignal;
   clock?: () => Date;
-}): Promise<{
+};
+
+type FinanceInsightTransactionBackfillResult = {
   planId: string;
   status: 'running' | 'completed';
   completedWindows: number;
@@ -494,7 +506,14 @@ export async function runFinanceInsightTransactionBackfill(input: {
   coverageStart: string;
   coverageEnd: string;
   itemCount: number;
-}> {
+};
+
+async function runTransactionBackfill(
+  input: FinanceInsightTransactionBackfillInput & {
+    projectionOnly?: boolean;
+    assertSafe?: () => Promise<void>;
+  },
+): Promise<FinanceInsightTransactionBackfillResult> {
   const idempotencyKey = input.idempotencyKey.trim();
   const horizonMonths = input.horizonMonths
     ?? FINANCE_INSIGHT_TRANSACTION_HISTORY_MAX_MONTHS;
@@ -510,6 +529,7 @@ export async function runFinanceInsightTransactionBackfill(input: {
   }
   const clock = input.clock ?? (() => new Date());
   const startedAt = clock();
+  await input.assertSafe?.();
   const currency = resolveBackfillCurrency(input.config);
   const repositories = await getWorkerPersistenceRepositories();
   repositories.execution.support.assertConfigSupported(input.config);
@@ -546,12 +566,15 @@ export async function runFinanceInsightTransactionBackfill(input: {
   let remaining = maxWindows;
   try {
     while (completedWindows < windows.length && remaining > 0) {
+      await input.assertSafe?.();
       await assertDeliveryDisabled(financeInsights, input.config.id);
       const result = await captureWindow({
         finance,
         config: input.config,
         plan,
         window: windows[completedWindows]!,
+        projectionOnly: input.projectionOnly,
+        assertSafe: input.assertSafe,
         signal: input.signal,
       });
       totalItemCount += result.itemCount;
@@ -559,6 +582,7 @@ export async function runFinanceInsightTransactionBackfill(input: {
       remaining--;
     }
     if (completedWindows === windows.length) {
+      await input.assertSafe?.();
       await promoteCompletedPlan(financeInsights, input.config.id, {
         ...plan,
         status: 'completed',
@@ -579,4 +603,21 @@ export async function runFinanceInsightTransactionBackfill(input: {
     coverageEnd: plan.coverageEnd,
     itemCount: totalItemCount,
   };
+}
+
+export function runFinanceInsightTransactionBackfill(
+  input: FinanceInsightTransactionBackfillInput,
+): Promise<FinanceInsightTransactionBackfillResult> {
+  return runTransactionBackfill(input);
+}
+
+export function runFinanceInsightTransactionProjectionRepair(
+  input: FinanceInsightTransactionBackfillInput & {
+    assertSafe: () => Promise<void>;
+  },
+): Promise<FinanceInsightTransactionBackfillResult> {
+  return runTransactionBackfill({
+    ...input,
+    projectionOnly: true,
+  });
 }

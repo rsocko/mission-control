@@ -113,6 +113,37 @@ afterAll(() => {
 });
 
 describe.sequential('finance operator sync control', () => {
+  it('exposes projection repair safety only while disabled, quarantined, and idle', async () => {
+    const { assertFinanceInsightProjectionRepairStatus } = await import(
+      '@/lib/connectors/monarch-money/projection-repair-safety'
+    );
+
+    const scheduled = await operator.getFinanceSyncControlStatus(connectorId);
+    expect(() => assertFinanceInsightProjectionRepairStatus(scheduled))
+      .toThrowError(expect.objectContaining({
+      code: 'finance_insight_repair_quarantine_required',
+    }));
+
+    await operator.quarantineFinanceConnectorSync({
+      connectorId,
+      actorType: 'service',
+      idempotencyKey: key('repair-quarantine'),
+    });
+    const quarantined = await operator.getFinanceSyncControlStatus(connectorId);
+    expect(() => assertFinanceInsightProjectionRepairStatus(quarantined)).not.toThrow();
+
+    await operator.enqueueFinanceOperatorCanary({
+      connectorId,
+      actorType: 'service',
+      idempotencyKey: key('repair-canary'),
+    });
+    const active = await operator.getFinanceSyncControlStatus(connectorId);
+    expect(() => assertFinanceInsightProjectionRepairStatus(active))
+      .toThrowError(expect.objectContaining({
+      code: 'finance_insight_repair_active_work',
+    }));
+  });
+
   it('serializes scheduler enqueue against quarantine without leaving raced work', async () => {
     const quarantine = startRaceProcess('quarantine');
     const enqueue = startRaceProcess('enqueue');

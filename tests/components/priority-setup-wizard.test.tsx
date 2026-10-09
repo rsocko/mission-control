@@ -145,9 +145,9 @@ describe('PrioritySetupWizard', () => {
     expect(screen.getByText('Microsoft Todo')).toBeDefined();
   });
 
-  it('shows first-launch setup badge', () => {
+  it('shows priority setup badge', () => {
     render(<PrioritySetupWizard onComplete={onComplete} onDismiss={onDismiss} />);
-    expect(screen.getByText('First-launch setup')).toBeDefined();
+    expect(screen.getByText('Priority setup')).toBeDefined();
   });
 
   it('renders as a named modal with an accessible dismiss control', () => {
@@ -397,6 +397,30 @@ describe('PriorityEntitiesPanel', () => {
 describe('PriorityWizardGate', () => {
   let PriorityWizardGate: React.ComponentType;
 
+  function mockGateState({
+    connectors = [{ id: 'connector-1' }],
+    entities = [],
+    settings = {},
+  }: {
+    connectors?: Array<{ id: string; deletedAt?: string | null }>;
+    entities?: Array<{ id: string }>;
+    settings?: Record<string, string>;
+  } = {}) {
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url === '/api/connectors') {
+        return Promise.resolve(new Response(JSON.stringify({ connectors }), { status: 200 }));
+      }
+      if (url === '/api/priority-entities') {
+        return Promise.resolve(new Response(JSON.stringify({ entities }), { status: 200 }));
+      }
+      if (url === '/api/smart-score/settings') {
+        return Promise.resolve(new Response(JSON.stringify({ settings }), { status: 200 }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+  }
+
   beforeEach(async () => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -404,10 +428,8 @@ describe('PriorityWizardGate', () => {
     PriorityWizardGate = mod.PriorityWizardGate;
   });
 
-  it('shows wizard when no entities exist and not dismissed', async () => {
-    fetchMock.mockImplementationOnce(() =>
-      Promise.resolve(new Response(JSON.stringify({ entities: [] }), { status: 200 })),
-    );
+  it('shows wizard after a connector exists when setup is unfinished', async () => {
+    mockGateState();
 
     render(<PriorityWizardGate />);
 
@@ -416,16 +438,35 @@ describe('PriorityWizardGate', () => {
     });
   });
 
-  it('does not show wizard when entities already exist', async () => {
-    fetchMock.mockImplementationOnce(() =>
-      Promise.resolve(new Response(JSON.stringify({ entities: [{ id: '1' }] }), { status: 200 })),
-    );
+  it('does not show wizard before a connector exists', async () => {
+    mockGateState({ connectors: [] });
 
     render(<PriorityWizardGate />);
 
-    // Give the effect time to run, then check wizard is absent
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+    expect(screen.queryByText('Priority Entities')).toBeNull();
+  });
+
+  it('does not show wizard when entities already exist', async () => {
+    mockGateState({ entities: [{ id: '1' }] });
+
+    render(<PriorityWizardGate />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+    expect(screen.queryByText('Priority Entities')).toBeNull();
+  });
+
+  it('does not show wizard when completed in another browser', async () => {
+    mockGateState({ settings: { priority_wizard_completed: 'true' } });
+
+    render(<PriorityWizardGate />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     });
     expect(screen.queryByText('Priority Entities')).toBeNull();
   });
@@ -441,10 +482,8 @@ describe('PriorityWizardGate', () => {
     expect(screen.queryByText('Priority Entities')).toBeNull();
   });
 
-  it('sets localStorage when wizard is dismissed', async () => {
-    fetchMock.mockImplementationOnce(() =>
-      Promise.resolve(new Response(JSON.stringify({ entities: [] }), { status: 200 })),
-    );
+  it('persists dismissal locally and for other browsers', async () => {
+    mockGateState();
 
     render(<PriorityWizardGate />);
 
@@ -456,5 +495,11 @@ describe('PriorityWizardGate', () => {
     fireEvent.click(screen.getByText('Skip for now'));
 
     expect(localStorage.getItem('mc_priority_wizard_dismissed')).toBe('true');
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/smart-score/settings', expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ key: 'priority_wizard_dismissed', value: 'true' }),
+      }));
+    });
   });
 });

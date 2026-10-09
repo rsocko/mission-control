@@ -363,7 +363,8 @@ function createProjectionPersistence(pool: Pool): FinanceInsightProjectionPersis
                 item_count AS "itemCount", content_digest AS "contentDigest",
                 coverage_start AS "coverageStart", coverage_end AS "coverageEnd",
                 window_count AS "windowCount", windows_digest AS "windowsDigest",
-                bridge_contract_version AS "bridgeContractVersion"
+                bridge_contract_version AS "bridgeContractVersion",
+                last_error_code AS "lastErrorCode", updated_at AS "updatedAt"
          FROM finance_insight_transaction_projection_state
          WHERE connector_id = $1`,
         [connectorId],

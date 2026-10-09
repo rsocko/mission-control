@@ -83,6 +83,19 @@ export async function GET(
             engineVersion: null,
           },
           insights: {
+            projection: {
+              status: 'succeeded',
+              generationId: null,
+              lastSuccessfulAt: null,
+              sourceAsOf: null,
+              itemCount: null,
+              coverageStart: null,
+              coverageEnd: null,
+              windowCount: null,
+              bridgeContractVersion: null,
+              lastErrorCode: null,
+              updatedAt: null,
+            },
             capture: {
               status: 'idle',
               lastAttemptAt: null,
@@ -107,6 +120,7 @@ export async function GET(
       const activeJob = snapshot.activeJob;
       const publication = snapshot.capture;
       const delivery = snapshot.evaluation;
+      const historyProjection = snapshot.projection;
       let bridge:
         | Awaited<ReturnType<MonarchBridgeClient['getHealth']>>
         | null = null;
@@ -229,6 +243,19 @@ export async function GET(
           engineVersion: snapshot.attribution?.engineVersion ?? null,
         },
         insights: {
+          projection: historyProjection ?? {
+            status: 'idle',
+            generationId: null,
+            lastSuccessfulAt: null,
+            sourceAsOf: null,
+            itemCount: null,
+            coverageStart: null,
+            coverageEnd: null,
+            windowCount: null,
+            bridgeContractVersion: null,
+            lastErrorCode: null,
+            updatedAt: null,
+          },
           capture: {
             status: publication?.status ?? 'idle',
             lastAttemptAt: publication?.lastAttemptAt ?? null,

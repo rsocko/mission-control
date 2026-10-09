@@ -98,7 +98,6 @@ export function TaskDetailPanel({
   portalDialog = false,
   minPanelWidth = 280,
   fillContainer = false,
-  documentPreviewClassName,
   focusPanelOnMount = false,
   allowPopout = true,
   notesOpenRequest = null,
@@ -1127,7 +1126,6 @@ export function TaskDetailPanel({
           connectorType={task.connectorType}
           metadata={parsedMetadata}
           dueDate={task.dueDate}
-          className={documentPreviewClassName}
         />
 
         <TaskAttachmentCard

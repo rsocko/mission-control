@@ -8,6 +8,10 @@ import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runti
 import { resolveFinanceExternalLinks } from '@/lib/finance/external-links';
 import { isFinanceConnectorType } from './config';
 import {
+  getTyrionAttributionPolicySelection,
+  TYRION_ATTRIBUTION_POLICY_SETTING,
+} from './config';
+import {
   createAttributionRequests,
   normalizeAttributionMerchant,
   resolveTyrionAttributionConfig,
@@ -65,23 +69,29 @@ export async function getFinanceAttributionPolicyReadiness(connectorId: string) 
       repositories.finance.operator.readAttributionAccountSummary(connectorId),
       repositories.finance.insights.projection.readState(connectorId),
     ]);
-    let expectedPolicyVersion: number | null = null;
+    const policySelection = getTyrionAttributionPolicySelection(connector.settings);
+    let activePolicyVersion: number | null = null;
+    let policyUpdatedAt: string | null = null;
+    let policyDiscoveryError: string | null = null;
     try {
-      expectedPolicyVersion = resolveTyrionAttributionConfig(connector).expectedPolicyVersion;
+      const policy = await new TyrionAttributionClient(
+        resolveTyrionAttributionConfig(connector),
+      ).readCurrentPolicy();
+      activePolicyVersion = policy.policyVersion;
+      policyUpdatedAt = policy.policyUpdatedAt;
     } catch (error) {
-      if (
-        !(error instanceof TyrionAttributionError)
-        || error.code !== 'attribution_not_configured'
-      ) {
-        throw error;
-      }
+      if (!(error instanceof TyrionAttributionError)) throw error;
+      policyDiscoveryError = error.code;
     }
     return {
       connector: {
         enabled: connector.enabled,
         configurationUrl: resolveFinanceExternalLinks().tyrionConfiguration,
       },
-      expectedPolicyVersion,
+      policySelection,
+      activePolicyVersion,
+      policyUpdatedAt,
+      policyDiscoveryError,
       accountSummary,
       historyProjection: projection
         ? {
@@ -104,6 +114,29 @@ export async function getFinanceAttributionPolicyReadiness(connectorId: string) 
   }
 }
 
+export async function updateFinanceAttributionPolicySelection(
+  connectorId: string,
+  pinnedPolicyVersion: number | null,
+) {
+  try {
+    const { repositories } = await financeConnector(connectorId);
+    if (
+      pinnedPolicyVersion !== null
+      && (!Number.isSafeInteger(pinnedPolicyVersion) || pinnedPolicyVersion < 1)
+    ) {
+      throw new FinanceAttributionReadinessError('attribution_policy_pin_invalid', 400);
+    }
+    await repositories.connectors.patchSettingsState(
+      connectorId,
+      TYRION_ATTRIBUTION_POLICY_SETTING,
+      { pinnedPolicyVersion: pinnedPolicyVersion ?? undefined },
+    );
+    return getFinanceAttributionPolicyReadiness(connectorId);
+  } catch (error) {
+    throw mapError(error);
+  }
+}
+
 export async function previewFinanceAttributionPolicy(connectorId: string) {
   try {
     const { connector, repositories } = await financeConnector(connectorId);
@@ -112,14 +145,15 @@ export async function previewFinanceAttributionPolicy(connectorId: string) {
       connectorId,
       limit: FINANCE_ATTRIBUTION_PREVIEW_MAX,
     });
+    const client = new TyrionAttributionClient(config);
+    const policyVersion = await client.resolvePolicyVersion();
     const requests = createAttributionRequests(
       projection.items.map((item) => ({
         ...item,
         merchantName: normalizeAttributionMerchant(item.merchantName),
       })),
-      config.expectedPolicyVersion,
+      policyVersion,
     );
-    const client = new TyrionAttributionClient(config);
     const counts = {
       status: {} as Record<string, number>,
       reason: {} as Record<string, number>,
@@ -127,12 +161,12 @@ export async function previewFinanceAttributionPolicy(connectorId: string) {
       confidence: {} as Record<string, number>,
       reviewStatus: {} as Record<string, number>,
     };
-    let policyVersion: number | null = null;
+    let evaluatedPolicyVersion: number | null = null;
     let engineVersion: string | null = null;
     let evaluated = 0;
     for (const request of requests) {
       const response = await client.attribute(request);
-      policyVersion = response.policyVersion;
+      evaluatedPolicyVersion = response.policyVersion;
       engineVersion = response.engineVersion;
       for (const result of response.results) {
         evaluated += 1;
@@ -150,7 +184,7 @@ export async function previewFinanceAttributionPolicy(connectorId: string) {
     const reviewRequired = counts.reviewStatus.pending ?? 0;
     return {
       generatedAt: new Date().toISOString(),
-      policyVersion,
+      policyVersion: evaluatedPolicyVersion,
       engineVersion,
       totalTransactions: projection.total,
       evaluated,

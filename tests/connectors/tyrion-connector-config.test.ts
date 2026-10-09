@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getTyrionAttributionPolicySelection,
   preserveFinanceConnectorIdentityCredentials,
   protectNewFinanceConnectorCredentials,
   redactFinanceConnector,
   sanitizeFinanceConnectorWrite,
+  validateFinanceConnectorSettings,
 } from '@/lib/connectors/monarch-money/config';
 import { serializeConnectorForBrowser } from '@/lib/connectors/public-config';
 import { defaultTyrionBridgeUrlForEnvironment } from '@/lib/connectors/monarch-money/constants';
@@ -70,6 +72,26 @@ describe('Tyrion connector configuration boundary', () => {
         cardRuleFingerprintParityProvenAt: '2026-08-22T00:00:00.000Z',
       },
     }).settings).toEqual({ householdCurrency: 'USD' });
+  });
+
+  it('defaults to follow-current and validates an optional positive policy pin', () => {
+    expect(getTyrionAttributionPolicySelection({})).toEqual({
+      mode: 'follow-current',
+      pinnedPolicyVersion: null,
+    });
+    expect(getTyrionAttributionPolicySelection({
+      tyrionAttributionPolicy: { pinnedPolicyVersion: 3 },
+    })).toEqual({
+      mode: 'pinned',
+      pinnedPolicyVersion: 3,
+    });
+    expect(() => validateFinanceConnectorSettings({
+      tyrionAttributionPolicy: { pinnedPolicyVersion: 0 },
+    }, {
+      requireHouseholdCurrency: false,
+    })).toThrowError(expect.objectContaining({
+      code: 'attribution_policy_pin_invalid',
+    }));
   });
 
   it('always derives raw identifiers even when they resemble scoped references', () => {

@@ -80,11 +80,6 @@ function gateEnabled(name: string): boolean {
   return process.env[name]?.trim().toLowerCase() === 'true';
 }
 
-function policyFenceConfigured(): boolean {
-  const value = Number(process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION);
-  return Number.isSafeInteger(value) && value > 0;
-}
-
 function metadataResult(job: {
   id: string;
   status: SyncJobStatus;
@@ -244,7 +239,6 @@ implements SyncOperatorControlRepository {
     if (queued + running > 0) blockers.push('sync_job_active');
     if (configurationState.status !== 'configured') blockers.push('household_currency_unavailable');
     if (!tokenConfigured) blockers.push('finance_service_token_unavailable');
-    if (!policyFenceConfigured()) blockers.push('attribution_policy_fence_unavailable');
     if (!isFinanceInsightShadowIngestEnabled()) {
       blockers.push('finance_insight_shadow_ingest_disabled');
     }

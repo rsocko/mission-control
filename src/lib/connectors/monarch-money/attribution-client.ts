@@ -6,16 +6,20 @@ import {
   attributionBatchRequestSchema,
   attributionBatchResponseSchema,
   attributionErrorResponseSchema,
+  attributionPolicyResponseSchema,
   TYRION_ATTRIBUTION_CONTRACT_VERSION,
   TYRION_ATTRIBUTION_MAX_BODY_BYTES,
   TYRION_ATTRIBUTION_MAX_ITEMS,
   TYRION_ATTRIBUTION_MAX_RESPONSE_BYTES,
   TYRION_ATTRIBUTION_PATH,
+  TYRION_ATTRIBUTION_POLICY_PATH,
   TYRION_ATTRIBUTION_PROVENANCE,
   type AttributionBatchItem,
   type AttributionBatchRequest,
   type AttributionBatchResponse,
+  type AttributionPolicyResponse,
 } from './attribution-contract';
+import { getTyrionAttributionPolicySelection } from './config';
 import {
   financeConnectorScopedReference,
   financeIdentityNamespaceFromCredentials,
@@ -46,7 +50,7 @@ const stableServiceErrorCodes = new Set([
 export interface TyrionAttributionConfig {
   serviceToken: string;
   identityNamespace: string;
-  expectedPolicyVersion: number;
+  expectedPolicyVersion: number | null;
   timeoutMs: number;
 }
 
@@ -69,20 +73,10 @@ function positiveInteger(value: string | undefined, fallback: number, maximum: n
     : fallback;
 }
 
-function requiredPositiveInteger(value: string | undefined): number {
-  const parsed = Number(value);
-  if (!value?.trim() || !Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new TyrionAttributionError(
-      'attribution_not_configured',
-      'Tyrion attribution policy configuration is invalid',
-      false,
-    );
-  }
-  return parsed;
-}
-
 export function resolveTyrionAttributionConfig(
-  financeConfig: Pick<ConnectorConfig, 'credentials'> = { credentials: {} },
+  financeConfig: Pick<ConnectorConfig, 'credentials'> & Partial<Pick<ConnectorConfig, 'settings'>> = {
+    credentials: {},
+  },
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): TyrionAttributionConfig {
   const serviceToken = getPersistedFinanceManagerServiceToken(financeConfig)
@@ -101,9 +95,9 @@ export function resolveTyrionAttributionConfig(
   return {
     serviceToken,
     identityNamespace,
-    expectedPolicyVersion: requiredPositiveInteger(
-      environment.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION,
-    ),
+    expectedPolicyVersion: getTyrionAttributionPolicySelection(
+      financeConfig.settings ?? {},
+    ).pinnedPolicyVersion,
     timeoutMs: positiveInteger(
       environment.TYRION_ATTRIBUTION_TIMEOUT_MS,
       DEFAULT_TIMEOUT_MS,
@@ -191,6 +185,30 @@ export class TyrionAttributionClient {
     private readonly fetchImplementation: typeof fetch = fetch,
   ) {}
 
+  async readCurrentPolicy(
+    signal?: AbortSignal,
+  ): Promise<AttributionPolicyResponse> {
+    const responseBody = await this.request(
+      TYRION_ATTRIBUTION_POLICY_PATH,
+      { method: 'GET' },
+      signal,
+    );
+    const parsedResponse = attributionPolicyResponseSchema.safeParse(responseBody);
+    if (!parsedResponse.success) {
+      throw new TyrionAttributionError(
+        'invalid_attribution_contract',
+        'Tyrion attribution returned invalid policy metadata',
+        false,
+      );
+    }
+    return parsedResponse.data;
+  }
+
+  async resolvePolicyVersion(signal?: AbortSignal): Promise<number> {
+    return this.config.expectedPolicyVersion
+      ?? (await this.readCurrentPolicy(signal)).policyVersion;
+  }
+
   async attribute(
     request: AttributionBatchRequest,
     signal?: AbortSignal,
@@ -212,6 +230,54 @@ export class TyrionAttributionClient {
         false,
       );
     }
+    const responseBody = await this.request(
+      TYRION_ATTRIBUTION_PATH,
+      { method: 'POST', body: bodyText },
+      signal,
+    );
+    const parsedResponse = attributionBatchResponseSchema.safeParse(responseBody);
+    if (!parsedResponse.success) {
+      throw new TyrionAttributionError(
+        'invalid_attribution_contract',
+        'Tyrion attribution returned an invalid response',
+        false,
+      );
+    }
+    const result = parsedResponse.data;
+    if (
+      result.results.length !== request.items.length
+      || result.results.some((item, index) => item.sourceRef !== request.items[index].sourceRef)
+      || result.results.some((item, index) => (
+        request.items[index].existingManualDecision === null
+        && (item.method === 'manual' || item.decisionSource === 'manual')
+      ))
+      || result.results.some((item) => (
+        item.contractVersion !== result.contractVersion
+        || item.policyVersion !== result.policyVersion
+        || item.engineVersion !== result.engineVersion
+      ))
+    ) {
+      throw new TyrionAttributionError(
+        'invalid_attribution_correlation',
+        'Tyrion attribution returned mismatched results',
+        false,
+      );
+    }
+    if (result.policyVersion !== request.expectedPolicyVersion) {
+      throw new TyrionAttributionError(
+        'policy_conflict',
+        'Tyrion attribution policy version changed',
+        false,
+      );
+    }
+    return result;
+  }
+
+  private async request(
+    path: string,
+    init: Pick<RequestInit, 'method' | 'body'>,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     const timeoutSignal = AbortSignal.timeout(this.config.timeoutMs);
     const requestSignal = signal
       ? AbortSignal.any([signal, timeoutSignal])
@@ -219,11 +285,11 @@ export class TyrionAttributionClient {
     let response: Response;
     try {
       response = await this.fetchImplementation(
-        `${PRIVATE_TYRION_ORIGIN}${TYRION_ATTRIBUTION_PATH}`,
+        `${PRIVATE_TYRION_ORIGIN}${path}`,
         {
-          method: 'POST',
+          method: init.method,
           headers: createAttributionHeaders(this.config),
-          body: bodyText,
+          ...(init.body === undefined ? {} : { body: init.body }),
           cache: 'no-store',
           redirect: 'error',
           signal: requestSignal,
@@ -264,48 +330,7 @@ export class TyrionAttributionClient {
         response.status,
       );
     }
-    const parsedResponse = attributionBatchResponseSchema.safeParse(responseBody);
-    if (!parsedResponse.success) {
-      throw new TyrionAttributionError(
-        'invalid_attribution_contract',
-        'Tyrion attribution returned an invalid response',
-        false,
-        response.status,
-      );
-    }
-    const result = parsedResponse.data;
-    if (
-      result.results.length !== request.items.length
-      || result.results.some((item, index) => item.sourceRef !== request.items[index].sourceRef)
-      || result.results.some((item, index) => (
-        request.items[index].existingManualDecision === null
-        && (item.method === 'manual' || item.decisionSource === 'manual')
-      ))
-      || result.results.some((item) => (
-        item.contractVersion !== result.contractVersion
-        || item.policyVersion !== result.policyVersion
-        || item.engineVersion !== result.engineVersion
-      ))
-    ) {
-      throw new TyrionAttributionError(
-        'invalid_attribution_correlation',
-        'Tyrion attribution returned mismatched results',
-        false,
-        response.status,
-      );
-    }
-    if (
-      request.expectedPolicyVersion !== null
-      && result.policyVersion !== request.expectedPolicyVersion
-    ) {
-      throw new TyrionAttributionError(
-        'policy_conflict',
-        'Tyrion attribution policy version changed',
-        false,
-        response.status,
-      );
-    }
-    return result;
+    return responseBody;
   }
 }
 

@@ -31,7 +31,6 @@ describePostgres('PostgreSQL sync operator-control integration', () => {
 
   beforeAll(async () => {
     assertSafeIntegrationTestTarget(connectionString!);
-    process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION = '7';
     process.env.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED = 'true';
     await backend.initialize();
     jobs = new PostgresSyncJobRepository(backend.context.pool);
@@ -61,7 +60,6 @@ describePostgres('PostgreSQL sync operator-control integration', () => {
 
   afterAll(async () => {
     await backend.shutdown();
-    delete process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION;
     delete process.env.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED;
   });
 

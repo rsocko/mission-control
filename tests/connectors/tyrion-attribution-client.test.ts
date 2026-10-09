@@ -298,9 +298,12 @@ describe('Tyrion attribution v2 client', () => {
         serviceToken: 'persisted-token',
         identityNamespace: config.identityNamespace,
       },
+      settings: {
+        tyrionAttributionPolicy: { pinnedPolicyVersion: 7 },
+      },
     }, {
       FINANCE_MANAGER_API_TOKEN: 'environment-token',
-      TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION: '7',
+      TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION: '99',
     })).toMatchObject({ serviceToken: 'persisted-token', expectedPolicyVersion: 7 });
     expect(resolveTyrionAttributionConfig({
       credentials: {
@@ -308,23 +311,55 @@ describe('Tyrion attribution v2 client', () => {
         identityNamespace: config.identityNamespace,
       },
     }, {
-      TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION: '7',
-    })).toMatchObject({ serviceToken: 'legacy-persisted-token' });
+    })).toMatchObject({
+      serviceToken: 'legacy-persisted-token',
+      expectedPolicyVersion: null,
+    });
     expect(resolveTyrionAttributionConfig({
       credentials: { identityNamespace: config.identityNamespace },
     }, {
       FINANCE_MANAGER_API_TOKEN: 'environment-token',
-      TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION: '7',
-    })).toMatchObject({ serviceToken: 'environment-token' });
+    })).toMatchObject({
+      serviceToken: 'environment-token',
+      expectedPolicyVersion: null,
+    });
     expect(() => resolveTyrionAttributionConfig({
       credentials: { serviceToken: 'persisted-token' },
     }, {})).toThrowError(expect.objectContaining({ code: 'attribution_not_configured' }));
-    expect(() => resolveTyrionAttributionConfig({
+    expect(resolveTyrionAttributionConfig({
       credentials: {
         serviceToken: 'persisted-token',
         identityNamespace: config.identityNamespace,
       },
-    }, {})).toThrowError(expect.objectContaining({ code: 'attribution_not_configured' }));
+    }, {})).toMatchObject({ expectedPolicyVersion: null });
+  });
+
+  it('resolves follow-current once from the no-store policy endpoint and lets pins bypass it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      contractVersion: '2.0',
+      engineVersion: '2.0.0',
+      policyVersion: 3,
+      policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+    }));
+    const followCurrent = new TyrionAttributionClient(
+      { ...config, expectedPolicyVersion: null },
+      fetchMock as typeof fetch,
+    );
+
+    await expect(followCurrent.resolvePolicyVersion()).resolves.toBe(3);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://tyrion-operations-ui:3000/api/internal/v2/attribution/policy',
+      expect.objectContaining({
+        method: 'GET',
+        cache: 'no-store',
+        redirect: 'error',
+      }),
+    );
+
+    const pinnedFetch = vi.fn();
+    const pinned = new TyrionAttributionClient(config, pinnedFetch as typeof fetch);
+    await expect(pinned.resolvePolicyVersion()).resolves.toBe(2);
+    expect(pinnedFetch).not.toHaveBeenCalled();
   });
 
   it('accepts a maximum-item response larger than the request body limit', async () => {

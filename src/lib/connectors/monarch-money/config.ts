@@ -38,11 +38,40 @@ export type FinanceConnectorConfigurationState =
 
 export class FinanceConnectorConfigurationError extends Error {
   constructor(
-    readonly code: 'household_currency_required' | 'household_currency_invalid',
+    readonly code:
+      | 'household_currency_required'
+      | 'household_currency_invalid'
+      | 'attribution_policy_pin_invalid',
   ) {
     super(code);
     this.name = 'FinanceConnectorConfigurationError';
   }
+}
+
+export const TYRION_ATTRIBUTION_POLICY_SETTING = 'tyrionAttributionPolicy';
+
+export type TyrionAttributionPolicySelection =
+  | { mode: 'follow-current'; pinnedPolicyVersion: null }
+  | { mode: 'pinned'; pinnedPolicyVersion: number };
+
+export function getTyrionAttributionPolicySelection(
+  settings: unknown,
+): TyrionAttributionPolicySelection {
+  const state = parseObject(settings)[TYRION_ATTRIBUTION_POLICY_SETTING];
+  if (state === undefined) {
+    return { mode: 'follow-current', pinnedPolicyVersion: null };
+  }
+  if (typeof state !== 'object' || state === null || Array.isArray(state)) {
+    throw new FinanceConnectorConfigurationError('attribution_policy_pin_invalid');
+  }
+  const pinnedPolicyVersion = (state as Record<string, unknown>).pinnedPolicyVersion;
+  if (pinnedPolicyVersion === undefined || pinnedPolicyVersion === null) {
+    return { mode: 'follow-current', pinnedPolicyVersion: null };
+  }
+  if (!Number.isSafeInteger(pinnedPolicyVersion) || Number(pinnedPolicyVersion) < 1) {
+    throw new FinanceConnectorConfigurationError('attribution_policy_pin_invalid');
+  }
+  return { mode: 'pinned', pinnedPolicyVersion: Number(pinnedPolicyVersion) };
 }
 
 export function isFinanceConnectorType(type: string): boolean {
@@ -98,6 +127,7 @@ export function validateFinanceConnectorSettings(
   options: { requireHouseholdCurrency: boolean },
 ): Record<string, unknown> {
   const parsed = parseObject(settings);
+  getTyrionAttributionPolicySelection(parsed);
   const hasCurrency = Object.prototype.hasOwnProperty.call(parsed, 'householdCurrency');
   if (!hasCurrency) {
     if (options.requireHouseholdCurrency) {

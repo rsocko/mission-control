@@ -3,20 +3,11 @@
 import { useEffect, useState } from 'react';
 import {
   Check,
-  Clipboard,
   ExternalLink,
   Loader2,
   RefreshCw,
   TriangleAlert,
 } from 'lucide-react';
-
-interface AttributionAccount {
-  accountRef: string;
-  displayName: string;
-  type: string;
-  mask: string | null;
-  active: boolean;
-}
 
 interface ReadinessResponse {
   connector: {
@@ -24,7 +15,10 @@ interface ReadinessResponse {
     configurationUrl: string;
   };
   expectedPolicyVersion: number | null;
-  accounts: AttributionAccount[];
+  accountSummary: {
+    total: number;
+    active: number;
+  };
   historyProjection: {
     status: 'idle' | 'running' | 'succeeded' | 'failed';
     lastSuccessfulAt: string | null;
@@ -73,7 +67,6 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
   const [loading, setLoading] = useState(true);
   const [previewing, setPreviewing] = useState(false);
   const [error, setError] = useState('');
-  const [copiedRef, setCopiedRef] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,16 +93,6 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
       cancelled = true;
     };
   }, [connectorId]);
-
-  async function copyAccountRef(accountRef: string) {
-    try {
-      await navigator.clipboard.writeText(accountRef);
-      setCopiedRef(accountRef);
-      setTimeout(() => setCopiedRef((current) => current === accountRef ? null : current), 2000);
-    } catch {
-      setError('Could not copy the account reference');
-    }
-  }
 
   async function runPreview() {
     setPreviewing(true);
@@ -157,8 +140,8 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
             Attribution policy readiness
           </h3>
           <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-            Copy each opaque reference into its matching Tyrion account rule, save the
-            policy, then run a no-write coverage preview.
+            Set each account&apos;s Default attribution in Tyrion, then run a no-write
+            coverage preview. Manual assignments and explicit rules override defaults.
           </p>
         </div>
         {readiness?.connector.configurationUrl && (
@@ -168,7 +151,7 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
             rel="noreferrer"
             className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           >
-            Configure <ExternalLink size={11} />
+            Configure defaults in Tyrion <ExternalLink size={11} />
           </a>
         )}
       </div>
@@ -187,44 +170,26 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
         <>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
             <span>Policy fence: {readiness.expectedPolicyVersion ?? 'not configured'}</span>
-            <span>{readiness.accounts.length} account{readiness.accounts.length === 1 ? '' : 's'}</span>
+            <span>
+              {readiness.accountSummary.total} synchronized account
+              {readiness.accountSummary.total === 1 ? '' : 's'}
+              {' '}({readiness.accountSummary.active} active)
+            </span>
           </div>
 
-          {readiness.accounts.length === 0 ? (
+          {readiness.accountSummary.total === 0 ? (
             <p className="rounded-md border border-dashed border-[var(--border)] p-3 text-xs text-[var(--text-muted)]">
               No synchronized accounts are available yet. Keep the connector quarantined
-              and complete a successful snapshot before configuring policy rules.
+              and complete a successful snapshot before configuring defaults.
             </p>
           ) : (
-            <div className="max-h-56 divide-y divide-[var(--border-subtle)] overflow-y-auto rounded-md border border-[var(--border-subtle)]">
-              {readiness.accounts.map((account) => (
-                <div key={account.accountRef} className="space-y-1.5 p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-xs font-medium text-[var(--text-secondary)]">
-                      {account.displayName}
-                      {account.mask ? ` - ${account.mask}` : ''}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-[var(--text-muted)]">
-                      {account.type}{account.active ? '' : ' - inactive'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <code className="min-w-0 flex-1 truncate rounded bg-[var(--surface-0)] px-2 py-1 text-[11px] text-[var(--text-tertiary)]">
-                      {account.accountRef}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={() => copyAccountRef(account.accountRef)}
-                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                      aria-label={`Copy Tyrion account reference for ${account.displayName}`}
-                    >
-                      {copiedRef === account.accountRef
-                        ? <Check size={12} className="text-green-400" />
-                        : <Clipboard size={12} />}
-                    </button>
-                  </div>
-                </div>
-              ))}
+            <div className="flex items-start gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-0)] p-2 text-xs text-[var(--text-secondary)]">
+              <Check size={13} className="mt-0.5 shrink-0 text-green-400" />
+              <p className="leading-5">
+                Default attribution is managed directly in Tyrion as a child,
+                Parent/shared, or Rule-based. Transaction-level manual assignments
+                remain authoritative.
+              </p>
             </div>
           )}
 
@@ -238,7 +203,7 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
           <button
             type="button"
             onClick={runPreview}
-            disabled={previewing || readiness.accounts.length === 0}
+            disabled={previewing || readiness.accountSummary.total === 0}
             className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             {previewing
@@ -267,7 +232,8 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
             Evaluated {preview.evaluated} of {preview.totalTransactions};
             {' '}{preview.counts.reviewStatus.pending ?? 0} pending review,
             {' '}{preview.counts.reason['no-match'] ?? 0} no-match,
-            {' '}{preview.counts.status.attributed ?? 0} attributed.
+            {' '}{preview.counts.status.attributed ?? 0} attributed,
+            {' '}{preview.counts.method.manual ?? 0} manual decisions preserved.
             {preview.truncated ? ' The bounded preview was truncated.' : ''}
           </p>
           <p className="mt-1 text-[11px] opacity-80">

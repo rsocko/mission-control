@@ -16,10 +16,17 @@ const identifierSchema = z.string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
   .refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
 const timestampSchema = z.string().datetime({ offset: true });
+export const tyrionBridgeAccountRefSchema = z.string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
+  .refine(
+    (value) => value === value.trim(),
+    'accountRef must be the exact Tyrion Bridge account identifier',
+  );
 const reasonSchema = z.enum([
   'no-match',
   'low-confidence',
-  'account-rule-conflict',
   'merchant-rule-conflict',
   'historical-attribution-tie',
   'engine-unavailable',
@@ -44,7 +51,7 @@ export const attributionBatchItemSchema = z.object({
   sourceRef: identifierSchema,
   occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   merchantName: z.string().min(1).max(160),
-  accountRef: z.string().regex(/^account-v1:[A-Za-z0-9_-]{43}$/),
+  accountRef: tyrionBridgeAccountRefSchema,
   observedAt: timestampSchema,
   existingManualDecision: manualDecisionSchema,
 }).strict();
@@ -78,7 +85,7 @@ export const attributionBatchResultSchema = z.object({
   confidence: z.enum(['definite', 'likely', 'none']),
   method: z.enum([
     'manual',
-    'account-rule',
+    'account-default',
     'merchant-rule',
     'historical-pattern',
     'unassigned',

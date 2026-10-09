@@ -32,7 +32,7 @@ export interface FinanceAttributionResult {
   confidence: 'definite' | 'likely' | 'none';
   method:
     | 'manual'
-    | 'account-rule'
+    | 'account-default'
     | 'merchant-rule'
     | 'historical-pattern'
     | 'unassigned'

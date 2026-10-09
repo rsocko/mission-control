@@ -465,7 +465,7 @@ export function describeFinanceWorkerPersistenceContract(
               status: 'attributed',
               kidId: 'kid-one',
               confidence: 'definite',
-              method: 'account-rule',
+              method: 'account-default',
               explanation: 'Matched account',
               reviewStatus: 'not-required',
               reasons: [],
@@ -488,7 +488,7 @@ export function describeFinanceWorkerPersistenceContract(
               status: 'attributed',
               kidId: 'kid-one',
               confidence: 'definite',
-              method: 'account-rule',
+              method: 'account-default',
               explanation: 'Matched account',
               reviewStatus: 'not-required',
               reasons: [],
@@ -508,7 +508,7 @@ export function describeFinanceWorkerPersistenceContract(
       });
       expect(await harness.transaction('automated-attribution')).toMatchObject({
         assignedKidId: 'kid-one',
-        kidAssignmentMethod: 'account-rule',
+        kidAssignmentMethod: 'account-default',
         manualDecisionAction: null,
         attributionStatus: 'attributed',
         attributionReasons: [],

@@ -152,11 +152,15 @@ recorded in `finance_mutation_audit`; local confirmation occurs only after the
 bridge acknowledges success.
 
 Each normalized snapshot page is separately submitted to Tyrion's protected
-batch attribution v2 service. Mission Control sends only deterministic opaque
-connector-scoped source and required account references, date, normalized
-merchant, observation time, and a structured existing manual decision. Raw
-Monarch account IDs and card masks never cross the boundary. Mission Control
-authenticates
+batch attribution v2 service. Mission Control sends only a deterministic opaque
+connector-scoped source reference, the stable direct account ID already supplied
+by Tyrion Bridge, date, normalized merchant, observation time, and a structured
+existing manual decision. The account ID is returned verbatim in `accountRef`;
+Mission Control does not apply a second namespace or hash mapping. Direct account
+IDs are private homelab contract data: they may cross this private service
+boundary but must not be logged or returned by operator-readiness responses.
+Card masks and other transaction data never cross the attribution boundary.
+Mission Control authenticates
 with the finance-manager bearer token over private service DNS; Tyrion fixes the
 service actor and household scope server-side. Tyrion remains the sole policy
 and engine runtime.
@@ -164,8 +168,10 @@ and engine runtime.
 The connector stores a random identity namespace beside its token in protected,
 browser-redacted connector credentials. Ordinary SHA-256 derivation produces
 stable connector-scoped transaction, recurring, category, category-group,
-account, and tag references for both attribution and Finance Insight
-publication. The namespace is identity state, not authentication key material;
+account, and tag references for Finance Insight publication, and the transaction
+source references used to correlate attribution results. Attribution account
+references are the direct Tyrion Bridge account IDs and do not use this
+namespace. The namespace is identity state, not authentication key material;
 the bearer token remains authentication only.
 
 Finance connector creation requires an exact uppercase ISO-4217

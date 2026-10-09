@@ -15,19 +15,16 @@ import {
 
 const sourceOne = 'source-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const sourceTwo = 'source-v1:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
-const accountOne = 'account-v1:CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC';
+const accountOne = 'bridge-account-1';
 
 function runtime(options: {
   truncated?: boolean;
   historyError?: string | null;
 } = {}) {
-  const listAttributionAccounts = vi.fn().mockResolvedValue([{
-    accountRef: accountOne,
-    displayName: 'Invented checking',
-    type: 'checking',
-    mask: '1234',
-    active: true,
-  }]);
+  const readAttributionAccountSummary = vi.fn().mockResolvedValue({
+    total: 1,
+    active: 1,
+  });
   const readAttributionPreview = vi.fn().mockResolvedValue({
     items: [
       {
@@ -36,7 +33,11 @@ function runtime(options: {
         merchantName: 'Invented market',
         accountRef: accountOne,
         observedAt: '2026-08-12T12:00:00.000Z',
-        existingManualDecision: null,
+        existingManualDecision: {
+          action: 'assign-kid',
+          kidId: 'kid-one',
+          decidedAt: '2026-08-12T11:30:00.000Z',
+        },
       },
       {
         sourceRef: sourceTwo,
@@ -78,7 +79,7 @@ function runtime(options: {
       },
       finance: {
         operator: {
-          listAttributionAccounts,
+          readAttributionAccountSummary,
           readAttributionPreview,
         },
         insights: {
@@ -86,7 +87,7 @@ function runtime(options: {
         },
       },
     },
-    listAttributionAccounts,
+    readAttributionAccountSummary,
     readAttributionPreview,
     readState,
   };
@@ -96,7 +97,7 @@ function result(
   sourceRef: string,
   input: {
     status: 'attributed' | 'unassigned';
-    method: 'account-rule' | 'unassigned';
+    method: 'account-default' | 'unassigned';
     reviewStatus: 'not-required' | 'pending';
     reasons: string[];
   },
@@ -132,23 +133,18 @@ afterEach(() => {
 });
 
 describe('Tyrion attribution policy readiness', () => {
-  it('returns only operator-safe account handoff data and stable projection diagnostics', async () => {
+  it('returns only aggregate account readiness and stable projection diagnostics', async () => {
     const setup = runtime({ historyError: 'insight_history_incomplete_snapshot' });
     mocks.runtime.mockResolvedValue(setup.repositories);
 
     const readiness = await getFinanceAttributionPolicyReadiness('finance-connector');
 
-    expect(readiness.accounts).toEqual([{
-      accountRef: accountOne,
-      displayName: 'Invented checking',
-      type: 'checking',
-      mask: '1234',
-      active: true,
-    }]);
+    expect(readiness.accountSummary).toEqual({ total: 1, active: 1 });
     expect(readiness.historyProjection?.lastErrorCode)
       .toBe('insight_history_incomplete_snapshot');
     expect(JSON.stringify(readiness)).not.toContain('identityNamespace');
     expect(JSON.stringify(readiness)).not.toContain('invented-service-token');
+    expect(JSON.stringify(readiness)).not.toContain(accountOne);
     expect(setup.readAttributionPreview).not.toHaveBeenCalled();
   });
 
@@ -157,24 +153,35 @@ describe('Tyrion attribution policy readiness', () => {
     mocks.runtime.mockResolvedValue(setup.repositories);
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, init) => {
       const request = JSON.parse(String(init?.body)) as {
-        items: Array<{ sourceRef: string }>;
+        items: Array<{ sourceRef: string; accountRef: string; existingManualDecision: unknown }>;
       };
+      expect(request.items.every((item) => item.accountRef === accountOne)).toBe(true);
+      expect(request.items[0]?.existingManualDecision).toEqual({
+        action: 'assign-kid',
+        kidId: 'kid-one',
+        decidedAt: '2026-08-12T11:30:00.000Z',
+      });
       return Response.json({
         contractVersion: '2.0',
         policyVersion: 2,
         engineVersion: '2.0.0',
         results: request.items.map((item) => item.sourceRef === sourceOne
-          ? result(item.sourceRef, {
+          ? {
+              ...result(item.sourceRef, {
+                status: 'attributed',
+                method: 'account-default',
+                reviewStatus: 'not-required',
+                reasons: [],
+              }),
+              method: 'manual',
+              decisionSource: 'manual',
+              explanation: 'Preserved the existing manual decision',
+            }
+          : result(item.sourceRef, {
               status: 'attributed',
-              method: 'account-rule',
+              method: 'account-default',
               reviewStatus: 'not-required',
               reasons: [],
-            })
-          : result(item.sourceRef, {
-              status: 'unassigned',
-              method: 'unassigned',
-              reviewStatus: 'pending',
-              reasons: ['no-match'],
             })),
       });
     }));
@@ -188,19 +195,19 @@ describe('Tyrion attribution policy readiness', () => {
       evaluated: 2,
       truncated: false,
       complete: true,
-      ready: false,
+      ready: true,
       counts: {
-        status: { attributed: 1, unassigned: 1 },
-        reason: { 'no-match': 1 },
-        method: { 'account-rule': 1, unassigned: 1 },
-        reviewStatus: { 'not-required': 1, pending: 1 },
+        status: { attributed: 2 },
+        reason: {},
+        method: { 'account-default': 1, manual: 1 },
+        reviewStatus: { 'not-required': 2 },
       },
     });
     expect(setup.readAttributionPreview).toHaveBeenCalledWith({
       connectorId: 'finance-connector',
       limit: 5_000,
     });
-    expect(setup.listAttributionAccounts).not.toHaveBeenCalled();
+    expect(setup.readAttributionAccountSummary).not.toHaveBeenCalled();
     expect(setup.readState).not.toHaveBeenCalled();
   });
 
@@ -217,7 +224,7 @@ describe('Tyrion attribution policy readiness', () => {
         engineVersion: '2.0.0',
         results: request.items.map((item) => result(item.sourceRef, {
           status: 'attributed',
-          method: 'account-rule',
+          method: 'account-default',
           reviewStatus: 'not-required',
           reasons: [],
         })),

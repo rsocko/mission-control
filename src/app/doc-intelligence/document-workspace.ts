@@ -194,6 +194,16 @@ export function sortDocumentTasks(
   return [...tasks].sort((left, right) => {
     const leftMetadata = parseDocumentTaskMetadata(left.metadata);
     const rightMetadata = parseDocumentTaskMetadata(right.metadata);
+    if (sortBy === 'createdAt') {
+      const createdAtComparison = compareNullable(
+        localDateTimestamp(left.createdAt),
+        localDateTimestamp(right.createdAt),
+        (a, b) => a - b,
+        direction,
+      );
+      if (createdAtComparison) return createdAtComparison;
+    }
+
     const dueDateComparison = compareNullable(
       localDateTimestamp(left.dueDate),
       localDateTimestamp(right.dueDate),
@@ -234,10 +244,8 @@ export function sortDocumentTasks(
         (a, b) => a.localeCompare(b),
         direction,
       );
-    } else {
-      comparison = Date.parse(left.createdAt) - Date.parse(right.createdAt);
     }
-    const directedComparison = sortBy === 'priority' || sortBy === 'createdAt'
+    const directedComparison = sortBy === 'priority'
       ? comparison * multiplier
       : comparison;
     return directedComparison || left.title.localeCompare(right.title);

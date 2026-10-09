@@ -3,16 +3,27 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { CheckCircle2, Loader2, MoreHorizontal, Sun, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { parseLocalDate } from '@/lib/utils/date-format';
 import type { TaskDetailMode } from './task-detail-types';
 
 export interface TaskDetailFooterProps {
   mode: TaskDetailMode;
   createdAt: string;
+  createdAtIsDateOnly?: boolean;
   updatedAt: string;
 }
 
 /** Created and updated timestamps. */
-export function TaskDetailFooter({ mode, createdAt, updatedAt }: TaskDetailFooterProps) {
+export function TaskDetailFooter({
+  mode,
+  createdAt,
+  createdAtIsDateOnly = false,
+  updatedAt,
+}: TaskDetailFooterProps) {
+  const createdDate = createdAtIsDateOnly
+    ? parseLocalDate(createdAt)
+    : new Date(createdAt);
+
   return (
     <div className={cn(
       'space-y-1 border-t border-[var(--border-subtle)] pt-3',
@@ -22,7 +33,7 @@ export function TaskDetailFooter({ mode, createdAt, updatedAt }: TaskDetailFoote
     )}>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
         <p>
-          Created {new Date(createdAt).toLocaleDateString()}
+          Created {createdDate?.toLocaleDateString()}
         </p>
         {updatedAt && (
           <p>

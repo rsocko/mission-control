@@ -539,6 +539,20 @@ describe('TaskDetailFooter', () => {
     expect(screen.getByText(/^Created /)).toBeInTheDocument();
     expect(screen.getByText(/^Updated /)).toBeInTheDocument();
   });
+
+  it('renders source calendar dates without a timezone shift', () => {
+    render(
+      <TaskDetailFooter
+        mode="panel"
+        createdAt="2026-09-24"
+        createdAtIsDateOnly
+        updatedAt="2026-10-09T00:42:34.000Z"
+      />,
+    );
+
+    const expected = new Date(2026, 8, 24).toLocaleDateString();
+    expect(screen.getByText(`Created ${expected}`)).toBeInTheDocument();
+  });
 });
 
 describe('TaskMobileActionBar', () => {

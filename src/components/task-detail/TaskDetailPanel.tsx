@@ -1145,7 +1145,12 @@ export function TaskDetailPanel({
           refreshKey={pasteCount}
         />
 
-        <TaskDetailFooter mode={mode} createdAt={task.createdAt} updatedAt={task.updatedAt} />
+        <TaskDetailFooter
+          mode={mode}
+          createdAt={task.createdAt}
+          createdAtIsDateOnly={typeof parsedMetadata.documentCreatedAt === 'string'}
+          updatedAt={task.updatedAt}
+        />
 
         {mode === 'mobile' && (
           <TaskMobileActionBar

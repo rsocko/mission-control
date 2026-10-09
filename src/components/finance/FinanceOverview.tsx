@@ -12,6 +12,7 @@ import {
   ExternalLink,
   HeartPulse,
   Loader2,
+  ListChecks,
   RefreshCw,
   ShieldAlert,
   Users,
@@ -270,9 +271,14 @@ export function FinanceOverview() {
               <h2 id="finance-attention-heading" className="text-sm font-semibold text-[var(--text-primary)]">
                 Needs attention
               </h2>
-              <Link href="/finance/review" className="flex items-center gap-1 text-xs font-medium text-[var(--accent-400)] hover:underline focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
-                Review exceptions <ArrowUpRight size={13} />
-              </Link>
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <Link href="/finance/quick-review" className="flex min-h-10 items-center gap-1 rounded-lg bg-[var(--accent)] px-3 text-xs font-semibold text-white focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+                  <ListChecks size={14} /> Quick review
+                </Link>
+                <Link href="/finance/review" className="flex min-h-10 items-center gap-1 text-xs font-medium text-[var(--accent-400)] hover:underline focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+                  Review exceptions <ArrowUpRight size={13} />
+                </Link>
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <AttentionCard label="Pending exceptions" value={overview.attention.pendingExceptions} icon={ShieldAlert} />

@@ -33,6 +33,7 @@ const BRIDGE_ERROR_CODES = [
   'not_found',
   'payload_too_large',
   'request_failed',
+  'review_capability_unavailable',
   'session_expired',
   'session_in_use',
   'transaction_not_found',
@@ -82,6 +83,8 @@ const transactionSchema = z.object({
     id: z.string().min(1),
     name: z.string(),
   }).strict()),
+  reviewStatus: z.enum(['needs_review', 'reviewed']),
+  reviewAssignee: z.string().min(1).nullable().optional(),
 }).strict();
 
 const transactionsResponseSchema = z.object({
@@ -188,6 +191,20 @@ const categoryUpdateResponseSchema = z.object({
   status: z.literal('updated'),
   transactionId: z.string(),
   categoryId: z.string(),
+}).strict();
+
+const merchantUpdateResponseSchema = z.object({
+  contractVersion: z.literal(CONTRACT_VERSION),
+  status: z.literal('updated'),
+  transactionId: z.string(),
+  merchantName: z.string(),
+}).strict();
+
+const reviewUpdateResponseSchema = z.object({
+  contractVersion: z.literal(CONTRACT_VERSION),
+  status: z.literal('reviewed'),
+  transactionId: z.string(),
+  reviewStatus: z.literal('reviewed'),
 }).strict();
 
 const errorResponseSchema = z.object({
@@ -524,7 +541,13 @@ export class MonarchBridgeClient {
   }
 
   async getTransactionsPage(
-    input: { startDate: string; endDate: string; limit: number; cursor?: string },
+    input: {
+      startDate: string;
+      endDate: string;
+      limit: number;
+      cursor?: string;
+      needsReview?: boolean;
+    },
     signal?: AbortSignal,
   ): Promise<MonarchTransactionsPage> {
     const query = new URLSearchParams({
@@ -533,6 +556,7 @@ export class MonarchBridgeClient {
       limit: String(Math.min(Math.max(input.limit, 1), 500)),
     });
     if (input.cursor) query.set('cursor', input.cursor);
+    if (input.needsReview !== undefined) query.set('needs_review', String(input.needsReview));
     const body = await this.request(`/transactions?${query}`, {}, signal);
     const parsed = transactionsResponseSchema.safeParse(body);
     if (!parsed.success) {
@@ -595,6 +619,41 @@ export class MonarchBridgeClient {
     const parsed = categoryUpdateResponseSchema.safeParse(body);
     if (!parsed.success || parsed.data.transactionId !== transactionId || parsed.data.categoryId !== categoryId) {
       throw new MonarchBridgeError('invalid_contract', 'Invalid Monarch Bridge category update contract', false);
+    }
+  }
+
+  async updateMerchant(
+    transactionId: string,
+    merchantName: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const body = await this.request(
+      `/transactions/${encodeURIComponent(transactionId)}/merchant`,
+      { method: 'PATCH', body: JSON.stringify({ merchantName }) },
+      signal,
+    );
+    const parsed = merchantUpdateResponseSchema.safeParse(body);
+    if (
+      !parsed.success
+      || parsed.data.transactionId !== transactionId
+      || parsed.data.merchantName !== merchantName
+    ) {
+      throw new MonarchBridgeError('invalid_contract', 'Invalid Monarch Bridge merchant update contract', false);
+    }
+  }
+
+  async markReviewed(
+    transactionId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const body = await this.request(
+      `/transactions/${encodeURIComponent(transactionId)}/review`,
+      { method: 'PATCH', body: JSON.stringify({ reviewed: true }) },
+      signal,
+    );
+    const parsed = reviewUpdateResponseSchema.safeParse(body);
+    if (!parsed.success || parsed.data.transactionId !== transactionId) {
+      throw new MonarchBridgeError('invalid_contract', 'Invalid Monarch Bridge review update contract', false);
     }
   }
 }

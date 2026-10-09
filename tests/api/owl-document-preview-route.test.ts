@@ -44,6 +44,8 @@ describe('GET /api/tasks/[id]/document-preview', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('application/pdf');
     expect(response.headers.get('content-disposition')).toContain('inline;');
+    expect(response.headers.get('cache-control')).toBe('private, max-age=300');
+    expect(response.headers.get('vary')).toBe('Cookie');
     expect(fetchMock).toHaveBeenCalledWith(
       'https://owl.example/api/documents/42/download',
       expect.objectContaining({

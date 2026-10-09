@@ -193,7 +193,6 @@ export function sortDocumentTasks(
   return [...tasks].sort((left, right) => {
     const leftMetadata = parseDocumentTaskMetadata(left.metadata);
     const rightMetadata = parseDocumentTaskMetadata(right.metadata);
-
     let selectedComparison = 0;
     if (sortBy === 'priority') {
       selectedComparison = (

@@ -432,6 +432,96 @@ async function assertCompletedPlanPromotion(
   }
 }
 
+async function assertLegacyCompletedPlanPromotion(
+  finance: FinanceInsightPersistence,
+  plan: FinanceInsightBackfillPlan,
+  command: FinanceInsightBackfillPromotionCommand,
+): Promise<void> {
+  const state = await runBackfillStage(
+    'proof',
+    () => finance.projection.readState(command.connectorId),
+  );
+  if (
+    state?.status !== 'succeeded'
+    || state.generationId === null
+    || state.sourceAsOf === null
+    || state.itemCount !== command.itemCount
+    || state.contentDigest !== command.contentDigest
+    || state.coverageStart !== command.coverageStart
+    || state.coverageEnd !== command.coverageEnd
+    || state.windowCount !== command.windowCount
+    || state.windowsDigest === null
+    || state.bridgeContractVersion !== command.bridgeContractVersion
+  ) {
+    throw new FinanceInsightBackfillProjectionConflictError();
+  }
+  const [storedFacts, storedWindows, operationalProofs] = await runBackfillStage(
+    'proof',
+    () => Promise.all([
+      finance.projection.readPromotedTransactionFacts(
+        command.connectorId,
+        state.generationId!,
+      ),
+      finance.projection.readWindowProofs(command.connectorId, state.generationId!),
+      finance.backfill.loadWindowProofs(plan.id),
+    ]),
+  );
+  const expectedWindows = buildFinanceInsightHistoryWindows(plan.coverageEnd);
+  const completedTime = Date.parse(plan.completedAt!);
+  if (
+    storedWindows.length !== expectedWindows.length
+    || financeInsightDigestV1(storedFacts as CanonicalJsonValue) !== state.contentDigest
+    || financeInsightDigestV1(storedWindows as unknown as CanonicalJsonValue)
+      !== state.windowsDigest
+  ) {
+    throw new FinanceInsightBackfillProjectionConflictError();
+  }
+  for (const [index, stored] of storedWindows.entries()) {
+    const expected = expectedWindows[index]!;
+    const windowFacts = command.facts.filter((fact) => {
+      const occurredOn = (fact as { occurredOn?: unknown }).occurredOn;
+      return typeof occurredOn === 'string'
+        && occurredOn >= expected.start
+        && occurredOn <= expected.end;
+    });
+    const validProofSource = operationalProofs.some(
+      (proof) => proof.windowStart <= expected.end
+        && proof.windowEnd >= expected.start
+        && proof.sourceAsOf === stored.sourceAsOf,
+    );
+    if (
+      stored.index !== expected.index
+      || stored.start !== expected.start
+      || stored.end !== expected.end
+      || stored.itemCount !== windowFacts.length
+      || stored.digest
+        !== financeInsightDigestV1(windowFacts as unknown as CanonicalJsonValue)
+      || !validProofSource
+      || !Number.isFinite(Date.parse(stored.sourceAsOf))
+      || Date.parse(stored.sourceAsOf) > completedTime
+    ) {
+      throw new FinanceInsightBackfillProjectionConflictError();
+    }
+  }
+  const sourceAsOf = storedWindows
+    .map((proof) => proof.sourceAsOf)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0];
+  const generationId = financeInsightHistoryGenerationRef({
+    connectorRef: command.connectorId,
+    sourceAsOf: state.sourceAsOf,
+    itemCount: state.itemCount,
+    contentDigest: state.contentDigest,
+    coverageStart: state.coverageStart,
+    coverageEnd: state.coverageEnd,
+    windowCount: state.windowCount,
+    windowsDigest: state.windowsDigest,
+    bridgeContractVersion: state.bridgeContractVersion,
+  });
+  if (state.sourceAsOf !== sourceAsOf || state.generationId !== generationId) {
+    throw new FinanceInsightBackfillProjectionConflictError();
+  }
+}
+
 async function promoteCompletedPlan(
   finance: FinanceInsightPersistence,
   connectorId: string,
@@ -708,7 +798,18 @@ async function runTransactionBackfill(
         new Date(existingPlan.completedAt),
       );
       if (command) {
-        await assertCompletedPlanPromotion(financeInsights, command);
+        if (
+          existingPlan.lastErrorCode
+          === UNKNOWN_BACKFILL_ERROR_CODES.promotion
+        ) {
+          await assertLegacyCompletedPlanPromotion(
+            financeInsights,
+            existingPlan,
+            command,
+          );
+        } else {
+          await assertCompletedPlanPromotion(financeInsights, command);
+        }
       }
       return {
         planId: existingPlan.id,

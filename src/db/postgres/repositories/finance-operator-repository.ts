@@ -17,6 +17,11 @@ import type {
 } from '@/db/persistence/finance-insights';
 import {
   FinanceOperatorPersistenceError,
+  financeCleanBootstrapConfirmationToken,
+  financeCleanBootstrapScopeDigest,
+  type FinanceCleanBootstrapApplyResult,
+  type FinanceCleanBootstrapDryRunResult,
+  type FinanceCleanBootstrapInventory,
   type FinanceOperatorCutoverEnableOutcome,
   type FinanceOperatorHealthSnapshot,
   type FinanceOperatorPersistence,
@@ -73,6 +78,272 @@ async function lockCutoverScope(client: PoolClient, connectorId: string): Promis
     'SELECT pg_advisory_xact_lock(hashtext($1))',
     [`finance-insight-cutover:${connectorId}`],
   );
+}
+
+interface CleanBootstrapAuditRow {
+  mode: 'dry-run' | 'apply';
+  dryRunId: string;
+  scopeDigest: string;
+  confirmationToken: string;
+  inventory: unknown;
+  result: unknown;
+}
+
+async function cleanBootstrapInventory(
+  client: Client,
+  connectorId: string,
+): Promise<FinanceCleanBootstrapInventory> {
+  const [row] = await query<{
+    manualAttributionDecisions: string;
+    automatedAttributionExceptions: string;
+    financeNotifications: string;
+    financeTasks: string;
+    accountProjections: string;
+    transactionProjections: string;
+    historyProjections: string;
+    backfillPlans: string;
+    backfillProofs: string;
+    activeDeliveryWork: string;
+    activeActionWork: string;
+  }>(client, `
+    SELECT
+      (SELECT COUNT(*) FROM finance_transactions
+        WHERE connector_instance_id = $1
+          AND (
+            manual_decision_action IS NOT NULL
+            OR manual_decided_at IS NOT NULL
+            OR kid_assignment_method = 'manual'
+            OR attribution_decision_source = 'manual'
+          )) AS "manualAttributionDecisions",
+      (SELECT COUNT(*) FROM finance_attribution_exceptions
+        WHERE connector_id = $1) AS "automatedAttributionExceptions",
+      (SELECT COUNT(*) FROM notifications
+        WHERE connector_instance_id = $1
+          AND connector_type IN ('finance-manager', 'monarch-money', 'finance'))
+        AS "financeNotifications",
+      (SELECT COUNT(*) FROM tasks
+        WHERE connector_instance_id = $1
+          AND connector_type IN ('finance-manager', 'monarch-money', 'finance'))
+        AS "financeTasks",
+      (SELECT COUNT(*) FROM finance_accounts WHERE connector_id = $1)
+        AS "accountProjections",
+      (SELECT COUNT(*) FROM finance_transactions WHERE connector_instance_id = $1)
+        AS "transactionProjections",
+      (
+        (SELECT COUNT(*) FROM finance_insight_transaction_projection_facts
+          WHERE connector_id = $1)
+        + (SELECT COUNT(*) FROM finance_insight_transaction_projection_windows
+          WHERE connector_id = $1)
+        + (SELECT COUNT(*) FROM finance_insight_publication_facts
+          WHERE publication_id IN (
+            SELECT id FROM finance_insight_publications WHERE connector_id = $1
+          ))
+        + (SELECT COUNT(*) FROM finance_insight_occurrences WHERE connector_id = $1)
+      ) AS "historyProjections",
+      (SELECT COUNT(*) FROM finance_insight_transaction_backfill_plans
+        WHERE connector_id = $1) AS "backfillPlans",
+      (SELECT COUNT(*) FROM finance_insight_transaction_window_proofs
+        WHERE connector_id = $1) AS "backfillProofs",
+      (SELECT COUNT(*)
+        FROM notification_delivery_events delivery
+        INNER JOIN notifications notification ON notification.id = delivery.notification_id
+        WHERE notification.connector_instance_id = $1
+          AND notification.connector_type IN ('finance-manager', 'monarch-money', 'finance')
+          AND delivery.status IN ('pending', 'sending')) AS "activeDeliveryWork",
+      (SELECT COUNT(*)
+        FROM notification_actions action
+        INNER JOIN notifications notification ON notification.id = action.notification_id
+        WHERE notification.connector_instance_id = $1
+          AND notification.connector_type IN ('finance-manager', 'monarch-money', 'finance')
+          AND action.claimed_at IS NOT NULL
+          AND action.completed_at IS NULL) AS "activeActionWork"
+  `, [connectorId]);
+  if (!row) throw new Error('Clean bootstrap inventory query returned no row');
+  return {
+    manualAttributionDecisions: Number(row.manualAttributionDecisions),
+    automatedAttributionExceptions: Number(row.automatedAttributionExceptions),
+    financeNotifications: Number(row.financeNotifications),
+    financeTasks: Number(row.financeTasks),
+    accountProjections: Number(row.accountProjections),
+    transactionProjections: Number(row.transactionProjections),
+    historyProjections: Number(row.historyProjections),
+    backfillPlans: Number(row.backfillPlans),
+    backfillProofs: Number(row.backfillProofs),
+    activeDeliveryWork: Number(row.activeDeliveryWork),
+    activeActionWork: Number(row.activeActionWork),
+  };
+}
+
+async function cleanBootstrapScopeIdentities(
+  client: Client,
+  connectorId: string,
+): Promise<string[]> {
+  const rows = await query<{ identity: string }>(client, `
+    SELECT identity FROM (
+      SELECT 'notification:' || id || ':' || state || ':' || source_state AS identity
+      FROM notifications
+      WHERE connector_instance_id = $1
+        AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+      UNION ALL
+      SELECT 'notification-action:' || action.id || ':' || action.execution_state
+        || ':' || COALESCE(action.claimed_at, '') || ':' || COALESCE(action.completed_at, '')
+      FROM notification_actions action
+      INNER JOIN notifications notification ON notification.id = action.notification_id
+      WHERE notification.connector_instance_id = $1
+        AND notification.connector_type IN ('finance-manager', 'monarch-money', 'finance')
+      UNION ALL
+      SELECT 'notification-delivery:' || delivery.id || ':' || delivery.status
+      FROM notification_delivery_events delivery
+      INNER JOIN notifications notification ON notification.id = delivery.notification_id
+      WHERE notification.connector_instance_id = $1
+        AND notification.connector_type IN ('finance-manager', 'monarch-money', 'finance')
+      UNION ALL
+      SELECT 'task:' || id || ':' || status || ':' || local_disposition || ':' || updated_at
+      FROM tasks
+      WHERE connector_instance_id = $1
+        AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+      UNION ALL
+      SELECT 'transaction:' || id || ':' || source_fingerprint || ':'
+        || COALESCE(attribution_updated_at, '') || ':' || COALESCE(manual_decision_action, '')
+        || ':' || COALESCE(manual_decided_at, '')
+      FROM finance_transactions WHERE connector_instance_id = $1
+      UNION ALL
+      SELECT 'account:' || id || ':' || last_seen_at
+      FROM finance_accounts WHERE connector_id = $1
+      UNION ALL
+      SELECT 'attribution-exception:' || id || ':' || status || ':' || updated_at
+      FROM finance_attribution_exceptions WHERE connector_id = $1
+      UNION ALL
+      SELECT 'attribution-audit:' || id FROM finance_attribution_audit
+      WHERE connector_id = $1
+      UNION ALL
+      SELECT 'attribution-subject:' || id || ':' || last_seen_at
+      FROM finance_attribution_subjects WHERE connector_id = $1
+      UNION ALL
+      SELECT 'attention-receipt:' || delivery_key || ':' || version
+      FROM finance_attention_delivery_receipts WHERE connector_id = $1
+      UNION ALL
+      SELECT 'attention-repair:' || id FROM finance_attention_repair_audit
+      WHERE connector_id = $1
+      UNION ALL
+      SELECT 'connection-outage:' || episode_id || ':' || updated_at
+      FROM finance_connection_outages WHERE connector_id = $1
+      UNION ALL
+      SELECT 'occurrence-cache:' || source_generation || ':' || source_sequence || ':' || updated_at
+      FROM finance_insight_occurrence_cache_state WHERE connector_id = $1
+      UNION ALL
+      SELECT 'occurrence:' || occurrence_id || ':' || revision_digest || ':' || source_updated_at
+      FROM finance_insight_occurrences WHERE connector_id = $1
+      UNION ALL
+      SELECT 'cutover-audit:' || id FROM finance_insight_cutover_audit
+      WHERE connector_id = $1
+      UNION ALL
+      SELECT 'cutover:' || source_generation || ':' || source_sequence || ':' || updated_at
+      FROM finance_insight_cutovers WHERE connector_id = $1
+      UNION ALL
+      SELECT 'publication:' || id || ':' || manifest_digest
+      FROM finance_insight_publications WHERE connector_id = $1
+      UNION ALL
+      SELECT 'publication-fact:' || fact.publication_id || ':' || fact.kind || ':' || fact.source_ref
+      FROM finance_insight_publication_facts fact
+      INNER JOIN finance_insight_publications publication ON publication.id = fact.publication_id
+      WHERE publication.connector_id = $1
+      UNION ALL
+      SELECT 'publication-delivery:' || publication_id || ':' || stage || ':' || updated_at
+      FROM finance_insight_publication_delivery WHERE connector_id = $1
+      UNION ALL
+      SELECT 'publication-state:' || COALESCE(latest_publication_id, '') || ':' || updated_at
+      FROM finance_insight_publication_state WHERE connector_id = $1
+      UNION ALL
+      SELECT 'projection-fact:' || generation_id || ':' || source_ref
+      FROM finance_insight_transaction_projection_facts WHERE connector_id = $1
+      UNION ALL
+      SELECT 'projection-window:' || generation_id || ':' || window_index || ':' || content_digest
+      FROM finance_insight_transaction_projection_windows WHERE connector_id = $1
+      UNION ALL
+      SELECT 'projection-state:' || COALESCE(successful_generation_id, '') || ':'
+        || COALESCE(content_digest, '') || ':' || COALESCE(windows_digest, '') || ':' || updated_at
+      FROM finance_insight_transaction_projection_state WHERE connector_id = $1
+      UNION ALL
+      SELECT 'backfill-proof:' || plan_id || ':' || window_ordinal || ':' || content_digest
+      FROM finance_insight_transaction_window_proofs WHERE connector_id = $1
+      UNION ALL
+      SELECT 'backfill-plan:' || id || ':' || status || ':' || updated_at
+      FROM finance_insight_transaction_backfill_plans WHERE connector_id = $1
+      UNION ALL
+      SELECT 'sync-state:' || updated_at FROM finance_sync_state
+      WHERE connector_id = $1
+      UNION ALL
+      SELECT 'dataset-state:' || dataset || ':' || updated_at FROM finance_dataset_sync_state
+      WHERE connector_id = $1 AND dataset = 'accounts'
+    ) scope
+    ORDER BY identity
+  `, [connectorId]);
+  return rows.map((row) => row.identity);
+}
+
+async function assertCleanBootstrapFence(
+  client: PoolClient,
+  connectorId: string,
+  leaseOwner: string,
+  now: string,
+): Promise<void> {
+  const [connector] = await query<{ type: string; enabled: boolean }>(client, `
+    SELECT type, enabled FROM connector_configs
+    WHERE id = $1 AND deleted_at IS NULL
+    FOR UPDATE
+  `, [connectorId]);
+  if (!connector) {
+    throw new FinanceOperatorPersistenceError('finance_connector_not_found', 404);
+  }
+  if (!FINANCE_PROVIDER_ALIASES.includes(
+    connector.type.trim().toLowerCase() as typeof FINANCE_PROVIDER_ALIASES[number],
+  )) {
+    throw new FinanceOperatorPersistenceError('invalid_finance_connector_type', 400);
+  }
+  if (connector.enabled) {
+    throw new FinanceOperatorPersistenceError('finance_insight_repair_connector_enabled');
+  }
+  const [quarantine] = await query<{ present: number }>(client, `
+    SELECT 1 AS present FROM connector_sync_controls
+    WHERE connector_id = $1 AND scheduler_state = 'quarantined'
+      AND released_at IS NULL
+  `, [connectorId]);
+  if (!quarantine) {
+    throw new FinanceOperatorPersistenceError('finance_insight_repair_quarantine_required');
+  }
+  const [activeJob] = await query<{ present: number }>(client, `
+    SELECT 1 AS present FROM sync_jobs
+    WHERE connector_id = $1 AND status IN ('queued', 'running')
+    LIMIT 1
+  `, [connectorId]);
+  if (activeJob) {
+    throw new FinanceOperatorPersistenceError('finance_insight_repair_active_work');
+  }
+  const [lease] = await query<{ present: number }>(client, `
+    SELECT 1 AS present FROM connector_operation_leases
+    WHERE connector_id = $1 AND operation_type = 'retention'
+      AND owner = $2 AND lease_expires_at > $3
+    FOR UPDATE
+  `, [connectorId, leaseOwner, now]);
+  if (!lease) {
+    throw new FinanceOperatorPersistenceError('finance_clean_bootstrap_lease_lost');
+  }
+}
+
+async function existingCleanBootstrapAudit(
+  client: PoolClient,
+  connectorId: string,
+  idempotencyKey: string,
+): Promise<CleanBootstrapAuditRow | undefined> {
+  const [row] = await query<CleanBootstrapAuditRow>(client, `
+    SELECT mode, dry_run_id AS "dryRunId", scope_digest AS "scopeDigest",
+           confirmation_token AS "confirmationToken", inventory, result
+    FROM finance_clean_bootstrap_audit
+    WHERE connector_id = $1 AND idempotency_key = $2
+    FOR UPDATE
+  `, [connectorId, idempotencyKey]);
+  return row;
 }
 
 interface CutoverAuditRow {
@@ -461,6 +732,339 @@ export function createPostgresFinanceOperatorPersistence(
   const idFactory = options.idFactory ?? randomUUID;
 
   return {
+    async inventoryCleanBootstrap(command): Promise<FinanceCleanBootstrapDryRunResult> {
+      return transaction(pool, async (client) => {
+        await client.query(
+          'SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`finance-clean-bootstrap:${command.connectorId}`],
+        );
+        const replay = await existingCleanBootstrapAudit(
+          client,
+          command.connectorId,
+          command.idempotencyKey,
+        );
+        if (replay) {
+          if (replay.mode !== 'dry-run') {
+            throw new FinanceOperatorPersistenceError(
+              'finance_clean_bootstrap_idempotency_conflict',
+            );
+          }
+          return {
+            mode: 'dry-run',
+            dryRunId: replay.dryRunId,
+            connectorId: command.connectorId,
+            inventory: replay.inventory as FinanceCleanBootstrapInventory,
+            scopeDigest: replay.scopeDigest,
+            confirmationToken: replay.confirmationToken,
+            replayed: true,
+          };
+        }
+        await assertCleanBootstrapFence(
+          client,
+          command.connectorId,
+          command.leaseOwner,
+          command.now,
+        );
+        const inventory = await cleanBootstrapInventory(client, command.connectorId);
+        const dryRunId = idFactory();
+        const scopeDigest = financeCleanBootstrapScopeDigest(
+          command.connectorId,
+          inventory,
+          await cleanBootstrapScopeIdentities(client, command.connectorId),
+        );
+        const confirmationToken = financeCleanBootstrapConfirmationToken(
+          command.connectorId,
+          dryRunId,
+          scopeDigest,
+        );
+        const result: FinanceCleanBootstrapDryRunResult = {
+          mode: 'dry-run',
+          dryRunId,
+          connectorId: command.connectorId,
+          inventory,
+          scopeDigest,
+          confirmationToken,
+          replayed: false,
+        };
+        await client.query(`
+          INSERT INTO finance_clean_bootstrap_audit (
+            id, connector_id, mode, actor_type, idempotency_key, dry_run_id,
+            scope_digest, confirmation_token, inventory, result, created_at, completed_at
+          ) VALUES ($1, $2, 'dry-run', $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $10)
+        `, [
+          idFactory(),
+          command.connectorId,
+          command.actorType,
+          command.idempotencyKey,
+          dryRunId,
+          scopeDigest,
+          confirmationToken,
+          JSON.stringify(inventory),
+          JSON.stringify(result),
+          command.now,
+        ]);
+        return result;
+      });
+    },
+
+    async applyCleanBootstrap(command): Promise<FinanceCleanBootstrapApplyResult> {
+      return transaction(pool, async (client) => {
+        await client.query(
+          'SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`finance-clean-bootstrap:${command.connectorId}`],
+        );
+        const replay = await existingCleanBootstrapAudit(
+          client,
+          command.connectorId,
+          command.idempotencyKey,
+        );
+        if (replay) {
+          if (
+            replay.mode !== 'apply'
+            || replay.dryRunId !== command.dryRunId
+            || replay.scopeDigest !== command.scopeDigest
+            || replay.confirmationToken !== command.confirmationToken
+          ) {
+            throw new FinanceOperatorPersistenceError(
+              'finance_clean_bootstrap_idempotency_conflict',
+            );
+          }
+          return {
+            ...(replay.result as FinanceCleanBootstrapApplyResult),
+            replayed: true,
+          };
+        }
+        await assertCleanBootstrapFence(
+          client,
+          command.connectorId,
+          command.leaseOwner,
+          command.now,
+        );
+        const [dryRun] = await query<{
+          scopeDigest: string;
+          confirmationToken: string;
+          inventory: unknown;
+        }>(client, `
+          SELECT scope_digest AS "scopeDigest",
+                 confirmation_token AS "confirmationToken", inventory
+          FROM finance_clean_bootstrap_audit
+          WHERE connector_id = $1 AND dry_run_id = $2 AND mode = 'dry-run'
+          FOR UPDATE
+        `, [command.connectorId, command.dryRunId]);
+        if (!dryRun) {
+          throw new FinanceOperatorPersistenceError(
+            'finance_clean_bootstrap_dry_run_not_found',
+            404,
+          );
+        }
+        if (
+          dryRun.scopeDigest !== command.scopeDigest
+          || dryRun.confirmationToken !== command.confirmationToken
+        ) {
+          throw new FinanceOperatorPersistenceError(
+            'finance_clean_bootstrap_confirmation_mismatch',
+          );
+        }
+        const inventory = await cleanBootstrapInventory(client, command.connectorId);
+        const currentDigest = financeCleanBootstrapScopeDigest(
+          command.connectorId,
+          inventory,
+          await cleanBootstrapScopeIdentities(client, command.connectorId),
+        );
+        if (currentDigest !== command.scopeDigest) {
+          throw new FinanceOperatorPersistenceError(
+            'finance_clean_bootstrap_scope_drift',
+          );
+        }
+        if (inventory.manualAttributionDecisions > 0) {
+          throw new FinanceOperatorPersistenceError(
+            'finance_clean_bootstrap_manual_decisions_present',
+          );
+        }
+        if (inventory.activeDeliveryWork > 0 || inventory.activeActionWork > 0) {
+          throw new FinanceOperatorPersistenceError(
+            'finance_clean_bootstrap_in_flight_work',
+          );
+        }
+
+        await client.query(`
+          UPDATE notifications
+          SET source_state = 'resolved',
+              source_resolved_at = COALESCE(source_resolved_at, $1),
+              last_source_synced_at = $1,
+              state = CASE
+                WHEN disposition = 'dismissed' THEN 'dismissed'
+                WHEN disposition = 'handled' THEN 'archived'
+                ELSE 'resolved'
+              END,
+              is_actionable = false,
+              primary_action_id = NULL,
+              ai_suggested_action_id = NULL,
+              auto_resolve_reason = 'finance_clean_bootstrap'
+          WHERE connector_instance_id = $2
+            AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+        `, [command.now, command.connectorId]);
+        await client.query(`
+          DELETE FROM notification_actions
+          WHERE notification_id IN (
+            SELECT id FROM notifications
+            WHERE connector_instance_id = $1
+              AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+          )
+        `, [command.connectorId]);
+        await client.query(`
+          UPDATE tasks
+          SET status = CASE
+                WHEN status IN ('done', 'cancelled') THEN status
+                ELSE 'cancelled'
+              END,
+              local_disposition = CASE
+                WHEN local_disposition = 'dismissed' THEN 'dismissed'
+                ELSE 'handled'
+              END,
+              status_reason = CASE
+                WHEN status IN ('done', 'cancelled') THEN status_reason
+                ELSE 'not_planned'
+              END,
+              updated_at = $1
+          WHERE connector_instance_id = $2
+            AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+        `, [command.now, command.connectorId]);
+
+        await client.query(
+          'DELETE FROM finance_attribution_audit WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_attribution_exceptions WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_attribution_subjects WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_attention_delivery_receipts WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_attention_repair_audit WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_connection_outages WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_occurrence_cache_state WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_occurrences WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_cutover_audit WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_cutovers WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(`
+          DELETE FROM finance_insight_publication_facts
+          WHERE publication_id IN (
+            SELECT id FROM finance_insight_publications WHERE connector_id = $1
+          )
+        `, [command.connectorId]);
+        await client.query(
+          'DELETE FROM finance_insight_publication_delivery WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_publications WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_publication_state WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_transaction_projection_facts WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_transaction_projection_windows WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_transaction_projection_state WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_transaction_window_proofs WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_insight_transaction_backfill_plans WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_transactions WHERE connector_instance_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_accounts WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(
+          'DELETE FROM finance_sync_state WHERE connector_id = $1',
+          [command.connectorId],
+        );
+        await client.query(`
+          DELETE FROM finance_dataset_sync_state
+          WHERE connector_id = $1 AND dataset = 'accounts'
+        `, [command.connectorId]);
+
+        const retired = {
+          automatedAttributionExceptions: inventory.automatedAttributionExceptions,
+          financeNotifications: inventory.financeNotifications,
+          financeTasks: inventory.financeTasks,
+          accountProjections: inventory.accountProjections,
+          transactionProjections: inventory.transactionProjections,
+          historyProjections: inventory.historyProjections,
+          backfillPlans: inventory.backfillPlans,
+          backfillProofs: inventory.backfillProofs,
+        };
+        const result: FinanceCleanBootstrapApplyResult = {
+          mode: 'apply',
+          dryRunId: command.dryRunId,
+          connectorId: command.connectorId,
+          scopeDigest: command.scopeDigest,
+          retired,
+          replayed: false,
+        };
+        await client.query(`
+          INSERT INTO finance_clean_bootstrap_audit (
+            id, connector_id, mode, actor_type, idempotency_key, dry_run_id,
+            scope_digest, confirmation_token, inventory, result, created_at, completed_at
+          ) VALUES ($1, $2, 'apply', $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $10)
+        `, [
+          idFactory(),
+          command.connectorId,
+          command.actorType,
+          command.idempotencyKey,
+          command.dryRunId,
+          command.scopeDigest,
+          command.confirmationToken,
+          JSON.stringify(inventory),
+          JSON.stringify(result),
+          command.now,
+        ]);
+        return result;
+      });
+    },
+
     async isLegacyAnomalyProductionEnabled(): Promise<boolean> {
       const [cutover] = await query<{ present: number }>(pool, `
         SELECT 1 AS present

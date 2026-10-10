@@ -23,6 +23,11 @@ import type {
 } from './finance-insights';
 import {
   FinanceOperatorPersistenceError,
+  financeCleanBootstrapConfirmationToken,
+  financeCleanBootstrapScopeDigest,
+  type FinanceCleanBootstrapApplyResult,
+  type FinanceCleanBootstrapDryRunResult,
+  type FinanceCleanBootstrapInventory,
   type FinanceOperatorCutoverEnableOutcome,
   type FinanceOperatorHealthSnapshot,
   type FinanceOperatorPersistence,
@@ -58,6 +63,268 @@ interface SqliteFinanceOperatorOptions {
 }
 
 const financeTypePlaceholders = FINANCE_PROVIDER_ALIASES.map(() => '?').join(', ');
+
+interface CleanBootstrapAuditRow {
+  mode: 'dry-run' | 'apply';
+  dryRunId: string;
+  scopeDigest: string;
+  confirmationToken: string;
+  inventory: string;
+  result: string;
+}
+
+function count(
+  handles: SqliteFinanceOperatorHandles,
+  statement: string,
+  ...params: unknown[]
+): number {
+  const row = handles.sqlite.prepare(statement).get(...params) as { count: number };
+  return Number(row.count);
+}
+
+function cleanBootstrapInventory(
+  handles: SqliteFinanceOperatorHandles,
+  connectorId: string,
+): FinanceCleanBootstrapInventory {
+  const scopedNotifications = `
+    connector_instance_id = ?
+    AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+  `;
+  return {
+    manualAttributionDecisions: count(handles, `
+      SELECT COUNT(*) AS count FROM finance_transactions
+      WHERE connector_instance_id = ?
+        AND (
+          manual_decision_action IS NOT NULL
+          OR manual_decided_at IS NOT NULL
+          OR kid_assignment_method = 'manual'
+          OR attribution_decision_source = 'manual'
+        )
+    `, connectorId),
+    automatedAttributionExceptions: count(handles, `
+      SELECT COUNT(*) AS count FROM finance_attribution_exceptions
+      WHERE connector_id = ?
+    `, connectorId),
+    financeNotifications: count(handles, `
+      SELECT COUNT(*) AS count FROM notifications WHERE ${scopedNotifications}
+    `, connectorId),
+    financeTasks: count(handles, `
+      SELECT COUNT(*) AS count FROM tasks
+      WHERE connector_instance_id = ?
+        AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+    `, connectorId),
+    accountProjections: count(handles, `
+      SELECT COUNT(*) AS count FROM finance_accounts WHERE connector_id = ?
+    `, connectorId),
+    transactionProjections: count(handles, `
+      SELECT COUNT(*) AS count FROM finance_transactions
+      WHERE connector_instance_id = ?
+    `, connectorId),
+    historyProjections: count(handles, `
+      SELECT
+        (SELECT COUNT(*) FROM finance_insight_transaction_projection_facts
+          WHERE connector_id = ?)
+        + (SELECT COUNT(*) FROM finance_insight_transaction_projection_windows
+          WHERE connector_id = ?)
+        + (SELECT COUNT(*) FROM finance_insight_publication_facts
+          WHERE publication_id IN (
+            SELECT id FROM finance_insight_publications WHERE connector_id = ?
+          ))
+        + (SELECT COUNT(*) FROM finance_insight_occurrences
+          WHERE connector_id = ?) AS count
+    `, connectorId, connectorId, connectorId, connectorId),
+    backfillPlans: count(handles, `
+      SELECT COUNT(*) AS count FROM finance_insight_transaction_backfill_plans
+      WHERE connector_id = ?
+    `, connectorId),
+    backfillProofs: count(handles, `
+      SELECT COUNT(*) AS count FROM finance_insight_transaction_window_proofs
+      WHERE connector_id = ?
+    `, connectorId),
+    activeDeliveryWork: count(handles, `
+      SELECT COUNT(*) AS count
+      FROM notification_delivery_events delivery
+      INNER JOIN notifications notification ON notification.id = delivery.notification_id
+      WHERE ${scopedNotifications.replaceAll('connector_', 'notification.connector_')}
+        AND delivery.status IN ('pending', 'sending')
+    `, connectorId),
+    activeActionWork: count(handles, `
+      SELECT COUNT(*) AS count
+      FROM notification_actions action
+      INNER JOIN notifications notification ON notification.id = action.notification_id
+      WHERE ${scopedNotifications.replaceAll('connector_', 'notification.connector_')}
+        AND action.claimed_at IS NOT NULL
+        AND action.completed_at IS NULL
+    `, connectorId),
+  };
+}
+
+function cleanBootstrapScopeIdentities(
+  handles: SqliteFinanceOperatorHandles,
+  connectorId: string,
+): string[] {
+  const rows = handles.sqlite.prepare(`
+    SELECT identity FROM (
+      SELECT 'notification:' || id || ':' || state || ':' || source_state AS identity
+      FROM notifications
+      WHERE connector_instance_id = @connectorId
+        AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+      UNION ALL
+      SELECT 'notification-action:' || action.id || ':' || action.execution_state
+        || ':' || COALESCE(action.claimed_at, '') || ':' || COALESCE(action.completed_at, '')
+      FROM notification_actions action
+      INNER JOIN notifications notification ON notification.id = action.notification_id
+      WHERE notification.connector_instance_id = @connectorId
+        AND notification.connector_type IN ('finance-manager', 'monarch-money', 'finance')
+      UNION ALL
+      SELECT 'notification-delivery:' || delivery.id || ':' || delivery.status
+      FROM notification_delivery_events delivery
+      INNER JOIN notifications notification ON notification.id = delivery.notification_id
+      WHERE notification.connector_instance_id = @connectorId
+        AND notification.connector_type IN ('finance-manager', 'monarch-money', 'finance')
+      UNION ALL
+      SELECT 'task:' || id || ':' || status || ':' || local_disposition || ':' || updated_at
+      FROM tasks
+      WHERE connector_instance_id = @connectorId
+        AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+      UNION ALL
+      SELECT 'transaction:' || id || ':' || source_fingerprint || ':'
+        || COALESCE(attribution_updated_at, '') || ':' || COALESCE(manual_decision_action, '')
+        || ':' || COALESCE(manual_decided_at, '')
+      FROM finance_transactions WHERE connector_instance_id = @connectorId
+      UNION ALL
+      SELECT 'account:' || id || ':' || last_seen_at
+      FROM finance_accounts WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'attribution-exception:' || id || ':' || status || ':' || updated_at
+      FROM finance_attribution_exceptions WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'attribution-audit:' || id FROM finance_attribution_audit
+      WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'attribution-subject:' || id || ':' || last_seen_at
+      FROM finance_attribution_subjects WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'attention-receipt:' || delivery_key || ':' || version
+      FROM finance_attention_delivery_receipts WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'attention-repair:' || id FROM finance_attention_repair_audit
+      WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'connection-outage:' || episode_id || ':' || updated_at
+      FROM finance_connection_outages WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'occurrence-cache:' || source_generation || ':' || source_sequence || ':' || updated_at
+      FROM finance_insight_occurrence_cache_state WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'occurrence:' || occurrence_id || ':' || revision_digest || ':' || source_updated_at
+      FROM finance_insight_occurrences WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'cutover-audit:' || id FROM finance_insight_cutover_audit
+      WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'cutover:' || source_generation || ':' || source_sequence || ':' || updated_at
+      FROM finance_insight_cutovers WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'publication:' || id || ':' || manifest_digest
+      FROM finance_insight_publications WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'publication-fact:' || fact.publication_id || ':' || fact.kind || ':' || fact.source_ref
+      FROM finance_insight_publication_facts fact
+      INNER JOIN finance_insight_publications publication ON publication.id = fact.publication_id
+      WHERE publication.connector_id = @connectorId
+      UNION ALL
+      SELECT 'publication-delivery:' || publication_id || ':' || stage || ':' || updated_at
+      FROM finance_insight_publication_delivery WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'publication-state:' || COALESCE(latest_publication_id, '') || ':' || updated_at
+      FROM finance_insight_publication_state WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'projection-fact:' || generation_id || ':' || source_ref
+      FROM finance_insight_transaction_projection_facts WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'projection-window:' || generation_id || ':' || window_index || ':' || content_digest
+      FROM finance_insight_transaction_projection_windows WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'projection-state:' || COALESCE(successful_generation_id, '') || ':'
+        || COALESCE(content_digest, '') || ':' || COALESCE(windows_digest, '') || ':' || updated_at
+      FROM finance_insight_transaction_projection_state WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'backfill-proof:' || plan_id || ':' || window_ordinal || ':' || content_digest
+      FROM finance_insight_transaction_window_proofs WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'backfill-plan:' || id || ':' || status || ':' || updated_at
+      FROM finance_insight_transaction_backfill_plans WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'sync-state:' || updated_at FROM finance_sync_state
+      WHERE connector_id = @connectorId
+      UNION ALL
+      SELECT 'dataset-state:' || dataset || ':' || updated_at FROM finance_dataset_sync_state
+      WHERE connector_id = @connectorId AND dataset = 'accounts'
+    )
+    ORDER BY identity
+  `).all({ connectorId }) as Array<{ identity: string }>;
+  return rows.map((row) => row.identity);
+}
+
+function assertCleanBootstrapFence(
+  handles: SqliteFinanceOperatorHandles,
+  connectorId: string,
+  leaseOwner: string,
+  now: string,
+): void {
+  const connector = handles.sqlite.prepare(`
+    SELECT type, enabled FROM connector_configs
+    WHERE id = ? AND deleted_at IS NULL
+  `).get(connectorId) as { type: string; enabled: number } | undefined;
+  if (!connector) {
+    throw new FinanceOperatorPersistenceError('finance_connector_not_found', 404);
+  }
+  if (!FINANCE_PROVIDER_ALIASES.includes(
+    connector.type.trim().toLowerCase() as typeof FINANCE_PROVIDER_ALIASES[number],
+  )) {
+    throw new FinanceOperatorPersistenceError('invalid_finance_connector_type', 400);
+  }
+  if (connector.enabled === 1) {
+    throw new FinanceOperatorPersistenceError('finance_insight_repair_connector_enabled');
+  }
+  const quarantine = handles.sqlite.prepare(`
+    SELECT 1 FROM connector_sync_controls
+    WHERE connector_id = ? AND scheduler_state = 'quarantined'
+      AND released_at IS NULL
+  `).get(connectorId);
+  if (!quarantine) {
+    throw new FinanceOperatorPersistenceError('finance_insight_repair_quarantine_required');
+  }
+  const activeJobs = count(handles, `
+    SELECT COUNT(*) AS count FROM sync_jobs
+    WHERE connector_id = ? AND status IN ('queued', 'running')
+  `, connectorId);
+  if (activeJobs > 0) {
+    throw new FinanceOperatorPersistenceError('finance_insight_repair_active_work');
+  }
+  const lease = handles.sqlite.prepare(`
+    SELECT 1 FROM connector_operation_leases
+    WHERE connector_id = ? AND operation_type = 'retention'
+      AND owner = ? AND lease_expires_at > ?
+  `).get(connectorId, leaseOwner, now);
+  if (!lease) {
+    throw new FinanceOperatorPersistenceError('finance_clean_bootstrap_lease_lost');
+  }
+}
+
+function existingCleanBootstrapAudit(
+  handles: SqliteFinanceOperatorHandles,
+  connectorId: string,
+  idempotencyKey: string,
+): CleanBootstrapAuditRow | undefined {
+  return handles.sqlite.prepare(`
+    SELECT mode, dry_run_id AS dryRunId, scope_digest AS scopeDigest,
+           confirmation_token AS confirmationToken, inventory, result
+    FROM finance_clean_bootstrap_audit
+    WHERE connector_id = ? AND idempotency_key = ?
+  `).get(connectorId, idempotencyKey) as CleanBootstrapAuditRow | undefined;
+}
 
 interface CutoverAuditRow {
   operation: 'enable' | 'rollback';
@@ -260,6 +527,275 @@ export function createSqliteFinanceOperatorPersistence(
   const idFactory = options.idFactory ?? randomUUID;
 
   return {
+    async inventoryCleanBootstrap(command): Promise<FinanceCleanBootstrapDryRunResult> {
+      return handles.db.transaction(() => {
+        const replay = existingCleanBootstrapAudit(
+          handles,
+          command.connectorId,
+          command.idempotencyKey,
+        );
+        if (replay) {
+          if (replay.mode !== 'dry-run') {
+            throw new FinanceOperatorPersistenceError(
+              'finance_clean_bootstrap_idempotency_conflict',
+            );
+          }
+          return {
+            mode: 'dry-run',
+            dryRunId: replay.dryRunId,
+            connectorId: command.connectorId,
+            inventory: JSON.parse(replay.inventory) as FinanceCleanBootstrapInventory,
+            scopeDigest: replay.scopeDigest,
+            confirmationToken: replay.confirmationToken,
+            replayed: true,
+          };
+        }
+        assertCleanBootstrapFence(
+          handles,
+          command.connectorId,
+          command.leaseOwner,
+          command.now,
+        );
+        const inventory = cleanBootstrapInventory(handles, command.connectorId);
+        const dryRunId = idFactory();
+        const scopeDigest = financeCleanBootstrapScopeDigest(
+          command.connectorId,
+          inventory,
+          cleanBootstrapScopeIdentities(handles, command.connectorId),
+        );
+        const confirmationToken = financeCleanBootstrapConfirmationToken(
+          command.connectorId,
+          dryRunId,
+          scopeDigest,
+        );
+        const result: FinanceCleanBootstrapDryRunResult = {
+          mode: 'dry-run',
+          dryRunId,
+          connectorId: command.connectorId,
+          inventory,
+          scopeDigest,
+          confirmationToken,
+          replayed: false,
+        };
+        handles.sqlite.prepare(`
+          INSERT INTO finance_clean_bootstrap_audit (
+            id, connector_id, mode, actor_type, idempotency_key, dry_run_id,
+            scope_digest, confirmation_token, inventory, result, created_at, completed_at
+          ) VALUES (?, ?, 'dry-run', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          idFactory(),
+          command.connectorId,
+          command.actorType,
+          command.idempotencyKey,
+          dryRunId,
+          scopeDigest,
+          confirmationToken,
+          JSON.stringify(inventory),
+          JSON.stringify(result),
+          command.now,
+          command.now,
+        );
+        return result;
+      }, { behavior: 'immediate' });
+    },
+
+    async applyCleanBootstrap(command): Promise<FinanceCleanBootstrapApplyResult> {
+      return handles.db.transaction(() => {
+        const replay = existingCleanBootstrapAudit(
+          handles,
+          command.connectorId,
+          command.idempotencyKey,
+        );
+        if (replay) {
+          if (
+            replay.mode !== 'apply'
+            || replay.dryRunId !== command.dryRunId
+            || replay.scopeDigest !== command.scopeDigest
+            || replay.confirmationToken !== command.confirmationToken
+          ) {
+            throw new FinanceOperatorPersistenceError(
+              'finance_clean_bootstrap_idempotency_conflict',
+            );
+          }
+          return {
+            ...(JSON.parse(replay.result) as FinanceCleanBootstrapApplyResult),
+            replayed: true,
+          };
+        }
+        assertCleanBootstrapFence(
+          handles,
+          command.connectorId,
+          command.leaseOwner,
+          command.now,
+        );
+        const dryRun = handles.sqlite.prepare(`
+          SELECT scope_digest AS scopeDigest,
+                 confirmation_token AS confirmationToken, inventory
+          FROM finance_clean_bootstrap_audit
+          WHERE connector_id = ? AND dry_run_id = ? AND mode = 'dry-run'
+        `).get(command.connectorId, command.dryRunId) as {
+          scopeDigest: string;
+          confirmationToken: string;
+          inventory: string;
+        } | undefined;
+        if (!dryRun) {
+          throw new FinanceOperatorPersistenceError(
+            'finance_clean_bootstrap_dry_run_not_found',
+            404,
+          );
+        }
+        if (
+          dryRun.scopeDigest !== command.scopeDigest
+          || dryRun.confirmationToken !== command.confirmationToken
+        ) {
+          throw new FinanceOperatorPersistenceError(
+            'finance_clean_bootstrap_confirmation_mismatch',
+          );
+        }
+        const inventory = cleanBootstrapInventory(handles, command.connectorId);
+        const currentDigest = financeCleanBootstrapScopeDigest(
+          command.connectorId,
+          inventory,
+          cleanBootstrapScopeIdentities(handles, command.connectorId),
+        );
+        if (currentDigest !== command.scopeDigest) {
+          throw new FinanceOperatorPersistenceError(
+            'finance_clean_bootstrap_scope_drift',
+          );
+        }
+        if (inventory.manualAttributionDecisions > 0) {
+          throw new FinanceOperatorPersistenceError(
+            'finance_clean_bootstrap_manual_decisions_present',
+          );
+        }
+        if (inventory.activeDeliveryWork > 0 || inventory.activeActionWork > 0) {
+          throw new FinanceOperatorPersistenceError(
+            'finance_clean_bootstrap_in_flight_work',
+          );
+        }
+
+        handles.sqlite.prepare(`
+          UPDATE notifications
+          SET source_state = 'resolved',
+              source_resolved_at = COALESCE(source_resolved_at, ?),
+              last_source_synced_at = ?,
+              state = CASE
+                WHEN disposition = 'dismissed' THEN 'dismissed'
+                WHEN disposition = 'handled' THEN 'archived'
+                ELSE 'resolved'
+              END,
+              is_actionable = 0,
+              primary_action_id = NULL,
+              ai_suggested_action_id = NULL,
+              auto_resolve_reason = 'finance_clean_bootstrap'
+          WHERE connector_instance_id = ?
+            AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+        `).run(command.now, command.now, command.connectorId);
+        handles.sqlite.prepare(`
+          DELETE FROM notification_actions
+          WHERE notification_id IN (
+            SELECT id FROM notifications
+            WHERE connector_instance_id = ?
+              AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+          )
+        `).run(command.connectorId);
+        handles.sqlite.prepare(`
+          UPDATE tasks
+          SET status = CASE
+                WHEN status IN ('done', 'cancelled') THEN status
+                ELSE 'cancelled'
+              END,
+              local_disposition = CASE
+                WHEN local_disposition = 'dismissed' THEN 'dismissed'
+                ELSE 'handled'
+              END,
+              status_reason = CASE
+                WHEN status IN ('done', 'cancelled') THEN status_reason
+                ELSE 'not_planned'
+              END,
+              updated_at = ?
+          WHERE connector_instance_id = ?
+            AND connector_type IN ('finance-manager', 'monarch-money', 'finance')
+        `).run(command.now, command.connectorId);
+
+        const deleteByConnector = (table: string, column = 'connector_id') => {
+          handles.sqlite.prepare(`DELETE FROM ${table} WHERE ${column} = ?`)
+            .run(command.connectorId);
+        };
+        deleteByConnector('finance_attribution_audit');
+        deleteByConnector('finance_attribution_exceptions');
+        deleteByConnector('finance_attribution_subjects');
+        deleteByConnector('finance_attention_delivery_receipts');
+        deleteByConnector('finance_attention_repair_audit');
+        deleteByConnector('finance_connection_outages');
+        deleteByConnector('finance_insight_occurrence_cache_state');
+        deleteByConnector('finance_insight_occurrences');
+        deleteByConnector('finance_insight_cutover_audit');
+        deleteByConnector('finance_insight_cutovers');
+        handles.sqlite.prepare(`
+          DELETE FROM finance_insight_publication_facts
+          WHERE publication_id IN (
+            SELECT id FROM finance_insight_publications WHERE connector_id = ?
+          )
+        `).run(command.connectorId);
+        handles.sqlite.prepare(`
+          DELETE FROM finance_insight_publication_delivery WHERE connector_id = ?
+        `).run(command.connectorId);
+        deleteByConnector('finance_insight_publications');
+        deleteByConnector('finance_insight_publication_state');
+        deleteByConnector('finance_insight_transaction_projection_facts');
+        deleteByConnector('finance_insight_transaction_projection_windows');
+        deleteByConnector('finance_insight_transaction_projection_state');
+        deleteByConnector('finance_insight_transaction_window_proofs');
+        deleteByConnector('finance_insight_transaction_backfill_plans');
+        deleteByConnector('finance_transactions', 'connector_instance_id');
+        deleteByConnector('finance_accounts');
+        deleteByConnector('finance_sync_state');
+        handles.sqlite.prepare(`
+          DELETE FROM finance_dataset_sync_state
+          WHERE connector_id = ? AND dataset = 'accounts'
+        `).run(command.connectorId);
+
+        const retired = {
+          automatedAttributionExceptions: inventory.automatedAttributionExceptions,
+          financeNotifications: inventory.financeNotifications,
+          financeTasks: inventory.financeTasks,
+          accountProjections: inventory.accountProjections,
+          transactionProjections: inventory.transactionProjections,
+          historyProjections: inventory.historyProjections,
+          backfillPlans: inventory.backfillPlans,
+          backfillProofs: inventory.backfillProofs,
+        };
+        const result: FinanceCleanBootstrapApplyResult = {
+          mode: 'apply',
+          dryRunId: command.dryRunId,
+          connectorId: command.connectorId,
+          scopeDigest: command.scopeDigest,
+          retired,
+          replayed: false,
+        };
+        handles.sqlite.prepare(`
+          INSERT INTO finance_clean_bootstrap_audit (
+            id, connector_id, mode, actor_type, idempotency_key, dry_run_id,
+            scope_digest, confirmation_token, inventory, result, created_at, completed_at
+          ) VALUES (?, ?, 'apply', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          idFactory(),
+          command.connectorId,
+          command.actorType,
+          command.idempotencyKey,
+          command.dryRunId,
+          command.scopeDigest,
+          command.confirmationToken,
+          JSON.stringify(inventory),
+          JSON.stringify(result),
+          command.now,
+          command.now,
+        );
+        return result;
+      }, { behavior: 'immediate' });
+    },
+
     async isLegacyAnomalyProductionEnabled(): Promise<boolean> {
       const cutover = handles.sqlite.prepare(`
         SELECT 1

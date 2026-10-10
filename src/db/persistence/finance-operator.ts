@@ -20,8 +20,100 @@ import type {
   FinanceInsightNotificationIngestItem,
   FinanceInsightNotificationReconcileItem,
 } from './finance-insights';
+import { createHash } from 'node:crypto';
 
 export type FinanceOperatorActorType = 'parent-admin' | 'service';
+
+// ─── Clean-current-state bootstrap ─────────────────────────────────────────
+
+export interface FinanceCleanBootstrapInventory {
+  manualAttributionDecisions: number;
+  automatedAttributionExceptions: number;
+  financeNotifications: number;
+  financeTasks: number;
+  accountProjections: number;
+  transactionProjections: number;
+  historyProjections: number;
+  backfillPlans: number;
+  backfillProofs: number;
+  activeDeliveryWork: number;
+  activeActionWork: number;
+}
+
+export interface FinanceCleanBootstrapDryRunCommand {
+  connectorId: string;
+  actorType: FinanceOperatorActorType;
+  idempotencyKey: string;
+  leaseOwner: string;
+  now: string;
+}
+
+export interface FinanceCleanBootstrapDryRunResult {
+  mode: 'dry-run';
+  dryRunId: string;
+  connectorId: string;
+  inventory: FinanceCleanBootstrapInventory;
+  scopeDigest: string;
+  confirmationToken: string;
+  replayed: boolean;
+}
+
+export interface FinanceCleanBootstrapApplyCommand {
+  connectorId: string;
+  actorType: FinanceOperatorActorType;
+  idempotencyKey: string;
+  leaseOwner: string;
+  dryRunId: string;
+  scopeDigest: string;
+  confirmationToken: string;
+  now: string;
+}
+
+export interface FinanceCleanBootstrapRetiredCounts {
+  automatedAttributionExceptions: number;
+  financeNotifications: number;
+  financeTasks: number;
+  accountProjections: number;
+  transactionProjections: number;
+  historyProjections: number;
+  backfillPlans: number;
+  backfillProofs: number;
+}
+
+export interface FinanceCleanBootstrapApplyResult {
+  mode: 'apply';
+  dryRunId: string;
+  connectorId: string;
+  scopeDigest: string;
+  retired: FinanceCleanBootstrapRetiredCounts;
+  replayed: boolean;
+}
+
+export function financeCleanBootstrapScopeDigest(
+  connectorId: string,
+  inventory: FinanceCleanBootstrapInventory,
+  scopeIdentities: readonly string[],
+): string {
+  return createHash('sha256').update(JSON.stringify({
+    version: 1,
+    connectorId,
+    inventory,
+    scopeIdentities: [...scopeIdentities].sort(),
+  })).digest('hex');
+}
+
+export function financeCleanBootstrapConfirmationToken(
+  connectorId: string,
+  dryRunId: string,
+  scopeDigest: string,
+): string {
+  return createHash('sha256').update([
+    'finance-clean-bootstrap-confirmation-v1',
+    connectorId,
+    dryRunId,
+    scopeDigest,
+  ].join('\n')).digest('hex');
+}
 
 // ─── Health snapshot ────────────────────────────────────────────────────────
 
@@ -247,6 +339,22 @@ export class FinanceOperatorPersistenceError extends Error {
 }
 
 export interface FinanceOperatorPersistence {
+  /**
+   * Privacy-safe connector-scoped inventory. The adapter serializes this read,
+   * persists its identity, and verifies the exclusive retention lease in the
+   * same transaction.
+   */
+  inventoryCleanBootstrap(
+    command: FinanceCleanBootstrapDryRunCommand,
+  ): Promise<FinanceCleanBootstrapDryRunResult>;
+  /**
+   * One transaction: replay check, lease and connector safety fence, exact
+   * dry-run identity confirmation, scope-drift check, lifecycle settlement,
+   * and derived-state retirement.
+   */
+  applyCleanBootstrap(
+    command: FinanceCleanBootstrapApplyCommand,
+  ): Promise<FinanceCleanBootstrapApplyResult>;
   /**
    * Global legacy-production gate. Once any connector has completed cutover,
    * enabling or adding another connector must not resurrect legacy anomalies.

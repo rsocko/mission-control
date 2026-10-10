@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   release: vi.fn(),
   rollback: vi.fn(),
   getCutoverReadiness: vi.fn(),
+  inventoryCleanBootstrap: vi.fn(),
+  applyCleanBootstrap: vi.fn(),
 }));
 
 vi.mock('@/lib/connectors/monarch-money/finance-request', () => ({
@@ -50,6 +52,12 @@ vi.mock('@/lib/finance-insights/cutover-operator', () => {
     rollbackFinanceInsightCutoverForOperator: vi.fn(),
   };
 });
+
+vi.mock('@/lib/connectors/monarch-money/clean-bootstrap', () => ({
+  inventoryFinanceCleanBootstrap: mocks.inventoryCleanBootstrap,
+  applyFinanceCleanBootstrap: mocks.applyCleanBootstrap,
+  cleanBootstrapErrorResponse: () => null,
+}));
 
 import { GET, POST } from '@/app/api/connectors/[id]/finance-operations/route';
 import { SyncOperatorError } from '@/lib/sync/operator-control';
@@ -173,6 +181,68 @@ describe('finance operator route async compatibility', () => {
       source: 'operator-canary',
       maxAttempts: 1,
       replayed: false,
+    });
+  });
+
+  it('passes only aggregate dry-run identity and exact apply confirmation', async () => {
+      mocks.inventoryCleanBootstrap.mockResolvedValue({
+        mode: 'dry-run',
+        dryRunId: '8c72cdf4-676e-4744-b7fc-d01fd49f08a3',
+        connectorId: 'finance-connector',
+        inventory: { manualAttributionDecisions: 0 },
+        scopeDigest: 'a'.repeat(64),
+        confirmationToken: 'b'.repeat(64),
+        replayed: false,
+      });
+      const inventoryResponse = await POST(
+        new NextRequest(
+          'http://localhost/api/connectors/finance-connector/finance-operations',
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'idempotency-key': 'route-bootstrap-dry-run-123',
+            },
+            body: JSON.stringify({ action: 'inventory-clean-bootstrap' }),
+          },
+        ),
+        context(),
+      );
+      expect(inventoryResponse.status).toBe(200);
+      expect(mocks.inventoryCleanBootstrap).toHaveBeenCalledWith({
+        connectorId: 'finance-connector',
+        actorType: 'service',
+        idempotencyKey: 'route-bootstrap-dry-run-123',
+      });
+
+      mocks.applyCleanBootstrap.mockResolvedValue({ mode: 'apply', replayed: false });
+      const applyResponse = await POST(
+        new NextRequest(
+          'http://localhost/api/connectors/finance-connector/finance-operations',
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'idempotency-key': 'route-bootstrap-apply-12345',
+            },
+            body: JSON.stringify({
+              action: 'apply-clean-bootstrap',
+              dryRunId: '8c72cdf4-676e-4744-b7fc-d01fd49f08a3',
+              scopeDigest: 'a'.repeat(64),
+              confirmationToken: 'b'.repeat(64),
+            }),
+          },
+        ),
+        context(),
+      );
+      expect(applyResponse.status).toBe(200);
+      expect(mocks.applyCleanBootstrap).toHaveBeenCalledWith({
+        connectorId: 'finance-connector',
+        actorType: 'service',
+        idempotencyKey: 'route-bootstrap-apply-12345',
+        dryRunId: '8c72cdf4-676e-4744-b7fc-d01fd49f08a3',
+        scopeDigest: 'a'.repeat(64),
+        confirmationToken: 'b'.repeat(64),
     });
   });
 });

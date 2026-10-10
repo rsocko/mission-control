@@ -27,6 +27,7 @@ export interface ProjectPhaseSummary {
   color: string | null;
   totalTasks: number;
   completedTasks: number;
+  resolvedTasks: number;
   inProgressTasks: number;
   percentComplete: number;
 }
@@ -50,6 +51,7 @@ export interface PortfolioSummary {
   atRiskProjects: number;
   totalTasks: number;
   completedTasks: number;
+  resolvedTasks: number;
   inProgressTasks: number;
   portfolioPercent: number;
   completedThisWeek: number;
@@ -129,13 +131,13 @@ function CategoryRings({
         <div>
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">By category</h2>
           <p className="mt-0.5 text-[9px] text-[var(--text-muted)]">
-            Outer ring: task completion · Inner ring: project health
+            Outer ring: task resolution · Inner ring: project health
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-[9px] text-[var(--text-muted)]">
           <span className="inline-flex items-center gap-1.5">
             <span className="h-1 w-3 rounded-full bg-[var(--accent-500)]" />
-            Task completion
+            Task resolution
           </span>
           <span className="inline-flex items-center gap-1.5">
             <span className="h-1.5 w-3 rounded-full bg-[linear-gradient(90deg,var(--success)_0_50%,var(--warning)_50%_75%,var(--danger)_75%)]" />
@@ -152,7 +154,7 @@ function CategoryRings({
             ? ((row.health.on_track + row.health.at_risk) / row.projectCount) * 100
             : 0;
           const selected = selectedCategory === row.category;
-          const ringLabel = `${row.category}: ${row.percentComplete}% of tasks complete; ${row.health.on_track} on track, ${row.health.at_risk} at risk, ${row.health.behind} behind`;
+          const ringLabel = `${row.category}: ${row.percentComplete}% of tasks resolved; ${row.health.on_track} on track, ${row.health.at_risk} at risk, ${row.health.behind} behind`;
 
           return (
             <button
@@ -259,7 +261,7 @@ function PhaseRail({ project }: { project: PortfolioProject }) {
         >
           <span className="block truncate text-[9px] font-semibold">{phase.name}</span>
           <span className="mt-0.5 block text-[9px] tabular-nums text-[var(--text-muted)]">
-            {phase.completedTasks}/{phase.totalTasks}
+            {phase.resolvedTasks}/{phase.totalTasks}
           </span>
           <span className="absolute inset-x-0 bottom-0 h-0.5 bg-[var(--surface-3)]">
             <span
@@ -286,7 +288,7 @@ function PhaseRail({ project }: { project: PortfolioProject }) {
 
 function ProjectRow({ project }: { project: PortfolioProject }) {
   const pulse = project.progress.pulse;
-  const secondary = pulse?.freshness.label ?? `${Math.max(0, project.progress.totalTasks - project.progress.completedTasks)} open tasks`;
+  const secondary = pulse?.freshness.label ?? `${Math.max(0, project.progress.totalTasks - (project.progress.resolvedTasks ?? project.progress.completedTasks))} open tasks`;
 
   return (
     <div className="grid gap-3 border-b border-[var(--border-subtle)] px-3 py-3 last:border-b-0 lg:grid-cols-[minmax(190px,1.15fr)_minmax(260px,1.6fr)_92px_82px] lg:items-center">
@@ -389,8 +391,11 @@ function ProjectMatrix({
         <div className="space-y-3">
           {visibleGroups.map((group) => {
             const totalTasks = group.projects.reduce((sum, project) => sum + project.progress.totalTasks, 0);
-            const completedTasks = group.projects.reduce((sum, project) => sum + project.progress.completedTasks, 0);
-            const completion = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+            const resolvedTasks = group.projects.reduce(
+              (sum, project) => sum + (project.progress.resolvedTasks ?? project.progress.completedTasks),
+              0,
+            );
+            const completion = totalTasks > 0 ? Math.round((resolvedTasks / totalTasks) * 100) : 0;
             const attention = group.projects.filter(project => project.progress.health !== 'on_track').length;
 
             return (
@@ -577,7 +582,7 @@ export function ProjectsPortfolioDashboard({
       <section className="grid overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--surface-1)] sm:grid-cols-4" aria-label="Portfolio summary">
         {[
           { label: 'Active projects', value: summary.activeProjects, detail: `${summary.totalProjects} total projects`, view: 'overview' as const, color: 'var(--accent-500)' },
-          { label: 'Portfolio progress', value: `${summary.portfolioPercent}%`, detail: `${summary.completedTasks} of ${summary.totalTasks} tasks complete`, view: 'overview' as const, color: 'var(--accent-500)' },
+          { label: 'Portfolio progress', value: `${summary.portfolioPercent}%`, detail: `${summary.resolvedTasks} of ${summary.totalTasks} tasks resolved`, view: 'overview' as const, color: 'var(--accent-500)' },
           { label: 'Needs attention', value: summary.atRiskProjects, detail: summary.atRiskProjects > 0 ? 'At risk or behind' : 'Everything is on track', view: 'health' as const, color: summary.atRiskProjects > 0 ? 'var(--warning)' : 'var(--success)' },
           { label: 'Completed this week', value: summary.completedThisWeek, detail: 'Recent portfolio wins', view: 'overview' as const, color: 'var(--success)' },
         ].map(metric => (

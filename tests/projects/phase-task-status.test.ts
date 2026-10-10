@@ -48,6 +48,15 @@ describe('phase task status', () => {
     expect(getPhaseTaskStatusSummary('pending', ['done', 'cancelled']).derivedStatus).toBe('completed');
   });
 
+  it('counts completed and cancelled tasks as resolved progress', () => {
+    expect(getPhaseTaskStatusSummary('completed', ['done', 'cancelled'])).toMatchObject({
+      totalCount: 2,
+      doneCount: 1,
+      resolvedCount: 2,
+      remainingCount: 0,
+    });
+  });
+
   it('filters only completed tasks and compacts only fully hidden completed phases', () => {
     const tasks = [
       { id: 'todo', status: 'todo' as const },

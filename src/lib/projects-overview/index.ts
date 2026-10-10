@@ -2,6 +2,7 @@ import type { ProjectStatus, ProjectProgress, HubProject, Tag } from '@/types';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { requireGraphReportingPersistence } from '@/db/persistence/worker-repositories';
 import { deriveProjectPulse } from '@/lib/projects/project-pulse';
+import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 
 // ─── STATUS INFERENCE ───────────────────────────────────────────────────────
 
@@ -21,14 +22,15 @@ export async function computeProjectProgress(projectId: string): Promise<Project
     await getWorkerPersistenceRepositories(),
   ).overview.listProjectTaskStatuses(projectId);
   if (projectTasks.length === 0) {
-    return { totalTasks: 0, completedTasks: 0, inProgressTasks: 0, percentComplete: 0, health: 'on_track' };
+    return { totalTasks: 0, completedTasks: 0, resolvedTasks: 0, inProgressTasks: 0, percentComplete: 0, health: 'on_track' };
   }
 
   const topLevelTasks = topLevelProjectTasks(projectTasks);
   const totalTasks = topLevelTasks.length;
   const completedTasks = topLevelTasks.filter(t => t.status === 'done').length;
+  const resolvedTasks = topLevelTasks.filter(t => isInactiveTaskStatus(t.status)).length;
   const inProgressTasks = topLevelTasks.filter(t => t.status === 'in_progress').length;
-  const percentComplete = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const percentComplete = totalTasks > 0 ? Math.round((resolvedTasks / totalTasks) * 100) : 0;
 
   const lastActivity = topLevelTasks
     .map(t => t.updatedAt)
@@ -37,7 +39,7 @@ export async function computeProjectProgress(projectId: string): Promise<Project
     .reverse()[0] || undefined;
 
   // Health will be computed with project-level target date in the caller
-  return { totalTasks, completedTasks, inProgressTasks, percentComplete, health: 'on_track', lastActivity };
+  return { totalTasks, completedTasks, resolvedTasks, inProgressTasks, percentComplete, health: 'on_track', lastActivity };
 }
 
 // ─── FETCH TAGS FOR PROJECTS ──────────────────────────────────────────────
@@ -79,6 +81,7 @@ export interface ProjectsOverview {
     atRiskProjects: number;
     totalTasks: number;
     completedTasks: number;
+    resolvedTasks: number;
     inProgressTasks: number;
     portfolioPercent: number;
     completedThisWeek: number;
@@ -102,6 +105,7 @@ export interface OverviewPhase {
   color: string | null;
   totalTasks: number;
   completedTasks: number;
+  resolvedTasks: number;
   inProgressTasks: number;
   percentComplete: number;
 }
@@ -136,6 +140,7 @@ export function buildProjectPhaseSummaries(
       .filter((task): task is OverviewTask => task !== undefined);
     const totalTasks = phaseTasks.length;
     const completedTasks = phaseTasks.filter(task => task.status === 'done').length;
+    const resolvedTasks = phaseTasks.filter(task => isInactiveTaskStatus(task.status)).length;
     const inProgressTasks = phaseTasks.filter(task => task.status === 'in_progress').length;
     const projectPhases = phasesByProject.get(phase.projectId) ?? [];
     projectPhases.push({
@@ -145,8 +150,9 @@ export function buildProjectPhaseSummaries(
       color: phase.color,
       totalTasks,
       completedTasks,
+      resolvedTasks,
       inProgressTasks,
-      percentComplete: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+      percentComplete: totalTasks > 0 ? Math.round((resolvedTasks / totalTasks) * 100) : 0,
     });
     phasesByProject.set(phase.projectId, projectPhases);
   }
@@ -197,11 +203,12 @@ export function buildPortfolioPulse(
   taskMap: Map<string, OverviewTask>,
   now = new Date(),
 ) {
-  const uniqueTasks = [...taskMap.values()].filter(task => task.status !== 'cancelled');
+  const uniqueTasks = [...taskMap.values()];
   const totalTasks = uniqueTasks.length;
   const completedTasks = uniqueTasks.filter(task => task.status === 'done').length;
+  const resolvedTasks = uniqueTasks.filter(task => isInactiveTaskStatus(task.status)).length;
   const inProgressTasks = uniqueTasks.filter(task => task.status === 'in_progress').length;
-  const portfolioPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const portfolioPercent = totalTasks > 0 ? Math.round((resolvedTasks / totalTasks) * 100) : 0;
 
   const weekStart = new Date(now);
   const daysSinceMonday = (weekStart.getDay() + 6) % 7;
@@ -273,6 +280,7 @@ export function buildPortfolioPulse(
     taskSummary: {
       totalTasks,
       completedTasks,
+      resolvedTasks,
       inProgressTasks,
       portfolioPercent,
       completedThisWeek,
@@ -299,6 +307,7 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
         atRiskProjects: 0,
         totalTasks: 0,
         completedTasks: 0,
+        resolvedTasks: 0,
         inProgressTasks: 0,
         portfolioPercent: 0,
         completedThisWeek: 0,
@@ -326,8 +335,9 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
 
     const totalTasks = projectTasks.length;
     const completedTasks = projectTasks.filter(t => t.status === 'done').length;
+    const resolvedTasks = projectTasks.filter(t => isInactiveTaskStatus(t.status)).length;
     const inProgressTasks = projectTasks.filter(t => t.status === 'in_progress').length;
-    const percentComplete = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+    const percentComplete = totalTasks > 0 ? Math.round((resolvedTasks / totalTasks) * 100) : 0;
 
     const overdueTasks = projectTasks.filter(
       t => t.dueDate && new Date(t.dueDate) < now && t.status !== 'done' && t.status !== 'cancelled'
@@ -340,7 +350,7 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
       .reverse()[0] || undefined;
 
     const progress: ProjectProgress = {
-      totalTasks, completedTasks, inProgressTasks, percentComplete,
+      totalTasks, completedTasks, resolvedTasks, inProgressTasks, percentComplete,
       health: 'on_track', lastActivity,
     };
     const status = inferProjectStatus(progress, project.statusOverride as ProjectStatus | null);
@@ -353,6 +363,7 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
     progress.pulse = deriveProjectPulse({
       totalTasks,
       completedTasks,
+      resolvedTasks,
       percentComplete,
       overdueTasks,
       scheduledTasks: projectTasks.filter((task) => Boolean(task.dueDate)).length,

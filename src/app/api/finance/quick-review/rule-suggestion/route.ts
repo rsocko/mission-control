@@ -1,17 +1,18 @@
 import { NextResponse } from 'next/server';
-import {
-  TyrionFinanceReviewClient,
-  TyrionFinanceReviewError,
-} from '@/lib/connectors/monarch-money/quick-review-client';
+import { TyrionFinanceReviewError } from '@/lib/connectors/monarch-money/quick-review-client';
 import { trustedFinanceMutationActor } from '@/lib/connectors/monarch-money/finance-request';
-import { tyrionQuickReviewRuleRequestSchema } from '@/lib/finance/quick-review-contract';
+import { financeQuickReviewRuleSuggestionRequestSchema } from '@/lib/finance/quick-review-contract';
+import {
+  previewQuickReviewMerchantRule,
+  QuickReviewSessionError,
+} from '@/lib/finance/quick-review-service';
 import { ApiErrors } from '@/lib/api-error';
 
 export async function POST(request: Request) {
   if (!trustedFinanceMutationActor(request)) {
     return ApiErrors.forbidden('Rule suggestions are restricted to trusted users.');
   }
-  const parsed = tyrionQuickReviewRuleRequestSchema.safeParse(
+  const parsed = financeQuickReviewRuleSuggestionRequestSchema.safeParse(
     await request.json().catch(() => null),
   );
   if (!parsed.success) {
@@ -21,14 +22,17 @@ export async function POST(request: Request) {
     }, { status: 400 });
   }
   try {
-    const result = await new TyrionFinanceReviewClient().suggestRule(parsed.data, request.signal);
-    return NextResponse.json(result);
+    const result = await previewQuickReviewMerchantRule(parsed.data, request.signal);
+    return NextResponse.json({
+      contractVersion: result.contractVersion,
+      suggestion: result.suggestion,
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
-    if (error instanceof TyrionFinanceReviewError) {
+    if (error instanceof TyrionFinanceReviewError || error instanceof QuickReviewSessionError) {
       return NextResponse.json({
         error: error.message,
         code: error.code,
-        retryable: error.retryable,
+        retryable: 'retryable' in error ? error.retryable : false,
       }, { status: error.status });
     }
     return ApiErrors.internal('Failed to suggest a finance attribution rule', error);

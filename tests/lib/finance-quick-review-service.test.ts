@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   assertQuickReviewCategoryCorrectionSupported,
+  buildQuickReviewMerchantRuleRequest,
+  buildQuickReviewRuleSuggestionRequest,
   merchantNameForRank,
   runExclusiveQuickReviewAction,
   runQuickReviewWriteSequence,
@@ -80,5 +82,63 @@ describe('finance quick review write sequence', () => {
       null,
       null,
     )).not.toThrow();
+  });
+
+  it('fences creation to the retained policy and server-owned current account', () => {
+    const result = buildQuickReviewMerchantRuleRequest({
+      contractVersion: '2.0',
+      sessionRef: 'session_ref_123456789',
+      resumeToken: 'resume_token_123456789',
+      reviewRef: 'review_ref_1234567890',
+      stateToken: 'state_token_123456789',
+      idempotencyKey: '4948bf5e-cd3d-47fe-8935-4e00949d1f3c',
+      confirmation: {
+        confirmed: true,
+        confirmedAt: '2026-10-09T20:00:00.000-04:00',
+        globalScopeConfirmed: false,
+      },
+      rule: {
+        outcome: 'kid',
+        kidId: 'kid-alex',
+        pattern: 'INVENTED MARKET',
+        businessEntityPattern: null,
+        scope: 'accounts',
+        confidence: 'likely',
+      },
+    }, {
+      contractVersion: '1.0',
+      policyVersion: 7,
+      suggestion: {
+        kind: 'merchant',
+        merchantPattern: 'INVENTED MARKET',
+        businessEntityPattern: null,
+        kidId: 'kid-alex',
+        confidence: 'likely',
+        requiresConfirmation: true,
+      },
+    }, 'server-owned-account');
+
+    expect(result).toMatchObject({
+      expectedPolicyVersion: 7,
+      idempotencyKey: '4948bf5e-cd3d-47fe-8935-4e00949d1f3c',
+      rule: { accountRefs: ['server-owned-account'] },
+    });
+  });
+
+  it('uses server-owned account and business entity context for rule suggestions', () => {
+    expect(buildQuickReviewRuleSuggestionRequest({
+      merchantName: 'Invented Market',
+      businessEntityName: 'Invented Market Holdings',
+      accountRef: 'server-owned-account',
+      kidId: 'kid-alex',
+    })).toEqual({
+      contractVersion: '1.0',
+      merchantName: 'Invented Market',
+      businessEntityName: 'Invented Market Holdings',
+      accountRef: 'server-owned-account',
+      scope: 'accounts',
+      kidId: 'kid-alex',
+      suggestReusableRule: true,
+    });
   });
 });

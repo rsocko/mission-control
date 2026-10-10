@@ -66,7 +66,10 @@ export type FinanceAttentionSignalKind =
   | 'attributionAccountReview'
   | 'duplicateTransactionCandidate'
   | 'connectorDegraded'
-  | 'writeBackFailed';
+  | 'writeBackFailed'
+  | 'receiptReconciliationUnmatched'
+  | 'receiptReconciliationReview'
+  | 'receiptReconciliationDurable';
 export type FinanceAttentionRoute =
   | 'informationalNotification'
   | 'actionableNotification'
@@ -247,6 +250,17 @@ export function selectFinanceAttentionRoute(
   decisionAt: Date,
 ): FinanceAttentionRoute {
   if (signal.sourceLifecycle !== 'open') return 'settled';
+  if (signal.signalKind === 'receiptReconciliationUnmatched') {
+    return signal.attention === 'informational'
+      ? 'informationalNotification'
+      : 'statusOnly';
+  }
+  if (signal.signalKind === 'receiptReconciliationReview') {
+    return signal.actionable ? 'actionableNotification' : 'statusOnly';
+  }
+  if (signal.signalKind === 'receiptReconciliationDurable') {
+    return signal.actionable ? 'task' : 'statusOnly';
+  }
   if (!signal.actionable && signal.attention !== 'informational') return 'statusOnly';
   if (signal.signalKind === 'attributionAccountReview') {
     return 'actionableNotification';
@@ -448,6 +462,8 @@ export function financeAttentionMetadata(
       contractVersion: FINANCE_ATTENTION_CONTRACT_VERSION,
       signalFamily: signal.signalKind === 'writeBackFailed'
         ? 'writeBack'
+        : signal.signalKind.startsWith('receiptReconciliation')
+          ? 'reconciliation'
         : signal.signalKind === 'duplicateTransactionCandidate'
           ? 'anomaly'
           : signal.signalKind === 'connectorDegraded'
@@ -570,6 +586,7 @@ export function financeAttentionMyDayCandidateRank(
       signalKind === 'writeBackFailed'
       || signalKind === 'duplicateTransactionCandidate'
       || signalKind === 'connectorDegraded'
+      || signalKind === 'receiptReconciliationDurable'
         ? 2
         : task.priority === 'critical' ? 3 : null
     );
@@ -678,7 +695,24 @@ export function financeAttentionNotificationInput(
       },
     };
   }
-  const presentation = signal.signalKind === 'duplicateTransactionCandidate'
+  const presentation = signal.signalKind.startsWith('receiptReconciliation')
+    ? {
+        title: signal.signalKind === 'receiptReconciliationUnmatched'
+          ? 'Receipt still needs a payment match'
+          : 'Review a receipt reconciliation exception',
+        body: signal.signalKind === 'receiptReconciliationUnmatched'
+          ? 'OWL could not match this receipt after the grace period.'
+          : 'OWL found ambiguous or conflicting payment evidence that needs a decision.',
+        level: signal.signalKind === 'receiptReconciliationUnmatched'
+          ? 'heads_up' as const
+          : 'action_needed' as const,
+        templateKey: 'finance-receipt-reconciliation',
+        groupKey: `finance-receipt-reconciliation:${signal.connectorId}`,
+        relatedEntityType: 'finance-receipt-reconciliation-review',
+        navigationTarget: `/finance/review?filter=receipt-reconciliation&review=${encodeURIComponent(signal.sourceRef)}`,
+        notificationType: 'financeReceiptReconciliation',
+      }
+    : signal.signalKind === 'duplicateTransactionCandidate'
     ? {
         title: 'Review a possible duplicate transaction',
         body: signal.attention === 'informational'
@@ -746,6 +780,46 @@ export function financeAttentionNotificationInput(
         decisionAt,
       ),
     },
+  };
+}
+
+export function financeAttentionTaskCopy(signal: FinanceAttentionSignal): {
+  title: string;
+  description: string;
+  priority: 'medium' | 'high';
+} {
+  if (signal.signalKind === 'writeBackFailed') {
+    return {
+      title: 'Resolve a failed finance write-back',
+      description: 'A confirmed Finance change could not be verified. Review it in Finance.',
+      priority: 'high',
+    };
+  }
+  if (signal.signalKind === 'duplicateTransactionCandidate') {
+    return {
+      title: 'Review a possible duplicate transaction',
+      description: 'A high-confidence duplicate candidate remains unresolved. Review it in Finance.',
+      priority: 'high',
+    };
+  }
+  if (signal.signalKind === 'connectorDegraded') {
+    return {
+      title: 'Restore the Monarch connection',
+      description: 'The Tyrion connector remains unavailable or stale. Restore and verify a healthy sync.',
+      priority: 'high',
+    };
+  }
+  if (signal.signalKind === 'receiptReconciliationDurable') {
+    return {
+      title: 'Resolve a durable receipt reconciliation exception',
+      description: 'OWL reports durable work or an exhausted repair. Review the bounded evidence in Finance.',
+      priority: 'high',
+    };
+  }
+  return {
+    title: 'Review a finance attribution exception',
+    description: 'An unresolved attribution decision requires review in Finance.',
+    priority: 'medium',
   };
 }
 

@@ -30,6 +30,7 @@ import {
   financeAttentionDeliveryDigest,
   FINANCE_ATTENTION_MAX_REPAIR_SCOPE,
   financeAttentionMetadata,
+  financeAttentionTaskCopy,
   financeAttentionMyDayCandidateRank,
   FINANCE_ATTENTION_REPAIR_CUTOVER,
   FINANCE_ATTENTION_REPAIR_REASON,
@@ -443,28 +444,17 @@ function createOrUpdateTask(
   }
   const metadata = financeAttentionMetadata(signal, 'task', decisionAt);
   financeAttentionRecord(metadata.financeAttention).promotedAt = decisionAt.toISOString();
+  const copy = financeAttentionTaskCopy(signal);
   const task = {
     id: financeAttentionTaskId(signal),
     sourceId,
     connectorType: FINANCE_ATTENTION_TASK_CONNECTOR_TYPE,
     connectorInstanceId: FINANCE_ATTENTION_TASK_CONNECTOR_INSTANCE_ID,
-    title: signal.signalKind === 'writeBackFailed'
-      ? 'Resolve a failed finance write-back'
-      : signal.signalKind === 'duplicateTransactionCandidate'
-        ? 'Review a possible duplicate transaction'
-        : signal.signalKind === 'connectorDegraded'
-          ? 'Restore the Monarch connection'
-          : 'Review a finance attribution exception',
-    description: signal.signalKind === 'writeBackFailed'
-      ? 'A confirmed Finance change could not be verified. Review it in Finance.'
-      : signal.signalKind === 'duplicateTransactionCandidate'
-        ? 'A high-confidence duplicate candidate remains unresolved. Review it in Finance.'
-        : signal.signalKind === 'connectorDegraded'
-          ? 'The Tyrion connector remains unavailable or stale. Restore and verify a healthy sync.'
-          : 'An unresolved attribution decision requires review in Finance.',
+    title: copy.title,
+    description: copy.description,
     status: 'todo',
     localDisposition: 'active' as const,
-    priority: signal.signalKind === 'attributionReviewRequired' ? 'medium' : 'high',
+    priority: copy.priority,
     createdAt: decisionAt.toISOString(),
     updatedAt: decisionAt.toISOString(),
     lastSyncedAt: decisionAt.toISOString(),

@@ -13,6 +13,7 @@ import {
   financeAttentionSourceId,
   financeAttentionTaskId,
 } from '@/db/persistence/finance-attention';
+import { attributionAttentionAccountRef } from '@/lib/finance/attribution-attention-policy';
 
 export const CONNECTOR_ID = 'finance-attention-contract';
 export const BASE_TIME = '2026-08-11T12:00:00.000Z';
@@ -24,7 +25,11 @@ export function iso(hoursAgo: number, from: Date = BASE): string {
 
 export interface FinanceAttentionNotificationSnapshot {
   id: string;
+  title: string;
+  body: string | null;
+  level: string;
   state: string;
+  readState: string;
   sourceState: string;
   isActionable: boolean;
   primaryActionId: string | null;
@@ -37,6 +42,12 @@ export interface FinanceAttentionTaskSnapshot {
   status: string;
   localDisposition: string;
   statusReason: string | null;
+}
+
+export interface FinanceAttentionExceptionSnapshot {
+  status: string;
+  reviewState: string;
+  reasonCode: string;
 }
 
 export interface FinanceAttentionContractHarness {
@@ -60,10 +71,18 @@ export interface FinanceAttentionContractHarness {
     attemptCount?: number;
     updatedAt: string;
   }): Promise<void>;
+  appendNoMatchTransactions(input: {
+    accountId: string;
+    displayName: string;
+    amounts: readonly number[];
+  }): Promise<void>;
+  resolveNoMatchTransactions(accountId: string, count: number): Promise<void>;
+  markNotificationRead(sourceId: string): Promise<void>;
   notificationBySourceId(sourceId: string): Promise<FinanceAttentionNotificationSnapshot | null>;
   deliveryEventCount(notificationId: string): Promise<number>;
   pendingDeliveryCount(notificationId: string): Promise<number>;
   taskBySourceId(sourceId: string): Promise<FinanceAttentionTaskSnapshot | null>;
+  attributionExceptionById(id: string): Promise<FinanceAttentionExceptionSnapshot | null>;
   countNotifications(): Promise<number>;
   countTasks(): Promise<number>;
   myDayTaskIds(date: string): Promise<string[]>;
@@ -145,6 +164,258 @@ export function describeFinanceAttentionPersistenceContract(
         expect(replay.hasPendingDelivery).toBe(false);
         expect(await harness.countNotifications()).toBe(1);
         expect(await harness.deliveryEventCount(notification!.id)).toBe(deliveryCountAfterCreate);
+      });
+
+      it('retains no-match in the review queue without creating per-item attention', async () => {
+        await harness.seedAttributionException({
+          id: 'exception-no-match',
+          reasonCode: 'no-match',
+          firstObservedAt: iso(48),
+          lastObservedAt: iso(1),
+        });
+
+        const result = await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: BASE,
+        });
+
+        expect(result.summary).toMatchObject({
+          evaluated: 1,
+          notificationsCreated: 0,
+          tasksCreated: 0,
+          statusOnly: 1,
+        });
+        expect(await harness.attributionExceptionById('exception-no-match')).toEqual({
+          status: 'open',
+          reviewState: 'pending',
+          reasonCode: 'no-match',
+        });
+        expect(await harness.countNotifications()).toBe(0);
+        expect(await harness.countTasks()).toBe(0);
+      });
+
+      it('settles stale no-match attention while leaving the review exception pending', async () => {
+        await harness.seedAttributionException({
+          id: 'exception-no-match-notification',
+          firstObservedAt: iso(2),
+          lastObservedAt: iso(2),
+        });
+        await harness.seedAttributionException({
+          id: 'exception-no-match-task',
+          firstObservedAt: iso(25),
+          lastObservedAt: iso(1),
+        });
+        await harness.routing.reconcile({ connectorId: CONNECTOR_ID, decisionAt: BASE });
+
+        const notificationSourceId = financeAttentionSourceId({
+          connectorId: CONNECTOR_ID,
+          signalKind: 'attributionReviewRequired',
+          sourceRef: 'exception-no-match-notification',
+        });
+        const taskSourceId = financeAttentionSourceId({
+          connectorId: CONNECTOR_ID,
+          signalKind: 'attributionReviewRequired',
+          sourceRef: 'exception-no-match-task',
+        });
+        const notificationBefore = await harness.notificationBySourceId(notificationSourceId);
+        expect(notificationBefore).not.toBeNull();
+        expect(await harness.taskBySourceId(taskSourceId)).toMatchObject({ status: 'todo' });
+
+        await harness.seedAttributionException({
+          id: 'exception-no-match-notification',
+          reasonCode: 'no-match',
+          firstObservedAt: iso(24 * 120),
+          lastObservedAt: iso(24 * 120),
+          updatedAt: iso(24 * 120),
+        });
+        await harness.seedAttributionException({
+          id: 'exception-no-match-task',
+          reasonCode: 'no-match',
+          firstObservedAt: iso(25),
+          lastObservedAt: iso(1),
+        });
+        const settled = await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: BASE,
+        });
+
+        expect(settled.summary).toMatchObject({
+          notificationsCreated: 0,
+          tasksCreated: 0,
+          statusOnly: 2,
+        });
+        expect(await harness.notificationBySourceId(notificationSourceId)).toMatchObject({
+          state: 'archived',
+          sourceState: 'resolved',
+          isActionable: false,
+          autoResolveReason: 'status_only',
+        });
+        expect(await harness.pendingDeliveryCount(notificationBefore!.id)).toBe(0);
+        expect(await harness.taskBySourceId(taskSourceId)).toMatchObject({
+          status: 'cancelled',
+          statusReason: 'not_planned',
+        });
+        expect(await harness.attributionExceptionById('exception-no-match-notification'))
+          .toMatchObject({ status: 'open', reviewState: 'pending', reasonCode: 'no-match' });
+        expect(await harness.attributionExceptionById('exception-no-match-task'))
+          .toMatchObject({ status: 'open', reviewState: 'pending', reasonCode: 'no-match' });
+      });
+
+      it('keeps true attribution conflicts actionable', async () => {
+        await harness.seedAttributionException({
+          id: 'exception-conflict',
+          reasonCode: 'merchant-rule-conflict',
+          firstObservedAt: iso(2),
+          lastObservedAt: iso(2),
+        });
+
+        const result = await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: BASE,
+        });
+
+        expect(result.summary).toMatchObject({
+          notificationsCreated: 1,
+          statusOnly: 0,
+        });
+      });
+
+      it('dedupes account summaries, escalates worsening, preserves read improvements, and settles', async () => {
+        await harness.appendNoMatchTransactions({
+          accountId: 'below-threshold',
+          displayName: 'Below threshold',
+          amounts: Array.from({ length: 9 }, () => -12),
+        });
+        const belowThreshold = await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: new Date(BASE.getTime() - 60_000),
+        });
+        expect(belowThreshold.summary.notificationsCreated).toBe(0);
+
+        await harness.appendNoMatchTransactions({
+          accountId: 'account-summary',
+          displayName: 'Household checking',
+          amounts: Array.from({ length: 10 }, () => -12),
+        });
+        const accountRef = attributionAttentionAccountRef(
+          CONNECTOR_ID,
+          'account-summary',
+        );
+        const sourceId = financeAttentionSourceId({
+          connectorId: CONNECTOR_ID,
+          signalKind: 'attributionAccountReview',
+          sourceRef: accountRef,
+        });
+
+        const concurrent = await Promise.all([
+          harness.routing.reconcile({
+            connectorId: CONNECTOR_ID,
+            decisionAt: BASE,
+          }),
+          harness.routing.reconcile({
+            connectorId: CONNECTOR_ID,
+            decisionAt: BASE,
+          }),
+        ]);
+        expect(concurrent.reduce(
+          (total, result) => total + result.summary.notificationsCreated,
+          0,
+        )).toBe(1);
+        expect(await harness.countNotifications()).toBe(1);
+        expect(await harness.notificationBySourceId(sourceId)).toMatchObject({
+          title: 'Review unattributed activity for Household checking',
+          level: 'heads_up',
+          readState: 'unread',
+          sourceState: 'active',
+        });
+
+        await harness.markNotificationRead(sourceId);
+        await harness.appendNoMatchTransactions({
+          accountId: 'account-summary',
+          displayName: 'Household checking',
+          amounts: [-300],
+        });
+        const worsened = await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: new Date(BASE.getTime() + 60_000),
+        });
+        expect(worsened.summary.notificationsCreated).toBe(0);
+        expect(await harness.countNotifications()).toBe(1);
+        expect(await harness.notificationBySourceId(sourceId)).toMatchObject({
+          level: 'action_needed',
+          readState: 'unread',
+          body: expect.stringContaining('$300.00'),
+        });
+
+        await harness.markNotificationRead(sourceId);
+        await harness.resolveNoMatchTransactions('account-summary', 1);
+        await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: new Date(BASE.getTime() + 120_000),
+        });
+        expect(await harness.notificationBySourceId(sourceId)).toMatchObject({
+          level: 'heads_up',
+          readState: 'read',
+          sourceState: 'active',
+        });
+
+        await harness.resolveNoMatchTransactions('account-summary', 10);
+        await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: new Date(BASE.getTime() + 180_000),
+        });
+        expect(await harness.notificationBySourceId(sourceId)).toMatchObject({
+          sourceState: 'resolved',
+          isActionable: false,
+          autoResolveReason: 'threshold_cleared',
+        });
+        expect(await harness.attributionExceptionById('exception-account-summary-000'))
+          .toMatchObject({ status: 'resolved', reviewState: 'resolved' });
+
+        await harness.appendNoMatchTransactions({
+          accountId: 'account-summary',
+          displayName: 'Household checking',
+          amounts: [-400],
+        });
+        const requalified = await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: new Date(BASE.getTime() + 240_000),
+        });
+        expect(requalified.summary.notificationsCreated).toBe(0);
+        expect(await harness.countNotifications()).toBe(1);
+        expect(await harness.notificationBySourceId(sourceId)).toMatchObject({
+          sourceState: 'active',
+          level: 'action_needed',
+          readState: 'unread',
+          isActionable: true,
+        });
+      });
+
+      it('qualifies an account at the absolute amount threshold', async () => {
+        await harness.appendNoMatchTransactions({
+          accountId: 'amount-threshold',
+          displayName: 'Household card',
+          amounts: [250],
+        });
+        const result = await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: BASE,
+        });
+        expect(result.summary.notificationsCreated).toBe(1);
+        const accountRef = attributionAttentionAccountRef(
+          CONNECTOR_ID,
+          'amount-threshold',
+        );
+        expect(await harness.notificationBySourceId(financeAttentionSourceId({
+          connectorId: CONNECTOR_ID,
+          signalKind: 'attributionAccountReview',
+          sourceRef: accountRef,
+        }))).toMatchObject({
+          level: 'action_needed',
+          body: expect.stringContaining('$250.00'),
+        });
+        expect(await harness.attributionExceptionById('exception-amount-threshold-000'))
+          .toMatchObject({ status: 'open', reviewState: 'pending' });
       });
 
       it('settles the notification into a task once escalation promotes it, updating relatedTaskId', async () => {

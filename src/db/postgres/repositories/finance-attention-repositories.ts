@@ -9,6 +9,8 @@ import { formatDateInLocalTimezone } from '@/lib/utils/date';
 import {
   compareFinanceAttentionMyDayCandidates,
   compareFinanceAttentionSignalsForRouting,
+  financeAttentionAccountMateriallyWorsened,
+  financeAttentionAccountSignal,
   financeAttentionAttributionSignal,
   FINANCE_ATTENTION_MAX_REPAIR_SCOPE,
   financeAttentionMetadata,
@@ -34,6 +36,7 @@ import {
   resolveFinanceAttentionNotificationPresentation,
   selectFinanceAttentionRoute,
   type FinanceAttentionAttributionExceptionRow,
+  type FinanceAttentionAccountSummaryRow,
   type FinanceAttentionMyDayTaskCandidate,
   type FinanceAttentionRepairConnector,
   type FinanceAttentionRepairCounts,
@@ -46,6 +49,9 @@ import {
   type FinanceAttentionSourceCursor,
   type FinanceAttentionWriteBackRow,
 } from '@/db/persistence/finance-attention';
+import {
+  parseAttributionAttentionPolicy,
+} from '@/lib/finance/attribution-attention-policy';
 
 /**
  * PostgreSQL equivalent of `sqlite-finance-attention-repositories.ts`. It
@@ -174,7 +180,7 @@ async function loadAttributionBatch(
              last_observed_at AS "lastObservedAt", resolved_at AS "resolvedAt",
              updated_at AS "updatedAt"
       FROM finance_attribution_exceptions
-      WHERE connector_id = $1 AND updated_at >= $2
+      WHERE connector_id = $1 AND (updated_at >= $2 OR reason_code = 'no-match')
       ORDER BY updated_at, id
       LIMIT $3
     `, [connectorId, since, FINANCE_ATTENTION_SOURCE_BATCH_SIZE]);
@@ -187,10 +193,18 @@ async function loadAttributionBatch(
            last_observed_at AS "lastObservedAt", resolved_at AS "resolvedAt",
            updated_at AS "updatedAt"
     FROM finance_attribution_exceptions
-    WHERE connector_id = $1 AND (updated_at, id) > ($2, $3)
+    WHERE connector_id = $1
+      AND (updated_at >= $2 OR reason_code = 'no-match')
+      AND (updated_at, id) > ($3, $4)
     ORDER BY updated_at, id
-    LIMIT $4
-  `, [connectorId, cursor.updatedAt, cursor.id, FINANCE_ATTENTION_SOURCE_BATCH_SIZE]);
+    LIMIT $5
+  `, [
+    connectorId,
+    since,
+    cursor.updatedAt,
+    cursor.id,
+    FINANCE_ATTENTION_SOURCE_BATCH_SIZE,
+  ]);
 }
 
 async function loadWriteBackBatch(
@@ -221,6 +235,75 @@ async function loadWriteBackBatch(
   `, [connectorId, cursor.updatedAt, cursor.id, FINANCE_ATTENTION_SOURCE_BATCH_SIZE]);
 }
 
+async function loadAttributionAccountSignals(
+  client: PoolClient,
+  connectorId: string,
+  decisionAt: Date,
+): Promise<FinanceAttentionSignal[]> {
+  const [connector] = await query<{ settings: unknown }>(client, `
+    SELECT settings FROM connector_configs WHERE id = $1 AND deleted_at IS NULL
+  `, [connectorId]);
+  if (!connector) return [];
+  const settings = (
+    connector.settings !== null
+    && typeof connector.settings === 'object'
+    && !Array.isArray(connector.settings)
+  ) ? connector.settings as Record<string, unknown> : {};
+  const currency = String(settings.householdCurrency ?? 'USD');
+  const policy = parseAttributionAttentionPolicy(settings, currency);
+  const rows = await query<FinanceAttentionAccountSummaryRow>(client, `
+    SELECT accounts.upstream_account_id AS "accountId",
+           accounts.display_name AS "accountDisplayName",
+           COUNT(exceptions.id)::int AS "pendingCount",
+           COALESCE(MAX(
+             CASE WHEN exceptions.id IS NOT NULL THEN ABS(transactions.amount) END
+           ), 0) AS "highestAmount",
+           highest.merchant_name AS "highestMerchantName",
+           MIN(exceptions.first_observed_at) AS "firstObservedAt",
+           MAX(exceptions.last_observed_at) AS "lastObservedAt"
+    FROM finance_accounts accounts
+    LEFT JOIN finance_transactions transactions
+      ON transactions.connector_instance_id = accounts.connector_id
+     AND transactions.account_id = accounts.upstream_account_id
+     AND transactions.lifecycle_status = 'active'
+    LEFT JOIN finance_attribution_exceptions exceptions
+      ON exceptions.connector_id = accounts.connector_id
+     AND exceptions.transaction_id = transactions.id
+     AND exceptions.status IN ('open', 'retry_requested')
+     AND exceptions.review_state = 'pending'
+     AND exceptions.reason_code = 'no-match'
+    LEFT JOIN LATERAL (
+      SELECT candidate.merchant_name
+      FROM finance_transactions candidate
+      JOIN finance_attribution_exceptions candidate_exception
+        ON candidate_exception.transaction_id = candidate.id
+       AND candidate_exception.connector_id = $1
+       AND candidate_exception.status IN ('open', 'retry_requested')
+       AND candidate_exception.review_state = 'pending'
+       AND candidate_exception.reason_code = 'no-match'
+      WHERE candidate.connector_instance_id = $1
+        AND candidate.account_id = accounts.upstream_account_id
+        AND candidate.lifecycle_status = 'active'
+      ORDER BY ABS(candidate.amount) DESC, candidate.id
+      LIMIT 1
+    ) highest ON true
+    WHERE accounts.connector_id = $1
+    GROUP BY accounts.upstream_account_id, accounts.display_name, highest.merchant_name
+    ORDER BY accounts.upstream_account_id
+  `, [connectorId]);
+  return rows.map((row) => financeAttentionAccountSignal(
+    connectorId,
+    {
+      ...row,
+      pendingCount: Number(row.pendingCount),
+      highestAmount: Number(row.highestAmount),
+    },
+    policy,
+    currency,
+    decisionAt,
+  ));
+}
+
 interface PgTaskRow {
   id: string;
   status: string;
@@ -238,6 +321,8 @@ interface PgNotificationRow {
   disposition: string;
   sourceResolvedAt: string | null;
   staleSince: string | null;
+  lastSourceActivityAt: string | null;
+  lastSourceActivityKey: string | null;
   metadata: unknown;
 }
 
@@ -261,7 +346,9 @@ async function findNotification(
 ): Promise<PgNotificationRow | undefined> {
   const rows = await query<PgNotificationRow>(client, `
     SELECT id, disposition, source_resolved_at AS "sourceResolvedAt",
-           stale_since AS "staleSince", metadata
+           stale_since AS "staleSince",
+           last_source_activity_at AS "lastSourceActivityAt",
+           last_source_activity_key AS "lastSourceActivityKey", metadata
     FROM notifications
     WHERE source_id = $1
   `, [sourceId]);
@@ -315,6 +402,12 @@ async function settleNotification(
   ]);
   await query(client, `
     DELETE FROM notification_actions WHERE notification_id = $1 AND created_by = 'connector'
+  `, [notification.id]);
+  await query(client, `
+    UPDATE notification_delivery_events
+    SET status = 'suppressed', suppression_reason = 'finance_attention_settled',
+        next_attempt_at = NULL, lease_expires_at = NULL
+    WHERE notification_id = $1 AND status = 'pending'
   `, [notification.id]);
   return true;
 }
@@ -420,6 +513,12 @@ async function preserveStatusOnly(
     ]);
     await query(client, `
       DELETE FROM notification_actions WHERE notification_id = $1 AND created_by = 'connector'
+    `, [notification.id]);
+    await query(client, `
+      UPDATE notification_delivery_events
+      SET status = 'suppressed', suppression_reason = 'finance_attention_status_only',
+          next_attempt_at = NULL, lease_expires_at = NULL
+      WHERE notification_id = $1 AND status = 'pending'
     `, [notification.id]);
   }
   if (task) {
@@ -623,7 +722,20 @@ async function createPendingNotification(
   signal: FinanceAttentionSignal,
   decisionAt: Date,
 ): Promise<{ created: boolean; notificationId: string; pendingDelivery: boolean }> {
-  const input = financeAttentionNotificationInput(signal, decisionAt);
+  const sourceId = financeAttentionSourceId(signal);
+  const existing = await findNotification(client, sourceId);
+  const materiallyWorsened = signal.signalKind === 'attributionAccountReview'
+    && (
+      !existing
+      || financeAttentionAccountMateriallyWorsened(signal, existing.metadata)
+    );
+  const input = financeAttentionNotificationInput(signal, decisionAt, existing
+    ? {
+        metadata: existing.metadata,
+        lastSourceActivityAt: existing.lastSourceActivityAt,
+        lastSourceActivityKey: existing.lastSourceActivityKey,
+      }
+    : undefined);
   const id = input.id!;
   const inbound: InboundNotification = {
     id,
@@ -679,6 +791,14 @@ async function createPendingNotification(
   };
   const result = await ingestPostgresConnectorNotificationInTransaction(client, command);
   await syncFinanceAttentionNotificationPresentation(client, result.id, resolved);
+  if (materiallyWorsened) {
+    await query(client, `
+      UPDATE notifications
+      SET state = 'unread', read_state = 'unread', disposition = 'inbox',
+          read_at = NULL, source_resolved_at = NULL
+      WHERE id = $1
+    `, [result.id]);
+  }
   return {
     created: result.created,
     notificationId: result.id,
@@ -782,6 +902,13 @@ export function createPostgresFinanceAttentionRoutingPersistence(
           const last = rows.at(-1)!;
           writeBackCursor = { updatedAt: last.updatedAt, id: last.id };
         }
+        const accountSignals = await loadAttributionAccountSignals(
+          client,
+          input.connectorId,
+          decisionAt,
+        );
+        result.evaluated += accountSignals.length;
+        signals.push(...accountSignals);
 
         let promotionsRemaining = Math.max(
           0,

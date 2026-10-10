@@ -65,6 +65,8 @@ async function createHarness(): Promise<FinanceAttentionContractHarness> {
         'finance_attention_repair_audit',
         'finance_mutation_audit',
         'finance_attribution_exceptions',
+        'finance_transactions',
+        'finance_accounts',
         'connector_configs',
         'push_subscriptions',
       ]) {
@@ -140,15 +142,113 @@ async function createHarness(): Promise<FinanceAttentionContractHarness> {
         input.updatedAt,
       );
     },
+    async appendNoMatchTransactions(input) {
+      database.prepare(`
+        INSERT INTO finance_accounts (
+          id, connector_id, upstream_account_id, display_name, type,
+          first_seen_at, last_seen_at
+        ) VALUES (?, ?, ?, ?, 'checking', ?, ?)
+        ON CONFLICT (connector_id, upstream_account_id) DO UPDATE
+        SET display_name = excluded.display_name, last_seen_at = excluded.last_seen_at
+      `).run(
+        `finance-account-${input.accountId}`,
+        CONNECTOR_ID,
+        input.accountId,
+        input.displayName,
+        BASE_TIME,
+        BASE_TIME,
+      );
+      const existing = database.prepare(`
+        SELECT COUNT(*) AS count FROM finance_transactions
+        WHERE connector_instance_id = ? AND account_id = ?
+      `).get(CONNECTOR_ID, input.accountId) as { count: number };
+      const transactionInsert = database.prepare(`
+        INSERT INTO finance_transactions (
+          id, connector_instance_id, upstream_transaction_id, date, amount,
+          merchant_name, account_id, account_name, tags, lifecycle_status,
+          source_fingerprint, first_seen_at, last_seen_at, synced_at
+        ) VALUES (?, ?, ?, '2026-08-11', ?, ?, ?, ?, '[]', 'active', ?, ?, ?, ?)
+      `);
+      const exceptionInsert = database.prepare(`
+        INSERT INTO finance_attribution_exceptions (
+          id, connector_id, transaction_id, source_ref, status, reason_code,
+          retryable, review_state, source_fingerprint, policy_version,
+          occurrence_count, created_at, first_observed_at, last_observed_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'open', 'no-match', 0, 'pending', ?, 1, 1, ?, ?, ?, ?)
+      `);
+      database.transaction(() => {
+        input.amounts.forEach((amount, offset) => {
+          const index = existing.count + offset;
+          const suffix = String(index).padStart(3, '0');
+          const transactionId = `transaction-${input.accountId}-${suffix}`;
+          const exceptionId = `exception-${input.accountId}-${suffix}`;
+          const observedAt = new Date(Date.parse(BASE_TIME) + index * 1_000).toISOString();
+          transactionInsert.run(
+            transactionId,
+            CONNECTOR_ID,
+            `upstream-${input.accountId}-${suffix}`,
+            amount,
+            index === existing.count + input.amounts.length - 1
+              ? 'Invented high-value merchant'
+              : 'Invented merchant',
+            input.accountId,
+            input.displayName,
+            `fingerprint-${input.accountId}-${suffix}`,
+            observedAt,
+            observedAt,
+            observedAt,
+          );
+          exceptionInsert.run(
+            exceptionId,
+            CONNECTOR_ID,
+            transactionId,
+            `source-${input.accountId}-${suffix}`,
+            `fingerprint-${input.accountId}-${suffix}`,
+            observedAt,
+            observedAt,
+            observedAt,
+            observedAt,
+          );
+        });
+      })();
+    },
+    async resolveNoMatchTransactions(accountId, count) {
+      database.prepare(`
+        UPDATE finance_attribution_exceptions
+        SET status = 'resolved', review_state = 'resolved',
+            resolution = 'reattributed', resolved_at = ?, updated_at = ?
+        WHERE id IN (
+          SELECT exceptions.id
+          FROM finance_attribution_exceptions exceptions
+          JOIN finance_transactions transactions ON transactions.id = exceptions.transaction_id
+          WHERE exceptions.connector_id = ?
+            AND transactions.account_id = ?
+            AND exceptions.status IN ('open', 'retry_requested')
+          ORDER BY ABS(transactions.amount) DESC, exceptions.id
+          LIMIT ?
+        )
+      `).run(BASE_TIME, BASE_TIME, CONNECTOR_ID, accountId, count);
+    },
+    async markNotificationRead(sourceId) {
+      database.prepare(`
+        UPDATE notifications SET state = 'read', read_state = 'read', read_at = ?
+        WHERE source_id = ?
+      `).run(BASE_TIME, sourceId);
+    },
     async notificationBySourceId(sourceId) {
       const row = database.prepare(`
-        SELECT id, state, source_state AS sourceState, is_actionable AS isActionable,
+        SELECT id, title, body, level, state, read_state AS readState,
+               source_state AS sourceState, is_actionable AS isActionable,
                primary_action_id AS primaryActionId, auto_resolve_reason AS autoResolveReason,
                related_task_id AS relatedTaskId
         FROM notifications WHERE source_id = ?
       `).get(sourceId) as {
         id: string;
+        title: string;
+        body: string | null;
+        level: string;
         state: string;
+        readState: string;
         sourceState: string;
         isActionable: number;
         primaryActionId: string | null;
@@ -181,6 +281,16 @@ async function createHarness(): Promise<FinanceAttentionContractHarness> {
         statusReason: string | null;
       } | undefined;
       return row ?? null;
+    },
+    async attributionExceptionById(id) {
+      return database.prepare(`
+        SELECT status, review_state AS reviewState, reason_code AS reasonCode
+        FROM finance_attribution_exceptions WHERE id = ?
+      `).get(id) as {
+        status: string;
+        reviewState: string;
+        reasonCode: string;
+      } | undefined ?? null;
     },
     async countNotifications() {
       const row = database.prepare(`SELECT COUNT(*) AS count FROM notifications`).get() as {

@@ -85,7 +85,7 @@ jobs:
                   ;;
               esac
               case "${path}" in
-                .gitattributes|vendor/generic-graph-workbench/*|vendor/icon-picker/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/icon-picker-vendor.mjs|scripts/icon-picker-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json)
+                .gitattributes|vendor/generic-graph-workbench/*|vendor/icon-picker/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/icon-picker-vendor.mjs|scripts/icon-picker-vendor-pin.json|scripts/icon-picker-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json)
                   vendor_changed=true
                   ;;
               esac

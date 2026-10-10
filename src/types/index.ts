@@ -271,6 +271,7 @@ export interface ContextThemePreferences {
 export interface ProjectProgress {
   totalTasks: number;
   completedTasks: number;
+  resolvedTasks?: number;
   inProgressTasks: number;
   percentComplete: number;
   health: ProjectHealth;

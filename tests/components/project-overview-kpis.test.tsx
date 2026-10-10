@@ -9,6 +9,7 @@ describe('ProjectOverviewKpis', () => {
         progress={{
           totalTasks: 20,
           completedTasks: 5,
+          resolvedTasks: 5,
           inProgressTasks: 3,
           todoTasks: 12,
           cancelledTasks: 0,
@@ -27,7 +28,7 @@ describe('ProjectOverviewKpis', () => {
       />,
     );
 
-    expect(screen.getByRole('img', { name: '25% of project tasks complete' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '25% of project tasks resolved' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: '3 of 20 tasks in progress' })).toBeInTheDocument();
     expect(screen.getByText('Project pulse')).toBeInTheDocument();
     expect(screen.getByText('On track')).toBeInTheDocument();
@@ -43,6 +44,7 @@ describe('ProjectOverviewKpis', () => {
         progress={{
           totalTasks: 0,
           completedTasks: 0,
+          resolvedTasks: 0,
           inProgressTasks: 0,
           todoTasks: 0,
           cancelledTasks: 0,
@@ -72,10 +74,11 @@ describe('ProjectOverviewKpis', () => {
         progress={{
           totalTasks: 4,
           completedTasks: 1,
+          resolvedTasks: 2,
           inProgressTasks: 1,
           todoTasks: 1,
           cancelledTasks: 1,
-          percentComplete: 25,
+          percentComplete: 50,
         }}
         pulse={{
           state: 'watch',
@@ -92,6 +95,8 @@ describe('ProjectOverviewKpis', () => {
 
     expect(screen.getByText('To do')).toBeInTheDocument();
     expect(screen.getByText('Cancelled')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '50% of project tasks resolved' })).toBeInTheDocument();
+    expect(screen.getByText('2 of 4 resolved')).toBeInTheDocument();
     expect(screen.getByText('One milestone needs attention.')).toBeInTheDocument();
     expect(screen.getByText(/Confirm the next deliverable/)).toBeInTheDocument();
   });

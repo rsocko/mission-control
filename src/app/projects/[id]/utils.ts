@@ -233,14 +233,16 @@ export function getTaskStatusColor(status: TaskStatus): string {
 export function getProgressSummary(tasks: ProjectTask[]): ProgressSummary {
   const totalTasks = tasks.length;
   const completedTasks = tasks.filter((task) => task.status === 'done').length;
+  const resolvedTasks = tasks.filter((task) => task.status === 'done' || task.status === 'cancelled').length;
   const inProgressTasks = tasks.filter((task) => task.status === 'in_progress').length;
   const todoTasks = tasks.filter((task) => task.status === 'todo').length;
   const cancelledTasks = tasks.filter((task) => task.status === 'cancelled').length;
-  const percentComplete = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const percentComplete = totalTasks > 0 ? Math.round((resolvedTasks / totalTasks) * 100) : 0;
 
   return {
     totalTasks,
     completedTasks,
+    resolvedTasks,
     inProgressTasks,
     todoTasks,
     cancelledTasks,
@@ -299,6 +301,7 @@ export function getHealthSummary(
   return deriveProjectPulse({
     totalTasks: progress.totalTasks,
     completedTasks: progress.completedTasks,
+    resolvedTasks: progress.resolvedTasks,
     percentComplete: progress.percentComplete,
     overdueTasks,
     scheduledTasks: tasks.filter((task) => Boolean(task.dueDate)).length,

@@ -30,11 +30,11 @@ const operatorRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('rollback-canary') }).strict(),
   z.object({
     action: z.literal('enable-insight-cutover'),
-    sourceGeneration: z.string().min(1).max(160),
+    sourceGeneration: z.string().trim().min(1).max(160),
   }).strict(),
   z.object({
     action: z.literal('rollback-insight-cutover'),
-    sourceGeneration: z.string().min(1).max(160),
+    sourceGeneration: z.string().trim().min(1).max(160),
   }).strict(),
 ]);
 
@@ -59,7 +59,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
     );
   }
   const { id } = await context.params;
-  const sourceGeneration = request.nextUrl.searchParams.get('sourceGeneration') ?? undefined;
+  const sourceGeneration = request.nextUrl.searchParams.get('sourceGeneration')?.trim();
+  if (!sourceGeneration) {
+    return NextResponse.json(
+      { error: 'finance_insight_cutover_generation_required' },
+      { status: 400 },
+    );
+  }
   try {
     return NextResponse.json({
       sync: await getFinanceSyncControlStatus(id),

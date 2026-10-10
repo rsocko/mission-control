@@ -78,7 +78,10 @@ describe('finance operator route async compatibility', () => {
     const status = deferred<{ scheduler: { state: string } }>();
     mocks.getStatus.mockReturnValue(status.promise);
     const responsePromise = GET(
-      new NextRequest('http://localhost/api/connectors/finance-connector/finance-operations'),
+      new NextRequest(
+        'http://localhost/api/connectors/finance-connector/finance-operations'
+        + '?sourceGeneration=publication-generation',
+      ),
       context(),
     );
 
@@ -94,8 +97,23 @@ describe('finance operator route async compatibility', () => {
     });
     expect(mocks.getCutoverReadiness).toHaveBeenCalledWith(
       'finance-connector',
-      undefined,
+      'publication-generation',
     );
+  });
+
+  it('requires an explicit source generation for readiness', async () => {
+    mocks.getStatus.mockResolvedValue({ scheduler: { state: 'scheduled' } });
+    const response = await GET(
+      new NextRequest('http://localhost/api/connectors/finance-connector/finance-operations'),
+      context(),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'finance_insight_cutover_generation_required',
+    });
+    expect(mocks.getStatus).not.toHaveBeenCalled();
+    expect(mocks.getCutoverReadiness).not.toHaveBeenCalled();
   });
 
   it('awaits operator failures so existing error mapping handles rejections', async () => {

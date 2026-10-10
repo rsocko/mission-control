@@ -10,6 +10,7 @@ import {
   selectFinanceAttentionRoute,
   type FinanceAttentionRoutingResult,
   type FinanceAttentionSignal,
+  type FinanceAttentionDelivery,
 } from '@/db/persistence/finance-attention';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { wakeNotificationDeliveryDispatcher } from '@/lib/notifications/dispatcher-wake';
@@ -55,6 +56,7 @@ export async function reconcileFinanceAttention(input: {
   connectorId: string;
   now?: Date;
   sourceSignals?: readonly FinanceAttentionSignal[];
+  deliveries?: readonly FinanceAttentionDelivery[];
 }): Promise<FinanceAttentionRoutingResult> {
   const decisionAt = input.now ?? new Date();
   try {
@@ -67,6 +69,7 @@ export async function reconcileFinanceAttention(input: {
       decisionAt,
       currency,
       sourceSignals: input.sourceSignals,
+      deliveries: input.deliveries,
     });
     if (
       hasPendingDelivery

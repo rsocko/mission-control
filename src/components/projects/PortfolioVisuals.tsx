@@ -59,10 +59,10 @@ function CompletionDonuts({ rows }: { rows: ReturnType<typeof buildCategoryPortf
         <div key={row.category} className="flex min-w-0 flex-col items-center text-center">
           <Donut
             background={`conic-gradient(${CATEGORY_COLORS[index % CATEGORY_COLORS.length]} 0 ${row.percentComplete}%, var(--surface-2) ${row.percentComplete}% 100%)`}
-            label={`${row.category}: ${row.percentComplete}% of tasks complete`}
+            label={`${row.category}: ${row.percentComplete}% of tasks resolved`}
           >
             <span className="text-lg font-bold tabular-nums text-[var(--text-primary)]">{row.percentComplete}%</span>
-            <span className="text-[8px] uppercase tracking-wider text-[var(--text-muted)]">complete</span>
+            <span className="text-[8px] uppercase tracking-wider text-[var(--text-muted)]">resolved</span>
           </Donut>
           <p className="mt-2 w-full truncate text-[11px] font-semibold text-[var(--text-secondary)]">{row.category}</p>
           <p className="text-[9px] tabular-nums text-[var(--text-muted)]">
@@ -217,7 +217,7 @@ function CategoryBalance({
           ))
         ) : (
           <span className="text-[9px] text-[var(--text-muted)]">
-            {view === 'completion' ? 'Ring = percent of tasks complete' : 'Slice = share of all portfolio tasks'}
+            {view === 'completion' ? 'Ring = percent of tasks resolved' : 'Slice = share of all portfolio tasks'}
           </span>
         )}
         <span className="ml-auto text-[9px] text-[var(--text-muted)]">Choose a view to compare concepts</span>
@@ -253,7 +253,7 @@ function TargetRunway({
             <Link
               key={project.id}
               href={`/projects/${project.id}`}
-              aria-label={`${project.name}, ${progress}% complete, ${deadlineLabel(project.daysRemaining)}`}
+              aria-label={`${project.name}, ${progress}% resolved, ${deadlineLabel(project.daysRemaining)}`}
               className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 rounded-lg px-1 py-2.5 transition-colors hover:bg-[var(--surface-2)]/30"
             >
               <span className="flex min-w-0 items-center gap-2">

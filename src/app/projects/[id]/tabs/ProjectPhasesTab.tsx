@@ -1341,8 +1341,8 @@ export function ProjectPhasesTab({
                       phase.status,
                       allEntries.map(({ task }) => task.status),
                     );
-                    const { doneCount, totalCount } = statusSummary;
-                    const pctComplete = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+                    const { resolvedCount, totalCount } = statusSummary;
+                    const pctComplete = totalCount > 0 ? Math.round((resolvedCount / totalCount) * 100) : 0;
                     const compactCompletedPhase = shouldCompactCompletedPhase(
                       phase.status,
                       completionFilteredEntries.length,
@@ -1394,7 +1394,7 @@ export function ProjectPhasesTab({
                               <span className="text-xs text-[var(--text-tertiary)]">
                                 {totalCount === 0
                                   ? 'No tasks'
-                                  : `${doneCount} ${doneCount === 1 ? 'task' : 'tasks'} complete`}
+                                  : `${resolvedCount} ${resolvedCount === 1 ? 'task' : 'tasks'} resolved`}
                               </span>
                               <button
                                 type="button"
@@ -1532,7 +1532,7 @@ export function ProjectPhasesTab({
                                       {/* Progress indicator */}
                                       {totalCount > 0 && (
                                         <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">
-                                          <span className="font-medium text-[var(--text-secondary)]">{doneCount}/{totalCount}</span>
+                                          <span className="font-medium text-[var(--text-secondary)]">{resolvedCount}/{totalCount}</span>
                                           <span className="relative h-1.5 w-16 overflow-hidden rounded-full bg-[var(--surface-2)]">
                                             <span
                                               className="absolute inset-y-0 left-0 rounded-full transition-all duration-300"

@@ -531,7 +531,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
               {project.name}
             </h1>
             <div className="hidden sm:flex items-center gap-4 text-xs text-[var(--text-tertiary)] tabular-nums flex-shrink-0">
-              <span><span className="font-semibold text-[var(--text-primary)]">{progress.percentComplete}%</span> done</span>
+              <span><span className="font-semibold text-[var(--text-primary)]">{progress.percentComplete}%</span> resolved</span>
               <span><span className="font-semibold text-[var(--text-primary)]">{progress.totalTasks}</span> tasks</span>
               <span><span className="font-semibold text-[var(--text-primary)]">{phases.length}</span> phases</span>
             </div>

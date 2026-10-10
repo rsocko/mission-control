@@ -25,6 +25,7 @@ function makeProject(
       color: '#3b82f6',
       totalTasks: 4,
       completedTasks: 2,
+      resolvedTasks: 2,
       inProgressTasks: 1,
       percentComplete: 50,
     }],
@@ -47,6 +48,7 @@ const summary: PortfolioSummary = {
   atRiskProjects: 1,
   totalTasks: 36,
   completedTasks: 18,
+  resolvedTasks: 18,
   inProgressTasks: 9,
   portfolioPercent: 50,
   completedThisWeek: 3,
@@ -84,11 +86,11 @@ describe('ProjectsPortfolioDashboard', () => {
   it('supports category expansion, drill-down, and direct phase navigation', () => {
     renderDashboard();
 
-    expect(screen.getAllByRole('img', { name: /tasks complete/ })).toHaveLength(8);
+    expect(screen.getAllByRole('img', { name: /tasks resolved/ })).toHaveLength(8);
     fireEvent.click(screen.getByRole('button', { name: 'Show 1 more' }));
-    expect(screen.getAllByRole('img', { name: /tasks complete/ })).toHaveLength(9);
+    expect(screen.getAllByRole('img', { name: /tasks resolved/ })).toHaveLength(9);
 
-    fireEvent.click(screen.getByRole('button', { name: /Category 1: 25% of tasks complete/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Category 1: 25% of tasks resolved/ }));
     expect(screen.getByText('Category 1 projects')).toBeInTheDocument();
     expect(screen.queryByText('Project 2')).not.toBeInTheDocument();
 

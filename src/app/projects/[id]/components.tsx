@@ -167,7 +167,7 @@ export function ProjectOverviewKpis({
         <CardContent className="grid h-full gap-6 p-5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:p-6">
           <div
             role="img"
-            aria-label={`${progress.percentComplete}% of project tasks complete`}
+            aria-label={`${progress.percentComplete}% of project tasks resolved`}
             className="relative mx-auto h-28 w-28 shrink-0 rounded-full"
             style={{ background: ringBackground }}
           >
@@ -176,7 +176,7 @@ export function ProjectOverviewKpis({
                 {progress.percentComplete}%
               </span>
               <span className="text-[9px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
-                complete
+                resolved
               </span>
             </div>
           </div>
@@ -186,7 +186,7 @@ export function ProjectOverviewKpis({
               <p className="text-sm font-semibold text-[var(--text-primary)]">Project progress</p>
               <p className="text-xs tabular-nums text-[var(--text-tertiary)]">
                 {progress.totalTasks > 0
-                  ? `${progress.completedTasks} of ${progress.totalTasks} complete`
+                  ? `${progress.resolvedTasks} of ${progress.totalTasks} resolved`
                   : 'No tasks assigned yet'}
               </p>
             </div>

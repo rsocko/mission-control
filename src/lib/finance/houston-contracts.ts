@@ -137,6 +137,9 @@ const transactionSchema = z.object({
       'unavailable',
     ]).nullable(),
   }).strict(),
+  supportingHints: z.object({
+    businessContext: z.string().max(120).nullable(),
+  }).strict(),
 }).strict();
 
 const expectedTransactionStateSchema = z.object({

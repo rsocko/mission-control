@@ -31,6 +31,7 @@ export const financeTransactions = sqliteTable('finance_transactions', {
   date: text('date').notNull(), // YYYY-MM-DD
   amount: real('amount').notNull(),
   merchantName: text('merchant_name'),
+  businessContext: text('business_context'),
   merchantLogoUrl: text('merchant_logo_url'),
   categoryId: text('category_id'),
   originalCategory: text('original_category'),

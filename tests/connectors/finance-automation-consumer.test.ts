@@ -264,6 +264,9 @@ describe('finance automation consumer contracts', () => {
     expect(notification.navigationTarget).toBe('/finance/review');
     expect(notification.isActionable).toBe(false);
     expect(JSON.stringify(notification.metadata)).not.toContain('transaction-one');
+    expect(notification.metadata).toMatchObject({
+      financeAttention: { signalFamily: 'anomaly' },
+    });
     expect(financeNotificationCatalogKey(notification.templateKey))
       .toBe('finance_duplicate_transaction');
     expect(financeNotificationCatalogKey('finance-connector-health'))

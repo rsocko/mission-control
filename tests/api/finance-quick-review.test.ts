@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   prepareResearch: vi.fn(),
   researchContext: vi.fn(),
   researchVendor: vi.fn(),
+  previewRule: vi.fn(),
+  createRule: vi.fn(),
 }));
 
 vi.mock('@/lib/connectors/monarch-money/finance-request', () => ({
@@ -20,6 +22,8 @@ vi.mock('@/lib/finance/quick-review-service', () => ({
   startQuickReviewSession: mocks.startSession,
   applyQuickReviewAction: mocks.applyAction,
   getQuickReviewResearchContext: mocks.researchContext,
+  previewQuickReviewMerchantRule: mocks.previewRule,
+  createQuickReviewMerchantRule: mocks.createRule,
 }));
 
 vi.mock('@/lib/connectors/monarch-money/quick-review-client', () => ({
@@ -243,5 +247,97 @@ describe('finance quick review API boundary', () => {
       code: 'vendor_research_provider_unavailable',
       retryable: false,
     });
+  });
+
+  it('binds rule preview to the active review session', async () => {
+    mocks.previewRule.mockResolvedValue({
+      contractVersion: '1.0',
+      policyVersion: 7,
+      suggestion: {
+        kind: 'merchant',
+        merchantPattern: 'INVENTED MARKET',
+        businessEntityPattern: 'INVENTED MARKET HOLDINGS',
+        kidId: 'kid-alex',
+        confidence: 'likely',
+        requiresConfirmation: true,
+      },
+    });
+    const { POST } = await import('@/app/api/finance/quick-review/rule-suggestion/route');
+    const response = await POST(new Request('https://mc.example/api/finance/quick-review/rule-suggestion', {
+      method: 'POST',
+      body: JSON.stringify({
+        contractVersion: '1.0',
+        sessionRef: 'session_ref_123456789',
+        resumeToken: 'resume_token_123456789',
+        reviewRef: 'review_ref_1234567890',
+        stateToken: 'state_token_123456789',
+        merchantName: 'Invented Market',
+        kidId: 'kid-alex',
+        suggestReusableRule: true,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      contractVersion: '1.0',
+      suggestion: expect.objectContaining({ merchantPattern: 'INVENTED MARKET' }),
+    });
+    expect(mocks.previewRule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionRef: 'session_ref_123456789',
+        reviewRef: 'review_ref_1234567890',
+      }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('rejects browser-controlled account references on rule creation', async () => {
+    const { POST } = await import('@/app/api/finance/quick-review/rules/route');
+    const response = await POST(new Request('https://mc.example/api/finance/quick-review/rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contractVersion: '2.0',
+        sessionRef: 'session_ref_123456789',
+        resumeToken: 'resume_token_123456789',
+        reviewRef: 'review_ref_1234567890',
+        stateToken: 'state_token_123456789',
+        idempotencyKey: '4948bf5e-cd3d-47fe-8935-4e00949d1f3c',
+        confirmation: {
+          confirmed: true,
+          confirmedAt: '2026-10-09T20:00:00.000-04:00',
+          globalScopeConfirmed: false,
+        },
+        rule: {
+          outcome: 'kid',
+          kidId: 'kid-alex',
+          pattern: 'INVENTED MARKET',
+          businessEntityPattern: null,
+          scope: 'accounts',
+          accountRefs: ['browser-controlled-account'],
+          confidence: 'likely',
+        },
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.createRule).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized merchant rule requests before parsing them', async () => {
+    const { POST } = await import('@/app/api/finance/quick-review/rules/route');
+    const response = await POST(new Request('https://mc.example/api/finance/quick-review/rules', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': '70000',
+      },
+      body: '{}',
+    }));
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    await expect(response.json()).resolves.toMatchObject({ code: 'payload_too_large' });
+    expect(mocks.createRule).not.toHaveBeenCalled();
   });
 });

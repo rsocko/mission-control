@@ -392,7 +392,7 @@ export function ProjectSettingsTab({
             </div>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-[var(--space-2)]">
             <label className="text-sm font-medium text-[var(--text-secondary)]">Icon</label>
             <IconPickerButton
               value={project.icon || null}

@@ -7,6 +7,10 @@ import {
   tyrionQuickReviewResearchResponseSchema,
   tyrionQuickReviewRuleRequestSchema,
   tyrionQuickReviewRuleResponseSchema,
+  tyrionMerchantRuleCreateRequestSchema,
+  tyrionMerchantRuleCreateResponseSchema,
+  type TyrionMerchantRuleCreateRequest,
+  type TyrionMerchantRuleCreateResponse,
   type TyrionQuickReviewRankRequest,
   type TyrionQuickReviewRankResponse,
   type TyrionQuickReviewResearchRequest,
@@ -18,6 +22,7 @@ import {
 const TYRION_INTERNAL_ORIGIN = 'http://tyrion-operations-ui:3000';
 const TYRION_INTERNAL_AUTHORITY = 'tyrion-operations-ui:3000';
 const QUICK_REVIEW_PATH = '/api/internal/v1/finance/quick-review';
+const MERCHANT_RULE_PATH = '/api/internal/v2/attribution/rules';
 const MAX_BODY_BYTES = 65_536;
 const TIMEOUT_MS = 15_000;
 
@@ -150,6 +155,85 @@ export class TyrionFinanceReviewClient {
       tyrionQuickReviewRuleResponseSchema,
       signal,
     );
+  }
+
+  async createMerchantRule(
+    request: TyrionMerchantRuleCreateRequest,
+    signal?: AbortSignal,
+  ): Promise<TyrionMerchantRuleCreateResponse> {
+    const parsedRequest = tyrionMerchantRuleCreateRequestSchema.safeParse(request);
+    if (!parsedRequest.success) {
+      throw new TyrionFinanceReviewError('invalid_request', 'Invalid merchant rule request', 400, false);
+    }
+    const body = JSON.stringify(parsedRequest.data);
+    if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) {
+      throw new TyrionFinanceReviewError('payload_too_large', 'Merchant rule request is too large', 413, false);
+    }
+    const timeoutSignal = AbortSignal.timeout(TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await this.fetchImplementation(`${TYRION_INTERNAL_ORIGIN}${MERCHANT_RULE_PATH}`, {
+        method: 'POST',
+        headers: {
+          Host: TYRION_INTERNAL_AUTHORITY,
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body,
+        cache: 'no-store',
+        redirect: 'error',
+        signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
+      });
+    } catch {
+      throw new TyrionFinanceReviewError(
+        timeoutSignal.aborted ? 'merchant_rule_timeout' : 'merchant_rule_creation_failed',
+        timeoutSignal.aborted ? 'Tyrion merchant rule creation timed out' : 'Tyrion merchant rule creation is unavailable',
+        503,
+        true,
+      );
+    }
+    const parsedBody = await boundedJson(response);
+    if (!response.ok) {
+      const rawCode = parsedBody && typeof parsedBody === 'object' && 'error' in parsedBody
+        ? (parsedBody as { error?: { code?: unknown } }).error?.code
+        : null;
+      const code = typeof rawCode === 'string' && /^[a-z0-9_]{1,80}$/.test(rawCode)
+        ? rawCode
+        : 'merchant_rule_creation_failed';
+      throw new TyrionFinanceReviewError(
+        code,
+        `Tyrion merchant rule request failed (${code})`,
+        response.status,
+        response.status >= 500,
+      );
+    }
+    const parsedResponse = tyrionMerchantRuleCreateResponseSchema.safeParse(parsedBody);
+    if (!parsedResponse.success) {
+      throw new TyrionFinanceReviewError('invalid_contract', 'Invalid Tyrion merchant rule response', 502, false);
+    }
+    const expectedRule = parsedRequest.data.rule;
+    const actualRule = parsedResponse.data.rule;
+    if (
+      actualRule.outcome !== expectedRule.outcome
+      || actualRule.kidId !== expectedRule.kidId
+      || actualRule.pattern !== expectedRule.pattern
+      || actualRule.businessEntityPattern !== expectedRule.businessEntityPattern
+      || actualRule.scope !== expectedRule.scope
+      || actualRule.confidence !== expectedRule.confidence
+      || JSON.stringify(actualRule.accountRefs) !== JSON.stringify(expectedRule.accountRefs)
+      || (
+        parsedResponse.data.outcome === 'created'
+        && parsedResponse.data.policyVersion !== parsedRequest.data.expectedPolicyVersion + 1
+      )
+    ) {
+      throw new TyrionFinanceReviewError(
+        'invalid_contract',
+        'Tyrion merchant rule response did not match the confirmed request',
+        502,
+        false,
+      );
+    }
+    return parsedResponse.data;
   }
 
   private async post<TRequest, TResponse>(

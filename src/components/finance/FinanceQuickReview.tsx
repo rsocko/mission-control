@@ -37,14 +37,17 @@ import { cn } from '@/lib/utils';
 import {
   FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
   financeReviewSessionSchema,
+  financeMerchantRuleCreateResponseSchema,
+  financeQuickReviewRuleSuggestionResponseSchema,
   financeVendorResearchResponseSchema,
-  tyrionQuickReviewRuleResponseSchema,
+  TYRION_MERCHANT_RULE_CONTRACT_VERSION,
+  type FinanceMerchantRuleCreateResponse,
+  type FinanceQuickReviewRuleSuggestionResponse,
   type FinanceReviewActionRequest,
   type FinanceReviewFilters,
   type FinanceReviewItem,
   type FinanceReviewSession,
   type FinanceVendorResearchResponse,
-  type TyrionQuickReviewRuleResponse,
 } from '@/lib/finance/quick-review-contract';
 
 const RESUME_KEY = 'mc.financeQuickReview.resume.v1';
@@ -69,6 +72,8 @@ const PRESETS: Array<{ value: FinanceReviewFilters['preset']; label: string }> =
 
 type ViewState = 'loading' | 'ready' | 'error';
 type ActionName = 'confirm' | 'correct' | 'skip';
+type MerchantRuleOutcome = 'kid' | 'parent-shared' | 'review';
+type MerchantRuleScope = 'accounts' | 'global';
 
 interface CorrectionDraft {
   kidId: string;
@@ -171,7 +176,17 @@ export function FinanceQuickReview() {
   const [researchPending, setResearchPending] = useState(false);
   const [research, setResearch] = useState<FinanceVendorResearchResponse | null>(null);
   const [rulePending, setRulePending] = useState(false);
-  const [ruleSuggestion, setRuleSuggestion] = useState<TyrionQuickReviewRuleResponse['suggestion']>(null);
+  const [ruleSuggestion, setRuleSuggestion] = useState<
+    FinanceQuickReviewRuleSuggestionResponse['suggestion']
+  >(null);
+  const [ruleOutcome, setRuleOutcome] = useState<MerchantRuleOutcome>('kid');
+  const [ruleScope, setRuleScope] = useState<MerchantRuleScope>('accounts');
+  const [ruleConfidence, setRuleConfidence] = useState<'definite' | 'likely'>('likely');
+  const [businessEntityPattern, setBusinessEntityPattern] = useState('');
+  const [globalScopeConfirmed, setGlobalScopeConfirmed] = useState(false);
+  const [ruleCreatePending, setRuleCreatePending] = useState(false);
+  const [createdRule, setCreatedRule] = useState<FinanceMerchantRuleCreateResponse | null>(null);
+  const [ruleIdempotencyKey, setRuleIdempotencyKey] = useState<string | null>(null);
   const actionRegionRef = useRef<HTMLDivElement>(null);
 
   const item = session?.current ?? null;
@@ -220,6 +235,8 @@ export function FinanceQuickReview() {
       setCorrecting(false);
       setResearch(null);
       setRuleSuggestion(null);
+      setCreatedRule(null);
+      setRuleIdempotencyKey(null);
       saveResume(parsed.data);
       setStatus(resume ? 'Review session resumed.' : 'Review session ready.');
       setViewState('ready');
@@ -285,6 +302,8 @@ export function FinanceQuickReview() {
       setCorrecting(false);
       setResearch(null);
       setRuleSuggestion(null);
+      setCreatedRule(null);
+      setRuleIdempotencyKey(null);
       saveResume(parsed.data);
       setStatus(
         action === 'skip'
@@ -365,7 +384,7 @@ export function FinanceQuickReview() {
   };
 
   const previewRuleSuggestion = async () => {
-    if (!item || !draft.kidId || rulePending || !online) return;
+    if (!session || !item || !draft.kidId || rulePending || !online) return;
     setRulePending(true);
     setRuleSuggestion(null);
     try {
@@ -374,6 +393,10 @@ export function FinanceQuickReview() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contractVersion: FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
+          sessionRef: session?.sessionRef,
+          resumeToken: session?.resumeToken,
+          reviewRef: item.reviewRef,
+          stateToken: item.stateToken,
           merchantName: draft.payee.trim(),
           kidId: draft.kidId,
           suggestReusableRule: true,
@@ -385,9 +408,16 @@ export function FinanceQuickReview() {
         setStatus(apiError?.error ?? 'A reusable rule suggestion could not be prepared.');
         return;
       }
-      const parsed = tyrionQuickReviewRuleResponseSchema.safeParse(body);
+      const parsed = financeQuickReviewRuleSuggestionResponseSchema.safeParse(body);
       if (!parsed.success) throw new Error('Invalid rule suggestion response');
       setRuleSuggestion(parsed.data.suggestion);
+      setCreatedRule(null);
+      setRuleIdempotencyKey(crypto.randomUUID());
+      setRuleOutcome('kid');
+      setRuleScope('accounts');
+      setRuleConfidence(parsed.data.suggestion?.confidence ?? 'likely');
+      setBusinessEntityPattern(parsed.data.suggestion?.businessEntityPattern ?? '');
+      setGlobalScopeConfirmed(false);
       setStatus(parsed.data.suggestion
         ? 'Rule suggestion ready. It has not been applied.'
         : 'Tyrion did not suggest a reusable rule.');
@@ -395,6 +425,70 @@ export function FinanceQuickReview() {
       setStatus('A reusable rule suggestion could not be prepared.');
     } finally {
       setRulePending(false);
+    }
+  };
+
+  const createMerchantRule = async () => {
+    if (
+      !session
+      || !item
+      || !ruleSuggestion
+      || !ruleIdempotencyKey
+      || ruleCreatePending
+      || !online
+    ) return;
+    setRuleCreatePending(true);
+    setCreatedRule(null);
+    setStatus('Creating the confirmed merchant rule...');
+    try {
+      const response = await fetch('/api/finance/quick-review/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contractVersion: TYRION_MERCHANT_RULE_CONTRACT_VERSION,
+          sessionRef: session.sessionRef,
+          resumeToken: session.resumeToken,
+          reviewRef: item.reviewRef,
+          stateToken: item.stateToken,
+          idempotencyKey: ruleIdempotencyKey,
+          confirmation: {
+            confirmed: true,
+            confirmedAt: new Date().toISOString(),
+            globalScopeConfirmed: ruleScope === 'global' && globalScopeConfirmed,
+          },
+          rule: {
+            outcome: ruleOutcome,
+            kidId: ruleOutcome === 'kid' ? ruleSuggestion.kidId : null,
+            pattern: ruleSuggestion.merchantPattern,
+            businessEntityPattern: businessEntityPattern.trim() || null,
+            scope: ruleScope,
+            confidence: ruleConfidence,
+          },
+        }),
+      });
+      const body = await response.json().catch(() => null) as unknown;
+      if (!response.ok) {
+        const apiError = body as ApiErrorBody | null;
+        if (response.status === 409) {
+          setRuleSuggestion(null);
+          setRuleIdempotencyKey(null);
+          setStatus('The attribution policy changed. Preview the rule again before confirming.');
+        } else {
+          setStatus(apiError?.error ?? 'The merchant rule could not be created.');
+        }
+        return;
+      }
+      const parsed = financeMerchantRuleCreateResponseSchema.safeParse(body);
+      if (!parsed.success) throw new Error('Invalid merchant rule creation response');
+      setCreatedRule(parsed.data);
+      setRuleSuggestion(null);
+      setStatus(parsed.data.outcome === 'replayed'
+        ? 'This merchant rule was already created.'
+        : 'Merchant rule created. The transaction correction remains unchanged.');
+    } catch {
+      setStatus('The merchant rule could not be created. Review the settings and try again.');
+    } finally {
+      setRuleCreatePending(false);
     }
   };
 
@@ -726,24 +820,168 @@ export function FinanceQuickReview() {
                     </label>
                   </div>
                   {item.corrections.maySuggestKidRule && draft.kidId && draft.kidId !== (item.kid?.id ?? '') && (
-                    <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        disabled={rulePending || !draft.payee.trim() || !online}
-                        onClick={() => void previewRuleSuggestion()}
-                      >
-                        {rulePending ? <Loader2 className="motion-safe:animate-spin" /> : <Sparkles />}
-                        Preview reusable Kids rule
-                      </Button>
+                    <section
+                      aria-labelledby="merchant-rule-heading"
+                      className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3 sm:p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h4 id="merchant-rule-heading" className="text-sm font-semibold text-[var(--text-primary)]">
+                            Reusable merchant rule
+                          </h4>
+                          <p className="mt-1 max-w-[70ch] text-xs text-[var(--text-muted)]">
+                            Previewing and creating a rule is separate from saving this transaction correction.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={rulePending || ruleCreatePending || !draft.payee.trim() || !online}
+                          onClick={() => void previewRuleSuggestion()}
+                        >
+                          {rulePending ? <Loader2 className="motion-safe:animate-spin" /> : <Sparkles />}
+                          {ruleSuggestion ? 'Refresh rule preview' : 'Preview reusable rule'}
+                        </Button>
+                      </div>
+
                       {ruleSuggestion && (
-                        <p className="mt-2 text-xs text-[var(--text-secondary)]">
-                          Suggested merchant pattern: <strong>{ruleSuggestion.merchantPattern}</strong>.
-                          This advisory has not been applied and requires a separate confirmation in Tyrion.
-                        </p>
+                        <div className="mt-4 space-y-4 border-t border-[var(--border)] pt-4">
+                          <div className="rounded-lg bg-[var(--surface-1)] p-3">
+                            <p className="text-xs font-medium text-[var(--text-primary)]">
+                              Merchant pattern: <span className="break-words">{ruleSuggestion.merchantPattern}</span>
+                            </p>
+                            <p className="mt-1 text-xs text-[var(--text-muted)]">
+                              This advisory has not been applied. Review every setting below, then explicitly create it.
+                            </p>
+                          </div>
+
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="text-xs text-[var(--text-secondary)]">
+                              <span id="merchant-rule-outcome-label">Outcome</span>
+                              <Select
+                                value={ruleOutcome}
+                                onValueChange={(value) => setRuleOutcome(value as MerchantRuleOutcome)}
+                              >
+                                <SelectTrigger
+                                  aria-labelledby="merchant-rule-outcome-label"
+                                  className="mt-1 w-full bg-[var(--surface-1)]"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="kid">Assign to selected kid</SelectItem>
+                                  <SelectItem value="parent-shared">Parent / shared expense</SelectItem>
+                                  <SelectItem value="review">Send to review</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="text-xs text-[var(--text-secondary)]">
+                              <span id="merchant-rule-confidence-label">Confidence</span>
+                              <Select
+                                value={ruleConfidence}
+                                onValueChange={(value) => setRuleConfidence(value as 'definite' | 'likely')}
+                              >
+                                <SelectTrigger
+                                  aria-labelledby="merchant-rule-confidence-label"
+                                  className="mt-1 w-full bg-[var(--surface-1)]"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="likely">Likely</SelectItem>
+                                  <SelectItem value="definite">Definite</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <label className="text-xs text-[var(--text-secondary)] sm:col-span-2">
+                              Business entity pattern <span className="text-[var(--text-muted)]">(optional)</span>
+                              <input
+                                value={businessEntityPattern}
+                                minLength={2}
+                                maxLength={160}
+                                onChange={(event) => setBusinessEntityPattern(event.target.value)}
+                                placeholder="Example Holdings LLC"
+                                className="mt-1 min-h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 text-base text-[var(--text-primary)] sm:text-sm"
+                              />
+                            </label>
+                          </div>
+
+                          <fieldset>
+                            <legend className="text-xs font-medium text-[var(--text-secondary)]">Scope</legend>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              <label className="flex min-h-12 cursor-pointer items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-xs text-[var(--text-secondary)]">
+                                <input
+                                  type="radio"
+                                  name="merchant-rule-scope"
+                                  value="accounts"
+                                  checked={ruleScope === 'accounts'}
+                                  onChange={() => {
+                                    setRuleScope('accounts');
+                                    setGlobalScopeConfirmed(false);
+                                  }}
+                                />
+                                <span>
+                                  <strong className="block text-[var(--text-primary)]">Current account</strong>
+                                  Applies only to the account for this transaction.
+                                </span>
+                              </label>
+                              <label className="flex min-h-12 cursor-pointer items-start gap-2 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-100">
+                                <input
+                                  type="radio"
+                                  name="merchant-rule-scope"
+                                  value="global"
+                                  checked={ruleScope === 'global'}
+                                  onChange={() => setRuleScope('global')}
+                                />
+                                <span>
+                                  <strong className="block text-amber-50">All accounts</strong>
+                                  Applies to matching merchants across the household.
+                                </span>
+                              </label>
+                            </div>
+                          </fieldset>
+
+                          {ruleScope === 'global' && (
+                            <label className="flex items-start gap-2 rounded-lg border border-amber-300/40 bg-amber-300/10 p-3 text-xs text-amber-50">
+                              <input
+                                type="checkbox"
+                                checked={globalScopeConfirmed}
+                                onChange={(event) => setGlobalScopeConfirmed(event.target.checked)}
+                              />
+                              <span>
+                                I understand this rule will apply to matching merchants on every household account.
+                              </span>
+                            </label>
+                          )}
+
+                          <Button
+                            type="button"
+                            disabled={
+                              ruleCreatePending
+                              || !online
+                              || (ruleScope === 'global' && !globalScopeConfirmed)
+                              || (businessEntityPattern.trim().length === 1)
+                            }
+                            onClick={() => void createMerchantRule()}
+                          >
+                            {ruleCreatePending ? <Loader2 className="motion-safe:animate-spin" /> : <ShieldCheck />}
+                            Create confirmed rule
+                          </Button>
+                        </div>
                       )}
-                    </div>
+
+                      {createdRule && (
+                        <div role="status" className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-3 text-xs text-emerald-100">
+                          <strong className="block text-emerald-50">
+                            {createdRule.outcome === 'replayed' ? 'Rule already created' : 'Rule created'}
+                          </strong>
+                          {createdRule.rule.pattern} is enabled for {
+                            createdRule.rule.scope === 'global' ? 'all accounts' : 'this account'
+                          }. The transaction correction has not been saved.
+                        </div>
+                      )}
+                    </section>
                   )}
                   <Button className="mt-4 w-full sm:w-auto" disabled={!canCorrect || !!actionPending || !online} onClick={() => void applyAction('correct')}>
                     {actionPending === 'correct' ? <Loader2 className="motion-safe:animate-spin" /> : <WandSparkles />}

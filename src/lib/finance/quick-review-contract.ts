@@ -334,19 +334,40 @@ export const tyrionQuickReviewResearchResponseSchema = z.object({
 export const tyrionQuickReviewRuleRequestSchema = z.object({
   contractVersion: z.literal(FINANCE_QUICK_REVIEW_CONTRACT_VERSION),
   merchantName: normalizedTyrionNameSchema,
+  businessEntityName: normalizedTyrionNameSchema.nullable(),
+  accountRef: tyrionOpaqueRefSchema,
+  scope: z.literal('accounts'),
   kidId: tyrionOpaqueRefSchema,
   suggestReusableRule: z.boolean(),
 }).strict();
 
 export const tyrionQuickReviewRuleResponseSchema = z.object({
   contractVersion: z.literal(FINANCE_QUICK_REVIEW_CONTRACT_VERSION),
+  policyVersion: z.number().int().positive(),
   suggestion: z.object({
     kind: z.literal('merchant'),
     merchantPattern: z.string().trim().min(1).max(120),
+    businessEntityPattern: z.string().trim().min(2).max(160).nullable(),
     kidId: tyrionOpaqueRefSchema,
     confidence: z.literal('likely'),
     requiresConfirmation: z.literal(true),
   }).strict().nullable(),
+}).strict();
+
+export const financeQuickReviewRuleSuggestionRequestSchema = z.object({
+  contractVersion: z.literal(FINANCE_QUICK_REVIEW_CONTRACT_VERSION),
+  sessionRef: z.string().trim().min(16).max(256),
+  resumeToken: z.string().trim().min(16).max(512),
+  reviewRef: z.string().trim().min(16).max(256),
+  stateToken: z.string().trim().min(16).max(256),
+  merchantName: normalizedTyrionNameSchema,
+  kidId: tyrionOpaqueRefSchema,
+  suggestReusableRule: z.literal(true),
+}).strict();
+
+export const financeQuickReviewRuleSuggestionResponseSchema = z.object({
+  contractVersion: z.literal(FINANCE_QUICK_REVIEW_CONTRACT_VERSION),
+  suggestion: tyrionQuickReviewRuleResponseSchema.shape.suggestion,
 }).strict();
 
 export type TyrionQuickReviewRankRequest = z.infer<typeof tyrionQuickReviewRankRequestSchema>;
@@ -355,3 +376,141 @@ export type TyrionQuickReviewResearchRequest = z.infer<typeof tyrionQuickReviewR
 export type TyrionQuickReviewResearchResponse = z.infer<typeof tyrionQuickReviewResearchResponseSchema>;
 export type TyrionQuickReviewRuleRequest = z.infer<typeof tyrionQuickReviewRuleRequestSchema>;
 export type TyrionQuickReviewRuleResponse = z.infer<typeof tyrionQuickReviewRuleResponseSchema>;
+export type FinanceQuickReviewRuleSuggestionRequest = z.infer<
+  typeof financeQuickReviewRuleSuggestionRequestSchema
+>;
+export type FinanceQuickReviewRuleSuggestionResponse = z.infer<
+  typeof financeQuickReviewRuleSuggestionResponseSchema
+>;
+
+export const TYRION_MERCHANT_RULE_CONTRACT_VERSION = '2.0' as const;
+
+const merchantRulePatternSchema = z.string().trim().min(2).max(160)
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), 'Pattern contains controls')
+  .transform((value) => value.replace(/\s+/g, ' '));
+const merchantRuleAccountRefSchema = z.string().trim().min(1).max(512)
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), 'Account reference contains controls');
+const merchantRuleIdempotencyKeySchema = z.string()
+  .min(8)
+  .max(128)
+  .regex(/^[A-Za-z0-9._:-]+$/);
+
+export const tyrionMerchantRuleSchema = z.object({
+  outcome: z.enum(['kid', 'parent-shared', 'review']),
+  kidId: tyrionOpaqueRefSchema.nullable(),
+  pattern: merchantRulePatternSchema,
+  businessEntityPattern: merchantRulePatternSchema.nullable(),
+  scope: z.enum(['global', 'accounts']),
+  accountRefs: z.array(merchantRuleAccountRefSchema).max(32)
+    .refine((values) => new Set(values).size === values.length, 'Account references must be unique'),
+  confidence: z.enum(['definite', 'likely']),
+}).strict().superRefine((rule, context) => {
+  if ((rule.outcome === 'kid') !== (rule.kidId !== null)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'kidId is required only for kid outcomes',
+      path: ['kidId'],
+    });
+  }
+  if (rule.scope === 'global' && rule.accountRefs.length !== 0) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Global rules cannot include account references',
+      path: ['accountRefs'],
+    });
+  }
+  if (rule.scope === 'accounts' && rule.accountRefs.length === 0) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Account-scoped rules require at least one account reference',
+      path: ['accountRefs'],
+    });
+  }
+});
+
+export const tyrionMerchantRuleCreateRequestSchema = z.object({
+  contractVersion: z.literal(TYRION_MERCHANT_RULE_CONTRACT_VERSION),
+  expectedPolicyVersion: z.number().int().positive(),
+  idempotencyKey: merchantRuleIdempotencyKeySchema,
+  confirmation: z.object({
+    confirmed: z.literal(true),
+    confirmedAt: z.iso.datetime({ offset: true }),
+  }).strict(),
+  rule: tyrionMerchantRuleSchema,
+}).strict();
+
+export const tyrionMerchantRuleCreateResponseSchema = z.object({
+  contractVersion: z.literal(TYRION_MERCHANT_RULE_CONTRACT_VERSION),
+  outcome: z.enum(['created', 'replayed']),
+  policyVersion: z.number().int().positive(),
+  rule: tyrionMerchantRuleSchema.extend({
+    id: z.string().trim().min(1).max(256),
+    enabled: z.literal(true),
+  }).strict(),
+}).strict();
+
+export const financeMerchantRuleCreateRequestSchema = z.object({
+  contractVersion: z.literal(TYRION_MERCHANT_RULE_CONTRACT_VERSION),
+  sessionRef: z.string().trim().min(16).max(256),
+  resumeToken: z.string().trim().min(16).max(512),
+  reviewRef: z.string().trim().min(16).max(256),
+  stateToken: z.string().trim().min(16).max(256),
+  idempotencyKey: z.uuid(),
+  confirmation: z.object({
+    confirmed: z.literal(true),
+    confirmedAt: z.iso.datetime({ offset: true }),
+    globalScopeConfirmed: z.boolean(),
+  }).strict(),
+  rule: z.object({
+    outcome: z.enum(['kid', 'parent-shared', 'review']),
+    kidId: tyrionOpaqueRefSchema.nullable(),
+    pattern: merchantRulePatternSchema,
+    businessEntityPattern: merchantRulePatternSchema.nullable(),
+    scope: z.enum(['global', 'accounts']),
+    confidence: z.enum(['definite', 'likely']),
+  }).strict(),
+}).strict().superRefine((request, context) => {
+  if ((request.rule.outcome === 'kid') !== (request.rule.kidId !== null)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'kidId is required only for kid outcomes',
+      path: ['rule', 'kidId'],
+    });
+  }
+  if (request.rule.scope === 'global' && !request.confirmation.globalScopeConfirmed) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Global scope requires an additional confirmation',
+      path: ['confirmation', 'globalScopeConfirmed'],
+    });
+  }
+  if (request.rule.scope === 'accounts' && request.confirmation.globalScopeConfirmed) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Account scope cannot include global confirmation',
+      path: ['confirmation', 'globalScopeConfirmed'],
+    });
+  }
+});
+
+export const financeMerchantRuleCreateResponseSchema = z.object({
+  contractVersion: z.literal(TYRION_MERCHANT_RULE_CONTRACT_VERSION),
+  outcome: z.enum(['created', 'replayed']),
+  policyVersion: z.number().int().positive(),
+  rule: z.object({
+    id: z.string().trim().min(1).max(256),
+    outcome: z.enum(['kid', 'parent-shared', 'review']),
+    kidId: tyrionOpaqueRefSchema.nullable(),
+    pattern: merchantRulePatternSchema,
+    businessEntityPattern: merchantRulePatternSchema.nullable(),
+    scope: z.enum(['global', 'accounts']),
+    confidence: z.enum(['definite', 'likely']),
+    enabled: z.literal(true),
+  }).strict(),
+}).strict();
+
+export type TyrionMerchantRule = z.infer<typeof tyrionMerchantRuleSchema>;
+export type TyrionMerchantRuleCreateRequest = z.infer<typeof tyrionMerchantRuleCreateRequestSchema>;
+export type TyrionMerchantRuleCreateResponse = z.infer<typeof tyrionMerchantRuleCreateResponseSchema>;
+export type FinanceMerchantRuleCreateRequest = z.infer<typeof financeMerchantRuleCreateRequestSchema>;
+export type FinanceMerchantRuleCreateResponse = z.infer<typeof financeMerchantRuleCreateResponseSchema>;

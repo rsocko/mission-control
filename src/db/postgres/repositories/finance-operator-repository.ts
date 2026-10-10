@@ -1160,6 +1160,20 @@ export function createPostgresFinanceOperatorPersistence(
         ORDER BY updated_at DESC
         LIMIT 1
       `, [connectorId]);
+      const [insightActivation] = await query<{
+        deliveryEnabled: boolean;
+        historyOperationExpected: boolean;
+      }>(pool, `
+        SELECT
+          EXISTS (
+            SELECT 1 FROM finance_insight_cutovers
+            WHERE connector_id = $1 AND delivery_enabled = true
+          ) AS "deliveryEnabled",
+          EXISTS (
+            SELECT 1 FROM finance_insight_transaction_backfill_plans
+            WHERE connector_id = $1
+          ) AS "historyOperationExpected"
+      `, [connectorId]);
       return {
         sync: state
           ? {
@@ -1213,6 +1227,10 @@ export function createPostgresFinanceOperatorPersistence(
               retryable: evaluation.retryable === true,
             }
           : null,
+        insightActivation: insightActivation ?? {
+          deliveryEnabled: false,
+          historyOperationExpected: false,
+        },
       };
     },
 

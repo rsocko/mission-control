@@ -173,6 +173,11 @@ export interface FinanceOperatorProjectionSnapshot {
   updatedAt: string | null;
 }
 
+export interface FinanceOperatorInsightActivationSnapshot {
+  deliveryEnabled: boolean;
+  historyOperationExpected: boolean;
+}
+
 /**
  * A bounded read. It claims no work, takes no lease, and mutates nothing.
  */
@@ -183,6 +188,7 @@ export interface FinanceOperatorHealthSnapshot {
   projection: FinanceOperatorProjectionSnapshot | null;
   capture: FinanceOperatorCaptureSnapshot | null;
   evaluation: FinanceOperatorEvaluationSnapshot | null;
+  insightActivation: FinanceOperatorInsightActivationSnapshot;
 }
 
 // ─── Attribution policy readiness ─────────────────────────────────────────

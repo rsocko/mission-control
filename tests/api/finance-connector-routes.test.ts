@@ -24,8 +24,13 @@ function emptyHealthSnapshot() {
     sync: null,
     attribution: null,
     activeJob: null,
+    projection: null,
     capture: null,
     evaluation: null,
+    insightActivation: {
+      deliveryEnabled: false,
+      historyOperationExpected: false,
+    },
   };
 }
 
@@ -646,6 +651,10 @@ describe('finance connector routes', () => {
         lastErrorCode: null,
         retryable: false,
       },
+      insightActivation: {
+        deliveryEnabled: false,
+        historyOperationExpected: false,
+      },
     });
     const { GET } = await import('@/app/api/connectors/[id]/health/route');
 
@@ -720,7 +729,112 @@ describe('finance connector routes', () => {
     );
   });
 
-  it('reports only sanitized Finance insight evaluation failures', async () => {
+  it('keeps inactive optional history failures diagnostic without degrading health', async () => {
+    const connector = {
+      id: 'persisted-finance',
+      type: 'finance-manager',
+      enabled: true,
+      pollIntervalMinutes: 240,
+    };
+    mocks.configFromRow.mockReturnValue({ id: connector.id, settings: {}, credentials: {} });
+    mocks.getHealth.mockResolvedValue({
+      status: 'ok',
+      mode: 'live',
+      reachable: true,
+      authenticated: true,
+      authState: 'connected',
+    });
+    mocks.getDatasetHealth.mockResolvedValue({ aggregate: 'fresh', datasets: [] });
+    mocks.getConnector.mockResolvedValue(connector);
+    mocks.readHealthSnapshot.mockResolvedValue({
+      sync: {
+        status: 'succeeded',
+        lastAttemptAt: null,
+        lastSuccessfulSyncAt: new Date().toISOString(),
+        lastSuccessfulWindowStart: null,
+        lastSuccessfulWindowEnd: null,
+        lastErrorCode: null,
+      },
+      attribution: {
+        status: 'healthy',
+        lastAttemptAt: null,
+        lastSuccessfulAt: null,
+        lastErrorCode: null,
+        policyVersion: null,
+        engineVersion: null,
+      },
+      activeJob: null,
+      projection: {
+        status: 'failed',
+        generationId: null,
+        lastSuccessfulAt: null,
+        sourceAsOf: null,
+        itemCount: null,
+        coverageStart: null,
+        coverageEnd: null,
+        windowCount: null,
+        bridgeContractVersion: null,
+        lastErrorCode: 'insight_history_sync_failed',
+        updatedAt: '2026-08-10T12:01:00.000Z',
+      },
+      capture: {
+        status: 'refused',
+        lastAttemptAt: '2026-08-10T12:02:00.000Z',
+        lastErrorCode: 'transaction_projection_unavailable',
+      },
+      evaluation: {
+        status: 'unavailable',
+        stage: 'evaluation-requested',
+        lastAttemptAt: '2026-08-10T12:03:00.000Z',
+        lastSuccessfulAt: null,
+        lastErrorCode: 'finance_insight_evaluation_unavailable',
+        retryable: true,
+      },
+      insightActivation: {
+        deliveryEnabled: false,
+        historyOperationExpected: false,
+      },
+    });
+    const { GET } = await import('@/app/api/connectors/[id]/health/route');
+
+    const response = await GET(new Request(
+      'http://localhost/api/connectors/persisted-finance/health',
+      { headers: { 'x-mc-api-key': 'test-finance-api-key' } },
+    ), { params: Promise.resolve({ id: connector.id }) });
+    const body = await response.json();
+
+    expect(body).toMatchObject({
+      overall: 'healthy',
+      insights: {
+        projection: {
+          status: 'failed',
+          lastErrorCode: 'insight_history_sync_failed',
+        },
+        capture: {
+          status: 'refused',
+          lastErrorCode: 'transaction_projection_unavailable',
+        },
+        evaluation: {
+          status: 'unavailable',
+          lastErrorCode: 'finance_insight_evaluation_unavailable',
+        },
+      },
+    });
+  });
+
+  it.each([
+    ['cutover delivery is active', {
+      deliveryEnabled: true,
+      historyOperationExpected: false,
+    }],
+    ['an explicit history operation is expected', {
+      deliveryEnabled: false,
+      historyOperationExpected: true,
+    }],
+  ])('reports only sanitized Finance insight evaluation failures when %s', async (
+    _condition,
+    insightActivation,
+  ) => {
     const connector = {
       id: 'persisted-finance',
       type: 'finance-manager',
@@ -768,6 +882,7 @@ describe('finance connector routes', () => {
         lastErrorCode: 'finance_insight_evaluation_unavailable',
         retryable: true,
       },
+      insightActivation,
     });
     const { GET } = await import('@/app/api/connectors/[id]/health/route');
 

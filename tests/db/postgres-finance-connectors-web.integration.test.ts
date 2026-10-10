@@ -245,6 +245,10 @@ if (connectionString) {
         projection: null,
         capture: null,
         evaluation: null,
+        insightActivation: {
+          deliveryEnabled: false,
+          historyOperationExpected: false,
+        },
       });
     });
 

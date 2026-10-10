@@ -155,10 +155,14 @@ export async function GET(
       const authenticated = bridge?.authenticated === true;
       const attributionStatus = snapshot.attribution?.status ?? 'idle';
       const projection = await getFinanceDatasetHealth(id);
-      const insightUnhealthy = Boolean(publication?.lastErrorCode)
+      const insightHealthRequired = snapshot.insightActivation.deliveryEnabled
+        || snapshot.insightActivation.historyOperationExpected;
+      const insightUnhealthy = insightHealthRequired && (
+        Boolean(publication?.lastErrorCode)
         || Boolean(delivery?.lastErrorCode)
         || delivery?.status === 'failed'
-        || delivery?.status === 'unavailable';
+        || delivery?.status === 'unavailable'
+      );
       const overall = !connector.enabled
         ? 'disabled'
         : bridgeErrorCode || !authenticated

@@ -206,8 +206,11 @@ failed with a stable `lastErrorCode`. Normal sync and canary must not invoke the
 or proofs. `transaction_projection_unavailable` is therefore expected for
 Finance Insight capture until an operator explicitly starts a later bounded
 historical backfill; it does not block current operational attribution or
-account-summary readiness. Any explicit history operation remains fail closed
-and must satisfy its own count, digest, fence, and safety checks.
+account-summary readiness or make an otherwise healthy connector degraded.
+Insight capture/evaluation errors affect overall connector health once cutover
+delivery is enabled or an explicit backfill plan exists. Any explicit history
+operation remains fail closed and must satisfy its own count, digest, fence,
+and safety checks.
 
 The readiness, health, recovery, attribution-review, manual KID, and cutover
 web paths use the same backend-selected Finance persistence composition as the

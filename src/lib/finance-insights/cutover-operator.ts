@@ -31,6 +31,7 @@ const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,159}$/;
 export type FinanceCutoverBlocker =
   | 'finance_connector_not_found'
   | 'invalid_finance_connector_type'
+  | 'finance_insight_cutover_generation_required'
   | 'finance_insight_connector_unavailable'
   | 'finance_connector_disabled'
   | 'household_currency_unavailable'
@@ -96,8 +97,14 @@ async function readinessInputs(connectorId: string): Promise<FinanceOperatorRead
 
 export async function getFinanceInsightCutoverReadiness(
   connectorId: string,
-  sourceGeneration?: string,
+  sourceGeneration: string,
 ) {
+  if (!sourceGeneration.trim()) {
+    throw new FinanceCutoverOperatorError(
+      'finance_insight_cutover_generation_required',
+      400,
+    );
+  }
   const inputs = await readinessInputs(connectorId);
   if (!isFinanceConnectorType(inputs.connector.type)) {
     throw new FinanceCutoverOperatorError('invalid_finance_connector_type', 400);
@@ -155,7 +162,7 @@ export async function getFinanceInsightCutoverReadiness(
   }
   if (!inputs.publication) {
     blockers.push('finance_insight_cutover_generation_unavailable');
-  } else if (sourceGeneration && inputs.publication.sourceGeneration !== sourceGeneration) {
+  } else if (inputs.publication.sourceGeneration !== sourceGeneration) {
     blockers.push('finance_insight_cutover_generation_stale');
   }
 
@@ -215,8 +222,6 @@ export async function enableFinanceInsightCutoverForOperator(input: {
       logger.info({
         connectorId: input.connectorId,
         sourceGeneration: input.sourceGeneration,
-        legacyExpiredCount: result.legacyExpiredCount,
-        importedCount: result.importedCount,
         operation: 'financeInsightCutoverEnable',
       }, 'Finance Insight cutover enabled');
     }
@@ -226,7 +231,6 @@ export async function enableFinanceInsightCutoverForOperator(input: {
     logger.warn({
       connectorId: input.connectorId,
       sourceGeneration: input.sourceGeneration,
-      blockerCodes: [operatorError.code],
       operation: 'financeInsightCutoverEnable',
     }, 'Finance Insight cutover blocked');
     throw operatorError;
@@ -253,7 +257,6 @@ export async function rollbackFinanceInsightCutoverForOperator(input: {
       logger.warn({
         connectorId: input.connectorId,
         sourceGeneration: input.sourceGeneration,
-        suppressedDeliveryCount: result.suppressedDeliveryCount,
         operation: 'financeInsightCutoverRollback',
       }, 'Finance Insight cutover rolled back');
     }

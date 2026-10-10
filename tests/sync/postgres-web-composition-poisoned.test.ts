@@ -569,7 +569,10 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
         sourceGeneration: 'generation',
       })).resolves.toMatchObject({ status: 'rolled-back' });
 
-      const readiness = await cutoverOperator.getFinanceInsightCutoverReadiness('finance');
+      const readiness = await cutoverOperator.getFinanceInsightCutoverReadiness(
+        'finance',
+        'generation',
+      );
       expect(readiness.readiness.ready).toBe(false);
       await expect(cutoverOperator.rollbackFinanceInsightCutoverForOperator({
         connectorId: 'finance',

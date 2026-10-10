@@ -86,6 +86,7 @@ function plan() {
 function repositories(overrides: {
   configuration?: () => void;
   identity?: () => Promise<void>;
+  loadPlan?: () => Promise<ReturnType<typeof plan> | null>;
   createPlan?: () => Promise<ReturnType<typeof plan>>;
   loadWindowProofs?: () => Promise<FinanceInsightBackfillWindowProof[]>;
   assertDeliveryDisabled?: () => Promise<void>;
@@ -105,6 +106,7 @@ function repositories(overrides: {
       },
       insights: {
         backfill: {
+          loadPlan: overrides.loadPlan ?? vi.fn().mockResolvedValue(null),
           createPlan: overrides.createPlan ?? vi.fn().mockResolvedValue(plan()),
           loadWindowProofs: overrides.loadWindowProofs ?? vi.fn().mockResolvedValue([]),
           assertDeliveryDisabled:

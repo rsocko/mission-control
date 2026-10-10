@@ -656,6 +656,16 @@ export function describeFinanceInsightPersistenceContract(
         expect(window0).toEqual({ itemCount: 1 });
         await expect(backfill.loadPlan(CONNECTOR_ID, 'plan-windows'))
           .resolves.toMatchObject({ status: 'running', nextWindowOrdinal: 1 });
+        await backfill.recordPlanFailure(
+          plan.id,
+          'finance_insight_backfill_provider_failed',
+          BASE_TIME,
+        );
+        await expect(backfill.loadPlan(CONNECTOR_ID, 'plan-windows'))
+          .resolves.toMatchObject({
+            status: 'running',
+            lastErrorCode: 'finance_insight_backfill_provider_failed',
+          });
 
         await backfill.upsertTransactionPage({
           connectorId: CONNECTOR_ID,
@@ -688,7 +698,7 @@ export function describeFinanceInsightPersistenceContract(
           id: plan.id,
           status: 'completed',
           nextWindowOrdinal: 2,
-          lastErrorCode: 'finance_insight_backfill_proof_failed',
+          lastErrorCode: null,
         });
       });
 

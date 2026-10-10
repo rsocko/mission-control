@@ -25,6 +25,22 @@ export {
   selectFinanceAttentionRoute,
 };
 export type { FinanceAttentionRoutingResult };
+export {
+  compareFinanceAttentionTransitionPrecedence,
+  evaluateFinanceAttentionEnvelope,
+  FINANCE_ATTENTION_CONTRACT_VERSION as FINANCE_ATTENTION_ENVELOPE_CONTRACT_VERSION,
+  FINANCE_ATTENTION_SIGNAL_KINDS,
+  FinanceAttentionEnvelopeError,
+  parseFinanceAttentionEnvelope,
+} from '@/lib/finance/attention-policy';
+export type {
+  FinanceAttentionCapability,
+  FinanceAttentionEnvelope,
+  FinanceAttentionEnvelopeSignalKind,
+  FinanceAttentionPolicyDecision,
+  FinanceAttentionPolicyRoute,
+  FinanceAttentionTarget,
+} from '@/lib/finance/attention-policy';
 
 /**
  * Reconciles finance attention signals (attribution-review, write-back

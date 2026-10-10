@@ -541,6 +541,11 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
       notificationCount: string;
       deliveryCount: string;
       insightDeliveryCount: string;
+      historyStateCount: string;
+      historyWindowCount: string;
+      historyFactCount: string;
+      backfillPlanCount: string;
+      backfillProofCount: string;
       projectionStatus: string | null;
       projectionError: string | null;
       publicationOutcome: string | null;
@@ -560,6 +565,16 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
           )) AS "deliveryCount",
          (SELECT count(*) FROM finance_insight_publication_delivery
           WHERE connector_id = $1 AND stage = 'evaluation-requested') AS "insightDeliveryCount",
+         (SELECT count(*) FROM finance_insight_transaction_projection_state
+          WHERE connector_id = $1) AS "historyStateCount",
+         (SELECT count(*) FROM finance_insight_transaction_projection_windows
+          WHERE connector_id = $1) AS "historyWindowCount",
+         (SELECT count(*) FROM finance_insight_transaction_projection_facts
+          WHERE connector_id = $1) AS "historyFactCount",
+         (SELECT count(*) FROM finance_insight_transaction_backfill_plans
+          WHERE connector_id = $1) AS "backfillPlanCount",
+         (SELECT count(*) FROM finance_insight_transaction_window_proofs
+          WHERE connector_id = $1) AS "backfillProofCount",
          (SELECT status FROM finance_insight_transaction_projection_state
           WHERE connector_id = $1) AS "projectionStatus",
          (SELECT last_error_code FROM finance_insight_transaction_projection_state
@@ -574,13 +589,18 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
     );
     expect(state.rows[0]).toMatchObject({
       transactionCount: '1',
-      publicationCount: '1',
+      publicationCount: '0',
       notificationCount: '0',
-      insightDeliveryCount: '1',
-      projectionStatus: 'succeeded',
+      insightDeliveryCount: '0',
+      historyStateCount: '0',
+      historyWindowCount: '0',
+      historyFactCount: '0',
+      backfillPlanCount: '0',
+      backfillProofCount: '0',
+      projectionStatus: null,
       projectionError: null,
-      publicationOutcome: 'idempotent',
-      publicationError: null,
+      publicationOutcome: 'refused',
+      publicationError: 'transaction_projection_unavailable',
       successfulRuns: '2',
     });
     expect(state.rows[0].deliveryCount).toBe('0');
@@ -912,6 +932,11 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
     const state = await pool.query<{
       transactionCount: string;
       publicationCount: string;
+      historyStateCount: string;
+      historyWindowCount: string;
+      historyFactCount: string;
+      backfillPlanCount: string;
+      backfillProofCount: string;
       successfulRuns: string;
     }>(
       `SELECT
@@ -919,13 +944,28 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
           WHERE connector_instance_id = $1) AS "transactionCount",
          (SELECT count(*) FROM finance_insight_publications
           WHERE connector_id = $1) AS "publicationCount",
+         (SELECT count(*) FROM finance_insight_transaction_projection_state
+          WHERE connector_id = $1) AS "historyStateCount",
+         (SELECT count(*) FROM finance_insight_transaction_projection_windows
+          WHERE connector_id = $1) AS "historyWindowCount",
+         (SELECT count(*) FROM finance_insight_transaction_projection_facts
+          WHERE connector_id = $1) AS "historyFactCount",
+         (SELECT count(*) FROM finance_insight_transaction_backfill_plans
+          WHERE connector_id = $1) AS "backfillPlanCount",
+         (SELECT count(*) FROM finance_insight_transaction_window_proofs
+          WHERE connector_id = $1) AS "backfillProofCount",
          (SELECT count(*) FROM sync_log
           WHERE connector_id = $1 AND success = true) AS "successfulRuns"`,
       [connectorId],
     );
     expect(state.rows[0]).toMatchObject({
       transactionCount: '1',
-      publicationCount: '1',
+      publicationCount: '0',
+      historyStateCount: '0',
+      historyWindowCount: '0',
+      historyFactCount: '0',
+      backfillPlanCount: '0',
+      backfillProofCount: '0',
       successfulRuns: '1',
     });
     expect(sqliteTouch).not.toHaveBeenCalled();

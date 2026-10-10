@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -146,6 +147,26 @@ function transactionFact(
     recurringRef: null,
     tagRefs: [],
     ...overrides,
+  };
+}
+
+function productionSourceRef(index: number): string {
+  const digest = createHash('sha256')
+    .update(`production-shaped-transaction-${index}`)
+    .digest('base64url');
+  return `transaction-v1:${digest}`;
+}
+
+function compareSourceRefs(left: TransactionFact, right: TransactionFact): number {
+  return left.sourceRef < right.sourceRef ? -1 : left.sourceRef > right.sourceRef ? 1 : 0;
+}
+
+function productionWindow(index: number): { start: string; end: string } {
+  const start = new Date(Date.UTC(2023, 7 + index, 1));
+  const end = new Date(Date.UTC(2023, 8 + index, 0));
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
   };
 }
 
@@ -317,6 +338,81 @@ export function describeFinanceInsightPersistenceContract(
         await expect(projection.readWindowProofs(CONNECTOR_ID, 'generation-1'))
           .resolves.toEqual([proof]);
         await expect(projection.readAttemptFacts(CONNECTOR_ID, 'attempt-1')).resolves.toEqual([]);
+      });
+
+      it('promotes a production-shaped 37-window projection across three fact pages', async () => {
+        const { projection } = harness.repositories;
+        const attemptId = 'attempt-production-shaped';
+        const generationId = 'generation-production-shaped';
+        await projection.startAttempt({
+          connectorId: CONNECTOR_ID,
+          attemptId,
+          attemptAt: BASE_TIME,
+        });
+
+        const facts = Array.from({ length: 1_001 }, (_, index) => transactionFact(
+          productionSourceRef(index),
+          productionWindow(index % 37).start,
+          { merchantName: `Merchant ${index}` },
+        )).sort(compareSourceRefs);
+        const insertionOrder = [...facts].reverse();
+        for (let offset = 0; offset < insertionOrder.length; offset += 500) {
+          await projection.insertAttemptFacts({
+            connectorId: CONNECTOR_ID,
+            attemptId,
+            facts: insertionOrder.slice(offset, offset + 500).map((fact) => ({
+              sourceRef: fact.sourceRef,
+              occurredOn: fact.occurredOn,
+              payload: fact,
+            })),
+          });
+        }
+
+        const proofs = Array.from({ length: 37 }, (_, index) => {
+          const window = productionWindow(index);
+          const windowFacts = facts.filter((fact) => (
+            fact.occurredOn >= window.start && fact.occurredOn <= window.end
+          ));
+          return windowProof({
+            index,
+            ...window,
+            itemCount: windowFacts.length,
+            digest: financeInsightDigestV1(windowFacts as unknown as CanonicalJsonValue),
+          });
+        });
+        for (const proof of proofs) {
+          await projection.insertAttemptWindowProof({
+            connectorId: CONNECTOR_ID,
+            attemptId,
+            proof,
+          });
+        }
+
+        await projection.promoteAttempt({
+          connectorId: CONNECTOR_ID,
+          attemptId,
+          generationId,
+          completedAt: BASE_TIME,
+          sourceAsOf: BASE_TIME,
+          itemCount: facts.length,
+          contentDigest: financeInsightDigestV1(facts as unknown as CanonicalJsonValue),
+          coverageStart: proofs[0]!.start,
+          coverageEnd: proofs.at(-1)!.end,
+          windowCount: proofs.length,
+          windowsDigest: financeInsightDigestV1(proofs as unknown as CanonicalJsonValue),
+          bridgeContractVersion: '1.0',
+        });
+
+        await expect(projection.readState(CONNECTOR_ID)).resolves.toMatchObject({
+          status: 'succeeded',
+          generationId,
+          itemCount: 1_001,
+          windowCount: 37,
+        });
+        await expect(projection.readPromotedTransactionFacts(CONNECTOR_ID, generationId))
+          .resolves.toEqual(facts);
+        await expect(projection.readWindowProofs(CONNECTOR_ID, generationId))
+          .resolves.toEqual(proofs);
       });
 
       it('fences a stale promoteAttempt and rolls back without losing staged data or clobbering current state', async () => {

@@ -18,6 +18,11 @@ import {
   getFinanceInsightCutoverReadiness,
   rollbackFinanceInsightCutoverForOperator,
 } from '@/lib/finance-insights/cutover-operator';
+import {
+  applyFinanceCleanBootstrap,
+  cleanBootstrapErrorResponse,
+  inventoryFinanceCleanBootstrap,
+} from '@/lib/connectors/monarch-money/clean-bootstrap';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,9 +41,25 @@ const operatorRequestSchema = z.discriminatedUnion('action', [
     action: z.literal('rollback-insight-cutover'),
     sourceGeneration: z.string().trim().min(1).max(160),
   }).strict(),
+  z.object({
+    action: z.literal('inventory-clean-bootstrap'),
+  }).strict(),
+  z.object({
+    action: z.literal('apply-clean-bootstrap'),
+    dryRunId: z.string().uuid(),
+    scopeDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    confirmationToken: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict(),
 ]);
 
 function errorResponse(error: unknown) {
+  const cleanBootstrapError = cleanBootstrapErrorResponse(error);
+  if (cleanBootstrapError) {
+    return NextResponse.json(
+      { error: cleanBootstrapError.code },
+      { status: cleanBootstrapError.status },
+    );
+  }
   if (error instanceof SyncOperatorError) {
     return NextResponse.json({ error: error.code }, { status: error.status });
   }
@@ -143,6 +164,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
           sourceGeneration: body.data.sourceGeneration,
           actorType: actor,
           idempotencyKey,
+        }));
+      case 'inventory-clean-bootstrap':
+        return NextResponse.json(await inventoryFinanceCleanBootstrap({
+          connectorId: id,
+          actorType: actor,
+          idempotencyKey,
+        }));
+      case 'apply-clean-bootstrap':
+        return NextResponse.json(await applyFinanceCleanBootstrap({
+          connectorId: id,
+          actorType: actor,
+          idempotencyKey,
+          dryRunId: body.data.dryRunId,
+          scopeDigest: body.data.scopeDigest,
+          confirmationToken: body.data.confirmationToken,
         }));
     }
     return NextResponse.json(

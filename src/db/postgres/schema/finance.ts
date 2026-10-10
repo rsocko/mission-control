@@ -517,6 +517,26 @@ export const financeAttentionRepairAudit = pgTable('finance_attention_repair_aud
     .on(table.connectorId, table.createdAt),
 ]);
 
+export const financeCleanBootstrapAudit = pgTable('finance_clean_bootstrap_audit', {
+  id: text('id').primaryKey(),
+  connectorId: text('connector_id').notNull(),
+  mode: text('mode').$type<'dry-run' | 'apply'>().notNull(),
+  actorType: text('actor_type').$type<'parent-admin' | 'service'>().notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  dryRunId: text('dry_run_id').notNull(),
+  scopeDigest: text('scope_digest').notNull(),
+  confirmationToken: text('confirmation_token').notNull(),
+  inventory: jsonb('inventory').notNull(),
+  result: jsonb('result').notNull(),
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_finance_clean_bootstrap_idempotency')
+    .on(table.connectorId, table.idempotencyKey),
+  index('idx_finance_clean_bootstrap_dry_run')
+    .on(table.connectorId, table.dryRunId, table.mode),
+]);
+
 export const financeAttentionDeliveryReceipts = pgTable(
   'finance_attention_delivery_receipts',
   {

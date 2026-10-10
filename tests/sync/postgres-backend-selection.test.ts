@@ -109,6 +109,7 @@ const postgresMocks = vi.hoisted(() => ({
         shadowIngestEnabled: true,
         immediateNotificationsEnabled: false,
         monthlyDigestEnabled: false,
+        weeklySummaryEnabled: false,
         deliveryEnabled: false,
         presentationEnabled: false,
         actionsEnabled: false,

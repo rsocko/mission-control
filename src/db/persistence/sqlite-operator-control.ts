@@ -12,6 +12,7 @@ import { isFinanceInsightShadowIngestEnabled } from '@/lib/finance-insights/orch
 import {
   FINANCE_IMMEDIATE_NOTIFICATION_GATE,
   FINANCE_MONTHLY_DIGEST_GATE,
+  FINANCE_WEEKLY_SUMMARY_GATE,
 } from '@/lib/finance-insights/notification-ingestion';
 import {
   enqueueSyncJobInCurrentTransaction,
@@ -167,6 +168,7 @@ export function getFinanceSyncControlStatus(
   `).get(connectorId) as { deliveryEnabled: number } | undefined;
   const immediateNotificationsEnabled = gateEnabled(FINANCE_IMMEDIATE_NOTIFICATION_GATE);
   const monthlyDigestEnabled = gateEnabled(FINANCE_MONTHLY_DIGEST_GATE);
+  const weeklySummaryEnabled = gateEnabled(FINANCE_WEEKLY_SUMMARY_GATE);
   const deliveryEnabled = cutover?.deliveryEnabled === 1;
   const queued = jobs.queued ?? 0;
   const running = jobs.running ?? 0;
@@ -182,7 +184,7 @@ export function getFinanceSyncControlStatus(
     blockers.push('finance_insight_shadow_ingest_disabled');
   }
   if (deliveryEnabled) blockers.push('finance_delivery_gate_enabled');
-  if (immediateNotificationsEnabled || monthlyDigestEnabled) {
+  if (immediateNotificationsEnabled || monthlyDigestEnabled || weeklySummaryEnabled) {
     blockers.push('finance_notification_gate_enabled');
   }
   const canaryJob = lastCanary?.jobId ? getSyncJob(lastCanary.jobId) ?? null : null;
@@ -210,6 +212,7 @@ export function getFinanceSyncControlStatus(
       shadowIngestEnabled: isFinanceInsightShadowIngestEnabled(),
       immediateNotificationsEnabled,
       monthlyDigestEnabled,
+      weeklySummaryEnabled,
       deliveryEnabled,
       presentationEnabled: deliveryEnabled,
       actionsEnabled: deliveryEnabled,

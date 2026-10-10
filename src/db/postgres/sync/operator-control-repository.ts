@@ -9,6 +9,7 @@ import { isFinanceInsightShadowIngestEnabled } from '@/lib/finance-insights/orch
 import {
   FINANCE_IMMEDIATE_NOTIFICATION_GATE,
   FINANCE_MONTHLY_DIGEST_GATE,
+  FINANCE_WEEKLY_SUMMARY_GATE,
 } from '@/lib/finance-insights/notification-ingestion';
 import {
   normalizeSyncOperatorIdempotencyKey,
@@ -223,6 +224,7 @@ implements SyncOperatorControlRepository {
     ]);
     const immediateNotificationsEnabled = gateEnabled(FINANCE_IMMEDIATE_NOTIFICATION_GATE);
     const monthlyDigestEnabled = gateEnabled(FINANCE_MONTHLY_DIGEST_GATE);
+    const weeklySummaryEnabled = gateEnabled(FINANCE_WEEKLY_SUMMARY_GATE);
     const deliveryEnabled = cutover?.deliveryEnabled === true;
     const queued = Number(jobs?.queued ?? 0);
     const running = Number(jobs?.running ?? 0);
@@ -240,7 +242,7 @@ implements SyncOperatorControlRepository {
       blockers.push('finance_insight_shadow_ingest_disabled');
     }
     if (deliveryEnabled) blockers.push('finance_delivery_gate_enabled');
-    if (immediateNotificationsEnabled || monthlyDigestEnabled) {
+    if (immediateNotificationsEnabled || monthlyDigestEnabled || weeklySummaryEnabled) {
       blockers.push('finance_notification_gate_enabled');
     }
 
@@ -267,6 +269,7 @@ implements SyncOperatorControlRepository {
         shadowIngestEnabled: isFinanceInsightShadowIngestEnabled(),
         immediateNotificationsEnabled,
         monthlyDigestEnabled,
+        weeklySummaryEnabled,
         deliveryEnabled,
         presentationEnabled: deliveryEnabled,
         actionsEnabled: deliveryEnabled,

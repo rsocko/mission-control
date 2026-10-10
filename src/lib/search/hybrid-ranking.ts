@@ -145,15 +145,23 @@ export function fuseHybridResults(
   });
 
   const selected: RankedResult[] = [];
+  const deferred: RankedResult[] = [];
   const kindCounts = new Map<SearchResult['type'], number>();
   const sorted = [...ranked.values()].sort(compareRanked);
   const enforceKindCap = new Set(sorted.map((candidate) => candidate.result.type)).size > 1;
   for (const candidate of sorted) {
     const kindCount = kindCounts.get(candidate.result.type) ?? 0;
-    if (enforceKindCap && kindCount >= perKindLimit) continue;
+    if (enforceKindCap && kindCount >= perKindLimit) {
+      deferred.push(candidate);
+      continue;
+    }
     selected.push(candidate);
     kindCounts.set(candidate.result.type, kindCount + 1);
     if (selected.length === limit) break;
+  }
+  if (selected.length < limit) {
+    selected.push(...deferred.slice(0, limit - selected.length));
+    selected.sort(compareRanked);
   }
 
   return selected.map((candidate, index) => {

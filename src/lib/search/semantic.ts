@@ -173,7 +173,7 @@ function positiveInteger(value: string | undefined, fallback: number) {
 }
 
 function normalizeLimit(limit = 20) {
-  return Math.max(1, Math.min(limit, 50));
+  return Math.max(1, Math.min(limit, 51));
 }
 
 export async function search(

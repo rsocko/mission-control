@@ -90,7 +90,6 @@ export async function GET(request: Request) {
   const searchOptions = {
     type,
     mode,
-    limit,
     ...(source ? { source } : {}),
     ...(status ? { status } : {}),
     ...(notificationKind ? { notificationKind } : {}),
@@ -102,13 +101,21 @@ export async function GET(request: Request) {
       excludeConnectorInstanceIds: excludedConnectorInstanceIds,
     } : {}),
   };
+  const executionOptions = {
+    ...searchOptions,
+    limit: Math.min(limit + 1, 51),
+  };
+  const facetOptions = {
+    ...searchOptions,
+    limit,
+  };
   const [execution, statusResult, facets] = await withRuntimeOperation({
     kind: 'semantic-search',
     name: mode,
     traceId: request.headers.get('x-trace-id') ?? undefined,
     routeFamily: '/api/ai/search',
   }, () => Promise.all([
-      searchWithBranches(query, searchOptions),
+      searchWithBranches(query, executionOptions),
       (async () => {
         const statusStartedAt = performance.now();
         const status = await getSearchStatus(mode);
@@ -119,16 +126,19 @@ export async function GET(request: Request) {
       })(),
       mode === 'semantic'
         ? Promise.resolve({ sources: [], statuses: [] })
-        : searchFTSFacets(query, searchOptions),
+        : searchFTSFacets(query, facetOptions),
     ]));
 
   const durationMs = Math.round(performance.now() - startMs);
+  const hasMore = execution.results.length > limit;
+  const results = execution.results.slice(0, limit);
 
   return Response.json({
     query,
     type,
     mode,
-    total: execution.results.length,
+    total: results.length,
+    hasMore,
     durationMs,
     note: statusResult.status.note,
     semanticEnabled: statusResult.status.enabled,
@@ -139,6 +149,6 @@ export async function GET(request: Request) {
     branches: execution.branches,
     facets,
     statusDurationMs: statusResult.durationMs,
-    results: execution.results,
+    results,
   });
 }

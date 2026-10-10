@@ -83,8 +83,8 @@ async function seed() {
   await pool.query(`
     INSERT INTO connector_sync_controls (
       connector_id, scheduler_state, quarantine_id, quarantined_at,
-      created_at, updated_at
-    ) VALUES ($1, 'quarantined', 'quarantine-postgres', $2, $2, $2)
+      updated_at
+    ) VALUES ($1, 'quarantined', 'quarantine-postgres', $2, $2)
   `, [connectorId, now]);
   await pool.query(`
     INSERT INTO connector_operation_leases (

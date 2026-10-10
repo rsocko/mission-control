@@ -161,7 +161,8 @@ async function createHarness(): Promise<FinanceWorkerContractHarness> {
     },
     async attributionException(upstreamId) {
       return (database.prepare(`
-        SELECT occurrence_count AS occurrenceCount, status
+        SELECT occurrence_count AS occurrenceCount, status,
+               review_state AS reviewState, resolution
         FROM finance_attribution_exceptions
         WHERE connector_id = ? AND transaction_id = ?
       `).get(CONNECTOR_ID, `finance:${CONNECTOR_ID}:${upstreamId}`) ?? null) as Awaited<

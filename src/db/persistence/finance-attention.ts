@@ -7,6 +7,12 @@ import {
 import type { InboundNotification, NotificationLevel } from '@/types';
 import type { CreateNotificationInput } from '@/lib/notifications/service';
 import type { FinanceActorType } from '@/lib/connectors/monarch-money/finance-request';
+import {
+  attributionAttentionAccountRef,
+  currencyMinorUnitFactor,
+  resolveAttributionAttentionThresholds,
+  type AttributionAttentionPolicy,
+} from '@/lib/finance/attribution-attention-policy';
 
 /**
  * Backend-neutral persistence contract for finance attention routing
@@ -38,7 +44,6 @@ const HUMAN_REVIEWABLE_ATTRIBUTION_REASONS = new Set([
   'low-confidence',
   'manual_decision_conflict',
   'merchant-rule-conflict',
-  'no-match',
   'review-required',
 ]);
 
@@ -51,9 +56,10 @@ export const FINANCE_ATTENTION_MAX_REPAIR_SCOPE = 10_000;
 
 export type FinanceAttentionSignalKind =
   | 'attributionReviewRequired'
-  | 'writeBackFailed'
+  | 'attributionAccountReview'
   | 'duplicateTransactionCandidate'
-  | 'connectorDegraded';
+  | 'connectorDegraded'
+  | 'writeBackFailed';
 export type FinanceAttentionRoute =
   | 'informationalNotification'
   | 'actionableNotification'
@@ -75,6 +81,30 @@ export interface FinanceAttentionSignal {
   freshness?: 'fresh' | 'stale' | 'unavailable';
   details?: Readonly<Record<string, unknown>>;
   settlementReason: string | null;
+  accountSummary?: FinanceAttentionAccountSummary;
+}
+
+export interface FinanceAttentionAccountSummary {
+  accountRef: string;
+  accountDisplayName: string;
+  pendingCount: number;
+  highestAmountMinor: number;
+  highestMerchantName: string | null;
+  currency: string;
+  pendingCountThreshold: number;
+  highAmountThresholdMinor: number;
+  countQualified: boolean;
+  highAmountQualified: boolean;
+}
+
+export interface FinanceAttentionAccountSummaryRow {
+  accountId: string;
+  accountDisplayName: string;
+  pendingCount: number;
+  highestAmount: number;
+  highestMerchantName: string | null;
+  firstObservedAt: string | null;
+  lastObservedAt: string | null;
 }
 
 export interface FinanceAttentionRoutingResult {
@@ -176,6 +206,10 @@ export function selectFinanceAttentionRoute(
   decisionAt: Date,
 ): FinanceAttentionRoute {
   if (signal.sourceLifecycle !== 'open') return 'settled';
+  if (!signal.actionable && signal.attention !== 'informational') return 'statusOnly';
+  if (signal.signalKind === 'attributionAccountReview') {
+    return 'actionableNotification';
+  }
 
   const sourceAsOf = financeAttentionValidTimestamp(signal.sourceAsOf);
   const conditionSince = financeAttentionValidTimestamp(signal.conditionSince);
@@ -253,6 +287,55 @@ export function financeAttentionAttributionSignal(
   };
 }
 
+export function financeAttentionAccountSignal(
+  connectorId: string,
+  row: FinanceAttentionAccountSummaryRow,
+  policy: AttributionAttentionPolicy,
+  currency: string,
+  decisionAt: Date,
+): FinanceAttentionSignal {
+  const accountRef = attributionAttentionAccountRef(connectorId, row.accountId);
+  const thresholds = resolveAttributionAttentionThresholds(policy, accountRef);
+  const highestAmountMinor = Math.round(
+    Math.abs(row.highestAmount) * currencyMinorUnitFactor(currency),
+  );
+  const countQualified = thresholds.pendingCountThreshold > 0
+    && row.pendingCount >= thresholds.pendingCountThreshold;
+  const highAmountQualified = thresholds.highAmountThresholdMinor > 0
+    && highestAmountMinor >= thresholds.highAmountThresholdMinor;
+  const actionable = countQualified || highAmountQualified;
+  const summary: FinanceAttentionAccountSummary = {
+    accountRef,
+    accountDisplayName: row.accountDisplayName,
+    pendingCount: row.pendingCount,
+    highestAmountMinor,
+    highestMerchantName: row.highestMerchantName,
+    currency,
+    ...thresholds,
+    countQualified,
+    highAmountQualified,
+  };
+  const sourceAsOf = row.lastObservedAt ?? decisionAt.toISOString();
+  return {
+    connectorId,
+    signalKind: 'attributionAccountReview',
+    sourceRef: accountRef,
+    sourceLifecycle: actionable ? 'open' : 'resolved',
+    conditionSince: row.firstObservedAt ?? sourceAsOf,
+    sourceAsOf,
+    activityKey: [
+      'attribution-account-v1',
+      row.pendingCount,
+      highestAmountMinor,
+      countQualified ? 1 : 0,
+      highAmountQualified ? 1 : 0,
+    ].join(':'),
+    actionable,
+    settlementReason: actionable ? null : 'threshold_cleared',
+    accountSummary: summary,
+  };
+}
+
 export function financeAttentionWriteBackSignal(
   connectorId: string,
   row: FinanceAttentionWriteBackRow,
@@ -303,8 +386,28 @@ export function financeAttentionMetadata(
       freshness: route === 'stale' ? 'stale' : 'fresh',
       settlementReason: signal.settlementReason,
       details: signal.details ?? {},
+      ...(signal.accountSummary ? { accountSummary: signal.accountSummary } : {}),
     },
   };
+}
+
+export function financeAttentionAccountMateriallyWorsened(
+  signal: FinanceAttentionSignal,
+  existingMetadata: unknown,
+): boolean {
+  const summary = signal.accountSummary;
+  if (!summary) return false;
+  const existingAttention = financeAttentionRecord(
+    financeAttentionRecord(existingMetadata).financeAttention,
+  );
+  const previous = financeAttentionRecord(existingAttention.accountSummary);
+  if (existingAttention.sourceLifecycle !== 'open') return true;
+  const previousCountQualified = previous.countQualified === true;
+  const previousHighAmountQualified = previous.highAmountQualified === true;
+  return (!previousCountQualified && summary.countQualified)
+    || (!previousHighAmountQualified && summary.highAmountQualified)
+    || summary.pendingCount > Number(previous.pendingCount ?? 0)
+    || summary.highestAmountMinor > Number(previous.highestAmountMinor ?? 0);
 }
 
 /**
@@ -416,6 +519,11 @@ export function compareFinanceAttentionMyDayCandidates(
 export function financeAttentionNotificationInput(
   signal: FinanceAttentionSignal,
   decisionAt: Date,
+  existing?: {
+    metadata: unknown;
+    lastSourceActivityAt: string | null;
+    lastSourceActivityKey: string | null;
+  },
 ): CreateNotificationInput & Required<Pick<
   CreateNotificationInput,
   | 'id'
@@ -437,6 +545,60 @@ export function financeAttentionNotificationInput(
   | 'metadata'
 >> & { level: NotificationLevel } {
   const sourceId = financeAttentionSourceId(signal);
+  if (signal.signalKind === 'attributionAccountReview' && signal.accountSummary) {
+    const summary = signal.accountSummary;
+    const worsened = !existing
+      || financeAttentionAccountMateriallyWorsened(signal, existing.metadata);
+    const activityKey = worsened
+      ? signal.activityKey
+      : existing.lastSourceActivityKey ?? signal.activityKey;
+    const sourceActivityAt = worsened
+      ? signal.sourceAsOf
+      : existing.lastSourceActivityAt ?? signal.sourceAsOf;
+    const amount = new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: summary.currency,
+    }).format(summary.highestAmountMinor / currencyMinorUnitFactor(summary.currency));
+    const highAmountCopy = summary.highAmountQualified
+      ? ` Highest pending amount: ${amount}${summary.highestMerchantName
+          ? ` at ${summary.highestMerchantName}`
+          : ''}.`
+      : '';
+    const level: NotificationLevel = summary.highAmountQualified
+      ? 'action_needed'
+      : 'heads_up';
+    return {
+      id: financeAttentionNotificationId(signal),
+      sourceId,
+      connectorType: 'finance-manager',
+      connectorInstanceId: signal.connectorId,
+      title: `Review unattributed activity for ${summary.accountDisplayName}`,
+      body: `${summary.pendingCount} transaction${
+        summary.pendingCount === 1 ? '' : 's'
+      } await attribution.${highAmountCopy}`,
+      level,
+      category: 'finance',
+      templateKey: 'finance-attribution-review',
+      readState: 'unread',
+      sourceState: 'active',
+      sourceActivityAt,
+      sourceActivityKey: activityKey,
+      reopenPolicy: 'handled_and_dismissed',
+      receivedAt: signal.conditionSince,
+      sortAt: sourceActivityAt,
+      groupKey: `finance-attribution:${signal.connectorId}`,
+      dedupeKey: sourceId,
+      relatedEntityType: 'finance-attribution-account-review',
+      relatedEntityId: summary.accountRef,
+      navigationTarget: '/finance/review',
+      isActionable: true,
+      occurrenceKey: activityKey,
+      metadata: {
+        notificationType: 'financeAttributionReview',
+        ...financeAttentionMetadata(signal, 'actionableNotification', decisionAt),
+      },
+    };
+  }
   const presentation = signal.signalKind === 'duplicateTransactionCandidate'
     ? {
         title: 'Review a possible duplicate transaction',

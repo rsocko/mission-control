@@ -10,6 +10,7 @@ import {
   myDayExclusions,
   myDayItems,
   notificationActions,
+  notificationDeliveryEvents,
   notifications,
   tasks,
 } from '@/db/schema';
@@ -22,6 +23,8 @@ import { formatDateInLocalTimezone } from '@/lib/utils/date';
 import {
   compareFinanceAttentionMyDayCandidates,
   compareFinanceAttentionSignalsForRouting,
+  financeAttentionAccountMateriallyWorsened,
+  financeAttentionAccountSignal,
   financeAttentionAttributionSignal,
   FINANCE_ATTENTION_MAX_REPAIR_SCOPE,
   financeAttentionMetadata,
@@ -47,6 +50,7 @@ import {
   resolveFinanceAttentionNotificationPresentation,
   selectFinanceAttentionRoute,
   type FinanceAttentionAttributionExceptionRow,
+  type FinanceAttentionAccountSummaryRow,
   type FinanceAttentionMyDayTaskCandidate,
   type FinanceAttentionRepairConnector,
   type FinanceAttentionRepairCounts,
@@ -59,6 +63,9 @@ import {
   type FinanceAttentionSourceCursor,
   type FinanceAttentionWriteBackRow,
 } from './finance-attention';
+import {
+  parseAttributionAttentionPolicy,
+} from '@/lib/finance/attribution-attention-policy';
 
 type SqliteDatabase = Database.Database;
 type DrizzleDatabase = BetterSQLite3Database<typeof schema>;
@@ -87,7 +94,7 @@ function loadAttributionBatch(
              last_observed_at AS lastObservedAt, resolved_at AS resolvedAt,
              updated_at AS updatedAt
       FROM finance_attribution_exceptions
-      WHERE connector_id = ? AND updated_at >= ?
+      WHERE connector_id = ? AND (updated_at >= ? OR reason_code = 'no-match')
       ORDER BY updated_at, id
       LIMIT ?
     `).all(connectorId, since, FINANCE_ATTENTION_SOURCE_BATCH_SIZE) as
@@ -100,11 +107,14 @@ function loadAttributionBatch(
            last_observed_at AS lastObservedAt, resolved_at AS resolvedAt,
            updated_at AS updatedAt
     FROM finance_attribution_exceptions
-    WHERE connector_id = ? AND (updated_at, id) > (?, ?)
+    WHERE connector_id = ?
+      AND (updated_at >= ? OR reason_code = 'no-match')
+      AND (updated_at, id) > (?, ?)
     ORDER BY updated_at, id
     LIMIT ?
   `).all(
     connectorId,
+    since,
     cursor.updatedAt,
     cursor.id,
     FINANCE_ATTENTION_SOURCE_BATCH_SIZE,
@@ -128,6 +138,7 @@ function loadWriteBackBatch(
       LIMIT ?
     `).all(connectorId, since, FINANCE_ATTENTION_SOURCE_BATCH_SIZE) as FinanceAttentionWriteBackRow[];
   }
+
   return handle.prepare(`
     SELECT id, status, attempt_count AS attemptCount, created_at AS createdAt,
            updated_at AS updatedAt, completed_at AS completedAt
@@ -142,6 +153,69 @@ function loadWriteBackBatch(
     cursor.id,
     FINANCE_ATTENTION_SOURCE_BATCH_SIZE,
   ) as FinanceAttentionWriteBackRow[];
+}
+
+function loadAttributionAccountSignals(
+  handle: SqliteDatabase,
+  connectorId: string,
+  decisionAt: Date,
+): FinanceAttentionSignal[] {
+  const connector = handle.prepare(`
+    SELECT settings FROM connector_configs
+    WHERE id = ? AND deleted_at IS NULL
+  `).get(connectorId) as { settings: string | Record<string, unknown> } | undefined;
+  if (!connector) return [];
+  const settings = typeof connector.settings === 'string'
+    ? JSON.parse(connector.settings) as Record<string, unknown>
+    : connector.settings;
+  const currency = String(settings.householdCurrency ?? 'USD');
+  const policy = parseAttributionAttentionPolicy(settings, currency);
+  const rows = handle.prepare(`
+    SELECT accounts.upstream_account_id AS accountId,
+           accounts.display_name AS accountDisplayName,
+           COUNT(exceptions.id) AS pendingCount,
+           COALESCE(MAX(
+             CASE WHEN exceptions.id IS NOT NULL THEN ABS(transactions.amount) END
+           ), 0) AS highestAmount,
+           (
+             SELECT candidate.merchant_name
+             FROM finance_transactions candidate
+             JOIN finance_attribution_exceptions candidate_exception
+               ON candidate_exception.transaction_id = candidate.id
+              AND candidate_exception.connector_id = ?
+              AND candidate_exception.status IN ('open', 'retry_requested')
+              AND candidate_exception.review_state = 'pending'
+              AND candidate_exception.reason_code = 'no-match'
+             WHERE candidate.connector_instance_id = ?
+               AND candidate.account_id = accounts.upstream_account_id
+               AND candidate.lifecycle_status = 'active'
+             ORDER BY ABS(candidate.amount) DESC, candidate.id
+             LIMIT 1
+           ) AS highestMerchantName,
+           MIN(exceptions.first_observed_at) AS firstObservedAt,
+           MAX(exceptions.last_observed_at) AS lastObservedAt
+    FROM finance_accounts accounts
+    LEFT JOIN finance_transactions transactions
+      ON transactions.connector_instance_id = accounts.connector_id
+     AND transactions.account_id = accounts.upstream_account_id
+     AND transactions.lifecycle_status = 'active'
+    LEFT JOIN finance_attribution_exceptions exceptions
+      ON exceptions.connector_id = accounts.connector_id
+     AND exceptions.transaction_id = transactions.id
+     AND exceptions.status IN ('open', 'retry_requested')
+     AND exceptions.review_state = 'pending'
+     AND exceptions.reason_code = 'no-match'
+    WHERE accounts.connector_id = ?
+    GROUP BY accounts.upstream_account_id, accounts.display_name
+    ORDER BY accounts.upstream_account_id
+  `).all(connectorId, connectorId, connectorId) as FinanceAttentionAccountSummaryRow[];
+  return rows.map((row) => financeAttentionAccountSignal(
+    connectorId,
+    row,
+    policy,
+    currency,
+    decisionAt,
+  ));
 }
 
 function findTask(transaction: Transaction, sourceId: string) {
@@ -190,6 +264,15 @@ function settleNotification(
   transaction.delete(notificationActions).where(and(
     eq(notificationActions.notificationId, notification.id),
     eq(notificationActions.createdBy, 'connector'),
+  )).run();
+  transaction.update(notificationDeliveryEvents).set({
+    status: 'suppressed',
+    suppressionReason: 'finance_attention_settled',
+    nextAttemptAt: null,
+    leaseExpiresAt: null,
+  }).where(and(
+    eq(notificationDeliveryEvents.notificationId, notification.id),
+    eq(notificationDeliveryEvents.status, 'pending'),
   )).run();
   return true;
 }
@@ -278,6 +361,15 @@ function preserveStatusOnly(
     transaction.delete(notificationActions).where(and(
       eq(notificationActions.notificationId, notification.id),
       eq(notificationActions.createdBy, 'connector'),
+    )).run();
+    transaction.update(notificationDeliveryEvents).set({
+      status: 'suppressed',
+      suppressionReason: 'finance_attention_status_only',
+      nextAttemptAt: null,
+      leaseExpiresAt: null,
+    }).where(and(
+      eq(notificationDeliveryEvents.notificationId, notification.id),
+      eq(notificationDeliveryEvents.status, 'pending'),
     )).run();
   }
   if (task) {
@@ -550,7 +642,11 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           statusOnly: 0,
         };
         const signals: FinanceAttentionSignal[] = [...(input.sourceSignals ?? [])];
-        const pendingNotifications: FinanceAttentionSignal[] = [];
+        const pendingNotifications: Array<{
+          signal: FinanceAttentionSignal;
+          existing: typeof notifications.$inferSelect | undefined;
+          materiallyWorsened: boolean;
+        }> = [];
         result.evaluated += signals.length;
         const collectSignals = (batch: FinanceAttentionSignal[]) => {
           result.evaluated += batch.length;
@@ -581,6 +677,13 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           const last = rows.at(-1)!;
           writeBackCursor = { updatedAt: last.updatedAt, id: last.id };
         }
+        const accountSignals = loadAttributionAccountSignals(
+          handles.sqlite,
+          input.connectorId,
+          decisionAt,
+        );
+        result.evaluated += accountSignals.length;
+        signals.push(...accountSignals);
 
         let promotionsRemaining = Math.max(
           0,
@@ -622,7 +725,16 @@ export function createSqliteFinanceAttentionRoutingPersistence(
               || decidedRoute === 'informationalNotification')
             && !task
           ) {
-            pendingNotifications.push(signal);
+            const existing = findNotification(transaction, sourceId);
+            pendingNotifications.push({
+              signal,
+              existing,
+              materiallyWorsened: signal.signalKind === 'attributionAccountReview'
+                && (
+                  !existing
+                  || financeAttentionAccountMateriallyWorsened(signal, existing.metadata)
+                ),
+            });
             continue;
           }
           if (financeAttentionRequiresTaskPromotion(task, signal)) {
@@ -640,17 +752,32 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           settleNotification(transaction, notification, signal, decisionAt, routedTask.task.id);
         }
         if (pendingNotifications.length > 0) {
-          const inputs: CreateNotificationInput[] = pendingNotifications.map((signal) => (
-            financeAttentionNotificationInput(signal, decisionAt)
+          const inputs: CreateNotificationInput[] = pendingNotifications.map(({ signal, existing }) => (
+            financeAttentionNotificationInput(signal, decisionAt, existing
+              ? {
+                  metadata: existing.metadata,
+                  lastSourceActivityAt: existing.lastSourceActivityAt,
+                  lastSourceActivityKey: existing.lastSourceActivityKey,
+                }
+              : undefined)
           ));
           const routed = createSqliteNotificationsInTransaction(transaction, inputs, {
             now: decisionAt,
             wakeDispatcher: false,
           });
           syncFinanceAttentionNotificationPresentation(transaction, routed);
-          for (const routedResult of routed) {
+          for (const [index, routedResult] of routed.entries()) {
             if (routedResult.created) result.notificationsCreated++;
             else result.notificationsUpdated++;
+            if (pendingNotifications[index]?.materiallyWorsened) {
+              transaction.update(notifications).set({
+                state: 'unread',
+                readState: 'unread',
+                disposition: 'inbox',
+                readAt: null,
+                sourceResolvedAt: null,
+              }).where(eq(notifications.id, routedResult.notification.id)).run();
+            }
             hasPendingDelivery ||= routedResult.deliveryEvents.some(
               (event) => event.status === 'pending',
             );

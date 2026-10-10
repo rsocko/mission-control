@@ -584,7 +584,10 @@ export function createSqliteConnectorExecutionRepositories(
           `connector_instance_id = ?
             AND (
               ${statusTerms}
-              OR source_id LIKE 'local:%'
+              OR (
+                source_id LIKE 'local:%'
+                AND sync_status <> 'push_failed'
+              )
               OR (
                 is_checklist_item = 1
                 AND source_id = id
@@ -626,7 +629,10 @@ export function createSqliteConnectorExecutionRepositories(
           WHERE id = ?
             AND (
               sync_status IN ('pending_push', 'push_error', 'pushing')
-              OR source_id LIKE 'local:%'
+              OR (
+                source_id LIKE 'local:%'
+                AND sync_status <> 'push_failed'
+              )
               OR (
                 is_checklist_item = 1
                 AND source_id = id

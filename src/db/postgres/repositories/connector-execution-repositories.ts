@@ -1763,7 +1763,10 @@ export function createPostgresConnectorExecutionRepositories(
             WHERE connector_instance_id = $1
               AND (
                 sync_status IN ${statuses}
-                OR source_id LIKE 'local:%'
+                OR (
+                  source_id LIKE 'local:%'
+                  AND sync_status <> 'push_failed'
+                )
                 OR (
                   is_checklist_item = true
                   AND source_id = id
@@ -1808,7 +1811,10 @@ export function createPostgresConnectorExecutionRepositories(
             WHERE id = $2
               AND (
                 sync_status IN ('pending_push', 'push_error', 'pushing')
-                OR source_id LIKE 'local:%'
+                OR (
+                  source_id LIKE 'local:%'
+                  AND sync_status <> 'push_failed'
+                )
                 OR (
                   is_checklist_item = true
                   AND source_id = id

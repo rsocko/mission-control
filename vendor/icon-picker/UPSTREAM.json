@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "package": {
+    "name": "@rsocko/icon-picker",
+    "version": "0.1.0-rc.0"
+  },
+  "source": {
+    "repository": "git+https://github.com/rsocko/icon-picker.git",
+    "commit": "7206bbe8dc22d43d95b2e2c3c0020215efb8a2b9",
+    "tag": null
+  },
+  "artifact": {
+    "filename": "rsocko-icon-picker-0.1.0-rc.0.tgz",
+    "size": 39695,
+    "unpackedSize": 126787,
+    "entryCount": 36,
+    "integrity": "sha512-SVLC5q+B6vuWVabZgm2V6ugfiec8kLEhIBgl/+lZDZrsLWtUn6HucMNm2iBRx+l8GgEwXf8gAmklfrHOddtV8w==",
+    "shasum": "0b2db4385f35f5636b324285bd219b5c3310c8fe",
+    "sha256": "822dfdf28a4f8419c778d1e56b00d9628bcbe93918b672a9921c1eeb0ab921be",
+    "sha512": "4952c2e6af81eafb9655a6d9826d95eae81f89e73c90b121201825ffe9590d9aec2d6b549fa1ee70c366da2051c7e97c1a01305dff200269257eb1ce75db55f3",
+    "files": [
+      "LICENSE",
+      "README.md",
+      "THIRD_PARTY_NOTICES.md",
+      "dist/IconPicker.d.ts",
+      "dist/IconPicker.d.ts.map",
+      "dist/IconPickerButton.d.ts",
+      "dist/IconPickerButton.d.ts.map",
+      "dist/IconRenderer.d.ts",
+      "dist/IconRenderer.d.ts.map",
+      "dist/chunks/IconPickerButton-BCeJJAHh.js",
+      "dist/chunks/IconPickerButton-BCeJJAHh.js.map",
+      "dist/chunks/IconRenderer-86b851bX.js",
+      "dist/chunks/IconRenderer-86b851bX.js.map",
+      "dist/classnames.d.ts",
+      "dist/classnames.d.ts.map",
+      "dist/core.d.ts",
+      "dist/core.d.ts.map",
+      "dist/core.js",
+      "dist/core.js.map",
+      "dist/data.d.ts",
+      "dist/data.d.ts.map",
+      "dist/iconify.d.ts",
+      "dist/iconify.d.ts.map",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/index.js",
+      "dist/picker.d.ts",
+      "dist/picker.d.ts.map",
+      "dist/picker.js",
+      "dist/renderer.d.ts",
+      "dist/renderer.d.ts.map",
+      "dist/renderer.js",
+      "dist/styles.css",
+      "dist/types.d.ts",
+      "dist/types.d.ts.map",
+      "package.json"
+    ]
+  },
+  "acquisition": "canonical-npm-pack-from-source",
+  "canonicalization": {
+    "lineEndings": "lf",
+    "artifactContract": "package-artifact.json"
+  }
+}

@@ -54,7 +54,7 @@ vi.mock('@/components/ui/SubtaskPill', () => ({
   ),
 }));
 
-vi.mock('@/components/ui/icon-picker', () => ({
+vi.mock('@rsocko/icon-picker/renderer', () => ({
   IconRenderer: ({ value }: { value: string }) => React.createElement('span', { 'data-testid': 'icon-renderer', 'data-value': value }),
 }));
 

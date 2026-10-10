@@ -17,7 +17,7 @@ import {
   Zap,
 } from 'lucide-react';
 import Image from 'next/image';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { ProjectModal } from '@/components/projects/ProjectModal';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { SearchInput } from '@/components/ui/SearchInput';

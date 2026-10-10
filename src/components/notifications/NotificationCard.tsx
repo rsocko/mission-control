@@ -14,7 +14,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from '@/lib/toast';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { formatTimeAgo } from '@/lib/utils/dashboard-helpers';
 import type { InboundNotification, NotificationItem, NotificationAction } from '@/types';
 import type {

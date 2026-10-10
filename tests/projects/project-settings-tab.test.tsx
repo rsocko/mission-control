@@ -127,7 +127,7 @@ describe('project settings tab', () => {
     await waitFor(() => {
       expect(patchBodies(harness)).toContainEqual({ iconColor: null });
     });
-    fireEvent.click(screen.getByTitle('🚀'));
+    fireEvent.click(screen.getByRole('button', { name: 'Select emoji 🚀' }));
     await waitFor(() => {
       expect(patchBodies(harness)).toContainEqual({
         icon: '🚀',

@@ -340,7 +340,7 @@ describe('NotificationCard — DI Rich Cards', () => {
       const { container } = render(<NotificationCard notification={notification} />);
 
       expect(container.querySelector(
-        'span[aria-label="mdi:lock-open-alert"]',
+        'span[aria-label="mdi icon: lock-open-alert"]',
       )).not.toBeNull();
       expect(container.querySelector(
         'img[src="/icons/connectors/home-assistant.svg"]',

@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { Plug } from 'lucide-react';
 import { CONNECTOR_ICONS } from './types';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 
 export function ConnectorBrandIcon({ type, size = 18 }: { type: string; size?: number }) {
   const src = CONNECTOR_ICONS[type];

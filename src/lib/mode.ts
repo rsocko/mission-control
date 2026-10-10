@@ -31,7 +31,7 @@ export interface ShortcutConfig {
 
 /** Maximum number of enabled shortcuts browsers reliably support */
 export const MAX_ENABLED_SHORTCUTS = TASKBAR_SHORTCUT_LIMIT;
-export const SHORTCUT_CONFIG_VERSION = 2;
+export const SHORTCUT_CONFIG_VERSION = 3;
 
 /**
  * Controls PWA launch behavior when a shortcut is clicked and the app is already open.
@@ -57,10 +57,10 @@ function createShortcutConfig(
 }
 
 export const DEFAULT_SHORTCUTS: ShortcutConfig[] = [
-  '/icons',
   '/today',
   '/triage',
   '/projects',
+  '/',
 ].map(url => {
   const page = getShortcutPage(url);
   if (!page) throw new Error(`Missing shortcut catalog entry for ${url}`);
@@ -151,25 +151,17 @@ export function getShortcuts(): ShortcutConfig[] {
     return canonicalShortcuts;
   }
 
-  const iconFinder = getShortcutPage('/icons');
-  const hasIconFinder = canonicalShortcuts.some(shortcut => shortcut.url === '/icons');
-  let remainingEnabledSlots = hasIconFinder
-    ? MAX_ENABLED_SHORTCUTS
-    : MAX_ENABLED_SHORTCUTS - 1;
+  let remainingEnabledSlots = MAX_ENABLED_SHORTCUTS;
   const cappedShortcuts = canonicalShortcuts.map(shortcut => {
     if (!shortcut.enabled) return shortcut;
     if (remainingEnabledSlots === 0) return { ...shortcut, enabled: false };
     remainingEnabledSlots -= 1;
     return shortcut;
   });
-  const migratedShortcuts = iconFinder && !hasIconFinder
-    ? [createShortcutConfig(iconFinder, true), ...cappedShortcuts]
-    : cappedShortcuts;
-
-  settings.shortcuts = migratedShortcuts;
+  settings.shortcuts = cappedShortcuts;
   settings.shortcutConfigVersion = SHORTCUT_CONFIG_VERSION;
   writeSettings(settings);
-  return migratedShortcuts;
+  return cappedShortcuts;
 }
 
 /**

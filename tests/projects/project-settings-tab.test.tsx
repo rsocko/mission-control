@@ -112,6 +112,16 @@ describe('project settings tab', () => {
     expect(harness.requestsFor(PROJECT_PATCHES, 'PATCH')).toHaveLength(0);
   });
 
+  it('keeps the icon label separated from its trigger', async () => {
+    await renderProjectTab('Settings');
+
+    const label = await screen.findByText('Icon', { selector: 'label' });
+    const field = label.parentElement;
+
+    expect(field).toHaveClass('flex', 'flex-col', 'gap-[var(--space-2)]');
+    expect(within(field!).getByRole('button', { name: 'Pick an icon' })).toBeInTheDocument();
+  });
+
   it('clears the icon color override when Auto is selected', async () => {
     harness = settingsScenario({
       project: {

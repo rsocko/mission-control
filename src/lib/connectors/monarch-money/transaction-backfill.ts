@@ -9,6 +9,7 @@ import {
   FinanceInsightBackfillTooLargeError,
   FinanceInsightBackfillWindowIncompleteError,
   type FinanceInsightBackfillPlan,
+  type FinanceInsightBackfillProjectionConflictReason,
   type FinanceInsightBackfillPromotionCommand,
   type FinanceInsightBackfillWindowProof,
   type FinanceInsightPersistence,
@@ -52,6 +53,7 @@ export class FinanceInsightBackfillError extends Error {
   constructor(
     readonly code: string,
     readonly status: number,
+    readonly diagnosticReason?: FinanceInsightBackfillProjectionConflictReason,
   ) {
     super(code);
     this.name = 'FinanceInsightBackfillError';
@@ -174,7 +176,13 @@ function normalizedBackfillError(
     || error instanceof FinanceInsightBackfillPlanUnavailableError
     || error instanceof FinanceInsightBackfillProjectionConflictError
   ) {
-    return new FinanceInsightBackfillError(error.code, 409);
+    return new FinanceInsightBackfillError(
+      error.code,
+      409,
+      error instanceof FinanceInsightBackfillProjectionConflictError
+        ? error.diagnosticReason
+        : undefined,
+    );
   }
   if (error instanceof MonarchBridgeError) {
     return new FinanceInsightBackfillError(error.code, error.status ?? 502);
@@ -441,19 +449,37 @@ async function assertLegacyCompletedPlanPromotion(
     'proof',
     () => finance.projection.readState(command.connectorId),
   );
+  if (state?.status !== 'succeeded') {
+    throw new FinanceInsightBackfillProjectionConflictError('projection_status');
+  }
+  if (state.generationId === null) {
+    throw new FinanceInsightBackfillProjectionConflictError('projection_generation_missing');
+  }
+  if (state.sourceAsOf === null) {
+    throw new FinanceInsightBackfillProjectionConflictError('projection_source_missing');
+  }
+  if (state.itemCount !== command.itemCount) {
+    throw new FinanceInsightBackfillProjectionConflictError('projection_item_count');
+  }
+  if (state.contentDigest !== command.contentDigest) {
+    throw new FinanceInsightBackfillProjectionConflictError('projection_content_digest');
+  }
   if (
-    state?.status !== 'succeeded'
-    || state.generationId === null
-    || state.sourceAsOf === null
-    || state.itemCount !== command.itemCount
-    || state.contentDigest !== command.contentDigest
-    || state.coverageStart !== command.coverageStart
+    state.coverageStart !== command.coverageStart
     || state.coverageEnd !== command.coverageEnd
-    || state.windowCount !== command.windowCount
-    || state.windowsDigest === null
-    || state.bridgeContractVersion !== command.bridgeContractVersion
   ) {
-    throw new FinanceInsightBackfillProjectionConflictError();
+    throw new FinanceInsightBackfillProjectionConflictError('projection_coverage');
+  }
+  if (state.windowCount !== command.windowCount) {
+    throw new FinanceInsightBackfillProjectionConflictError('projection_window_count');
+  }
+  if (state.windowsDigest === null) {
+    throw new FinanceInsightBackfillProjectionConflictError(
+      'projection_windows_digest_missing',
+    );
+  }
+  if (state.bridgeContractVersion !== command.bridgeContractVersion) {
+    throw new FinanceInsightBackfillProjectionConflictError('projection_contract');
   }
   const [storedFacts, storedWindows, operationalProofs] = await runBackfillStage(
     'proof',
@@ -468,13 +494,17 @@ async function assertLegacyCompletedPlanPromotion(
   );
   const expectedWindows = buildFinanceInsightHistoryWindows(plan.coverageEnd);
   const completedTime = Date.parse(plan.completedAt!);
+  if (storedWindows.length !== expectedWindows.length) {
+    throw new FinanceInsightBackfillProjectionConflictError('promoted_window_count');
+  }
+  if (financeInsightDigestV1(storedFacts as CanonicalJsonValue) !== state.contentDigest) {
+    throw new FinanceInsightBackfillProjectionConflictError('promoted_facts_digest');
+  }
   if (
-    storedWindows.length !== expectedWindows.length
-    || financeInsightDigestV1(storedFacts as CanonicalJsonValue) !== state.contentDigest
-    || financeInsightDigestV1(storedWindows as unknown as CanonicalJsonValue)
-      !== state.windowsDigest
+    financeInsightDigestV1(storedWindows as unknown as CanonicalJsonValue)
+    !== state.windowsDigest
   ) {
-    throw new FinanceInsightBackfillProjectionConflictError();
+    throw new FinanceInsightBackfillProjectionConflictError('promoted_windows_digest');
   }
   for (const [index, stored] of storedWindows.entries()) {
     const expected = expectedWindows[index]!;
@@ -493,14 +523,28 @@ async function assertLegacyCompletedPlanPromotion(
       stored.index !== expected.index
       || stored.start !== expected.start
       || stored.end !== expected.end
-      || stored.itemCount !== windowFacts.length
-      || stored.digest
-        !== financeInsightDigestV1(windowFacts as unknown as CanonicalJsonValue)
-      || !validProofSource
-      || !Number.isFinite(Date.parse(stored.sourceAsOf))
-      || Date.parse(stored.sourceAsOf) > completedTime
     ) {
-      throw new FinanceInsightBackfillProjectionConflictError();
+      throw new FinanceInsightBackfillProjectionConflictError('promoted_window_identity');
+    }
+    if (stored.itemCount !== windowFacts.length) {
+      throw new FinanceInsightBackfillProjectionConflictError('promoted_window_item_count');
+    }
+    if (
+      stored.digest
+      !== financeInsightDigestV1(windowFacts as unknown as CanonicalJsonValue)
+    ) {
+      throw new FinanceInsightBackfillProjectionConflictError('promoted_window_digest');
+    }
+    if (!validProofSource) {
+      throw new FinanceInsightBackfillProjectionConflictError('promoted_window_source_proof');
+    }
+    if (!Number.isFinite(Date.parse(stored.sourceAsOf))) {
+      throw new FinanceInsightBackfillProjectionConflictError('promoted_window_source_invalid');
+    }
+    if (Date.parse(stored.sourceAsOf) > completedTime) {
+      throw new FinanceInsightBackfillProjectionConflictError(
+        'promoted_window_source_after_completion',
+      );
     }
   }
   const sourceAsOf = storedWindows
@@ -517,8 +561,13 @@ async function assertLegacyCompletedPlanPromotion(
     windowsDigest: state.windowsDigest,
     bridgeContractVersion: state.bridgeContractVersion,
   });
-  if (state.sourceAsOf !== sourceAsOf || state.generationId !== generationId) {
-    throw new FinanceInsightBackfillProjectionConflictError();
+  if (state.sourceAsOf !== sourceAsOf) {
+    throw new FinanceInsightBackfillProjectionConflictError('projection_source_minimum');
+  }
+  if (state.generationId !== generationId) {
+    throw new FinanceInsightBackfillProjectionConflictError(
+      'projection_generation_identity',
+    );
   }
 }
 

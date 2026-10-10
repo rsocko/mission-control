@@ -349,10 +349,32 @@ export class FinanceInsightBackfillPlanUnavailableError extends Error {
   }
 }
 
+export type FinanceInsightBackfillProjectionConflictReason =
+  | 'projection_status'
+  | 'projection_generation_missing'
+  | 'projection_source_missing'
+  | 'projection_item_count'
+  | 'projection_content_digest'
+  | 'projection_coverage'
+  | 'projection_window_count'
+  | 'projection_windows_digest_missing'
+  | 'projection_contract'
+  | 'promoted_window_count'
+  | 'promoted_facts_digest'
+  | 'promoted_windows_digest'
+  | 'promoted_window_identity'
+  | 'promoted_window_item_count'
+  | 'promoted_window_digest'
+  | 'promoted_window_source_proof'
+  | 'promoted_window_source_invalid'
+  | 'promoted_window_source_after_completion'
+  | 'projection_source_minimum'
+  | 'projection_generation_identity';
+
 export class FinanceInsightBackfillProjectionConflictError extends Error {
   readonly code = 'finance_insight_backfill_projection_changed';
 
-  constructor() {
+  constructor(readonly diagnosticReason?: FinanceInsightBackfillProjectionConflictReason) {
     super('Finance insight backfill projection changed since it was captured');
     this.name = 'FinanceInsightBackfillProjectionConflictError';
   }

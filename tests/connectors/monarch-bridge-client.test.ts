@@ -133,6 +133,7 @@ describe('MonarchBridgeClient', () => {
     });
 
     expect(result.transactions[0]?.businessContext).toBe('Invented Neighborhood Foods');
+    expect(result.transactions[0]?.businessEntityName).toBeNull();
   });
 
   it('filters native Monarch review state and validates exact merchant/review mutations', async () => {

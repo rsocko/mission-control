@@ -42,6 +42,7 @@ export function assertFinanceInsightProjectionRepairStatus(
   if (
     status.gates.immediateNotificationsEnabled
     || status.gates.monthlyDigestEnabled
+    || status.gates.weeklySummaryEnabled
     || status.gates.deliveryEnabled
     || status.gates.presentationEnabled
     || status.gates.actionsEnabled

@@ -313,6 +313,7 @@ export {
   financeAttributionExceptions,
   financeAttributionAudit,
   financeAttentionRepairAudit,
+  financeCleanBootstrapAudit,
   financeAttentionDeliveryReceipts,
   kidProfiles,
   kidCardRules,

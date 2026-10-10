@@ -2,7 +2,7 @@
 title: "Tyrion Recovery and Finance Insight Readiness"
 status: accepted
 created: 2026-08-22
-last_reviewed: 2026-10-09
+last_reviewed: 2026-10-10
 category: operations
 related:
   - "[Finance Attention Projection Repair](./finance-attention-repair.md)"
@@ -35,7 +35,9 @@ or notification content into a request, log, or incident note.
 3. Deploy PR #1563 and this stacked PR as one immutable artifact. Web and worker
    must run the identical digest. Do not mix old and new worker/web revisions.
 4. Confirm migrations `0113_finance_attention_repair`,
-   `0114_tyrion_readiness`, and `0117_simplify_tyrion_identities` applied
+   `0114_tyrion_readiness`, `0117_simplify_tyrion_identities`, and
+   `0150_finance_clean_bootstrap` (PostgreSQL:
+   `0028_finance_clean_bootstrap`) applied
    through normal startup. Migration `0117` invalidates cached Finance Insight
    publications and identity-dependent projection/backfill proofs so no legacy
    raw source identity can be replayed. A fresh disabled/quarantined sync must
@@ -211,21 +213,20 @@ metadata reads do not claim work or mutate leases. Cutover and rollback remain
 single atomic database operations, and notification dispatcher wake occurs only
 after a successful commit.
 
-## 4. Repair PR #1563 projections
+## 4. Choose repair or clean-current-state recovery
 
-Follow [Finance Attention Projection Repair](./finance-attention-repair.md)
-exactly:
+Do not combine the legacy projection repair with a clean-current-state
+bootstrap. Use [Finance Attention Projection Repair](./finance-attention-repair.md)
+only when preserving and reconciling the old derived projection is an explicit
+operator goal.
 
-1. Run the bounded dry-run.
-2. Confirm the expected 4,632 target baseline; stop on any mismatch.
-3. Apply using the exact dry-run ID and confirmation string.
-4. Replay the apply with the same idempotency key and require
-   `replayed: true`.
-5. Run a new dry-run with a new key and require every target count to be zero.
-
-Stop on `repair_scope_changed`, `repair_delivery_in_flight`, an unexpected
-digest/count, or any nonzero verification replay. Do not broaden the scope or
-edit projection tables directly.
+Use the clean bootstrap in section 6 when the approved recovery decision is to
+abandon old Mission Control-derived Tyrion state and start from the current
+contract. It does not mutate Monarch, Tyrion policy, connector configuration or
+credentials, the stable Finance identity namespace, quarantine, or gate
+settings. It has no option to delete manual attribution decisions. Any manual
+decision count greater than zero is a hard stop requiring a later, separate
+user decision.
 
 ## 5. Quarantine the scheduler
 
@@ -248,74 +249,110 @@ Require `status: quarantined`, then repeat metadata readiness and require
 `sync_quarantine_active_job`, let the current job finish; do not force a second
 job or bypass the fence.
 
-## 6. Repair the quarantined 37-month history projection
+## 6. Clean-current-state bootstrap
 
-Only use this operation after scheduler quarantine is active. It is the narrow
-exception that can read the configured disabled connector by explicit ID.
-It does not enqueue a sync job, run attribution, or create notifications,
-tasks, actions, presentations, or delivery work.
+Only use this two-phase operation after scheduler quarantine is active. Both
+phases require trusted Finance mutation authentication, the explicit connector
+ID, an idempotency key, a disabled connector, active quarantine, zero
+queued/running jobs, every downstream gate false, and the connector's exclusive
+retention lease. Neither phase contacts Monarch or Tyrion. Neither phase
+enqueues a sync or canary.
 
-1. Read Finance operations metadata again and require all of the following:
-   `connector.enabled=false`, `scheduler.state=quarantined`,
-   `scheduler.queued=0`, `scheduler.running=0`, and every notification,
-   delivery, presentation, and action gate is false.
-2. Choose one new operator idempotency key and retain it for every retry of this
-   repair. Do not place credentials or connector data in the key. A failed plan
-   is resumable: after deploying a repair, retry the exact same connector ID,
-   key, horizon, and window limit. Do not rotate the key merely because a prior
-   attempt failed.
-3. Run the complete bounded repair:
+### 6.1 Aggregate-only inventory
 
 ```bash
-REPAIR_KEY="tyrion-history-repair-$(date -u +%Y%m%dT%H%M%SZ)"
+DRY_RUN_KEY="tyrion-clean-inventory-$(date -u +%Y%m%dT%H%M%SZ)"
 
 curl --fail-with-body -X POST \
-  "$MC_ORIGIN/api/finance/sync" \
+  "$MC_ORIGIN/api/connectors/$CONNECTOR_ID/finance-operations" \
   -H "X-MC-API-Key: ${MC_API_KEY}" \
+  -H "Idempotency-Key: $DRY_RUN_KEY" \
   -H "Content-Type: application/json" \
-  --data "{\"connectorId\":\"$CONNECTOR_ID\",\"insightBackfill\":{\"idempotencyKey\":\"$REPAIR_KEY\",\"horizonMonths\":37,\"maxWindows\":4}}"
+  --data '{"action":"inventory-clean-bootstrap"}'
 ```
 
-Require only sanitized `insightBackfill` operation metadata in the response:
-`status=completed`, `completedWindows=4`, `totalWindows=4`, the expected
-coverage dates, and the expected aggregate item count. Stop on
-`finance_insight_repair_connector_enabled`,
-`finance_insight_repair_quarantine_required`,
-`finance_insight_repair_active_work`,
-`finance_insight_repair_gates_enabled`, any backfill error, or any unexpected
-field.
+The response is privacy-safe and aggregate-only. It separately counts manual
+attribution decisions, automated attribution exceptions, Finance
+notifications, Finance tasks, account projections, transaction projections,
+history projections, backfill plans, backfill proofs, active delivery work,
+and active action work. It never returns transaction IDs, direct account IDs,
+merchant names, amounts, child identities, credentials, or source payloads.
+Record the exact `dryRunId`, `scopeDigest`, and `confirmationToken`. Replaying
+the same key must return those same values with `replayed=true`.
 
-On a backfill error, stop and read trusted attribution readiness. Inspect
-`historyBackfill.status`, `completedWindows`, `totalWindows`, `lastErrorCode`,
-and `updatedAt`; these are aggregate operation metadata and do not contain the
-operator key, plan ID, provider records, or finance content. The stable error
-families identify configuration, identity, plan, safety, provider, persistence,
-proof, or promotion failures. Keep the connector disabled and quarantined and
-keep every gate false while investigating. Retry the exact key only after the
-reported stage is repaired. If the same stage/code repeats, stop; do not rotate
-the key, run a canary, release quarantine, or substitute an ordinary sync. Use
-a new key only when intentionally starting a different repair request after the
-existing plan completed successfully, or when changing the horizon or other
-immutable plan inputs.
+Stop if `manualAttributionDecisions` is nonzero. This release deliberately has
+no force-delete-manual option. Also stop for active delivery/action work, an
+unexpected count, private content, an enabled connector, missing quarantine,
+active jobs, an enabled gate, or lease contention.
 
-`finance_insight_backfill_projection_changed` may also include a stable
-aggregate-only `reason` naming the failed validation predicate. Record that
-reason for diagnosis. It contains no connector identity, finance content,
-counts, dates, or digests and does not authorize relaxing the failed check.
+### 6.2 Exact confirmed apply
 
-4. Replay the exact request with the same connector ID, idempotency key,
-   horizon, and window limit. Require the same plan ID and identical completed
-   metadata. This replay must make no provider requests and no additional
-   writes.
-5. Repeat the Finance operations metadata read. Require the connector to remain
-   disabled and quarantined, zero queued/running jobs, unchanged gates, no
-   canary, and zero task/notification/action/presentation/delivery deltas.
-6. Read connector health and require `insights.projection.status=succeeded`,
-   `windowCount=37`, current `sourceAsOf`, non-null coverage and item count, and
-   `lastErrorCode=null`.
+Use a new apply idempotency key and copy the three dry-run values exactly:
 
-Do not authorize a canary until all six checks pass. Never substitute an
-ordinary manual/full sync: those continue to reject a disabled connector.
+```bash
+APPLY_KEY="tyrion-clean-apply-$(date -u +%Y%m%dT%H%M%SZ)"
+
+curl --fail-with-body -X POST \
+  "$MC_ORIGIN/api/connectors/$CONNECTOR_ID/finance-operations" \
+  -H "X-MC-API-Key: ${MC_API_KEY}" \
+  -H "Idempotency-Key: $APPLY_KEY" \
+  -H "Content-Type: application/json" \
+  --data "{
+    \"action\":\"apply-clean-bootstrap\",
+    \"dryRunId\":\"$DRY_RUN_ID\",
+    \"scopeDigest\":\"$SCOPE_DIGEST\",
+    \"confirmationToken\":\"$CONFIRMATION_TOKEN\"
+  }"
+```
+
+Apply re-inventories under the exclusive lease and refuses
+`finance_clean_bootstrap_scope_drift` if anything changed. It also refuses a
+missing/mismatched confirmation, a reused key with different input, manual
+decisions, in-flight delivery/action work, or any safety-fence change. There is
+no partial success response: SQLite uses an immediate transaction and
+PostgreSQL uses a transaction plus connector-scoped advisory lock.
+
+The transaction retires only connector-scoped Mission Control-derived state:
+
+- Automated attribution exceptions, audits/results, and local subject
+  projections.
+- Finance attention/insight notifications by resolving their source lifecycle,
+  clearing actionability, and removing connector-created actions.
+- Finance-derived tasks by cancelling open work with `not_planned` lifecycle
+  semantics while preserving already terminal disposition.
+- Account and transaction projections, transaction-history state/windows/facts,
+  insight publications/delivery/cache/occurrences/cutover state, stale
+  connection-attention state, attention delivery receipts, and obsolete
+  attention-repair audits.
+- Old transaction backfill plans and proofs.
+
+It retains connector configuration and credentials, the stable Finance
+identity namespace and dedupe identity inputs, external Tyrion policy,
+quarantine, all gate settings, terminal notification/task records, and the
+clean-bootstrap audit. It does not delete or modify Monarch data.
+
+Replay the exact apply with the same apply key and require the same result with
+`replayed=true`. Then run a new inventory with a new key. Require zero manual
+decisions, automated exceptions, account/transaction/history projections,
+backfill plans/proofs, active delivery work, and active action work. Finance
+notifications and tasks remain as terminal lifecycle records and therefore may
+still be counted; verify they are resolved/archived/dismissed or
+done/cancelled, not actionable.
+
+Re-read Finance operations metadata and require the connector still disabled
+and quarantined, zero queued/running jobs, every gate unchanged and false, and
+no canary. The state is now empty and ready for exactly one normal
+current-window canary in section 7; apply never enqueues it.
+
+Apply is intentionally destructive for derived projections and has no online
+undo. Rollback means stop all operators, restore the verified pre-apply
+database backup with the matching prior artifact, and re-run inventory before
+any further mutation. Do not attempt table-level reconstruction from the audit.
+
+After the current-window canary succeeds, a later historical backfill must use
+a new idempotency key and generation, fetch again from Monarch, and evaluate
+through the current Tyrion contract. It must not reuse old plan/proof IDs or
+resurrect any retired legacy attention notification/task identity.
 
 ## 7. Run exactly one controlled canary
 

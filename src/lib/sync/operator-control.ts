@@ -94,6 +94,7 @@ export interface FinanceSyncControlStatus {
     shadowIngestEnabled: boolean;
     immediateNotificationsEnabled: boolean;
     monthlyDigestEnabled: boolean;
+    weeklySummaryEnabled: boolean;
     deliveryEnabled: boolean;
     presentationEnabled: boolean;
     actionsEnabled: boolean;

@@ -512,6 +512,26 @@ export const financeAttentionRepairAudit = sqliteTable('finance_attention_repair
     .on(table.connectorId, table.createdAt),
 ]);
 
+export const financeCleanBootstrapAudit = sqliteTable('finance_clean_bootstrap_audit', {
+  id: text('id').primaryKey(),
+  connectorId: text('connector_id').notNull(),
+  mode: text('mode').$type<'dry-run' | 'apply'>().notNull(),
+  actorType: text('actor_type').$type<'parent-admin' | 'service'>().notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  dryRunId: text('dry_run_id').notNull(),
+  scopeDigest: text('scope_digest').notNull(),
+  confirmationToken: text('confirmation_token').notNull(),
+  inventory: text('inventory', { mode: 'json' }).notNull(),
+  result: text('result', { mode: 'json' }).notNull(),
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_finance_clean_bootstrap_idempotency')
+    .on(table.connectorId, table.idempotencyKey),
+  index('idx_finance_clean_bootstrap_dry_run')
+    .on(table.connectorId, table.dryRunId, table.mode),
+]);
+
 export const financeAttentionDeliveryReceipts = sqliteTable(
   'finance_attention_delivery_receipts',
   {

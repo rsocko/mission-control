@@ -1051,6 +1051,13 @@
       "when": 1791600000000,
       "tag": "0149_finance_attention_delivery_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "6",
+      "when": 1791606499727,
+      "tag": "0150_finance_clean_bootstrap",
+      "breakpoints": true
     }
   ]
 }

@@ -31,8 +31,49 @@ describe('IconPickerButton', () => {
   });
 
   afterEach(() => {
+    document.documentElement.classList.remove('dark');
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('inherits the Mission Control dark theme and carries it into the portal', () => {
+    document.documentElement.classList.add('dark');
+    setViewport(1200, 800);
+    mockTriggerRect({});
+
+    render(<IconPickerButton value={null} onChange={vi.fn()} />);
+
+    const trigger = screen.getByTitle('Pick an icon');
+    expect(trigger).toHaveAttribute('data-rs-icon-picker-theme', 'dark');
+
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole('dialog', { name: 'Choose an icon' }).parentElement)
+      .toHaveAttribute('data-rs-icon-picker-theme', 'dark');
+  });
+
+  it('allows an explicit theme to override the dark host', () => {
+    document.documentElement.classList.add('dark');
+
+    render(<IconPickerButton value={null} onChange={vi.fn()} theme="light" />);
+
+    expect(screen.getByTitle('Pick an icon'))
+      .toHaveAttribute('data-rs-icon-picker-theme', 'light');
+  });
+
+  it('propagates namespaced theme tokens into the portal', () => {
+    render(
+      <IconPickerButton
+        value={null}
+        onChange={vi.fn()}
+        style={{ '--rs-icon-picker-bg': '#111827' }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('Pick an icon'));
+
+    expect(screen.getByRole('dialog', { name: 'Choose an icon' }).parentElement)
+      .toHaveStyle({ '--rs-icon-picker-bg': '#111827' });
   });
 
   it('opens above the trigger and clamps to the viewport when space is constrained', () => {

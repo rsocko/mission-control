@@ -94,6 +94,7 @@ async function loadPin(path = PIN_PATH) {
 const { pin: INITIAL_PIN } = await loadPin();
 const PACKAGE_VERSION = INITIAL_PIN.packageVersion;
 const SOURCE_COMMIT = INITIAL_PIN.sourceCommit;
+const SOURCE_TAG = INITIAL_PIN.sourceTag;
 
 function run(command, arguments_, options = {}) {
   const result = spawnSync(command, arguments_, {
@@ -641,6 +642,7 @@ export {
   PACKAGE_NAME,
   PACKAGE_VERSION,
   SOURCE_COMMIT,
+  SOURCE_TAG,
   CI_REGISTRY,
   LOCAL_REGISTRY,
 };

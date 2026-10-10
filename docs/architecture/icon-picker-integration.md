@@ -65,7 +65,8 @@ or production builds. For local troubleshooting, use the reviewed commit from
 the pin:
 
 ```powershell
-npm run vendor:icon-picker:sync -- --commit <reviewed-commit>
+$commit = (Get-Content scripts/icon-picker-vendor-pin.json | ConvertFrom-Json).sourceCommit
+npm run vendor:icon-picker:sync -- --commit $commit
 ```
 
 The command:
@@ -98,3 +99,9 @@ and legacy bare Lucide names require no database migration.
 
 Mission Control consumes the picker and renderer only inside product workflows.
 The standalone icon-picker deployment owns the public explorer and demo.
+
+Picker consumers use the package default `theme="auto"`. Mission Control's
+root `.dark` class resolves the trigger and its portal to dark mode without
+per-call props. Explicit light or dark overrides remain available, and visual
+customization must use the package's public `--rs-icon-picker-*` variables
+rather than selectors coupled to generated markup.

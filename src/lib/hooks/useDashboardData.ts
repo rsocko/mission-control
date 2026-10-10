@@ -31,6 +31,7 @@ import {
   taskFilterContextToDashboard,
   taskFilterContextToTaskQuery,
 } from '@/lib/task-filter-context';
+import { withTaskDerivedSourceOptions } from '@/lib/tasks/source-hierarchy';
 import type {
   DashboardProjectViewModel as HubProject,
   DashboardTaskResponseViewModel as TaskResponse,
@@ -964,6 +965,10 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   // ─── Computed Values ───────────────────────────────────────────────────────
 
   const sidebarSourceCounts = allSourceCounts;
+  const canonicalEnabledSources = useMemo(
+    () => withTaskDerivedSourceOptions(enabledSources, allSourceCounts),
+    [allSourceCounts, enabledSources],
+  );
 
   const visibleSourceLists = useMemo(() => {
     if (!sourceFilter) return [];
@@ -1019,7 +1024,9 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
 
   return {
     state: {
-      taskResponse, projects, allTags, allAssignees, enabledSources, sourceLists, listGroups,
+      taskResponse, projects, allTags, allAssignees,
+      enabledSources: canonicalEnabledSources,
+      sourceLists, listGroups,
       syncStatus, myDayTaskIds, savedViews, savedQuickFilters, addTaskDestinations,
       loading, loadingMore, loadingMoreGroups, refreshing, isSyncing,
       sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,

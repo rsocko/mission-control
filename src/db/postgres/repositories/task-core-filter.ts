@@ -31,6 +31,10 @@ import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
 import {
+  LEGACY_LOCAL_TASK_SOURCE_TYPE,
+  taskSourceFilterIdentity,
+} from '@/lib/tasks/source-hierarchy';
+import {
   CLOSED_TASK_STATUSES,
   HIGH_PRIORITY_VALUES,
   SELF_ASSIGNED_CONNECTOR_TYPES,
@@ -80,6 +84,35 @@ export function getTaskSourceVisibilityConditions(): SQL[] {
     )`,
     notInArray(tasks.connectorType, [...NOTIFICATION_ONLY_CONNECTOR_TYPES]),
   ];
+}
+
+export function getCanonicalTaskSourceCondition(sourceTypes: readonly string[]): SQL {
+  const canonicalTypes = [...new Set(sourceTypes)];
+  if (canonicalTypes.length === 0) return sql`1 = 0`;
+  return or(...canonicalTypes.map((sourceType) => {
+    const identity = taskSourceFilterIdentity(sourceType);
+    const connectorCondition = identity.connectorTypes.length === 1
+      ? eq(tasks.connectorType, identity.connectorTypes[0])
+      : inArray(tasks.connectorType, identity.connectorTypes);
+    const includedMissionControl = identity.includedMissionControlSourceListIds.length > 0
+      ? and(
+          eq(tasks.connectorType, LEGACY_LOCAL_TASK_SOURCE_TYPE),
+          inArray(tasks.sourceListId, identity.includedMissionControlSourceListIds),
+        )
+      : undefined;
+    const excludedMissionControl = identity.excludedMissionControlSourceListIds.length > 0
+      ? or(
+          isNull(tasks.sourceListId),
+          notInArray(tasks.sourceListId, identity.excludedMissionControlSourceListIds),
+        )
+      : undefined;
+    return or(
+      ...(includedMissionControl ? [includedMissionControl] : []),
+      excludedMissionControl
+        ? and(connectorCondition, excludedMissionControl)!
+        : connectorCondition,
+    )!;
+  }))!;
 }
 
 export function getTagSlugFilterCondition(tagSlug: string): SQL {
@@ -178,9 +211,7 @@ function getCollectionGroupCondition(spec: TaskFilterSpec): SQL | undefined {
         : sql`1 = 0`;
   }
   if (group.mode === 'source') {
-    return value === 'local'
-      ? or(isNull(tasks.connectorType), eq(tasks.connectorType, ''), eq(tasks.connectorType, 'local'))!
-      : eq(tasks.connectorType, value);
+    return getCanonicalTaskSourceCondition([value]);
   }
   if (group.mode === 'list') {
     return sql`COALESCE(
@@ -670,7 +701,9 @@ export function compileFilterQueryConditions(
   }
 
   if (statusTokens.length > 0) conditions.push(inArray(tasks.status, statusTokens));
-  if (sourceTokens.length > 0) conditions.push(inArray(tasks.connectorType, sourceTokens));
+  if (sourceTokens.length > 0) {
+    conditions.push(getCanonicalTaskSourceCondition(sourceTokens));
+  }
   if (titleTokens.length > 0) {
     conditions.push(or(...titleTokens.map((value) => containsLiteral(tasks.title, value)))!);
   }
@@ -725,7 +758,7 @@ export function compileFilterQueryConditions(
     conditions.push(notInArray(tasks.status, negatedByType.status));
   }
   if (negatedByType.source.length > 0) {
-    conditions.push(notInArray(tasks.connectorType, negatedByType.source));
+    conditions.push(not(getCanonicalTaskSourceCondition(negatedByType.source)));
   }
   for (const value of negatedByType.title) {
     conditions.push(not(containsLiteral(tasks.title, value)));
@@ -828,10 +861,8 @@ export function compileCanonicalTaskFilter(
 ): CompiledPostgresTaskFilter {
   const conditions = getTaskSourceVisibilityConditions();
 
-  if (spec.connectorTypes.length === 1) {
-    conditions.push(eq(tasks.connectorType, spec.connectorTypes[0]));
-  } else if (spec.connectorTypes.length > 1) {
-    conditions.push(inArray(tasks.connectorType, [...spec.connectorTypes]));
+  if (spec.connectorTypes.length > 0) {
+    conditions.push(getCanonicalTaskSourceCondition(spec.connectorTypes));
   }
 
   if (spec.statuses.length === 1) {

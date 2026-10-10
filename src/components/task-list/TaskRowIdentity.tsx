@@ -7,6 +7,8 @@ import { SubtaskPill } from '@/components/ui/SubtaskPill';
 import { MICRO_STATUS_CONFIG } from '@/types';
 import type { MicroStatus } from '@/types';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
+import { getConnectorLabel } from '@/lib/constants/colors';
+import { canonicalTaskSourceType } from '@/lib/tasks/source-hierarchy';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
 import { cn } from '@/lib/utils';
 import { MicroStatusIcon } from './MicroStatusIcon';
@@ -16,6 +18,8 @@ export interface TaskRowIdentityTask {
   title: string;
   status: string;
   connectorType: string;
+  sourceListId?: string | null;
+  sourceListName?: string | null;
   metadata?: string | null;
   sourceId?: string | null;
   microStatus?: string | null;
@@ -51,6 +55,8 @@ export function TaskRowIdentity({
   wrapTitle = false,
 }: TaskRowIdentityProps) {
   const displayId = getTaskDisplayId(task.connectorType, task.metadata, task.sourceId);
+  const sourceType = canonicalTaskSourceType(task.connectorType, task.sourceListId);
+  const sourceLabel = getConnectorLabel(sourceType);
   const microStatus = task.microStatus as MicroStatus | null | undefined;
   const microStatusConfig = microStatus ? MICRO_STATUS_CONFIG[microStatus] : null;
 
@@ -59,12 +65,12 @@ export function TaskRowIdentity({
       {beforeTitle}
       <span
         className="flex h-4 w-4 shrink-0 items-center justify-center"
-        title={task.connectorType}
+        title={sourceLabel}
       >
-        {CONNECTOR_ICONS[task.connectorType] ? (
+        {CONNECTOR_ICONS[sourceType] ? (
           <Image
-            src={CONNECTOR_ICONS[task.connectorType]}
-            alt={task.connectorType}
+            src={CONNECTOR_ICONS[sourceType]}
+            alt={sourceLabel}
             width={compact ? 12 : 14}
             height={compact ? 12 : 14}
           />

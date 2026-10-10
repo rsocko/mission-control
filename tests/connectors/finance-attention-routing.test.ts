@@ -488,13 +488,17 @@ describe.sequential('finance attention routing', () => {
     };
     expect(sqlite.prepare(`
       SELECT id, source_id AS sourceId, connector_type AS connectorType,
-             connector_instance_id AS connectorInstanceId, status, metadata
+             connector_instance_id AS connectorInstanceId,
+             source_list_id AS sourceListId, source_list_name AS sourceListName,
+             status, metadata
       FROM tasks
     `).get()).toMatchObject({
       id: financeAttentionTaskId(taskSignal),
       sourceId: financeAttentionSourceId(taskSignal),
       connectorType: 'mission-control',
       connectorInstanceId: 'mission-control',
+      sourceListId: 'tyrion-finance',
+      sourceListName: 'Tyrion',
       status: 'todo',
     });
     const taskId = (sqlite.prepare(`SELECT id FROM tasks`).get() as { id: string }).id;

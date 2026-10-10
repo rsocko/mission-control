@@ -28,6 +28,8 @@ import {
   financeAttentionTaskId,
   FINANCE_ATTENTION_TASK_CONNECTOR_INSTANCE_ID,
   FINANCE_ATTENTION_TASK_CONNECTOR_TYPE,
+  FINANCE_ATTENTION_TASK_SOURCE_LABEL,
+  FINANCE_ATTENTION_TASK_SOURCE_LIST_ID,
   financeAttentionValidTimestamp,
   financeAttentionWriteBackSignal,
   FINANCE_MY_DAY_DAILY_CAP,
@@ -572,13 +574,31 @@ async function createOrUpdateTask(
         UPDATE tasks
         SET status = 'todo', status_reason = NULL, completed_at = NULL,
             local_disposition = 'active',
-            last_synced_at = $1, updated_at = $2, metadata = $3::jsonb
-        WHERE id = $4
-      `, [now, now, JSON.stringify(metadata), existing.id]);
+            source_list_id = $1, source_list_name = $2,
+            last_synced_at = $3, updated_at = $4, metadata = $5::jsonb
+        WHERE id = $6
+      `, [
+        FINANCE_ATTENTION_TASK_SOURCE_LIST_ID,
+        FINANCE_ATTENTION_TASK_SOURCE_LABEL,
+        now,
+        now,
+        JSON.stringify(metadata),
+        existing.id,
+      ]);
     } else {
       await query(client, `
-        UPDATE tasks SET last_synced_at = $1, updated_at = $2, metadata = $3::jsonb WHERE id = $4
-      `, [now, now, JSON.stringify(metadata), existing.id]);
+        UPDATE tasks
+        SET source_list_id = $1, source_list_name = $2,
+            last_synced_at = $3, updated_at = $4, metadata = $5::jsonb
+        WHERE id = $6
+      `, [
+        FINANCE_ATTENTION_TASK_SOURCE_LIST_ID,
+        FINANCE_ATTENTION_TASK_SOURCE_LABEL,
+        now,
+        now,
+        JSON.stringify(metadata),
+        existing.id,
+      ]);
     }
     return { task: (await findTask(client, sourceId))!, created: false, promoted: resurface };
   }
@@ -592,7 +612,7 @@ async function createOrUpdateTask(
       source_list_id, source_list_name, metadata, sync_status
     ) VALUES (
       $1, $2, $3, $4, $5, $6, 'todo', 'active', $7, $8, $9, $10,
-      'local', 'Local', $11::jsonb, 'synced'
+      $11, $12, $13::jsonb, 'synced'
     )
     ON CONFLICT (source_id, connector_instance_id) DO NOTHING
     RETURNING id
@@ -619,6 +639,8 @@ async function createOrUpdateTask(
     now,
     now,
     now,
+    FINANCE_ATTENTION_TASK_SOURCE_LIST_ID,
+    FINANCE_ATTENTION_TASK_SOURCE_LABEL,
     JSON.stringify(metadata),
   ]);
   return {

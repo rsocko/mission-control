@@ -23,6 +23,7 @@ import {
   mergeInboxListEntries,
   parseConfiguredInboxListEntries,
 } from '@/lib/tasks/core/inbox-list-entries';
+import { canonicalTaskSourceType } from '@/lib/tasks/source-hierarchy';
 import {
   appSettings,
   connectorConfigs,
@@ -81,6 +82,7 @@ import {
   compileCanonicalTaskFilter,
   compileQuickFilterCondition,
   enabledGitHubConnectorCondition,
+  getCanonicalTaskSourceCondition,
   getTaskSourceVisibilityConditions,
   withCondition,
   type CanonicalTaskFilterInputs,
@@ -548,13 +550,18 @@ class SqliteTaskQueryRepository implements TaskQueryRepository {
     const inputs = await this.resolveInputs(spec);
     const compiled = compileCanonicalTaskFilter(spec, inputs);
     const rows = await this.database
-      .select({ connectorType: tasks.connectorType, count: sql<number>`count(*)` })
+      .select({
+        connectorType: tasks.connectorType,
+        sourceListId: tasks.sourceListId,
+        count: sql<number>`count(*)`,
+      })
       .from(tasks)
       .where(compiled.baseWhere)
-      .groupBy(tasks.connectorType);
+      .groupBy(tasks.connectorType, tasks.sourceListId);
 
     return rows.reduce<TaskSourceCounts>((accumulator, row) => {
-      accumulator[row.connectorType] = Number(row.count ?? 0);
+      const sourceType = canonicalTaskSourceType(row.connectorType, row.sourceListId);
+      accumulator[sourceType] = (accumulator[sourceType] ?? 0) + Number(row.count ?? 0);
       return accumulator;
     }, {});
   }
@@ -998,10 +1005,8 @@ class SqliteTaskReadRepository implements TaskReadRepository {
           AND ${quickSortLog.triagedAt} > ${input.skipCutoff}
       )`,
     ];
-    if (input.sourceTypes.length === 1) {
-      conditions.push(eq(tasks.connectorType, input.sourceTypes[0]));
-    } else if (input.sourceTypes.length > 1) {
-      conditions.push(inArray(tasks.connectorType, [...input.sourceTypes]));
+    if (input.sourceTypes.length > 0) {
+      conditions.push(getCanonicalTaskSourceCondition(input.sourceTypes));
     }
     if (input.sourceListId) {
       conditions.push(eq(tasks.sourceListId, input.sourceListId));

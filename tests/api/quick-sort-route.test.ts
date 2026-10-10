@@ -133,6 +133,13 @@ describe('GET /api/tasks/quick-sort', () => {
           sourceListName: 'rsocko/mission-control',
           count: 4,
         },
+        {
+          connectorType: 'mission-control',
+          connectorInstanceId: 'mission-control',
+          sourceListId: 'tyrion-finance',
+          sourceListName: 'Tyrion',
+          count: 1,
+        },
       ],
       definitions: [{
         connectorInstanceId: 'github',
@@ -152,6 +159,7 @@ describe('GET /api/tasks/quick-sort', () => {
 
     expect(body.sources).not.toHaveProperty('mission-control');
     expect(body.sources.local).toMatchObject({ count: 5, lists: [] });
+    expect(body.sources['finance-manager']).toMatchObject({ count: 1, lists: [] });
     expect(body.sources['github-issues'].lists).toEqual([{
       connectorId: 'github',
       sourceListId: 'rsocko/mission-control',

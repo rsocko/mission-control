@@ -2090,6 +2090,47 @@ export function describeTaskCoreContract(
           'microsoft-todo': 1,
         });
       });
+
+      it('keeps Tyrion Finance tasks out of Local filters and counts', async () => {
+        await harness.insertTasks([
+          {
+            id: 'task-tyrion-finance',
+            connectorType: 'mission-control',
+            connectorInstanceId: 'mission-control',
+            sourceId: 'finance-attention:v1:test',
+            sourceListId: 'tyrion-finance',
+            sourceListName: 'Tyrion',
+            metadata: { financeAttention: { signalKind: 'writeBackFailed' } },
+          },
+          {
+            id: 'task-legacy-local',
+            connectorType: 'mission-control',
+            connectorInstanceId: 'mission-control',
+            sourceId: 'local:legacy',
+            sourceListId: 'local',
+            sourceListName: 'Local',
+          },
+        ]);
+
+        expect(await harness.persistence.queries.countTasks(
+          makeSpec({ connectorTypes: ['finance-manager'] }),
+        )).toBe(1);
+        expect(await harness.persistence.queries.countTasks(
+          makeSpec({ connectorTypes: ['local'] }),
+        )).toBe(3);
+        expect(await harness.persistence.queries.countTasks(
+          makeSpec({ filterQuery: 'source:finance-manager' }),
+        )).toBe(1);
+        expect(await harness.persistence.queries.countTasks(
+          makeSpec({ filterQuery: 'source:local' }),
+        )).toBe(3);
+        expect(await harness.persistence.queries.getSourceCounts(makeSpec())).toEqual({
+          'finance-manager': 1,
+          'github-issues': 1,
+          local: 3,
+          'microsoft-todo': 1,
+        });
+      });
     });
 
     describe('deterministic ordering', () => {

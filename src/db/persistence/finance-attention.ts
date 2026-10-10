@@ -17,6 +17,10 @@ import {
   resolveAttributionAttentionThresholds,
   type AttributionAttentionPolicy,
 } from '@/lib/finance/attribution-attention-policy';
+import {
+  TYRION_FINANCE_TASK_SOURCE_LABEL,
+  TYRION_FINANCE_TASK_SOURCE_LIST_ID,
+} from '@/lib/tasks/source-hierarchy';
 
 /**
  * Backend-neutral persistence contract for finance attention routing
@@ -38,6 +42,8 @@ export const FINANCE_MY_DAY_DAILY_CAP = 8;
 export const FINANCE_MY_DAY_DUE_SOON_DAYS = 2;
 export const FINANCE_ATTENTION_TASK_CONNECTOR_TYPE = 'mission-control';
 export const FINANCE_ATTENTION_TASK_CONNECTOR_INSTANCE_ID = 'mission-control';
+export const FINANCE_ATTENTION_TASK_SOURCE_LIST_ID = TYRION_FINANCE_TASK_SOURCE_LIST_ID;
+export const FINANCE_ATTENTION_TASK_SOURCE_LABEL = TYRION_FINANCE_TASK_SOURCE_LABEL;
 
 const HUMAN_REVIEWABLE_ATTRIBUTION_REASONS = new Set([
   'attribution_ambiguous',

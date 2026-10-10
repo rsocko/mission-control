@@ -10,6 +10,7 @@ import {
   getSourceListGroupCondition,
   getSourceListIdsCondition,
 } from './filter-query';
+import { getCanonicalTaskSourceCondition } from '@/db/persistence/sqlite-task-filter';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import {
   getAssignedFilterCondition,
@@ -83,10 +84,8 @@ export async function buildCanonicalTaskFilterConditions(
   const { filterInputs } = await getTaskCorePersistence();
   const myDayTaskIds = [...await filterInputs.listMyDayTaskIds(spec.myDayDate)];
 
-  if (spec.connectorTypes.length > 1) {
-    conditions.push(inArray(tasks.connectorType, [...spec.connectorTypes]));
-  } else if (spec.connectorTypes.length === 1) {
-    conditions.push(eq(tasks.connectorType, spec.connectorTypes[0]));
+  if (spec.connectorTypes.length > 0) {
+    conditions.push(getCanonicalTaskSourceCondition(spec.connectorTypes));
   }
 
   if (spec.statuses.length > 1) {

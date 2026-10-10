@@ -1,4 +1,8 @@
-import { canonicalTaskSourceType, LOCAL_TASK_SOURCE_TYPE } from '@/lib/tasks/source-hierarchy';
+import {
+  canonicalTaskSourceType,
+  LOCAL_TASK_SOURCE_TYPE,
+  TYRION_FINANCE_TASK_SOURCE_TYPE,
+} from '@/lib/tasks/source-hierarchy';
 import type { SourceList } from '@/types/dashboard';
 
 export interface QuickSortSourceRow {
@@ -86,7 +90,7 @@ export function buildQuickSortSourceData(
   }>();
 
   for (const row of rows) {
-    const connectorType = canonicalTaskSourceType(row.connectorType);
+    const connectorType = canonicalTaskSourceType(row.connectorType, row.sourceListId);
     const source = grouped.get(connectorType) ?? {
       connectorId: row.connectorInstanceId,
       count: 0,
@@ -95,9 +99,13 @@ export function buildQuickSortSourceData(
     source.count += Number(row.count);
     grouped.set(connectorType, source);
 
-    // Local is a leaf source in the canonical left nav, even when legacy
-    // Mission Control tasks carry a denormalized "Local" list name.
-    if (connectorType === LOCAL_TASK_SOURCE_TYPE || !row.sourceListName) continue;
+    // Local and derived Tyrion Finance identities are leaf sources in the
+    // canonical source navigation rather than expandable connector lists.
+    if (
+      connectorType === LOCAL_TASK_SOURCE_TYPE
+      || connectorType === TYRION_FINANCE_TASK_SOURCE_TYPE
+      || !row.sourceListName
+    ) continue;
 
     const definition = (
       row.sourceListId

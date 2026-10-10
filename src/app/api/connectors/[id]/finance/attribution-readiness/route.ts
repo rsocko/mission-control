@@ -7,6 +7,7 @@ import {
   FinanceAttributionReadinessError,
   getFinanceAttributionPolicyReadiness,
   previewFinanceAttributionPolicy,
+  updateFinanceAttributionAttentionPolicy,
   updateFinanceAttributionPolicySelection,
 } from '@/lib/connectors/monarch-money/attribution-readiness';
 
@@ -64,17 +65,33 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     );
   }
   const body = await request.json().catch(() => null) as unknown;
-  if (
-    typeof body !== 'object'
-    || body === null
-    || !Object.prototype.hasOwnProperty.call(body, 'pinnedPolicyVersion')
-  ) {
+  if (typeof body !== 'object' || body === null) {
     return NextResponse.json(
-      { error: 'attribution_policy_pin_invalid' },
+      { error: 'attribution_readiness_update_invalid' },
       { status: 400 },
     );
   }
-  const pinnedPolicyVersion = (body as Record<string, unknown>).pinnedPolicyVersion;
+  const record = body as Record<string, unknown>;
+  const { id } = await context.params;
+  if (Object.prototype.hasOwnProperty.call(record, 'attentionPolicy')) {
+    try {
+      return NextResponse.json(await updateFinanceAttributionAttentionPolicy(
+        id,
+        record.attentionPolicy as Parameters<
+          typeof updateFinanceAttributionAttentionPolicy
+        >[1],
+      ));
+    } catch (error) {
+      return errorResponse(error);
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(record, 'pinnedPolicyVersion')) {
+    return NextResponse.json(
+      { error: 'attribution_readiness_update_invalid' },
+      { status: 400 },
+    );
+  }
+  const pinnedPolicyVersion = record.pinnedPolicyVersion;
   if (
     pinnedPolicyVersion !== null
     && (!Number.isSafeInteger(pinnedPolicyVersion) || Number(pinnedPolicyVersion) < 1)
@@ -84,7 +101,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       { status: 400 },
     );
   }
-  const { id } = await context.params;
   try {
     return NextResponse.json(await updateFinanceAttributionPolicySelection(
       id,

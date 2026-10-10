@@ -11,6 +11,7 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
 import {
   getFinanceAttributionPolicyReadiness,
   previewFinanceAttributionPolicy,
+  updateFinanceAttributionAttentionPolicy,
   updateFinanceAttributionPolicySelection,
 } from '@/lib/connectors/monarch-money/attribution-readiness';
 
@@ -27,6 +28,11 @@ function runtime(options: {
   const readAttributionAccountSummary = vi.fn().mockResolvedValue({
     total: 1,
     active: 1,
+    accounts: [{
+      accountRef: `account-v1:${'b'.repeat(64)}`,
+      displayName: 'Household checking',
+      active: true,
+    }],
   });
   const items = Array.from({ length: options.itemCount ?? 2 }, (_, index) => (
     index === 0
@@ -186,7 +192,15 @@ describe('Tyrion attribution policy readiness', () => {
       policyUpdatedAt: '2026-10-09T12:00:00.000Z',
       policyDiscoveryError: null,
     });
-    expect(readiness.accountSummary).toEqual({ total: 1, active: 1 });
+    expect(readiness.accountSummary).toEqual({
+      total: 1,
+      active: 1,
+      accounts: [{
+        accountRef: `account-v1:${'b'.repeat(64)}`,
+        displayName: 'Household checking',
+        active: true,
+      }],
+    });
     expect(readiness.historyProjection?.lastErrorCode)
       .toBe('insight_history_incomplete_snapshot');
     expect(readiness.historyBackfill).toEqual({
@@ -338,6 +352,46 @@ describe('Tyrion attribution policy readiness', () => {
     expect(preview.truncated).toBe(true);
   });
 
+  it('accepts an explicit no-match review backlog without hiding blocking review', async () => {
+    const setup = runtime();
+    mocks.runtime.mockResolvedValue(setup.repositories);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, init) => {
+      if (init?.method === 'GET') {
+        return Response.json({
+          contractVersion: '2.0',
+          engineVersion: '2.0.0',
+          policyVersion: 2,
+          policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+        });
+      }
+      const request = JSON.parse(String(init?.body)) as {
+        items: Array<{ sourceRef: string }>;
+      };
+      return Response.json({
+        contractVersion: '2.0',
+        policyVersion: 2,
+        engineVersion: '2.0.0',
+        results: request.items.map((item) => result(item.sourceRef, {
+          status: 'unassigned',
+          method: 'unassigned',
+          reviewStatus: 'pending',
+          reasons: ['no-match'],
+        })),
+      });
+    }));
+
+    await expect(previewFinanceAttributionPolicy('finance-connector')).resolves.toMatchObject({
+      complete: true,
+      ready: true,
+      acceptedRuleBasedReviewBacklog: 2,
+      blockingReviewRequired: 0,
+      counts: {
+        reason: { 'no-match': 2 },
+        reviewStatus: { pending: 2 },
+      },
+    });
+  });
+
   it('resolves follow-current once and holds that exact policy across every preview batch', async () => {
     const setup = runtime({ itemCount: 101 });
     mocks.runtime.mockResolvedValue(setup.repositories);
@@ -468,6 +522,29 @@ describe('Tyrion attribution policy readiness', () => {
       'finance-connector',
       'tyrionAttributionPolicy',
       { pinnedPolicyVersion: undefined },
+    );
+  });
+
+  it('persists validated connector defaults and account overrides', async () => {
+    const setup = runtime();
+    mocks.runtime.mockResolvedValue(setup.repositories);
+    const accountRef = `account-v1:${'b'.repeat(64)}`;
+    const policy = {
+      pendingCountThreshold: 15,
+      highAmountThresholdMinor: 30_000,
+      accountOverrides: {
+        [accountRef]: {
+          pendingCountThreshold: null,
+          highAmountThresholdMinor: 40_000,
+        },
+      },
+    };
+
+    await updateFinanceAttributionAttentionPolicy('finance-connector', policy);
+    expect(setup.patchSettingsState).toHaveBeenCalledWith(
+      'finance-connector',
+      'attributionAttention',
+      policy,
     );
   });
 });

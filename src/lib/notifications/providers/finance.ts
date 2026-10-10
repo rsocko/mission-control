@@ -190,6 +190,81 @@ function digestPresentation(
   };
 }
 
+function weeklySummaryPresentation(
+  notification: Parameters<NotificationSourceProvider['signatures'][number]['present']>[0],
+) {
+  const metadata = notification.metadata;
+  const members = Array.isArray(metadata.members)
+    ? metadata.members.slice(0, 8).map(record)
+    : [];
+  const decisionCount = typeof metadata.decisionCount === 'number'
+    && Number.isSafeInteger(metadata.decisionCount)
+    && metadata.decisionCount >= 0
+    ? metadata.decisionCount
+    : members.length;
+  const firstOccurrenceId = text(members[0]?.occurrenceId);
+  const summaryPeriod = record(metadata.summaryPeriod);
+  const summaryStart = text(summaryPeriod.start);
+  const summaryEnd = text(summaryPeriod.end);
+  const summaryTarget = summaryStart && summaryEnd
+    ? financeInsightPeriodTarget({ start: summaryStart, end: summaryEnd })
+    : '/finance';
+  const actions = [
+    ...(notification.isActionable && firstOccurrenceId ? [{
+      actionType: 'navigate',
+      label: 'Review top decision',
+      icon: 'search',
+      variant: 'primary' as const,
+      isPrimary: true,
+      payload: { target: financeInsightDetailTarget(firstOccurrenceId) },
+      createdBy: 'connector' as const,
+    }] : []),
+    {
+      actionType: 'navigate',
+      label: notification.isActionable ? 'Open Finance' : 'View summary',
+      icon: 'bar-chart-3',
+      variant: notification.isActionable ? 'secondary' as const : 'primary' as const,
+      isPrimary: !notification.isActionable,
+      payload: { target: summaryTarget },
+      createdBy: 'connector' as const,
+    },
+  ].slice(0, 2);
+  return {
+    title: notification.title,
+    body: notification.body ?? null,
+    level: 'digest' as const,
+    category: 'finance',
+    templateKey: 'weekly_summary',
+    isActionable: notification.isActionable,
+    metadata,
+    presentation: {
+      sourceName: 'Tyrion',
+      providerSignature: 'finance-weekly-summary',
+      metadataChips: [
+        { label: 'Decisions', value: String(decisionCount) },
+        ...(text(metadata.sourceAsOf)
+          ? [{ label: 'Source as of', value: text(metadata.sourceAsOf)! }]
+          : []),
+      ],
+      richContent: {
+        primaryText: decisionCount === 0
+          ? 'No new household decisions'
+          : `${decisionCount} household ${decisionCount === 1 ? 'decision' : 'decisions'}`,
+        secondaryText: 'Fresh, complete Finance Insight results from the prior week',
+        stats: members.map((member, index) => ({
+          label: `#${index + 1} ${text(member.kind) ?? 'Finance insight'}`,
+          value: text(member.headline) ?? 'Review in Finance',
+          tone: 'info' as const,
+        })),
+        footerText: metadata.membersTruncated
+          ? 'Showing the highest-impact decisions. Open Finance for the complete review.'
+          : 'Immediate alerts and their tasks are not duplicated here.',
+      },
+    },
+    actions,
+  };
+}
+
 export const financeNotificationProvider: NotificationSourceProvider = {
   sourceType: 'finance-manager',
   displayName: 'Tyrion',
@@ -303,6 +378,11 @@ export const financeNotificationProvider: NotificationSourceProvider = {
       key: 'finance-monthly-movers-digest',
       matches: notification => notification.metadata.notificationType === 'monthlyMoversDigest',
       present: digestPresentation,
+    },
+    {
+      key: 'finance-weekly-summary',
+      matches: notification => notification.metadata.notificationType === 'weekly_summary',
+      present: weeklySummaryPresentation,
     },
     {
       key: 'finance-attribution-review',

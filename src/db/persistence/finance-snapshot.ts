@@ -12,6 +12,7 @@ export interface FinanceSnapshotTransaction {
   id: string;
   date: string;
   amount: number;
+  businessContext?: string | null;
   merchant: {
     name: string;
     logoUrl: string | null;

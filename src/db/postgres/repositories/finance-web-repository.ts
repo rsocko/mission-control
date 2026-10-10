@@ -14,7 +14,8 @@ type Client = Pool | PoolClient;
 const transactionColumns = `
   id, connector_instance_id AS "connectorInstanceId",
   upstream_transaction_id AS "upstreamTransactionId", date, amount,
-  merchant_name AS "merchantName", merchant_logo_url AS "merchantLogoUrl",
+  merchant_name AS "merchantName", business_context AS "businessContext",
+  merchant_logo_url AS "merchantLogoUrl",
   category_id AS "categoryId", original_category AS "originalCategory",
   confirmed_category AS "confirmedCategory", account_id AS "accountId",
   account_name AS "accountName", card_last4 AS "cardLast4",

@@ -442,6 +442,11 @@ function safeTransaction(row: FinanceAssistantTransaction) {
       confidence: row.confidence,
       method: row.method,
     },
+    supportingHints: {
+      businessContext: row.businessContext
+        ? safeText(row.businessContext, 'Business context unavailable', 120)
+        : null,
+    },
   };
 }
 

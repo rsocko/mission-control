@@ -121,7 +121,9 @@ function stableValue(value: unknown): string {
 }
 
 function transactionFingerprint(value: FinanceSnapshotTransaction): string {
-  return stableValue(value);
+  const identityFacts = { ...value };
+  delete identityFacts.businessContext;
+  return stableValue(identityFacts);
 }
 
 function assertBatch(size: number, maximum: number, label: string): void {
@@ -251,6 +253,7 @@ function createSnapshotPersistence(pool: Pool): FinanceSnapshotPersistence {
             item.amount,
             item.merchant.name,
             item.merchant.logoUrl,
+            item.businessContext ?? null,
             item.category?.id ?? null,
             item.category?.name ?? null,
             item.account.id,
@@ -266,7 +269,7 @@ function createSnapshotPersistence(pool: Pool): FinanceSnapshotPersistence {
             await client.query(
               `INSERT INTO finance_transactions (
                  id, connector_instance_id, upstream_transaction_id, date, amount,
-                 merchant_name, merchant_logo_url, category_id, original_category,
+                 merchant_name, merchant_logo_url, business_context, category_id, original_category,
                  confirmed_category, account_id, account_name, card_last4,
                  assigned_kid_id, kid_assignment_method, triage_status, flag_reason,
                  is_pending, is_recurring, notes, tags, tag_references,
@@ -274,9 +277,9 @@ function createSnapshotPersistence(pool: Pool): FinanceSnapshotPersistence {
                  provenance_fetched_at, source_fingerprint, source_url,
                  last_seen_generation_id, first_seen_at, last_seen_at, synced_at
                ) VALUES (
-                 $1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, $10, $11, $12,
-                 NULL, NULL, 'pending', NULL, $13, $14, $15, $16::jsonb, $17::jsonb,
-                 'active', NULL, $18, $19, $20, NULL, $21, $22, $22, $22
+                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12, $13,
+                 NULL, NULL, 'pending', NULL, $14, $15, $16, $17::jsonb, $18::jsonb,
+                 'active', NULL, $19, $20, $21, NULL, $22, $23, $23, $23
                )`,
               [
                 localTransactionId(command.connectorId, item.id),
@@ -296,14 +299,15 @@ function createSnapshotPersistence(pool: Pool): FinanceSnapshotPersistence {
             await client.query(
               `UPDATE finance_transactions
                SET date = $1, amount = $2, merchant_name = $3, merchant_logo_url = $4,
-                   category_id = $5, original_category = $6, account_id = $7,
-                   account_name = $8, card_last4 = $9, is_pending = $10,
-                   is_recurring = $11, notes = $12, tags = $13::jsonb,
-                   tag_references = $14::jsonb, lifecycle_status = 'active',
-                   deleted_at = NULL, provenance_provider = $15,
-                   provenance_fetched_at = $16, source_fingerprint = $17,
-                   last_seen_generation_id = $18, last_seen_at = $19, synced_at = $19
-               WHERE connector_instance_id = $20 AND upstream_transaction_id = $21`,
+                   business_context = $5, category_id = $6, original_category = $7,
+                   account_id = $8, account_name = $9, card_last4 = $10,
+                   is_pending = $11, is_recurring = $12, notes = $13,
+                   tags = $14::jsonb, tag_references = $15::jsonb,
+                   lifecycle_status = 'active', deleted_at = NULL,
+                   provenance_provider = $16, provenance_fetched_at = $17,
+                   source_fingerprint = $18, last_seen_generation_id = $19,
+                   last_seen_at = $20, synced_at = $20
+               WHERE connector_instance_id = $21 AND upstream_transaction_id = $22`,
               [
                 ...values,
                 command.provenance.provider,

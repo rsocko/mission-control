@@ -336,6 +336,17 @@ describe.sequential('Finance insight transaction backfill', () => {
     };
 
     const first = await runFinanceInsightTransactionProjectionRepair(request);
+    const promotedState = sqlite.prepare(`
+      SELECT successful_generation_id AS generationId,
+             last_successful_at AS lastSuccessfulAt,
+             updated_at AS updatedAt
+      FROM finance_insight_transaction_projection_state
+      WHERE connector_id = ?
+    `).get(config.id);
+    const providerCallsAfterCompletion = vi.mocked(fetch).mock.calls.length;
+    const changesAfterCompletion = sqlite.prepare(`
+      SELECT total_changes() AS count
+    `).get();
     const replay = await runFinanceInsightTransactionProjectionRepair(request);
 
     expect(first).toMatchObject({
@@ -346,6 +357,17 @@ describe.sequential('Finance insight transaction backfill', () => {
     });
     expect(replay).toEqual(first);
     expect(fetchedWindows).toHaveLength(4);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(providerCallsAfterCompletion);
+    expect(sqlite.prepare(`
+      SELECT total_changes() AS count
+    `).get()).toEqual(changesAfterCompletion);
+    expect(sqlite.prepare(`
+      SELECT successful_generation_id AS generationId,
+             last_successful_at AS lastSuccessfulAt,
+             updated_at AS updatedAt
+      FROM finance_insight_transaction_projection_state
+      WHERE connector_id = ?
+    `).get(config.id)).toEqual(promotedState);
     expect(assertSafe).toHaveBeenCalled();
     expect(attributionCoordinatorConstructor).not.toHaveBeenCalled();
     expect(sqlite.prepare(`
@@ -360,6 +382,31 @@ describe.sequential('Finance insight transaction backfill', () => {
       windowCount: 37,
       itemCount: 4,
     });
+    await expect(runFinanceInsightTransactionProjectionRepair({
+      ...request,
+      horizonMonths: 36,
+    })).rejects.toMatchObject({
+      code: 'finance_insight_backfill_idempotency_conflict',
+      status: 409,
+    });
+    expect(sqlite.prepare(`
+      SELECT total_changes() AS count
+    `).get()).toEqual(changesAfterCompletion);
+    expect(sqlite.prepare(`
+      SELECT status, last_error_code AS lastErrorCode
+      FROM finance_insight_transaction_backfill_plans
+      WHERE idempotency_key = ?
+    `).get(request.idempotencyKey)).toEqual({
+      status: 'completed',
+      lastErrorCode: null,
+    });
+    expect(sqlite.prepare(`
+      SELECT successful_generation_id AS generationId,
+             last_successful_at AS lastSuccessfulAt,
+             updated_at AS updatedAt
+      FROM finance_insight_transaction_projection_state
+      WHERE connector_id = ?
+    `).get(config.id)).toEqual(promotedState);
     for (const table of [
       'tasks',
       'notifications',

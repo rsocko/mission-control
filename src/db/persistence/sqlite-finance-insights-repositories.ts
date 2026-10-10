@@ -647,7 +647,8 @@ function createBackfillPersistence(
     async recordPlanFailure(planId: string, errorCode: string, now: string) {
       sqlite.prepare(`
         UPDATE finance_insight_transaction_backfill_plans
-        SET last_error_code = ?, updated_at = ? WHERE id = ?
+        SET last_error_code = ?, updated_at = ?
+        WHERE id = ? AND status = 'running'
       `).run(errorCode, now, planId);
     },
 

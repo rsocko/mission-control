@@ -12,6 +12,8 @@ import {
 } from '@/db/persistence/finance-attention';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { wakeNotificationDeliveryDispatcher } from '@/lib/notifications/dispatcher-wake';
+import { getPersistedFinanceConnectorConfigById } from '@/lib/connectors/monarch-money/config';
+import { resolveTyrionHouseholdCurrency } from '@/lib/connectors/monarch-money/attribution-client';
 
 export {
   financeAttentionSourceId,
@@ -40,9 +42,12 @@ export async function reconcileFinanceAttention(input: {
   try {
     const repositories = await getWorkerPersistenceRepositories();
     const persistence = repositories.finance.attention.routing;
+    const config = await getPersistedFinanceConnectorConfigById(input.connectorId);
+    const currency = await resolveTyrionHouseholdCurrency(config);
     const { summary, hasPendingDelivery } = await persistence.reconcile({
       connectorId: input.connectorId,
       decisionAt,
+      currency,
     });
     if (
       hasPendingDelivery

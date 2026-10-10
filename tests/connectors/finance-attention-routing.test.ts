@@ -190,10 +190,22 @@ beforeAll(async () => {
   } = await import('@/lib/finance/attention-routing'));
 }, 30_000);
 
-beforeEach(clearDatabase);
+beforeEach(() => {
+  clearDatabase();
+  vi.stubEnv('FINANCE_MANAGER_API_TOKEN', 'invented-service-token');
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({
+    contractVersion: '2.0',
+    engineVersion: '2.0.0',
+    policyVersion: 2,
+    policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+    householdCurrency: 'USD',
+  })));
+});
 
 afterAll(() => {
   delete process.env.MC_DB_PATH;
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   sqlite.close();
   rmSync(tempDirectory, { recursive: true, force: true });
 });
@@ -206,7 +218,7 @@ describe.sequential('finance attention routing', () => {
       ['low-confidence', true],
       ['manual_decision_conflict', true],
       ['merchant-rule-conflict', true],
-      ['no-match', true],
+      ['no-match', false],
       ['review-required', true],
       ['attribution_auth_invalid', false],
       ['attribution_auth_not_configured', false],

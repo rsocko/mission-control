@@ -564,7 +564,7 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
     expect(state.rows[0]).toMatchObject({
       transactionCount: '1',
       publicationCount: '1',
-      notificationCount: '1',
+      notificationCount: '0',
       insightDeliveryCount: '1',
       projectionStatus: 'succeeded',
       projectionError: null,
@@ -572,7 +572,7 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
       publicationError: null,
       successfulRuns: '2',
     });
-    expect(Number(state.rows[0].deliveryCount)).toBeGreaterThan(0);
+    expect(state.rows[0].deliveryCount).toBe('0');
     expect(sqliteTouch).not.toHaveBeenCalled();
   }, 180_000);
 

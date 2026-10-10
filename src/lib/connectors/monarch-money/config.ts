@@ -8,6 +8,10 @@ import {
 } from './bridge-url';
 import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
 import {
+  AttributionAttentionPolicyError,
+  parseAttributionAttentionPolicy,
+} from '@/lib/finance/attribution-attention-policy';
+import {
   createFinanceIdentityNamespace,
   FINANCE_IDENTITY_NAMESPACE_CREDENTIAL,
   financeIdentityNamespaceFromCredentials,
@@ -33,7 +37,9 @@ type ConnectorConfigLike = {
 
 export class FinanceConnectorConfigurationError extends Error {
   constructor(
-    readonly code: 'attribution_policy_pin_invalid',
+    readonly code:
+      | 'attribution_policy_pin_invalid'
+      | 'attribution_attention_policy_invalid',
   ) {
     super(code);
     this.name = 'FinanceConnectorConfigurationError';
@@ -121,6 +127,12 @@ export function validateFinanceConnectorSettings(
   const parsed = parseObject(settings);
   getTyrionAttributionPolicySelection(parsed);
   delete parsed.householdCurrency;
+  try {
+    parseAttributionAttentionPolicy(parsed, 'USD');
+  } catch (error) {
+    if (!(error instanceof AttributionAttentionPolicyError)) throw error;
+    throw new FinanceConnectorConfigurationError('attribution_attention_policy_invalid');
+  }
   return parsed;
 }
 

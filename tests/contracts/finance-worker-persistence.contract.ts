@@ -47,6 +47,8 @@ export interface FinanceWorkerContractHarness {
   attributionException(upstreamId: string): Promise<{
     occurrenceCount: number;
     status: string;
+    reviewState: string;
+    resolution: string | null;
   } | null>;
   referenceAccount(): Promise<{
     id: string;
@@ -553,6 +555,91 @@ export function describeFinanceWorkerPersistenceContract(
       });
     });
 
+    it('resolves a pending exception as reattributed after a non-pending result', async () => {
+      await harness.repositories.snapshots.start(startInput('reattribution-generation'));
+      await harness.repositories.snapshots.upsertPage(pageInput(
+        'reattribution-generation',
+        [snapshotTransaction('reattribution')],
+      ));
+      const initial = (await harness.repositories.attribution.readRows(
+        CONNECTOR_ID,
+        ['reattribution'],
+      )).get('reattribution')!;
+      await harness.repositories.attribution.applyResults({
+        connectorId: CONNECTOR_ID,
+        generationId: 'reattribution-generation',
+        now: '2026-08-30T12:21:00.000Z',
+        provenance: 'contract-test',
+        items: [{
+          transactionId: initial.id,
+          sourceFingerprint: initial.sourceFingerprint,
+          sourceRef: 'transaction-v1:reattribution',
+          stateSnapshot: attributionSnapshot(initial),
+          hasManualDecision: false,
+          manualResultMatches: true,
+          result: {
+            contractVersion: '2.0',
+            sourceRef: 'transaction-v1:reattribution',
+            status: 'unassigned',
+            kidId: null,
+            confidence: 'none',
+            method: 'unassigned',
+            explanation: 'No attribution rule matched',
+            reviewStatus: 'pending',
+            reasons: ['no-match'],
+            decisionSource: 'fallback',
+            policyVersion: 7,
+            engineVersion: '2.0.0',
+            evaluatedAt: '2026-08-30T12:20:30.000Z',
+          },
+        }],
+      });
+      expect(await harness.attributionException('reattribution')).toMatchObject({
+        status: 'open',
+        reviewState: 'pending',
+        resolution: null,
+      });
+
+      const pending = (await harness.repositories.attribution.readRows(
+        CONNECTOR_ID,
+        ['reattribution'],
+      )).get('reattribution')!;
+      await harness.repositories.attribution.applyResults({
+        connectorId: CONNECTOR_ID,
+        generationId: 'reattribution-generation',
+        now: '2026-08-30T12:22:00.000Z',
+        provenance: 'contract-test',
+        items: [{
+          transactionId: pending.id,
+          sourceFingerprint: pending.sourceFingerprint,
+          sourceRef: 'transaction-v1:reattribution',
+          stateSnapshot: attributionSnapshot(pending),
+          hasManualDecision: false,
+          manualResultMatches: true,
+          result: {
+            contractVersion: '2.0',
+            sourceRef: 'transaction-v1:reattribution',
+            status: 'attributed',
+            kidId: 'kid-one',
+            confidence: 'definite',
+            method: 'account-default',
+            explanation: 'Matched account default',
+            reviewStatus: 'not-required',
+            reasons: [],
+            decisionSource: 'automated',
+            policyVersion: 7,
+            engineVersion: '2.0.0',
+            evaluatedAt: '2026-08-30T12:21:30.000Z',
+          },
+        }],
+      });
+      expect(await harness.attributionException('reattribution')).toMatchObject({
+        status: 'resolved',
+        reviewState: 'resolved',
+        resolution: 'reattributed',
+      });
+    });
+
     it('finishes attribution against both running and completed snapshot generations', async () => {
       await harness.repositories.snapshots.start(startInput('running-attribution'));
       await expect(harness.repositories.attribution.finish({
@@ -679,7 +766,7 @@ export function describeFinanceWorkerPersistenceContract(
       };
       await harness.repositories.attribution.persistUnavailable(command);
       await harness.repositories.attribution.persistUnavailable(command);
-      expect(await harness.attributionException('unavailable')).toEqual({
+      expect(await harness.attributionException('unavailable')).toMatchObject({
         occurrenceCount: 2,
         status: 'open',
       });
@@ -833,6 +920,23 @@ export function describeFinanceWorkerPersistenceContract(
           .resolves.toMatchObject({ status: 'resolved', replayed: false });
         await expect(harness.repositories.attribution.applyManualDecision(command))
           .resolves.toMatchObject({ status: 'resolved', replayed: true });
+        await expect(harness.repositories.attribution.listExceptions({
+          connectorId: CONNECTOR_ID,
+          status: 'current',
+          limit: 10,
+          cursor: null,
+        })).resolves.toMatchObject({ exceptions: [] });
+        await expect(harness.repositories.attribution.listExceptions({
+          connectorId: CONNECTOR_ID,
+          status: 'resolved',
+          limit: 10,
+          cursor: null,
+        })).resolves.toMatchObject({
+          exceptions: [expect.objectContaining({
+            status: 'resolved',
+            reviewState: 'resolved',
+          })],
+        });
         expect(await harness.transaction('api-attribution')).toMatchObject({
           assignedKidId: 'kid-one',
           kidAssignmentMethod: 'manual',

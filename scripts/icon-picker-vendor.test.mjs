@@ -34,9 +34,12 @@ test('verifies the committed exact-commit package snapshot', async () => {
   assert.equal(manifest.package.name, PACKAGE_NAME);
   assert.equal(manifest.package.version, PACKAGE_VERSION);
   assert.equal(manifest.artifact.entryCount, 38);
-  assert.equal(APPROVED_REGISTRY, LOCAL_REGISTRY);
   assert.equal(LOCAL_REGISTRY, 'https://packagefeedproxy.microsoft.io/npm/');
   assert.equal(CI_REGISTRY, 'https://registry.npmjs.org/');
+  assert.equal(
+    APPROVED_REGISTRY,
+    process.env.GITHUB_ACTIONS === 'true' ? CI_REGISTRY : LOCAL_REGISTRY,
+  );
 });
 
 test('ignores dependencies installed into the linked vendor package', async () => {

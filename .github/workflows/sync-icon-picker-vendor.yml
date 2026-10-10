@@ -1,0 +1,251 @@
+name: Sync icon picker vendor
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Optional full upstream main commit SHA (defaults to latest)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+
+concurrency:
+  group: sync-icon-picker-vendor
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Propose icon picker vendor update
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Resolve merged upstream commit
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_COMMIT: ${{ inputs.commit || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_commit="$(gh api repos/rsocko/icon-picker/commits/main --jq .sha)"
+          requested_commit="${REQUESTED_COMMIT//[[:space:]]/}"
+          target_commit="${requested_commit:-${latest_commit}}"
+          if [[ ! "${target_commit}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::commit must be a full lowercase upstream SHA"
+            exit 1
+          fi
+
+          comparison_status="$(
+            gh api "repos/rsocko/icon-picker/compare/${target_commit}...${latest_commit}" --jq .status
+          )"
+          if [[ "${comparison_status}" != "ahead" && "${comparison_status}" != "identical" ]]; then
+            echo "::error::${target_commit} is not in the upstream main history"
+            exit 1
+          fi
+
+          current_commit="$(
+            node -p "JSON.parse(require('node:fs').readFileSync(
+              'scripts/icon-picker-vendor-pin.json', 'utf8'
+            )).sourceCommit"
+          )"
+          echo "commit=${target_commit}" >> "$GITHUB_OUTPUT"
+          echo "short_commit=${target_commit:0:12}" >> "$GITHUB_OUTPUT"
+          if [[ "${target_commit}" == "${current_commit}" ]]; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare deterministic update branch
+        if: steps.upstream.outputs.needed == 'true'
+        id: branch
+        env:
+          BRANCH: automation/icon-picker-vendor-sync
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          remote_sha="$(git ls-remote --heads origin "refs/heads/${BRANCH}" | awk '{print $1}')"
+          git switch --create "${BRANCH}"
+          echo "name=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "remote_sha=${remote_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Synchronize exact upstream package snapshot
+        if: steps.upstream.outputs.needed == 'true'
+        env:
+          TARGET_COMMIT: ${{ steps.upstream.outputs.commit }}
+        run: npm run vendor:icon-picker:sync -- --commit "${TARGET_COMMIT}" --update-pin true
+
+      - name: Refresh local dependency lock metadata
+        if: steps.upstream.outputs.needed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npm_version="$(
+            node -p "JSON.parse(require('node:fs').readFileSync(
+              'scripts/icon-picker-vendor-pin.json', 'utf8'
+            )).npmVersion"
+          )"
+          npm exec --yes --package="npm@${npm_version}" -- npm install \
+            --package-lock-only \
+            --ignore-scripts \
+            --no-audit \
+            --no-fund \
+            --fetch-retries=0 \
+            --fetch-timeout=15000
+
+      - name: Verify generated vendor update
+        if: steps.upstream.outputs.needed == 'true'
+        run: |
+          npm run vendor:icon-picker:verify
+          node --test scripts/icon-picker-vendor.test.mjs
+
+      - name: Detect snapshot changes
+        if: steps.upstream.outputs.needed == 'true'
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          unexpected="$(
+            git status --short |
+              awk '$2 !~ /^(package-lock\.json|scripts\/icon-picker-vendor-pin\.json|vendor\/icon-picker\/)/'
+          )"
+          if [[ -n "${unexpected}" ]]; then
+            echo "::error::Synchronization changed unexpected paths"
+            printf '%s\n' "${unexpected}"
+            exit 1
+          fi
+          if git diff --quiet -- \
+            package-lock.json \
+            scripts/icon-picker-vendor-pin.json \
+            vendor/icon-picker; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push review branch
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          REMOTE_SHA: ${{ steps.branch.outputs.remote_sha }}
+          TARGET_COMMIT: ${{ steps.upstream.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json scripts/icon-picker-vendor-pin.json vendor/icon-picker
+          git commit -m "Refresh icon picker vendor snapshot to ${TARGET_COMMIT:0:12}"
+          if [[ -n "${REMOTE_SHA}" ]]; then
+            git push \
+              --force-with-lease="refs/heads/${BRANCH}:${REMOTE_SHA}" \
+              origin "HEAD:refs/heads/${BRANCH}"
+          else
+            git push origin "HEAD:refs/heads/${BRANCH}"
+          fi
+
+      - name: Close obsolete review pull request
+        if: >-
+          steps.upstream.outputs.needed == 'false' ||
+          steps.changes.outputs.changed == 'false'
+        env:
+          BRANCH: automation/icon-picker-vendor-sync
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_number="$(
+            gh pr list --state open --base main --head "${BRANCH}" --json number --jq '.[0].number // empty'
+          )"
+          if [[ -n "${pr_number}" ]]; then
+            gh pr close "${pr_number}" --delete-branch \
+              --comment "Closing because the generated snapshot no longer differs from main."
+          fi
+
+      - name: Create or update review pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ steps.branch.outputs.name }}
+          GH_TOKEN: ${{ github.token }}
+          TARGET_COMMIT: ${{ steps.upstream.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          title="Refresh vendored icon picker to ${TARGET_COMMIT:0:12}"
+          body_file="${RUNNER_TEMP}/icon-picker-vendor-pr.md"
+          cat > "${body_file}" <<EOF
+          ## Summary
+
+          Refreshes the deterministic \`@rsocko/icon-picker\` snapshot from upstream
+          commit \`${TARGET_COMMIT}\`. This PR was generated by the scheduled or
+          manually dispatched vendor synchronization workflow and requires review.
+
+          Closes: N/A
+
+          ## Changes
+
+          - Rebuilds the publishable package from the exact upstream commit.
+          - Updates the reviewed pin, vendored files, and local dependency lock metadata.
+          - Does not publish, tag, release, or auto-merge anything.
+
+          ## Validation
+
+          - \`npm run vendor:icon-picker:verify\` — passed
+          - \`node --test scripts/icon-picker-vendor.test.mjs\` — passed
+
+          ## Security and privacy
+
+          - [x] This change does not commit credentials, tokens, personal data, production
+                exports, private infrastructure details, or real connector payloads.
+          - [x] New or changed workflows use least-privilege permissions, immutable action
+                references, and no protected secrets for untrusted pull requests.
+          - [ ] Connector changes document collected data, retention, write-back behavior,
+                and deletion expectations. (N/A: no connector changes.)
+          - [x] Logs, fixtures, screenshots, and examples use synthetic values.
+
+          ## Contributor checklist
+
+          - [ ] I added or updated tests for changed behavior. (N/A: generated package snapshot.)
+          - [ ] I updated relevant documentation and compatibility notes. (N/A: generated snapshot.)
+          - [ ] I included migration and rollback steps for persistent data changes.
+                (N/A: no persistent data changes.)
+          - [x] I confirmed \`package.json\` remains private unless npm publication was
+                separately approved.
+          EOF
+
+          pr_number="$(
+            gh pr list --state open --base main --head "${BRANCH}" --json number --jq '.[0].number // empty'
+          )"
+          if [[ -n "${pr_number}" ]]; then
+            gh pr edit "${pr_number}" --title "${title}" --body-file "${body_file}"
+          else
+            gh pr create --base main --head "${BRANCH}" --title "${title}" --body-file "${body_file}"
+          fi

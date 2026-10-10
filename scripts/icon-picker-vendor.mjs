@@ -8,6 +8,7 @@ import {
   readdir,
   rename,
   rm,
+  stat,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,22 +19,12 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const VENDOR_DIRECTORY = join(ROOT, 'vendor', 'icon-picker');
 const UPSTREAM_MANIFEST = 'UPSTREAM.json';
 const SNAPSHOT_MANIFEST = 'icon-picker.snapshot.json';
+const PIN_PATH = join(ROOT, 'scripts', 'icon-picker-vendor-pin.json');
 const SOURCE_REPOSITORY = 'https://github.com/rsocko/icon-picker.git';
-const SOURCE_COMMIT = '7206bbe8dc22d43d95b2e2c3c0020215efb8a2b9';
-const APPROVED_REGISTRY = 'https://packagefeedproxy.microsoft.io/npm/';
+const LOCAL_REGISTRY = 'https://packagefeedproxy.microsoft.io/npm/';
+const CI_REGISTRY = 'https://registry.npmjs.org/';
+const APPROVED_REGISTRY = process.env.GITHUB_ACTIONS === 'true' ? CI_REGISTRY : LOCAL_REGISTRY;
 const PACKAGE_NAME = '@rsocko/icon-picker';
-const PACKAGE_VERSION = '0.1.0-rc.0';
-const PINNED_NPM_VERSION = '11.19.0';
-const ARTIFACT = Object.freeze({
-  filename: 'rsocko-icon-picker-0.1.0-rc.0.tgz',
-  size: 39695,
-  unpackedSize: 126787,
-  entryCount: 36,
-  integrity: 'sha512-SVLC5q+B6vuWVabZgm2V6ugfiec8kLEhIBgl/+lZDZrsLWtUn6HucMNm2iBRx+l8GgEwXf8gAmklfrHOddtV8w==',
-  shasum: '0b2db4385f35f5636b324285bd219b5c3310c8fe',
-  sha256: '822dfdf28a4f8419c778d1e56b00d9628bcbe93918b672a9921c1eeb0ab921be',
-  sha512: '4952c2e6af81eafb9655a6d9826d95eae81f89e73c90b121201825ffe9590d9aec2d6b549fa1ee70c366da2051c7e97c1a01305dff200269257eb1ce75db55f3',
-});
 const PACKAGE_EXPORTS = Object.freeze({
   '.': {
     types: './dist/index.d.ts',
@@ -58,6 +49,51 @@ const PACKAGE_EXPORTS = Object.freeze({
 function fail(message) {
   throw new Error(message);
 }
+
+async function loadPin(path = PIN_PATH) {
+  const bytes = await readFile(path);
+  const pin = parseJson(bytes, 'Icon picker vendor pin');
+  assertExactKeys(
+    pin,
+    [
+      'artifact',
+      'npmVersion',
+      'packageVersion',
+      'schemaVersion',
+      'sourceCommit',
+      'sourceTag',
+    ],
+    'Icon picker vendor pin',
+  );
+  assertExactKeys(
+    pin.artifact,
+    [
+      'entryCount',
+      'filename',
+      'integrity',
+      'sha256',
+      'sha512',
+      'shasum',
+      'size',
+      'unpackedSize',
+    ],
+    'Icon picker vendor artifact pin',
+  );
+  if (
+    pin.schemaVersion !== 1
+    || !/^[0-9a-f]{40}$/u.test(pin.sourceCommit)
+    || (pin.sourceTag !== null && typeof pin.sourceTag !== 'string')
+    || typeof pin.packageVersion !== 'string'
+    || !/^npm@\d+\.\d+\.\d+$/u.test(`npm@${pin.npmVersion}`)
+  ) {
+    fail('Icon picker vendor pin contains invalid identity fields');
+  }
+  return { pin };
+}
+
+const { pin: INITIAL_PIN } = await loadPin();
+const PACKAGE_VERSION = INITIAL_PIN.packageVersion;
+const SOURCE_COMMIT = INITIAL_PIN.sourceCommit;
 
 function run(command, arguments_, options = {}) {
   const result = spawnSync(command, arguments_, {
@@ -84,12 +120,12 @@ function runNpm(arguments_, options = {}) {
   return run(process.platform === 'win32' ? 'npm.cmd' : 'npm', arguments_, options);
 }
 
-function runPinnedNpm(arguments_, options = {}) {
+function runPinnedNpm(version, arguments_, options = {}) {
   return runNpm(
     [
       'exec',
       '--yes',
-      `--package=npm@${PINNED_NPM_VERSION}`,
+      `--package=npm@${version}`,
       '--',
       'npm',
       ...arguments_,
@@ -100,6 +136,10 @@ function runPinnedNpm(arguments_, options = {}) {
 
 function hash(bytes, algorithm) {
   return createHash(algorithm).update(bytes).digest('hex');
+}
+
+function hashBase64(bytes, algorithm) {
+  return createHash(algorithm).update(bytes).digest('base64');
 }
 
 function parseJson(bytes, label) {
@@ -152,7 +192,7 @@ async function listFiles(root, current = root) {
   return files.sort();
 }
 
-function validateManifest(manifest, bytes) {
+function validateManifest(manifest, bytes, pin) {
   assertExactKeys(
     manifest,
     [
@@ -190,24 +230,44 @@ function validateManifest(manifest, bytes) {
   if (
     manifest.schemaVersion !== 1
     || manifest.package.name !== PACKAGE_NAME
-    || manifest.package.version !== PACKAGE_VERSION
+    || manifest.package.version !== pin.packageVersion
     || manifest.source.repository !== `git+${SOURCE_REPOSITORY}`
-    || manifest.source.commit !== SOURCE_COMMIT
-    || manifest.source.tag !== null
+    || manifest.source.commit !== pin.sourceCommit
+    || manifest.source.tag !== pin.sourceTag
     || manifest.acquisition !== 'canonical-npm-pack-from-source'
     || manifest.canonicalization.lineEndings !== 'lf'
     || manifest.canonicalization.artifactContract !== 'package-artifact.json'
   ) {
     fail(`${UPSTREAM_MANIFEST} does not match the pinned upstream identity`);
   }
-  for (const [key, value] of Object.entries(ARTIFACT)) {
+  if (
+    !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(manifest.package.version)
+    || (
+      manifest.source.tag !== null
+      && manifest.source.tag !== `v${manifest.package.version}`
+    )
+    || manifest.artifact.filename !== `rsocko-icon-picker-${manifest.package.version}.tgz`
+    || !Number.isSafeInteger(manifest.artifact.size)
+    || manifest.artifact.size <= 0
+    || !Number.isSafeInteger(manifest.artifact.unpackedSize)
+    || manifest.artifact.unpackedSize <= 0
+    || !Number.isSafeInteger(manifest.artifact.entryCount)
+    || manifest.artifact.entryCount <= 0
+    || !/^sha512-[A-Za-z0-9+/]+={0,2}$/u.test(manifest.artifact.integrity)
+    || !/^[0-9a-f]{40}$/u.test(manifest.artifact.shasum)
+    || !/^[0-9a-f]{64}$/u.test(manifest.artifact.sha256)
+    || !/^[0-9a-f]{128}$/u.test(manifest.artifact.sha512)
+  ) {
+    fail(`${UPSTREAM_MANIFEST} contains invalid package artifact metadata`);
+  }
+  for (const [key, value] of Object.entries(pin.artifact)) {
     if (manifest.artifact[key] !== value) {
       fail(`${UPSTREAM_MANIFEST} artifact ${key} does not match the pinned value`);
     }
   }
   if (
     !Array.isArray(manifest.artifact.files)
-    || manifest.artifact.files.length !== ARTIFACT.entryCount
+    || manifest.artifact.files.length !== pin.artifact.entryCount
     || JSON.stringify(manifest.artifact.files)
       !== JSON.stringify([...manifest.artifact.files].sort())
     || new Set(manifest.artifact.files).size !== manifest.artifact.files.length
@@ -219,10 +279,10 @@ function validateManifest(manifest, bytes) {
   if (!canonical.equals(bytes)) fail(`${UPSTREAM_MANIFEST} is not canonically encoded`);
 }
 
-function validatePackageManifest(packageManifest) {
+function validatePackageManifest(packageManifest, pin) {
   if (
     packageManifest.name !== PACKAGE_NAME
-    || packageManifest.version !== PACKAGE_VERSION
+    || packageManifest.version !== pin.packageVersion
     || packageManifest.private === true
     || packageManifest.type !== 'module'
     || JSON.stringify(packageManifest.exports) !== JSON.stringify(PACKAGE_EXPORTS)
@@ -248,7 +308,7 @@ async function createSnapshotManifest(snapshotRoot, upstream) {
   };
 }
 
-function validateSnapshotManifest(snapshot, upstream) {
+function validateSnapshotManifest(snapshot, upstream, pin) {
   assertExactKeys(
     snapshot,
     ['artifactSha256', 'files', 'package', 'schemaVersion', 'source'],
@@ -258,7 +318,7 @@ function validateSnapshotManifest(snapshot, upstream) {
     snapshot.schemaVersion !== 1
     || JSON.stringify(snapshot.package) !== JSON.stringify(upstream.package)
     || JSON.stringify(snapshot.source) !== JSON.stringify(upstream.source)
-    || snapshot.artifactSha256 !== ARTIFACT.sha256
+    || snapshot.artifactSha256 !== pin.artifact.sha256
     || !Array.isArray(snapshot.files)
     || JSON.stringify(snapshot.files.map(({ path }) => path))
       !== JSON.stringify(upstream.artifact.files)
@@ -267,21 +327,22 @@ function validateSnapshotManifest(snapshot, upstream) {
   }
 }
 
-export async function verifySnapshot(root = VENDOR_DIRECTORY) {
+export async function verifySnapshot(root = VENDOR_DIRECTORY, pinOverride) {
   const snapshotRoot = resolve(root);
+  const { pin } = pinOverride ? { pin: pinOverride } : await loadPin();
   const upstreamBytes = await readFile(join(snapshotRoot, UPSTREAM_MANIFEST));
   const manifest = parseJson(upstreamBytes, UPSTREAM_MANIFEST);
-  validateManifest(manifest, upstreamBytes);
+  validateManifest(manifest, upstreamBytes, pin);
 
   const packageManifest = parseJson(
     await readFile(join(snapshotRoot, 'package.json')),
     'Vendored package.json',
   );
-  validatePackageManifest(packageManifest);
+  validatePackageManifest(packageManifest, pin);
 
   const snapshotBytes = await readFile(join(snapshotRoot, SNAPSHOT_MANIFEST));
   const snapshot = parseJson(snapshotBytes, SNAPSHOT_MANIFEST);
-  validateSnapshotManifest(snapshot, manifest);
+  validateSnapshotManifest(snapshot, manifest, pin);
   const canonicalSnapshot = Buffer.from(`${JSON.stringify(snapshot, null, 2)}\n`);
   if (!canonicalSnapshot.equals(snapshotBytes)) {
     fail(`${SNAPSHOT_MANIFEST} is not canonically encoded`);
@@ -325,22 +386,102 @@ function parseArguments(arguments_) {
     options[key] = value;
   }
   const allowed = command === 'sync'
-    ? new Set(['--commit', '--repository'])
+    ? new Set(['--commit', '--repository', '--update-pin'])
     : new Set();
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) fail(`Unknown argument: ${unknown}`);
   return { command, options };
 }
 
+async function totalArtifactSize(root, files) {
+  let total = 0;
+  for (const path of files) {
+    total += (await stat(join(root, ...path.split('/')))).size;
+  }
+  return total;
+}
+
+function createCandidatePin(manifest, npmVersion) {
+  const artifact = Object.fromEntries(
+    Object.entries(manifest.artifact).filter(([key]) => key !== 'files'),
+  );
+  return {
+    schemaVersion: 1,
+    sourceCommit: manifest.source.commit,
+    sourceTag: manifest.source.tag,
+    packageVersion: manifest.package.version,
+    npmVersion,
+    artifact,
+  };
+}
+
+async function replaceSnapshotAndPin(stagedSnapshot, pin) {
+  const vendorBackup = join(ROOT, `.icon-picker-vendor-${process.pid}.backup`);
+  const pinBackup = `${PIN_PATH}.${process.pid}.backup`;
+  const stagedPin = `${PIN_PATH}.${process.pid}.tmp`;
+  let vendorBackedUp = false;
+  let pinBackedUp = false;
+  await writeFile(stagedPin, `${JSON.stringify(pin, null, 2)}\n`);
+  await rm(vendorBackup, { recursive: true, force: true });
+  await rm(pinBackup, { force: true });
+  try {
+    try {
+      await rename(VENDOR_DIRECTORY, vendorBackup);
+      vendorBackedUp = true;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    await rename(PIN_PATH, pinBackup);
+    pinBackedUp = true;
+    await rename(stagedSnapshot, VENDOR_DIRECTORY);
+    await rename(stagedPin, PIN_PATH);
+    await verifySnapshot();
+    await rm(vendorBackup, { recursive: true, force: true });
+    await rm(pinBackup, { force: true });
+  } catch (error) {
+    const rollbackErrors = [];
+    await rm(VENDOR_DIRECTORY, { recursive: true, force: true });
+    await rm(PIN_PATH, { force: true });
+    if (vendorBackedUp) {
+      try {
+        await rename(vendorBackup, VENDOR_DIRECTORY);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    if (pinBackedUp) {
+      try {
+        await rename(pinBackup, PIN_PATH);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError([error, ...rollbackErrors], 'Failed to restore vendor snapshot');
+    }
+    throw error;
+  } finally {
+    await rm(stagedPin, { force: true });
+  }
+}
+
 async function syncSnapshot(options) {
+  const { pin: committedPin } = await loadPin();
   const requestedCommit = options['--commit'];
   if (!requestedCommit) {
-    fail(`Usage: vendor:icon-picker:sync -- --commit ${SOURCE_COMMIT}`);
+    fail(`Usage: vendor:icon-picker:sync -- --commit ${committedPin.sourceCommit}`);
   }
-  if (requestedCommit !== SOURCE_COMMIT) {
+  if (!/^[0-9a-f]{40}$/u.test(requestedCommit)) {
+    fail('Requested commit must be a full lowercase SHA');
+  }
+  const updatePin = options['--update-pin'] === 'true';
+  if (options['--update-pin'] !== undefined && !['true', 'false'].includes(options['--update-pin'])) {
+    fail('--update-pin must be true or false');
+  }
+  if (requestedCommit !== committedPin.sourceCommit && !updatePin) {
     fail(
-      `Requested commit ${requestedCommit} does not match repository pin ${SOURCE_COMMIT}; `
-      + 'update and review the pin before synchronizing a different commit.',
+      `Requested commit ${requestedCommit} does not match repository pin `
+      + `${committedPin.sourceCommit}; pass --update-pin true only when generating a reviewable update.`,
     );
   }
 
@@ -349,7 +490,6 @@ async function syncSnapshot(options) {
   const artifacts = join(temporaryRoot, 'artifacts');
   const extracted = join(temporaryRoot, 'extracted');
   const stagedSnapshot = join(temporaryRoot, 'snapshot');
-  const backup = join(ROOT, `.icon-picker-vendor-${process.pid}.backup`);
   try {
     run('git', [
       'clone',
@@ -371,6 +511,22 @@ async function syncSnapshot(options) {
     ).trim();
     if (actualCommit !== requestedCommit) fail(`Checked out unexpected commit ${actualCommit}`);
 
+    const upstreamPackage = parseJson(
+      await readFile(join(repository, 'package.json')),
+      'Upstream package.json',
+    );
+    const packageManager = /^npm@(\d+\.\d+\.\d+)$/u.exec(upstreamPackage.packageManager ?? '');
+    if (
+      upstreamPackage.name !== PACKAGE_NAME
+      || upstreamPackage.private === true
+      || upstreamPackage.type !== 'module'
+      || typeof upstreamPackage.version !== 'string'
+      || !packageManager
+      || JSON.stringify(upstreamPackage.exports) !== JSON.stringify(PACKAGE_EXPORTS)
+    ) {
+      fail('Upstream package does not match the required package identity and exports');
+    }
+    const npmVersion = packageManager[1];
     const registry = runNpm(['config', 'get', 'registry'], { cwd: repository }).trim();
     if (registry !== APPROVED_REGISTRY) {
       fail(`Upstream build registry must be ${APPROVED_REGISTRY}; received ${registry}`);
@@ -381,6 +537,7 @@ async function syncSnapshot(options) {
       SOURCE_COMMIT: requestedCommit,
     };
     runPinnedNpm(
+      npmVersion,
       [
         'ci',
         '--prefer-offline',
@@ -392,35 +549,44 @@ async function syncSnapshot(options) {
       { cwd: repository, env: buildEnvironment },
     );
     await mkdir(artifacts);
-    runPinnedNpm(['run', 'package:artifact', '--', artifacts], {
+    runPinnedNpm(npmVersion, ['run', 'package:artifact', '--', artifacts], {
       cwd: repository,
       env: buildEnvironment,
     });
 
-    const artifactPath = join(artifacts, ARTIFACT.filename);
+    const upstreamBytes = await readFile(join(artifacts, UPSTREAM_MANIFEST));
+    const upstream = parseJson(upstreamBytes, UPSTREAM_MANIFEST);
+    const candidatePin = createCandidatePin(upstream, npmVersion);
+    validateManifest(upstream, upstreamBytes, candidatePin);
+    const artifactPath = join(artifacts, candidatePin.artifact.filename);
     const artifactBytes = await readFile(artifactPath);
     if (
-      artifactBytes.length !== ARTIFACT.size
-      || hash(artifactBytes, 'sha256') !== ARTIFACT.sha256
-      || hash(artifactBytes, 'sha512') !== ARTIFACT.sha512
+      artifactBytes.length !== candidatePin.artifact.size
+      || hash(artifactBytes, 'sha1') !== candidatePin.artifact.shasum
+      || hash(artifactBytes, 'sha256') !== candidatePin.artifact.sha256
+      || hash(artifactBytes, 'sha512') !== candidatePin.artifact.sha512
+      || `sha512-${hashBase64(artifactBytes, 'sha512')}` !== candidatePin.artifact.integrity
     ) {
-      fail('Built upstream artifact does not match the pinned integrity values');
+      fail('Built upstream artifact does not match its canonical integrity values');
     }
 
-    const upstreamBytes = await readFile(join(artifacts, UPSTREAM_MANIFEST));
-    validateManifest(parseJson(upstreamBytes, UPSTREAM_MANIFEST), upstreamBytes);
     const tarEntries = run('tar', ['-tzf', artifactPath])
       .split(/\r?\n/)
       .filter(Boolean)
       .map((path) => path.replace(/^package\//, ''))
       .sort();
-    const upstream = parseJson(upstreamBytes, UPSTREAM_MANIFEST);
     if (JSON.stringify(tarEntries) !== JSON.stringify(upstream.artifact.files)) {
       fail('Artifact archive entries do not match the upstream package allowlist');
     }
 
     await mkdir(extracted);
     run('tar', ['-xzf', artifactPath, '-C', extracted]);
+    if (
+      await totalArtifactSize(join(extracted, 'package'), upstream.artifact.files)
+      !== candidatePin.artifact.unpackedSize
+    ) {
+      fail('Artifact unpacked size does not match its canonical metadata');
+    }
     await cp(join(extracted, 'package'), stagedSnapshot, { recursive: true });
     await writeFile(join(stagedSnapshot, UPSTREAM_MANIFEST), upstreamBytes);
     const snapshot = await createSnapshotManifest(stagedSnapshot, upstream);
@@ -428,27 +594,15 @@ async function syncSnapshot(options) {
       join(stagedSnapshot, SNAPSHOT_MANIFEST),
       `${JSON.stringify(snapshot, null, 2)}\n`,
     );
-    await verifySnapshot(stagedSnapshot);
+    await verifySnapshot(stagedSnapshot, candidatePin);
+    if (!updatePin && JSON.stringify(candidatePin) !== JSON.stringify(committedPin)) {
+      fail('Rebuilt artifact no longer matches the committed pin');
+    }
 
     await mkdir(dirname(VENDOR_DIRECTORY), { recursive: true });
-    await rm(backup, { recursive: true, force: true });
-    let hadExisting = false;
-    try {
-      await rename(VENDOR_DIRECTORY, backup);
-      hadExisting = true;
-    } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
-    }
-    try {
-      await rename(stagedSnapshot, VENDOR_DIRECTORY);
-      await rm(backup, { recursive: true, force: true });
-    } catch (error) {
-      if (hadExisting) await rename(backup, VENDOR_DIRECTORY);
-      throw error;
-    }
+    await replaceSnapshotAndPin(stagedSnapshot, candidatePin);
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
-    await rm(backup, { recursive: true, force: true });
   }
 }
 
@@ -487,4 +641,6 @@ export {
   PACKAGE_NAME,
   PACKAGE_VERSION,
   SOURCE_COMMIT,
+  CI_REGISTRY,
+  LOCAL_REGISTRY,
 };

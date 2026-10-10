@@ -1,6 +1,6 @@
 {
   "name": "@rsocko/icon-picker",
-  "version": "0.1.0-rc.0",
+  "version": "0.1.0-rc.2",
   "description": "Framework-neutral React icon picker with portable icon values",
   "license": "MIT",
   "author": "Ryan Sockalosky",

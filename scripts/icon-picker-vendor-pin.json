@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "87079346141c7d91c9e65830dcd83b9f3860abc6",
+  "sourceTag": "v0.1.0-rc.2",
+  "packageVersion": "0.1.0-rc.2",
+  "npmVersion": "11.19.0",
+  "artifact": {
+    "filename": "rsocko-icon-picker-0.1.0-rc.2.tgz",
+    "size": 43309,
+    "unpackedSize": 143023,
+    "entryCount": 38,
+    "integrity": "sha512-5XZGRJAXNP09f9rP6piLOqSq4OXv0/ZkxHgbe2Zf78TqudDUg44vPhkjUnRQMQu/dRT8uct/Gj5FuHHvQ19ZjA==",
+    "shasum": "5f20ec50dbb1402affac40d40bca37b7b62524f9",
+    "sha256": "6494359674d85fe8b4469893fee4bf28070d7ef5e3db3734095aadd97d0fa346",
+    "sha512": "e5764644901734fd3d7fdacfea988b3aa4aae0e5efd3f664c4781b7b665fefc4eab9d0d4838e2f3e1923527450310bbf7514fcb9cb7f1a3e45b871ef435f598c"
+  }
+}

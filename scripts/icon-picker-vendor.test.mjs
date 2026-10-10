@@ -6,6 +6,8 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 import {
   APPROVED_REGISTRY,
+  CI_REGISTRY,
+  LOCAL_REGISTRY,
   PACKAGE_NAME,
   PACKAGE_VERSION,
   SOURCE_COMMIT,
@@ -29,8 +31,10 @@ test('verifies the committed exact-commit package snapshot', async () => {
   assert.equal(manifest.source.commit, SOURCE_COMMIT);
   assert.equal(manifest.package.name, PACKAGE_NAME);
   assert.equal(manifest.package.version, PACKAGE_VERSION);
-  assert.equal(manifest.artifact.entryCount, 36);
-  assert.equal(APPROVED_REGISTRY, 'https://packagefeedproxy.microsoft.io/npm/');
+  assert.equal(manifest.artifact.entryCount, 38);
+  assert.equal(APPROVED_REGISTRY, LOCAL_REGISTRY);
+  assert.equal(LOCAL_REGISTRY, 'https://packagefeedproxy.microsoft.io/npm/');
+  assert.equal(CI_REGISTRY, 'https://registry.npmjs.org/');
 });
 
 test('ignores dependencies installed into the linked vendor package', async () => {
@@ -118,4 +122,21 @@ test('refuses synchronization without the reviewed exact commit', () => {
   );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /does not match repository pin/i);
+});
+
+test('requires an explicit reviewable pin update for a different exact commit', () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      resolve('scripts', 'icon-picker-vendor.mjs'),
+      'sync',
+      '--commit',
+      '0'.repeat(40),
+      '--update-pin',
+      'false',
+    ],
+    { encoding: 'utf8', windowsHide: true },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /pass --update-pin true only when generating a reviewable update/i);
 });

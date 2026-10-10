@@ -80,55 +80,127 @@ var v = [
 function E(e) {
 	return typeof e == "object" && !!e && "icons" in e && typeof e.icons == "object" && e.icons !== null;
 }
-var D = /* @__PURE__ */ new Map(), O = 1e3;
-function k(e, t) {
+var D = /* @__PURE__ */ new Map(), re = 1e3;
+function O(e, t) {
 	return `${e}:${t}`;
 }
-function A(e, t, n) {
+function ie(e, t, n) {
 	let r = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${t} ${n}">${e}</svg>`;
 	return `data:image/svg+xml,${encodeURIComponent(r)}`;
 }
-async function j(e, t, n) {
+async function k(e, t, n) {
 	if (![
 		"lucide",
 		"mdi",
 		"ph"
 	].includes(e) || t.length === 0) return {};
-	let r = t.filter((t) => !D.has(k(e, t)));
+	let r = t.filter((t) => !D.has(O(e, t)));
 	if (r.length > 0) try {
 		let i = new URLSearchParams({ icons: r.join(",") }), a = await fetch(`https://api.iconify.design/${e}.json?${i}`, n ? { signal: n } : void 0);
 		if (a.ok) {
 			let n = await a.json();
-			if (!E(n)) return Object.fromEntries(t.map((t) => [k(e, t), null]));
+			if (!E(n)) return Object.fromEntries(t.map((t) => [O(e, t), null]));
 			for (let t of r) {
 				let r = n.aliases?.[t], i = n.icons[t] ?? (r ? n.icons[r.parent] : void 0);
 				if (!i) continue;
 				let a = r?.width ?? i.width ?? n.width ?? 24, o = r?.height ?? i.height ?? n.height ?? 24;
-				if (D.size >= O) {
+				if (D.size >= re) {
 					let e = D.keys().next().value;
 					e && D.delete(e);
 				}
-				D.set(k(e, t), A(i.body, a, o));
+				D.set(O(e, t), ie(i.body, a, o));
 			}
 		}
 	} catch {}
 	return Object.fromEntries(t.map((t) => {
-		let n = k(e, t);
+		let n = O(e, t);
 		return [n, D.get(n) ?? null];
 	}));
 }
 //#endregion
+//#region src/theme.ts
+var A = [
+	"--rs-icon-picker-bg",
+	"--rs-icon-picker-surface",
+	"--rs-icon-picker-surface-hover",
+	"--rs-icon-picker-border",
+	"--rs-icon-picker-text",
+	"--rs-icon-picker-muted",
+	"--rs-icon-picker-accent",
+	"--rs-icon-picker-shadow",
+	"--rs-icon-picker-notice-bg",
+	"--rs-icon-picker-notice-text"
+], j = typeof window > "u" ? u : f;
+function M() {
+	return typeof window < "u" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function N(e, t) {
+	if (e !== "auto") return e;
+	let n = t?.parentElement ?? null;
+	for (; n;) {
+		let e = n.dataset.theme;
+		if (e === "dark" || e === "light") return e;
+		if (n.classList.contains("dark")) return "dark";
+		let t = getComputedStyle(n).colorScheme.split(/\s+/).filter(Boolean);
+		if (t.length === 1 && t[0] === "dark") return "dark";
+		if (t.length === 1 && t[0] === "light") return "light";
+		n = n.parentElement;
+	}
+	return M();
+}
+function ae(e, t) {
+	let [n, r] = h(e === "dark" ? "dark" : "light");
+	return j(() => {
+		let n = () => r(N(e, t));
+		if (n(), e !== "auto" || typeof window > "u") return;
+		let i = window.matchMedia?.("(prefers-color-scheme: dark)");
+		i?.addEventListener("change", n);
+		let a = [], o = t?.parentElement ?? null;
+		for (; o;) {
+			let e = new MutationObserver(n);
+			e.observe(o, {
+				attributes: !0,
+				attributeFilter: [
+					"class",
+					"style",
+					"data-theme"
+				]
+			}), a.push(e), o = o.parentElement;
+		}
+		return () => {
+			i?.removeEventListener("change", n);
+			for (let e of a) e.disconnect();
+		};
+	}, [t, e]), n;
+}
+function oe(e) {
+	if (!e || typeof window > "u") return {};
+	let t = {};
+	for (let n of A) {
+		let r = e;
+		for (; r;) {
+			let e = getComputedStyle(r).getPropertyValue(n).trim();
+			if (e) {
+				t[n] = e;
+				break;
+			}
+			r = r.parentElement;
+		}
+	}
+	return t;
+}
+//#endregion
 //#region src/IconPicker.tsx
-var re = s(() => import("emoji-picker-react")), M = null, N = /* @__PURE__ */ new Map(), ie = 200;
-function P(e, t) {
+var se = s(() => import("emoji-picker-react")), P = null, F = /* @__PURE__ */ new Map(), I = 200;
+function L(e, t) {
 	if (typeof e != "object" || !e) return null;
 	let n = e[t];
 	return Array.isArray(n) ? n : null;
 }
-function F(e) {
+function ce(e) {
 	return Array.isArray(e) ? e : null;
 }
-function ae() {
+function le() {
 	return /* @__PURE__ */ _("svg", {
 		viewBox: "0 0 24 24",
 		"aria-hidden": "true",
@@ -140,7 +212,7 @@ function ae() {
 		}), /* @__PURE__ */ g("path", { d: "m20 20-3.5-3.5" })]
 	});
 }
-function I() {
+function ue() {
 	return /* @__PURE__ */ g("svg", {
 		viewBox: "0 0 24 24",
 		"aria-hidden": "true",
@@ -148,78 +220,80 @@ function I() {
 		children: /* @__PURE__ */ g("path", { d: "M18 6 6 18M6 6l12 12" })
 	});
 }
-function L() {
+function R() {
 	return /* @__PURE__ */ g("span", {
 		className: "rs-icon-picker__spinner",
 		"aria-hidden": "true"
 	});
 }
-async function oe(e, t) {
-	M ??= import("emojilib");
-	let { default: n } = await M, r = e.toLowerCase(), i = [];
+async function de(e, t) {
+	P ??= import("emojilib");
+	let { default: n } = await P, r = e.toLowerCase(), i = [];
 	for (let [e, a] of Object.entries(n)) {
 		if (i.length >= t) break;
 		a.some((e) => e.includes(r)) && i.push(e);
 	}
 	return i;
 }
-async function se(e, t, n, r) {
-	let i = `${t}:${e}:${n}`, a = N.get(i);
+async function fe(e, t, n, r) {
+	let i = `${t}:${e}:${n}`, a = F.get(i);
 	if (a) return a;
 	let o = await fetch(`https://api.iconify.design/search?query=${encodeURIComponent(e)}&prefix=${t}&limit=${n}`, { signal: r });
 	if (!o.ok) throw Error(`Iconify search returned HTTP ${o.status}.`);
-	let s = await o.json(), c = F(s) ?? P(s, "icons");
+	let s = await o.json(), c = ce(s) ?? L(s, "icons");
 	if (!c) throw Error("Iconify search returned an invalid response.");
 	let l = c.filter((e) => typeof e == "string").map((e) => e.replace(`${t}:`, ""));
-	if (N.size >= ie) {
-		let e = N.keys().next().value;
-		e && N.delete(e);
+	if (F.size >= I) {
+		let e = F.keys().next().value;
+		e && F.delete(e);
 	}
-	return N.set(i, l), l;
+	return F.set(i, l), l;
 }
-async function ce(e) {
+async function pe(e) {
 	let t = await fetch("https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons@main/tree.json", { signal: e });
 	if (!t.ok) throw Error(`Dashboard Icons returned HTTP ${t.status}.`);
-	let n = P(await t.json(), "svg");
+	let n = L(await t.json(), "svg");
 	if (!n) throw Error("Dashboard Icons returned an invalid catalog.");
 	return n.filter((e) => typeof e == "string" && e.endsWith(".svg")).map((e) => e.slice(0, -4)).filter((e) => !e.endsWith("-light") && !e.endsWith("-dark"));
 }
-async function le(e) {
+async function me(e) {
 	let n = await fetch("https://api.iconify.design/collection?prefix=simple-icons", { signal: e });
 	if (!n.ok) throw Error(`Simple Icons returned HTTP ${n.status}.`);
 	let r = t(await n.json());
 	if (r.length === 0) throw Error("Simple Icons returned an invalid catalog.");
 	return r;
 }
-function ue(e) {
+function he(e) {
 	return Array.from(e.querySelectorAll("button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex=\"-1\"])")).filter((e) => !e.hasAttribute("hidden"));
 }
-var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange: c, className: l, id: f, ariaLabel: te = "Choose an icon", searchDebounceMs: b = 200, modal: x = !1 }) {
-	let S = m(null), E = m(0), D = d(), O = f ?? `rs-icon-picker-${D.replace(/:/g, "")}`, [A, M] = h(""), [N, ie] = h(/* @__PURE__ */ new Set()), [P, F] = h([]), [R, z] = h(!1), [B, V] = h(null), [H, U] = h(!1), [W, G] = h([]), [K, q] = h([]), [fe, J] = h(!1), [pe, me] = h(0), [he, ge] = h({});
+var z = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange: c, className: f, id: te, ariaLabel: b = "Choose an icon", searchDebounceMs: x = 200, modal: S = !1, theme: E = "auto", style: D }) {
+	let [re, ie] = h(null), A = m(null), j = ae(E, re), M = l((e) => {
+		A.current = e, ie(e);
+	}, []), N = m(0), oe = d(), P = te ?? `rs-icon-picker-${oe.replace(/:/g, "")}`, [F, I] = h(""), [L, ce] = h(/* @__PURE__ */ new Set()), [z, B] = h([]), [V, H] = h(!1), [U, W] = h(null), [G, _e] = h(!1), [K, ve] = h([]), [q, ye] = h([]), [be, J] = h(!1), [xe, Se] = h(0), [Ce, we] = h({});
 	u(() => {
 		let e = new AbortController();
-		return Promise.allSettled([ce(e.signal), le(e.signal)]).then(([t, n]) => {
-			e.signal.aborted || (t.status === "fulfilled" && G(t.value), n.status === "fulfilled" && q(n.value), U(t.status === "rejected" || n.status === "rejected"));
+		return Promise.allSettled([pe(e.signal), me(e.signal)]).then(([t, n]) => {
+			e.signal.aborted || (t.status === "fulfilled" && ve(t.value), n.status === "fulfilled" && ye(n.value), _e(t.status === "rejected" || n.status === "rejected"));
 		}), () => e.abort();
 	}, []);
-	let Y = p(() => N.size === 0 ? v : v.filter((e) => N.has(e.id)), [N]);
+	let Y = p(() => L.size === 0 ? v : v.filter((e) => L.has(e.id)), [L]);
 	u(() => {
-		let e = A.trim(), t = ++E.current;
+		let e = F.trim(), t = ++N.current;
 		if (!e) return;
 		let n = new AbortController(), r = setTimeout(() => {
-			z(!0), V(null);
+			H(!0), W(null);
 			let r = Y.length <= 2 ? 48 : Y.length <= 4 ? 32 : 24, i = e.toLowerCase(), a = Y.map(async (t) => {
 				if (t.id === "emoji") return {
 					source: "emoji",
 					label: t.label,
-					icons: await oe(e, r)
+					icons: await de(e, r)
 				};
 				if (t.iconifyPrefix) return {
 					source: t.id,
 					label: t.label,
-					icons: await se(e, t.iconifyPrefix, r, n.signal)
+					icons: await fe(e, t.iconifyPrefix, r, n.signal)
 				};
-				let a = t.id === "dash" ? W.length > 0 ? W : C : K.length > 0 ? K : w;
+				let a = t.id === "dash" ? K.length > 0 ? K : C : q.length > 0 ? q : w;
 				return {
 					source: t.id,
 					label: t.label,
@@ -227,23 +301,23 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 				};
 			});
 			Promise.allSettled(a).then((e) => {
-				if (n.signal.aborted || t !== E.current) return;
+				if (n.signal.aborted || t !== N.current) return;
 				let r = e.flatMap((e) => e.status === "fulfilled" && e.value.icons.length > 0 ? [e.value] : []), i = e.filter((e) => e.status === "rejected").length;
-				F(r), V(i > 0 ? `${i === 1 ? "One provider is" : "Some providers are"} temporarily unavailable.` : null), z(!1);
+				B(r), W(i > 0 ? `${i === 1 ? "One provider is" : "Some providers are"} temporarily unavailable.` : null), H(!1);
 			});
-		}, Math.max(0, b));
+		}, Math.max(0, x));
 		return () => {
 			clearTimeout(r), n.abort();
 		};
 	}, [
 		Y,
-		W,
-		A,
-		pe,
-		b,
-		K
+		K,
+		F,
+		xe,
+		x,
+		q
 	]);
-	let _e = p(() => {
+	let Te = p(() => {
 		let e = Y.length <= 2 ? 48 : Y.length <= 4 ? 32 : 24;
 		return Y.map((t) => {
 			if (t.id === "emoji") return {
@@ -251,7 +325,7 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 				label: t.label,
 				icons: ne
 			};
-			let n = t.id === "dash" && W.length > 0 ? W : t.id === "si" && K.length > 0 ? K : T[t.id];
+			let n = t.id === "dash" && K.length > 0 ? K : t.id === "si" && q.length > 0 ? q : T[t.id];
 			return {
 				source: t.id,
 				label: t.label,
@@ -260,30 +334,30 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 		});
 	}, [
 		Y,
-		W,
-		K
-	]), X = n(e), Z = A.trim().length > 0, Q = Z ? P : _e, ve = Q.reduce((e, t) => e + t.icons.length, 0);
+		K,
+		q
+	]), X = n(e), Z = F.trim().length > 0, Q = Z ? z : Te, Ee = Q.reduce((e, t) => e + t.icons.length, 0);
 	u(() => {
 		let e = new AbortController(), t = Q.filter((e) => [
 			"lucide",
 			"mdi",
 			"ph"
 		].includes(e.source));
-		return t.length === 0 || Promise.all(t.map((t) => j(t.source, t.icons, e.signal))).then((t) => {
-			e.signal.aborted || ge((e) => t.reduce((e, t) => ({
+		return t.length === 0 || Promise.all(t.map((t) => k(t.source, t.icons, e.signal))).then((t) => {
+			e.signal.aborted || we((e) => t.reduce((e, t) => ({
 				...e,
 				...t
 			}), e));
 		}), () => e.abort();
 	}, [Q]);
-	function ye(e) {
-		ie((t) => {
+	function De(e) {
+		ce((t) => {
 			let n = new Set(t);
 			return n.has(e) ? n.delete(e) : n.add(e), n;
 		});
 	}
-	function be(e) {
-		M(e), J(!1), e.trim() || (F([]), z(!1), V(null));
+	function Oe(e) {
+		I(e), J(!1), e.trim() || (B([]), H(!1), W(null));
 	}
 	function $(e, n) {
 		t(r({
@@ -291,50 +365,52 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 			name: n
 		}));
 	}
-	function xe(e) {
+	function ke(e) {
 		if (e.key === "Escape" && a) {
 			e.stopPropagation(), a();
 			return;
 		}
-		if (!x || e.key !== "Tab" || !S.current) return;
-		let t = ue(S.current), n = t[0], r = t.at(-1);
+		if (!S || e.key !== "Tab" || !A.current) return;
+		let t = he(A.current), n = t[0], r = t.at(-1);
 		!n || !r || (e.shiftKey && document.activeElement === n ? (e.preventDefault(), r.focus()) : !e.shiftKey && document.activeElement === r && (e.preventDefault(), n.focus()));
 	}
 	return /* @__PURE__ */ _("div", {
-		ref: S,
-		id: O,
-		className: i("rs-icon-picker", l),
-		role: x ? "dialog" : "region",
-		"aria-modal": x || void 0,
-		"aria-label": te,
-		onKeyDown: xe,
+		ref: M,
+		id: P,
+		className: i("rs-icon-picker", f),
+		"data-rs-icon-picker-theme": j,
+		style: D,
+		role: S ? "dialog" : "region",
+		"aria-modal": S || void 0,
+		"aria-label": b,
+		onKeyDown: ke,
 		children: [
 			/* @__PURE__ */ _("div", {
 				className: "rs-icon-picker__search",
 				children: [
-					/* @__PURE__ */ g(ae, {}),
+					/* @__PURE__ */ g(le, {}),
 					/* @__PURE__ */ g("input", {
 						type: "search",
-						value: A,
-						onChange: (e) => be(e.target.value),
+						value: F,
+						onChange: (e) => Oe(e.target.value),
 						placeholder: "Search emoji, icons, brands...",
 						"aria-label": "Search icons",
-						autoFocus: x
+						autoFocus: S
 					}),
-					R && /* @__PURE__ */ g(L, {}),
-					A && !R && /* @__PURE__ */ g("button", {
+					V && /* @__PURE__ */ g(R, {}),
+					F && !V && /* @__PURE__ */ g("button", {
 						type: "button",
 						className: "rs-icon-picker__icon-button",
-						onClick: () => be(""),
+						onClick: () => Oe(""),
 						"aria-label": "Clear search",
-						children: /* @__PURE__ */ g(I, {})
+						children: /* @__PURE__ */ g(ue, {})
 					}),
 					a && /* @__PURE__ */ g("button", {
 						type: "button",
 						className: "rs-icon-picker__icon-button",
 						onClick: a,
 						"aria-label": "Close icon picker",
-						children: /* @__PURE__ */ g(I, {})
+						children: /* @__PURE__ */ g(ue, {})
 					})
 				]
 			}),
@@ -343,10 +419,10 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 				role: "group",
 				"aria-label": "Icon sources",
 				children: v.map((e) => {
-					let t = N.size === 0 || N.has(e.id);
+					let t = L.size === 0 || L.has(e.id);
 					return /* @__PURE__ */ g("button", {
 						type: "button",
-						onClick: () => ye(e.id),
+						onClick: () => De(e.id),
 						className: i("rs-icon-picker__filter", t && "rs-icon-picker__filter--active"),
 						"aria-pressed": t,
 						children: e.label
@@ -377,7 +453,7 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 			}),
 			/* @__PURE__ */ g("div", {
 				className: "rs-icon-picker__results",
-				children: fe && !Z ? /* @__PURE__ */ _(ee, { children: [/* @__PURE__ */ g("button", {
+				children: be && !Z ? /* @__PURE__ */ _(ee, { children: [/* @__PURE__ */ g("button", {
 					type: "button",
 					className: "rs-icon-picker__back",
 					onClick: () => J(!1),
@@ -386,40 +462,40 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 					fallback: /* @__PURE__ */ _("div", {
 						className: "rs-icon-picker__state",
 						role: "status",
-						children: [/* @__PURE__ */ g(L, {}), " Loading emoji..."]
+						children: [/* @__PURE__ */ g(R, {}), " Loading emoji..."]
 					}),
-					children: /* @__PURE__ */ g(re, {
+					children: /* @__PURE__ */ g(se, {
 						onEmojiClick: (e) => $("emoji", e.emoji),
 						autoFocusSearch: !1,
-						theme: "auto",
+						theme: j,
 						height: 400,
 						width: "100%",
 						searchPlaceHolder: "Search emoji...",
 						previewConfig: { showPreview: !1 }
 					})
-				})] }) : R && Q.length === 0 ? /* @__PURE__ */ _("div", {
+				})] }) : V && Q.length === 0 ? /* @__PURE__ */ _("div", {
 					className: "rs-icon-picker__state",
 					role: "status",
-					children: [/* @__PURE__ */ g(L, {}), " Searching..."]
+					children: [/* @__PURE__ */ g(R, {}), " Searching..."]
 				}) : Q.length === 0 && Z ? /* @__PURE__ */ _("div", {
 					className: "rs-icon-picker__state",
 					children: [/* @__PURE__ */ _("span", { children: [
 						"No results for \"",
-						A,
+						F,
 						"\"."
-					] }), B && /* @__PURE__ */ g("button", {
+					] }), U && /* @__PURE__ */ g("button", {
 						type: "button",
-						onClick: () => me((e) => e + 1),
+						onClick: () => Se((e) => e + 1),
 						children: "Retry providers"
 					})]
 				}) : Q.map((e) => /* @__PURE__ */ _("section", {
 					className: "rs-icon-picker__group",
-					"aria-labelledby": `${O}-${e.source}`,
+					"aria-labelledby": `${P}-${e.source}`,
 					children: [/* @__PURE__ */ _("div", {
 						className: "rs-icon-picker__group-heading",
 						children: [
 							/* @__PURE__ */ g("h2", {
-								id: `${O}-${e.source}`,
+								id: `${P}-${e.source}`,
 								children: e.label
 							}),
 							/* @__PURE__ */ g("span", { children: e.icons.length }),
@@ -438,11 +514,11 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 							"aria-label": `Select emoji ${t}`,
 							"aria-pressed": X?.source === "emoji" && X.name === t,
 							children: t
-						}, t) : /* @__PURE__ */ g(de, {
+						}, t) : /* @__PURE__ */ g(ge, {
 							name: t,
 							source: e.source,
 							color: e.source === "dash" || e.source === "si" ? void 0 : s,
-							maskUrl: he[k(e.source, t)],
+							maskUrl: Ce[O(e.source, t)],
 							selected: X?.source === e.source && X.name === t,
 							onClick: () => $(e.source, t)
 						}, `${e.source}:${t}`))
@@ -452,16 +528,16 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 			/* @__PURE__ */ g("div", {
 				className: "rs-icon-picker__announcer",
 				"aria-live": "polite",
-				children: Z && !R ? `${ve} icon${ve === 1 ? "" : "s"} found.` : ""
+				children: Z && !V ? `${Ee} icon${Ee === 1 ? "" : "s"} found.` : ""
 			}),
-			(B || H) && /* @__PURE__ */ g("div", {
+			(U || G) && /* @__PURE__ */ g("div", {
 				className: "rs-icon-picker__notice",
 				role: "alert",
-				children: B ?? "Live brand catalogs are unavailable; showing built-in icons."
+				children: U ?? "Live brand catalogs are unavailable; showing built-in icons."
 			})
 		]
 	});
-}), de = c(function({ name: t, source: n, color: i, selected: o, maskUrl: s, onClick: c }) {
+}), ge = c(function({ name: t, source: n, color: i, selected: o, maskUrl: s, onClick: c }) {
 	let l = {
 		source: n,
 		name: t
@@ -509,7 +585,7 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 			children: "!"
 		}), /* @__PURE__ */ g("span", { children: t.length > 10 ? `${t.slice(0, 10)}...` : t })]
 	});
-}), z = {
+}), B = {
 	sm: {
 		className: "rs-icon-picker-trigger--sm",
 		iconSize: 16
@@ -522,62 +598,72 @@ var R = c(function({ value: e, onChange: t, onClose: a, color: s, onColorChange:
 		className: "rs-icon-picker-trigger--lg",
 		iconSize: 28
 	}
-}, B = 420, V = 520, H = 240, U = 8, W = 4, G = typeof window > "u" ? u : f;
+}, V = 420, H = 520, U = 240, W = 8, G = 4, _e = typeof window > "u" ? u : f;
 function K(e, t, n) {
-	let r = Math.max(1, Math.min(B, t - 16)), i = Math.max(0, n - e.bottom - W - U), a = Math.max(0, e.top - W - U), o = i < V && a > i, s = Math.max(1, n - 16), c = Math.max(a, i) < Math.min(H, s), l = c ? Math.min(V, s) : Math.min(V, o ? a : i), u = Math.min(Math.max(U, e.left), Math.max(U, t - U - r));
+	let r = Math.max(1, Math.min(V, t - 16)), i = Math.max(0, n - e.bottom - G - W), a = Math.max(0, e.top - G - W), o = i < H && a > i, s = Math.max(1, n - 16), c = Math.max(a, i) < Math.min(U, s), l = c ? Math.min(H, s) : Math.min(H, o ? a : i), u = Math.min(Math.max(W, e.left), Math.max(W, t - W - r));
 	return {
-		top: c ? U : o ? Math.max(U, e.top - W - l) : Math.min(e.bottom + W, Math.max(U, n - U - l)),
+		top: c ? W : o ? Math.max(W, e.top - G - l) : Math.min(e.bottom + G, Math.max(W, n - W - l)),
 		left: u,
 		width: r,
 		height: l
 	};
 }
-function q({ value: e, onChange: t, onOpenChange: n, placeholder: r, size: o = "md", className: s, disabled: c = !1, color: f, pickerColor: p = f, onColorChange: v, label: y = "Pick an icon", portalTarget: ne, pickerProps: b }) {
-	let [x, S] = h(!1), [C, w] = h(null), T = m(null), E = m(null), D = `rs-icon-picker-${d().replace(/:/g, "")}`, O = z[o], k = l((e) => {
-		S(e), n?.(e);
-	}, [n]), A = l((e) => {
-		k(!1), e && T.current?.focus();
-	}, [k]);
-	G(() => {
-		if (!x) return;
+function ve({ value: e, onChange: t, onOpenChange: n, placeholder: r, size: o = "md", className: s, disabled: c = !1, color: f, pickerColor: p = f, onColorChange: v, label: y = "Pick an icon", portalTarget: ne, pickerProps: b, theme: x = "auto", style: S }) {
+	let [C, w] = h(!1), [T, E] = h(null), [D, re] = h(null), [O, ie] = h({}), k = m(null), A = m(null), j = `rs-icon-picker-${d().replace(/:/g, "")}`, M = B[o], N = ae(x, D), se = l((e) => {
+		k.current = e, re(e);
+	}, []), P = l((e) => {
+		w(e), n?.(e);
+	}, [n]), F = l((e) => {
+		P(!1), e && k.current?.focus();
+	}, [P]);
+	_e(() => {
+		if (!C) return;
+		ie(oe(D));
 		function e() {
-			let e = T.current;
+			let e = k.current;
 			if (!e) return;
 			let t = K(e.getBoundingClientRect(), window.innerWidth, window.innerHeight);
-			w((e) => e && e.top === t.top && e.left === t.left && e.width === t.width && e.height === t.height ? e : t);
+			E((e) => e && e.top === t.top && e.left === t.left && e.width === t.width && e.height === t.height ? e : t);
 		}
 		function t(t) {
 			let n = t.target;
-			n instanceof Node && E.current?.contains(n) || e();
+			n instanceof Node && A.current?.contains(n) || e();
 		}
 		return e(), window.addEventListener("resize", e), window.addEventListener("scroll", t, !0), () => {
 			window.removeEventListener("resize", e), window.removeEventListener("scroll", t, !0);
 		};
-	}, [x]), u(() => {
-		if (!x) return;
+	}, [
+		C,
+		N,
+		S,
+		D
+	]), u(() => {
+		if (!C) return;
 		function e(e) {
 			let t = e.target;
-			t instanceof Node && (T.current?.contains(t) || E.current?.contains(t) || A(!1));
+			t instanceof Node && (k.current?.contains(t) || A.current?.contains(t) || F(!1));
 		}
 		return document.addEventListener("pointerdown", e), () => document.removeEventListener("pointerdown", e);
-	}, [A, x]);
-	let j = typeof document > "u" ? null : ne ?? document.body;
+	}, [F, C]);
+	let I = typeof document > "u" ? null : ne ?? document.body;
 	return /* @__PURE__ */ _(ee, { children: [/* @__PURE__ */ g("button", {
-		ref: T,
+		ref: se,
 		type: "button",
 		onClick: () => {
-			c || k(!x);
+			c || P(!C);
 		},
 		disabled: c,
-		"aria-expanded": x,
+		"aria-expanded": C,
 		"aria-haspopup": "dialog",
-		"aria-controls": D,
+		"aria-controls": j,
 		"aria-label": y,
 		title: y,
-		className: i("rs-icon-picker-trigger", O.className, s),
+		className: i("rs-icon-picker-trigger", M.className, s),
+		"data-rs-icon-picker-theme": N,
+		style: S,
 		children: e ? /* @__PURE__ */ g(a, {
 			value: e,
-			size: O.iconSize,
+			size: M.iconSize,
 			color: f,
 			label: ""
 		}) : r ?? /* @__PURE__ */ g("span", {
@@ -585,32 +671,35 @@ function q({ value: e, onChange: t, onOpenChange: n, placeholder: r, size: o = "
 			"aria-hidden": "true",
 			children: "😀"
 		})
-	}), x && j && te(/* @__PURE__ */ g("div", {
-		ref: E,
+	}), C && I && te(/* @__PURE__ */ g("div", {
+		ref: A,
 		className: "rs-icon-picker-popover",
+		"data-rs-icon-picker-theme": N,
 		onMouseDown: (e) => e.stopPropagation(),
 		style: {
-			top: C?.top ?? 0,
-			left: C?.left ?? 0,
-			width: C?.width ?? B,
-			height: C?.height ?? V,
-			visibility: C ? "visible" : "hidden"
+			...O,
+			top: T?.top ?? 0,
+			left: T?.left ?? 0,
+			width: T?.width ?? V,
+			height: T?.height ?? H,
+			visibility: T ? "visible" : "hidden"
 		},
-		children: /* @__PURE__ */ g(R, {
+		children: /* @__PURE__ */ g(z, {
 			...b,
-			id: D,
+			id: j,
 			value: e,
 			onChange: (e) => {
-				t(e), A(!0);
+				t(e), F(!0);
 			},
-			onClose: () => A(!0),
+			onClose: () => F(!0),
 			color: p,
 			onColorChange: v,
-			modal: !0
+			modal: !0,
+			theme: N
 		})
-	}), j)] });
+	}), I)] });
 }
 //#endregion
-export { R as n, q as t };
+export { z as n, ve as t };
 
-//# sourceMappingURL=IconPickerButton-BCeJJAHh.js.map
+//# sourceMappingURL=IconPickerButton-BjUqdo6t.js.map

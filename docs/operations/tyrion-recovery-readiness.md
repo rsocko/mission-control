@@ -298,6 +298,11 @@ a new key only when intentionally starting a different repair request after the
 existing plan completed successfully, or when changing the horizon or other
 immutable plan inputs.
 
+`finance_insight_backfill_projection_changed` may also include a stable
+aggregate-only `reason` naming the failed validation predicate. Record that
+reason for diagnosis. It contains no connector identity, finance content,
+counts, dates, or digests and does not authorize relaxing the failed check.
+
 4. Replay the exact request with the same connector ID, idempotency key,
    horizon, and window limit. Require the same plan ID and identical completed
    metadata. This replay must make no provider requests and no additional

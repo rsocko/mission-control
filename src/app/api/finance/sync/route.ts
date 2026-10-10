@@ -131,7 +131,13 @@ export async function POST(request: Request) {
       return ApiErrors.conflict('Connector has an active operation');
     }
     if (error instanceof FinanceInsightBackfillError) {
-      return NextResponse.json({ error: error.code }, { status: error.status });
+      return NextResponse.json(
+        {
+          error: error.code,
+          ...(error.diagnosticReason ? { reason: error.diagnosticReason } : {}),
+        },
+        { status: error.status },
+      );
     }
     if (
       error instanceof FinanceInsightProjectionRepairError

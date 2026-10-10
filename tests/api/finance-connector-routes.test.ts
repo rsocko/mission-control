@@ -80,6 +80,7 @@ vi.mock('@/lib/connectors/monarch-money/transaction-backfill', () => ({
     constructor(
       readonly code: string,
       readonly status: number,
+      readonly diagnosticReason?: string,
     ) {
       super(code);
     }
@@ -515,6 +516,46 @@ describe('finance connector routes', () => {
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
       error: 'finance_insight_backfill_persistence_failed',
+    });
+  });
+
+  it('returns an aggregate-only projection diagnostic reason', async () => {
+    mocks.getPersistedConfig.mockResolvedValue({
+      id: 'persisted-finance',
+      type: 'finance-manager',
+      enabled: false,
+    });
+    mocks.runExclusive.mockImplementation(async (_connectorId, operation) => operation());
+    const { FinanceInsightBackfillError } = await import(
+      '@/lib/connectors/monarch-money/transaction-backfill'
+    );
+    mocks.runProjectionRepair.mockRejectedValue(
+      new FinanceInsightBackfillError(
+        'finance_insight_backfill_projection_changed',
+        409,
+        'promoted_windows_digest',
+      ),
+    );
+    const { POST } = await import('@/app/api/finance/sync/route');
+    const response = await POST(new Request('http://localhost/api/finance/sync', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        host: 'localhost',
+        origin: 'http://localhost',
+        'sec-fetch-site': 'same-origin',
+        'x-mc-api-key': 'test-finance-api-key',
+      },
+      body: JSON.stringify({
+        connectorId: 'persisted-finance',
+        insightBackfill: { idempotencyKey: 'invented-operator-key' },
+      }),
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: 'finance_insight_backfill_projection_changed',
+      reason: 'promoted_windows_digest',
     });
   });
 

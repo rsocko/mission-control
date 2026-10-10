@@ -439,6 +439,7 @@ describe.sequential('Finance insight transaction backfill', () => {
       .rejects.toMatchObject({
         code: 'finance_insight_backfill_projection_changed',
         status: 409,
+        diagnosticReason: 'promoted_facts_digest',
       });
     expect(sqlite.prepare(`
       SELECT total_changes() AS count

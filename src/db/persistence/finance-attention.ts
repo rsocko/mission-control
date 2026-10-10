@@ -7,6 +7,10 @@ import {
 import type { InboundNotification, NotificationLevel } from '@/types';
 import type { CreateNotificationInput } from '@/lib/notifications/service';
 import type { FinanceActorType } from '@/lib/connectors/monarch-money/finance-request';
+import {
+  evaluateFinanceAttentionEnvelope,
+  type FinanceAttentionEnvelope,
+} from '@/lib/finance/attention-policy';
 
 /**
  * Backend-neutral persistence contract for finance attention routing
@@ -20,9 +24,6 @@ import type { FinanceActorType } from '@/lib/connectors/monarch-money/finance-re
 
 export const FINANCE_ATTENTION_CONTRACT_VERSION = '1.0';
 
-const ATTRIBUTION_ESCALATION_MS = 24 * 60 * 60 * 1_000;
-const ATTRIBUTION_FRESHNESS_MS = 24 * 60 * 60 * 1_000;
-const WRITE_BACK_FRESHNESS_MS = 60 * 60 * 1_000;
 export const FINANCE_ATTENTION_WRITE_BACK_EXHAUSTED_ATTEMPTS = 3;
 export const FINANCE_ATTENTION_SOURCE_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1_000;
 export const FINANCE_ATTENTION_SOURCE_BATCH_SIZE = 500;
@@ -174,22 +175,47 @@ export function selectFinanceAttentionRoute(
 
   const sourceAsOf = financeAttentionValidTimestamp(signal.sourceAsOf);
   const conditionSince = financeAttentionValidTimestamp(signal.conditionSince);
-  if (
-    sourceAsOf === null
-    || conditionSince === null
-    || sourceAsOf > decisionAt.getTime()
-    || conditionSince > sourceAsOf
-  ) {
-    return 'stale';
-  }
-  const maximumAge = signal.signalKind === 'attributionReviewRequired'
-    ? ATTRIBUTION_FRESHNESS_MS
-    : WRITE_BACK_FRESHNESS_MS;
-  if (decisionAt.getTime() - sourceAsOf > maximumAge) return 'stale';
-  if (signal.signalKind === 'writeBackFailed') return 'task';
-  return decisionAt.getTime() - conditionSince >= ATTRIBUTION_ESCALATION_MS
-    ? 'task'
-    : 'actionableNotification';
+  if (sourceAsOf === null || conditionSince === null) return 'stale';
+  const envelope: FinanceAttentionEnvelope = {
+    contractVersion: FINANCE_ATTENTION_CONTRACT_VERSION,
+    signalFamily: signal.signalKind === 'writeBackFailed' ? 'writeBack' : 'attribution',
+    signalKind: signal.signalKind,
+    signalId: signal.sourceRef,
+    occurrenceId: signal.sourceRef,
+    attentionKey: signal.sourceRef,
+    revision: 1,
+    sourceLifecycle: signal.sourceLifecycle,
+    severity: signal.signalKind === 'writeBackFailed' ? 'high' : 'medium',
+    episodeSince: signal.conditionSince,
+    conditionSince: signal.conditionSince,
+    sourceAsOf: signal.sourceAsOf,
+    evaluatedAt: signal.sourceAsOf,
+    freshness: 'fresh',
+    provenance: {
+      owningSystem: 'mission-control',
+      producerVersion: 'finance-attention-v1',
+      sourceGeneration: signal.activityKey,
+      connectorRef: signal.connectorId,
+    },
+    dueAt: null,
+    capabilities: signal.signalKind === 'writeBackFailed'
+      ? ['openFinanceReview', 'openFinanceTask']
+      : ['openFinanceReview', 'createFinanceTask', 'openFinanceTask'],
+    targets: [{
+      type: 'internal',
+      target: 'financeReview',
+      opaqueRef: signal.sourceRef,
+    }],
+    settlementReason: signal.settlementReason,
+  };
+  const route = evaluateFinanceAttentionEnvelope({
+    connectorId: signal.connectorId,
+    envelope,
+    decisionAt,
+  }).route;
+  return route === 'informationalNotification' || route === 'suppressed'
+    ? 'statusOnly'
+    : route;
 }
 
 export function isHumanReviewableAttributionReason(reasonCode: string): boolean {

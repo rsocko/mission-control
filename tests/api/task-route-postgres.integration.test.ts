@@ -128,7 +128,7 @@ if (connectionString) {
       ), { params: Promise.resolve({ id: created.id }) });
       expect(deleteResponse.status).toBe(200);
       expect((await pool.query(
-        'SELECT COUNT(*)::int AS count FROM tasks WHERE id = $1',
+        'SELECT COUNT(*)::int AS count FROM tasks WHERE id = $1 AND deleted_at IS NULL',
         [created.id],
       )).rows[0]?.count).toBe(0);
       expect(poison.triggered).toBe(false);

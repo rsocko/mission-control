@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cp, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -31,6 +31,17 @@ test('verifies the committed exact-commit package snapshot', async () => {
   assert.equal(manifest.package.version, PACKAGE_VERSION);
   assert.equal(manifest.artifact.entryCount, 36);
   assert.equal(APPROVED_REGISTRY, 'https://packagefeedproxy.microsoft.io/npm/');
+});
+
+test('ignores dependencies installed into the linked vendor package', async () => {
+  const copy = await fixture();
+  try {
+    await mkdir(join(copy.snapshot, 'node_modules', '.bin'), { recursive: true });
+    await writeFile(join(copy.snapshot, 'node_modules', '.bin', 'rolldown'), 'generated install artifact');
+    await verifySnapshot(copy.snapshot);
+  } finally {
+    await copy.cleanup();
+  }
 });
 
 test('rejects missing, extra, and tampered package files', async (context) => {

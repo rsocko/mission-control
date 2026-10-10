@@ -121,6 +121,7 @@ function assertSafePath(path) {
 async function listFiles(root, current = root) {
   const files = [];
   for (const entry of await readdir(current, { withFileTypes: true })) {
+    if (current === root && entry.name === 'node_modules') continue;
     const absolutePath = join(current, entry.name);
     const snapshotPath = relative(root, absolutePath).split(sep).join('/');
     if (entry.isSymbolicLink()) fail(`Snapshot contains a symbolic link: ${snapshotPath}`);

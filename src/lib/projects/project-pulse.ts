@@ -10,6 +10,7 @@ import type {
 export interface ProjectPulseInput {
   totalTasks: number;
   completedTasks: number;
+  resolvedTasks?: number;
   percentComplete: number;
   overdueTasks: number;
   scheduledTasks: number;
@@ -63,7 +64,7 @@ export function deriveProjectPulse(input: ProjectPulseInput, now = new Date()): 
   const daysToTarget = targetDate
     ? Math.ceil((targetDate.getTime() - today.getTime()) / DAY_MS)
     : null;
-  const unfinishedTasks = Math.max(0, input.totalTasks - input.completedTasks);
+  const unfinishedTasks = Math.max(0, input.totalTasks - (input.resolvedTasks ?? input.completedTasks));
   const overdueRatio = input.overdueTasks / Math.max(unfinishedTasks, 1);
   const freshness = getFreshness(input.lastActivity, now);
   const latePhases = input.latePhases ?? 0;

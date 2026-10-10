@@ -195,6 +195,7 @@ describe('getProgressSummary', () => {
     expect(result).toEqual({
       totalTasks: 0,
       completedTasks: 0,
+      resolvedTasks: 0,
       inProgressTasks: 0,
       todoTasks: 0,
       cancelledTasks: 0,
@@ -212,6 +213,7 @@ describe('getProgressSummary', () => {
     const result = getProgressSummary(tasks);
     expect(result.totalTasks).toBe(4);
     expect(result.completedTasks).toBe(2);
+    expect(result.resolvedTasks).toBe(2);
     expect(result.inProgressTasks).toBe(1);
     expect(result.todoTasks).toBe(1);
     expect(result.cancelledTasks).toBe(0);
@@ -230,6 +232,9 @@ describe('getProgressSummary', () => {
 
     expect(result.todoTasks).toBe(1);
     expect(result.cancelledTasks).toBe(1);
+    expect(result.completedTasks).toBe(1);
+    expect(result.resolvedTasks).toBe(2);
+    expect(result.percentComplete).toBe(50);
   });
 
   it('returns 100% when all done', () => {
@@ -238,6 +243,21 @@ describe('getProgressSummary', () => {
       makeTask({ id: '2', title: 'b', status: 'done' }),
     ];
     expect(getProgressSummary(tasks).percentComplete).toBe(100);
+  });
+
+  it('returns 100% when all tasks are resolved', () => {
+    const tasks = [
+      makeTask({ id: '1', title: 'done', status: 'done' }),
+      makeTask({ id: '2', title: 'cancelled', status: 'cancelled' }),
+    ];
+
+    expect(getProgressSummary(tasks)).toMatchObject({
+      totalTasks: 2,
+      completedTasks: 1,
+      resolvedTasks: 2,
+      cancelledTasks: 1,
+      percentComplete: 100,
+    });
   });
 });
 

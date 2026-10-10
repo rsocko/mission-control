@@ -135,7 +135,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-[var(--text-primary)]">Progress snapshot</p>
-                  <p className="text-xs text-[var(--text-tertiary)]">Completion rolls up from all tasks currently assigned to this project.</p>
+                  <p className="text-xs text-[var(--text-tertiary)]">Resolved work includes completed and cancelled tasks assigned to this project.</p>
                 </div>
                 <span className="text-sm font-semibold tabular-nums text-[var(--text-primary)]">{progress.percentComplete}%</span>
               </div>
@@ -206,8 +206,8 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
               <div className="space-y-3">
                 {phases.map((phase) => {
                   const entries = phaseEntries[phase.id] ?? [];
-                  const doneTasks = entries.filter(({ task }) => task.status === 'done').length;
-                  const pct = entries.length > 0 ? Math.round((doneTasks / entries.length) * 100) : 0;
+                  const resolvedTasks = entries.filter(({ task }) => task.status === 'done' || task.status === 'cancelled').length;
+                  const pct = entries.length > 0 ? Math.round((resolvedTasks / entries.length) * 100) : 0;
                   const phaseColor = getPhaseColor(phase, project);
                   return (
                     <button
@@ -224,7 +224,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
                         </div>
                         <div className="flex items-center gap-2">
                           <PhaseStatusBadge status={phase.status} />
-                          <span className="text-xs text-[var(--text-tertiary)] tabular-nums">{doneTasks}/{entries.length}</span>
+                          <span className="text-xs text-[var(--text-tertiary)] tabular-nums">{resolvedTasks}/{entries.length} resolved</span>
                         </div>
                       </div>
                       <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">

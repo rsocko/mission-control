@@ -105,6 +105,7 @@ describe('buildPortfolioPulse', () => {
           color: '#3b82f6',
           totalTasks: 3,
           completedTasks: 1,
+          resolvedTasks: 1,
           inProgressTasks: 1,
           percentComplete: 33,
         },
@@ -115,6 +116,7 @@ describe('buildPortfolioPulse', () => {
           color: null,
           totalTasks: 0,
           completedTasks: 0,
+          resolvedTasks: 0,
           inProgressTasks: 0,
           percentComplete: 0,
         },
@@ -155,10 +157,11 @@ describe('buildPortfolioPulse', () => {
     );
 
     expect(result.taskSummary).toEqual({
-      totalTasks: 3,
+      totalTasks: 4,
       completedTasks: 2,
+      resolvedTasks: 3,
       inProgressTasks: 1,
-      portfolioPercent: 67,
+      portfolioPercent: 75,
       completedThisWeek: 1,
     });
   });

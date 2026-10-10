@@ -9,6 +9,7 @@ export interface PortfolioVisualProject {
   progress: {
     totalTasks: number;
     completedTasks: number;
+    resolvedTasks?: number;
     percentComplete: number;
     health: ProjectHealth;
     lastActivity?: string;
@@ -49,13 +50,16 @@ export function buildCategoryPortfolioRows(
     .filter(group => group.projects.length > 0)
     .map((group) => {
       const totalTasks = group.projects.reduce((sum, project) => sum + project.progress.totalTasks, 0);
-      const completedTasks = group.projects.reduce((sum, project) => sum + project.progress.completedTasks, 0);
+      const resolvedTasks = group.projects.reduce(
+        (sum, project) => sum + (project.progress.resolvedTasks ?? project.progress.completedTasks),
+        0,
+      );
 
       return {
         category: group.category,
         projectCount: group.projects.length,
         totalTasks,
-        percentComplete: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+        percentComplete: totalTasks > 0 ? Math.round((resolvedTasks / totalTasks) * 100) : 0,
         health: {
           on_track: group.projects.filter(project => project.progress.health === 'on_track').length,
           at_risk: group.projects.filter(project => project.progress.health === 'at_risk').length,

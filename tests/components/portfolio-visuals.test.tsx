@@ -46,7 +46,7 @@ describe('PortfolioVisuals', () => {
   it('offers completion, workload, and health chart concepts', () => {
     render(<PortfolioVisuals categories={categories} uncategorized={[]} />);
 
-    expect(screen.getByRole('img', { name: 'Design: 60% of tasks complete' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Design: 60% of tasks resolved' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Workload' }));
     expect(screen.getByRole('img', { name: 'Task workload across 2 categories' })).toBeInTheDocument();

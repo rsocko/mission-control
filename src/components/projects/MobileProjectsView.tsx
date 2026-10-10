@@ -69,7 +69,7 @@ function getHealthLabel(progress: ProjectProgress): string {
     return 'on track';
   }
   const overdue = progress.health === 'behind' || progress.health === 'at_risk';
-  if (overdue) return `${progress.totalTasks - progress.completedTasks} remaining`;
+  if (overdue) return `${progress.totalTasks - (progress.resolvedTasks ?? progress.completedTasks)} remaining`;
   return 'on track';
 }
 
@@ -84,7 +84,7 @@ function MobileProjectCard({
 }) {
   const pct = project.progress?.percentComplete ?? 0;
   const totalTasks = project.progress?.totalTasks ?? 0;
-  const completedTasks = project.progress?.completedTasks ?? 0;
+  const resolvedTasks = project.progress?.resolvedTasks ?? project.progress?.completedTasks ?? 0;
   const isCompleted = project.status === 'completed';
   const isPaused = project.status === 'paused' || project.status === 'on_hold';
 
@@ -136,14 +136,14 @@ function MobileProjectCard({
             />
           </div>
           <div className="mt-2 flex items-center justify-between text-xs text-[var(--text-muted)]">
-            <span>{pct}% complete</span>
+            <span>{pct}% resolved</span>
             {project.targetDate && (
               <span>
                 Due {new Date(project.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
               </span>
             )}
             {!project.targetDate && (
-              <span>{completedTasks}/{totalTasks} done</span>
+              <span>{resolvedTasks}/{totalTasks} resolved</span>
             )}
           </div>
         </>
@@ -261,7 +261,7 @@ function ProjectDetailSheet({
                 />
               </div>
               <div className="mt-1.5 flex items-center justify-between text-xs text-[var(--text-muted)]">
-                <span>{project.progress.completedTasks} of {project.progress.totalTasks} tasks complete</span>
+                <span>{project.progress.resolvedTasks ?? project.progress.completedTasks} of {project.progress.totalTasks} tasks resolved</span>
                 <span className="font-medium">{pct}%</span>
               </div>
             </div>

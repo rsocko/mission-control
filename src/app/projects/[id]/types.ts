@@ -59,6 +59,7 @@ export interface ProjectRuleMatch {
 export interface ProgressSummary {
   totalTasks: number;
   completedTasks: number;
+  resolvedTasks: number;
   inProgressTasks: number;
   todoTasks: number;
   cancelledTasks: number;

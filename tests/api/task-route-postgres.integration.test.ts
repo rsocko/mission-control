@@ -13,8 +13,10 @@ vi.mock('@/lib/search/fts', () => ({
   removeTaskFromIndex: vi.fn(async () => undefined),
 }));
 vi.mock('@/lib/semantic-index/publication-service', () => ({
+  assertCanRegisterSemanticPublicationService: vi.fn(),
   publishSemanticEntityDelete: vi.fn(async () => undefined),
   publishSemanticEntityUpsert: vi.fn(async () => undefined),
+  registerSemanticPublicationService: vi.fn(),
 }));
 vi.mock('@/lib/rules', () => ({ evaluateRulesForTasks: vi.fn(async () => undefined) }));
 

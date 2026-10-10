@@ -17,6 +17,9 @@ vi.mock('@/db', () => {
   sqliteTouch();
   throw new Error('SQLite must not load in PostgreSQL native routes');
 });
+vi.mock('@/lib/semantic-index/publication-service', () => ({
+  publishSemanticEntityUpsert: vi.fn(async () => undefined),
+}));
 
 process.env.APNS_TEAM_ID = 'ABCDEFGHIJ';
 process.env.APNS_KEY_ID = 'KLMNOPQRST';

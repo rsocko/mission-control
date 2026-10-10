@@ -69,11 +69,12 @@ if (connectionString) {
       await pool.query(`
         INSERT INTO tasks (
           id, source_id, connector_type, connector_instance_id, title, status,
-          local_disposition, priority, created_at, updated_at, sync_status
+          local_disposition, priority, created_at, updated_at, sync_status, last_synced_at
         ) VALUES (
           'lifecycle-parent', 'local:lifecycle-parent', 'local', 'local',
           'Lifecycle parent', 'todo', 'active', 'medium',
-          '2026-08-10T12:00:00.000Z', '2026-08-10T12:00:00.000Z', 'synced'
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:00:00.000Z', 'synced',
+          '2026-08-10T12:00:00.000Z'
         )
       `);
 

@@ -109,7 +109,7 @@ describe('hybrid reciprocal-rank fusion', () => {
     expect(fused[0].id).toBe('related');
   });
 
-  it('applies strict per-kind caps when multiple kinds are available', () => {
+  it('backfills unused slots after applying per-kind diversity caps', () => {
     const fused = fuseHybridResults(
       'work',
       Array.from({ length: 5 }, (_, index) => result('task', `task-${index}`)),
@@ -117,7 +117,8 @@ describe('hybrid reciprocal-rank fusion', () => {
       { limit: 6, perKindLimit: 3 },
     );
 
-    expect(fused.filter((item) => item.type === 'task')).toHaveLength(3);
+    expect(fused).toHaveLength(6);
+    expect(fused.filter((item) => item.type === 'task')).toHaveLength(5);
     expect(fused.some((item) => item.id === 'alert-1')).toBe(true);
   });
 

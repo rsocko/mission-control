@@ -24,6 +24,7 @@ import {
   type FinanceOperatorAttributionAccountSummary,
   type FinanceOperatorAttributionPreviewProjection,
 } from '@/db/persistence/finance-operator';
+import { attributionAttentionAccountRef } from '@/lib/finance/attribution-attention-policy';
 import { ingestPostgresConnectorNotificationInTransaction } from './connector-execution-repositories';
 
 /**
@@ -612,12 +613,13 @@ export function createPostgresFinanceOperatorPersistence(
     },
 
     async readAttributionAccountSummary(connectorId): Promise<FinanceOperatorAttributionAccountSummary> {
-      const [row] = await query<{
-        total: string;
-        active: string;
+      const rows = await query<{
+        accountId: string;
+        displayName: string;
+        active: boolean;
       }>(pool, `
-        SELECT COUNT(*) AS total,
-               COUNT(*) FILTER (WHERE is_active = true) AS active
+        SELECT upstream_account_id AS "accountId", display_name AS "displayName",
+               is_active AS active
         FROM finance_accounts
         WHERE connector_id = $1
           AND (
@@ -630,10 +632,16 @@ export function createPostgresFinanceOperatorPersistence(
                 AND transactions.lifecycle_status = 'active'
             )
           )
+        ORDER BY display_name, upstream_account_id
       `, [connectorId]);
       return {
-        total: Number(row?.total ?? 0),
-        active: Number(row?.active ?? 0),
+        total: rows.length,
+        active: rows.filter((row) => row.active).length,
+        accounts: rows.map((row) => ({
+          accountRef: attributionAttentionAccountRef(connectorId, row.accountId),
+          displayName: row.displayName,
+          active: row.active,
+        })),
       };
     },
 

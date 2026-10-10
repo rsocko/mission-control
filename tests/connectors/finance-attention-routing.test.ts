@@ -206,7 +206,7 @@ describe.sequential('finance attention routing', () => {
       ['low-confidence', true],
       ['manual_decision_conflict', true],
       ['merchant-rule-conflict', true],
-      ['no-match', true],
+      ['no-match', false],
       ['review-required', true],
       ['attribution_auth_invalid', false],
       ['attribution_auth_not_configured', false],

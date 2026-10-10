@@ -29,6 +29,8 @@ describe('AttributionPolicyReadiness', () => {
             truncated: false,
             complete: true,
             ready: true,
+            acceptedRuleBasedReviewBacklog: 0,
+            blockingReviewRequired: 0,
             counts: {
               status: { attributed: 2 },
               reason: {},
@@ -50,7 +52,21 @@ describe('AttributionPolicyReadiness', () => {
               activePolicyVersion: 3,
               policyUpdatedAt: '2026-10-09T11:00:00.000Z',
               policyDiscoveryError: null,
-              accountSummary: { total: 2, active: 2 },
+              householdCurrency: 'USD',
+              attentionPolicy: {
+                pendingCountThreshold: 10,
+                highAmountThresholdMinor: 25_000,
+                accountOverrides: {},
+              },
+              accountSummary: {
+                total: 1,
+                active: 1,
+                accounts: [{
+                  accountRef: `account-v1:${'b'.repeat(64)}`,
+                  displayName: 'Household checking',
+                  active: true,
+                }],
+              },
               historyProjection: null,
             })
         : response({
@@ -65,7 +81,21 @@ describe('AttributionPolicyReadiness', () => {
             activePolicyVersion: 3,
             policyUpdatedAt: '2026-10-09T11:00:00.000Z',
             policyDiscoveryError: null,
-            accountSummary: { total: 2, active: 2 },
+            householdCurrency: 'USD',
+            attentionPolicy: {
+              pendingCountThreshold: 10,
+              highAmountThresholdMinor: 25_000,
+              accountOverrides: {},
+            },
+            accountSummary: {
+              total: 1,
+              active: 1,
+              accounts: [{
+                accountRef: `account-v1:${'b'.repeat(64)}`,
+                displayName: 'Household checking',
+                active: true,
+              }],
+            },
             historyProjection: null,
           })
     ));
@@ -86,6 +116,42 @@ describe('AttributionPolicyReadiness', () => {
       name: /Follow Tyrion's current policy/,
     })).toBeChecked();
     expect(screen.getByText(/without redeploying Mission Control/)).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: 'Pending count' }))
+      .toHaveAttribute('placeholder', 'Inherit');
+    expect(screen.getByRole('spinbutton', { name: 'Amount (USD)' }))
+      .toHaveAttribute('placeholder', 'Inherit');
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Pending transactions' }), {
+      target: { value: '12' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'High amount (USD)' }), {
+      target: { value: '300' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Pending count' }), {
+      target: { value: '15' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save notification thresholds' }));
+    expect(await screen.findByText('Attribution notification thresholds saved.'))
+      .toBeInTheDocument();
+    expect(fetcher).toHaveBeenLastCalledWith(
+      '/api/connectors/finance-connector/finance/attribution-readiness',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attentionPolicy: {
+            pendingCountThreshold: 12,
+            highAmountThresholdMinor: 30_000,
+            accountOverrides: {
+              [`account-v1:${'b'.repeat(64)}`]: {
+                pendingCountThreshold: 15,
+                highAmountThresholdMinor: null,
+              },
+            },
+          },
+        }),
+      },
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Run no-write preview' }));
 
@@ -98,7 +164,7 @@ describe('AttributionPolicyReadiness', () => {
     fireEvent.click(screen.getByRole('radio', {
       name: /Pin a specific policy version/,
     }));
-    fireEvent.change(screen.getByRole('spinbutton'), {
+    fireEvent.change(screen.getByRole('spinbutton', { name: /^Policy version/ }), {
       target: { value: '3' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save policy mode' }));

@@ -24,6 +24,20 @@ interface ReadinessResponse {
   accountSummary: {
     total: number;
     active: number;
+    accounts: Array<{
+      accountRef: string;
+      displayName: string;
+      active: boolean;
+    }>;
+  };
+  householdCurrency: string;
+  attentionPolicy: {
+    pendingCountThreshold: number;
+    highAmountThresholdMinor: number;
+    accountOverrides: Record<string, {
+      pendingCountThreshold: number | null;
+      highAmountThresholdMinor: number | null;
+    }>;
   };
   historyProjection: {
     status: 'idle' | 'running' | 'succeeded' | 'failed';
@@ -46,6 +60,8 @@ interface PreviewResponse {
   truncated: boolean;
   complete: boolean;
   ready: boolean;
+  acceptedRuleBasedReviewBacklog: number;
+  blockingReviewRequired: number;
   counts: {
     status: Record<string, number>;
     reason: Record<string, number>;
@@ -75,6 +91,12 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<'follow-current' | 'pinned'>('follow-current');
   const [pin, setPin] = useState('');
+  const [countThreshold, setCountThreshold] = useState('10');
+  const [amountThreshold, setAmountThreshold] = useState('250');
+  const [accountOverrides, setAccountOverrides] = useState<Record<string, {
+    count: string;
+    amount: string;
+  }>>({});
   const [savedMessage, setSavedMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -82,6 +104,25 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
     setReadiness(body);
     setMode(body.policySelection.mode);
     setPin(body.policySelection.pinnedPolicyVersion?.toString() ?? '');
+    const minorDigits = new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: body.householdCurrency,
+    }).resolvedOptions().maximumFractionDigits ?? 2;
+    const minorFactor = 10 ** minorDigits;
+    setCountThreshold(body.attentionPolicy.pendingCountThreshold.toString());
+    setAmountThreshold(
+      (body.attentionPolicy.highAmountThresholdMinor / minorFactor).toString(),
+    );
+    setAccountOverrides(Object.fromEntries(body.accountSummary.accounts.map((account) => {
+      const override = body.attentionPolicy.accountOverrides[account.accountRef];
+      return [account.accountRef, {
+        count: override?.pendingCountThreshold?.toString() ?? '',
+        amount: override?.highAmountThresholdMinor === null
+          || override?.highAmountThresholdMinor === undefined
+          ? ''
+          : (override.highAmountThresholdMinor / minorFactor).toString(),
+      }];
+    })));
   }
 
   useEffect(() => {
@@ -160,11 +201,76 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
       if (!response.ok) {
         throw new Error(responseError(body, 'Attribution preview failed'));
       }
+
       setPreview(body as PreviewResponse);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Attribution preview failed');
     } finally {
       setPreviewing(false);
+    }
+  }
+
+  async function saveAttentionPolicy() {
+    if (!readiness) return;
+    const count = Number(countThreshold);
+    const amount = Number(amountThreshold);
+    if (!Number.isSafeInteger(count) || count < 0 || !Number.isFinite(amount) || amount < 0) {
+      setError('Notification thresholds must be nonnegative numbers.');
+      return;
+    }
+    const minorDigits = new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: readiness.householdCurrency,
+    }).resolvedOptions().maximumFractionDigits ?? 2;
+    const minorFactor = 10 ** minorDigits;
+    const overrides: ReadinessResponse['attentionPolicy']['accountOverrides'] = {};
+    for (const [accountRef, override] of Object.entries(accountOverrides)) {
+      const overrideCount = override.count.trim() === '' ? null : Number(override.count);
+      const overrideAmount = override.amount.trim() === '' ? null : Number(override.amount);
+      if (
+        (overrideCount !== null && (!Number.isSafeInteger(overrideCount) || overrideCount < 0))
+        || (overrideAmount !== null && (!Number.isFinite(overrideAmount) || overrideAmount < 0))
+      ) {
+        setError('Account overrides must be nonnegative numbers or blank to inherit.');
+        return;
+      }
+      if (overrideCount !== null || overrideAmount !== null) {
+        overrides[accountRef] = {
+          pendingCountThreshold: overrideCount,
+          highAmountThresholdMinor: overrideAmount === null
+            ? null
+            : Math.round(overrideAmount * minorFactor),
+        };
+      }
+    }
+    setSaving(true);
+    setError('');
+    setSavedMessage('');
+    try {
+      const response = await fetch(
+        `/api/connectors/${connectorId}/finance/attribution-readiness`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            attentionPolicy: {
+              pendingCountThreshold: count,
+              highAmountThresholdMinor: Math.round(amount * minorFactor),
+              accountOverrides: overrides,
+            },
+          }),
+        },
+      );
+      const body = await response.json().catch(() => null) as unknown;
+      if (!response.ok) {
+        throw new Error(responseError(body, 'Notification thresholds could not be saved'));
+      }
+      applyReadiness(body as ReadinessResponse);
+      setSavedMessage('Attribution notification thresholds saved.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Notification thresholds could not be saved');
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -310,6 +416,102 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
             </div>
           </fieldset>
 
+          <fieldset className="space-y-3 border-t border-[var(--border-subtle)] pt-3">
+            <legend className="text-xs font-medium text-[var(--text-primary)]">
+              Account review notifications
+            </legend>
+            <p className="text-xs leading-5 text-[var(--text-muted)]">
+              Mission Control keeps every unmatched transaction in the review queue and sends
+              at most one live summary per account. Set a threshold to 0 to disable that trigger.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">
+                Pending transactions
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={countThreshold}
+                  onChange={(event) => setCountThreshold(event.target.value)}
+                  className="mt-1 block w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1.5 text-sm text-[var(--text-primary)]"
+                />
+              </label>
+              <label className="text-xs font-medium text-[var(--text-secondary)]">
+                High amount ({readiness.householdCurrency})
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={amountThreshold}
+                  onChange={(event) => setAmountThreshold(event.target.value)}
+                  className="mt-1 block w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1.5 text-sm text-[var(--text-primary)]"
+                />
+              </label>
+            </div>
+            {readiness.accountSummary.accounts.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-[var(--text-secondary)]">
+                  Optional account overrides
+                </p>
+                {readiness.accountSummary.accounts.map((account) => (
+                  <div
+                    key={account.accountRef}
+                    className="grid gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-0)] p-2 sm:grid-cols-[minmax(0,1fr)_9rem_9rem]"
+                  >
+                    <span className="self-center truncate text-xs text-[var(--text-primary)]">
+                      {account.displayName}
+                    </span>
+                    <label className="text-[11px] text-[var(--text-muted)]">
+                      Pending count
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        placeholder="Inherit"
+                        value={accountOverrides[account.accountRef]?.count ?? ''}
+                        onChange={(event) => setAccountOverrides((current) => ({
+                          ...current,
+                          [account.accountRef]: {
+                            count: event.target.value,
+                            amount: current[account.accountRef]?.amount ?? '',
+                          },
+                        }))}
+                        className="mt-1 block w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs text-[var(--text-primary)]"
+                      />
+                    </label>
+                    <label className="text-[11px] text-[var(--text-muted)]">
+                      Amount ({readiness.householdCurrency})
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        placeholder="Inherit"
+                        value={accountOverrides[account.accountRef]?.amount ?? ''}
+                        onChange={(event) => setAccountOverrides((current) => ({
+                          ...current,
+                          [account.accountRef]: {
+                            count: current[account.accountRef]?.count ?? '',
+                            amount: event.target.value,
+                          },
+                        }))}
+                        className="mt-1 block w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs text-[var(--text-primary)]"
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={saveAttentionPolicy}
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              {saving && <Loader2 size={12} className="animate-spin" />}
+              {saving ? 'Saving thresholds...' : 'Save notification thresholds'}
+            </button>
+          </fieldset>
+
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
             <span>
               Active Tyrion policy: {readiness.activePolicyVersion ?? 'unavailable'}
@@ -398,7 +600,7 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
         >
           <p className="font-medium">
             {preview.ready
-              ? 'Policy covers the complete local transaction projection.'
+              ? 'Policy safely covers the complete local transaction projection.'
               : 'Policy still requires review before another canary.'}
           </p>
           <p className="mt-1 leading-5">
@@ -409,6 +611,14 @@ export function AttributionPolicyReadiness({ connectorId }: { connectorId: strin
             {' '}{preview.counts.method.manual ?? 0} manual decisions preserved.
             {preview.truncated ? ' The bounded preview was truncated.' : ''}
           </p>
+          {preview.acceptedRuleBasedReviewBacklog > 0 && (
+            <p className="mt-1 leading-5">
+              {preview.acceptedRuleBasedReviewBacklog} explicitly accepted Rule-based
+              {' '}items may remain in the manual review queue. This backlog is not a
+              configuration defect and must not add per-transaction notifications;
+              release safety still requires canary notificationsAdded=0.
+            </p>
+          )}
           <p className="mt-1 text-[11px] opacity-80">
             Policy {preview.policyVersion ?? 'unknown'} - engine {preview.engineVersion ?? 'unknown'}
           </p>

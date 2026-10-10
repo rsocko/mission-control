@@ -9,6 +9,10 @@ import {
 import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
 import { currencySchema } from '@/lib/finance/currency';
 import {
+  AttributionAttentionPolicyError,
+  parseAttributionAttentionPolicy,
+} from '@/lib/finance/attribution-attention-policy';
+import {
   createFinanceIdentityNamespace,
   FINANCE_IDENTITY_NAMESPACE_CREDENTIAL,
   financeIdentityNamespaceFromCredentials,
@@ -41,7 +45,8 @@ export class FinanceConnectorConfigurationError extends Error {
     readonly code:
       | 'household_currency_required'
       | 'household_currency_invalid'
-      | 'attribution_policy_pin_invalid',
+      | 'attribution_policy_pin_invalid'
+      | 'attribution_attention_policy_invalid',
   ) {
     super(code);
     this.name = 'FinanceConnectorConfigurationError';
@@ -137,6 +142,12 @@ export function validateFinanceConnectorSettings(
   }
   if (!currencySchema.safeParse(parsed.householdCurrency).success) {
     throw new FinanceConnectorConfigurationError('household_currency_invalid');
+  }
+  try {
+    parseAttributionAttentionPolicy(parsed, String(parsed.householdCurrency));
+  } catch (error) {
+    if (!(error instanceof AttributionAttentionPolicyError)) throw error;
+    throw new FinanceConnectorConfigurationError('attribution_attention_policy_invalid');
   }
   return parsed;
 }

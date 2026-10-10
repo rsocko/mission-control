@@ -336,6 +336,15 @@ describe.sequential('Finance insight transaction backfill', () => {
     };
 
     const first = await runFinanceInsightTransactionProjectionRepair(request);
+    sqlite.prepare(`
+      UPDATE finance_insight_transaction_backfill_plans
+      SET last_error_code = ?, updated_at = ?
+      WHERE idempotency_key = ?
+    `).run(
+      'finance_insight_backfill_promotion_failed',
+      '2024-02-29T13:00:00.000Z',
+      request.idempotencyKey,
+    );
     const promotedState = sqlite.prepare(`
       SELECT successful_generation_id AS generationId,
              last_successful_at AS lastSuccessfulAt,
@@ -398,7 +407,7 @@ describe.sequential('Finance insight transaction backfill', () => {
       WHERE idempotency_key = ?
     `).get(request.idempotencyKey)).toEqual({
       status: 'completed',
-      lastErrorCode: null,
+      lastErrorCode: 'finance_insight_backfill_promotion_failed',
     });
     expect(sqlite.prepare(`
       SELECT successful_generation_id AS generationId,
@@ -407,6 +416,41 @@ describe.sequential('Finance insight transaction backfill', () => {
       FROM finance_insight_transaction_projection_state
       WHERE connector_id = ?
     `).get(config.id)).toEqual(promotedState);
+    const storedFact = sqlite.prepare(`
+      SELECT source_ref AS sourceRef, payload
+      FROM finance_insight_transaction_projection_facts
+      WHERE connector_id = ?
+      ORDER BY source_ref
+      LIMIT 1
+    `).get(config.id) as { sourceRef: string; payload: string };
+    sqlite.prepare(`
+      UPDATE finance_insight_transaction_projection_facts
+      SET payload = ?
+      WHERE connector_id = ? AND source_ref = ?
+    `).run(
+      JSON.stringify({ ...JSON.parse(storedFact.payload), amountMinor: -1001 }),
+      config.id,
+      storedFact.sourceRef,
+    );
+    const changesAfterProjectionDrift = sqlite.prepare(`
+      SELECT total_changes() AS count
+    `).get();
+    await expect(runFinanceInsightTransactionProjectionRepair(request))
+      .rejects.toMatchObject({
+        code: 'finance_insight_backfill_projection_changed',
+        status: 409,
+      });
+    expect(sqlite.prepare(`
+      SELECT total_changes() AS count
+    `).get()).toEqual(changesAfterProjectionDrift);
+    expect(sqlite.prepare(`
+      SELECT status, last_error_code AS lastErrorCode
+      FROM finance_insight_transaction_backfill_plans
+      WHERE idempotency_key = ?
+    `).get(request.idempotencyKey)).toEqual({
+      status: 'completed',
+      lastErrorCode: 'finance_insight_backfill_promotion_failed',
+    });
     for (const table of [
       'tasks',
       'notifications',

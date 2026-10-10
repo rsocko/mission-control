@@ -19,20 +19,21 @@ const VENDOR_DIRECTORY = join(ROOT, 'vendor', 'icon-picker');
 const UPSTREAM_MANIFEST = 'UPSTREAM.json';
 const SNAPSHOT_MANIFEST = 'icon-picker.snapshot.json';
 const SOURCE_REPOSITORY = 'https://github.com/rsocko/icon-picker.git';
-const SOURCE_COMMIT = '7206bbe8dc22d43d95b2e2c3c0020215efb8a2b9';
+const SOURCE_COMMIT = '87079346141c7d91c9e65830dcd83b9f3860abc6';
+const SOURCE_TAG = 'v0.1.0-rc.2';
 const APPROVED_REGISTRY = 'https://packagefeedproxy.microsoft.io/npm/';
 const PACKAGE_NAME = '@rsocko/icon-picker';
-const PACKAGE_VERSION = '0.1.0-rc.0';
+const PACKAGE_VERSION = '0.1.0-rc.2';
 const PINNED_NPM_VERSION = '11.19.0';
 const ARTIFACT = Object.freeze({
-  filename: 'rsocko-icon-picker-0.1.0-rc.0.tgz',
-  size: 39695,
-  unpackedSize: 126787,
-  entryCount: 36,
-  integrity: 'sha512-SVLC5q+B6vuWVabZgm2V6ugfiec8kLEhIBgl/+lZDZrsLWtUn6HucMNm2iBRx+l8GgEwXf8gAmklfrHOddtV8w==',
-  shasum: '0b2db4385f35f5636b324285bd219b5c3310c8fe',
-  sha256: '822dfdf28a4f8419c778d1e56b00d9628bcbe93918b672a9921c1eeb0ab921be',
-  sha512: '4952c2e6af81eafb9655a6d9826d95eae81f89e73c90b121201825ffe9590d9aec2d6b549fa1ee70c366da2051c7e97c1a01305dff200269257eb1ce75db55f3',
+  filename: 'rsocko-icon-picker-0.1.0-rc.2.tgz',
+  size: 43309,
+  unpackedSize: 143023,
+  entryCount: 38,
+  integrity: 'sha512-5XZGRJAXNP09f9rP6piLOqSq4OXv0/ZkxHgbe2Zf78TqudDUg44vPhkjUnRQMQu/dRT8uct/Gj5FuHHvQ19ZjA==',
+  shasum: '5f20ec50dbb1402affac40d40bca37b7b62524f9',
+  sha256: '6494359674d85fe8b4469893fee4bf28070d7ef5e3db3734095aadd97d0fa346',
+  sha512: 'e5764644901734fd3d7fdacfea988b3aa4aae0e5efd3f664c4781b7b665fefc4eab9d0d4838e2f3e1923527450310bbf7514fcb9cb7f1a3e45b871ef435f598c',
 });
 const PACKAGE_EXPORTS = Object.freeze({
   '.': {
@@ -193,7 +194,7 @@ function validateManifest(manifest, bytes) {
     || manifest.package.version !== PACKAGE_VERSION
     || manifest.source.repository !== `git+${SOURCE_REPOSITORY}`
     || manifest.source.commit !== SOURCE_COMMIT
-    || manifest.source.tag !== null
+    || manifest.source.tag !== SOURCE_TAG
     || manifest.acquisition !== 'canonical-npm-pack-from-source'
     || manifest.canonicalization.lineEndings !== 'lf'
     || manifest.canonicalization.artifactContract !== 'package-artifact.json'
@@ -487,4 +488,5 @@ export {
   PACKAGE_NAME,
   PACKAGE_VERSION,
   SOURCE_COMMIT,
+  SOURCE_TAG,
 };

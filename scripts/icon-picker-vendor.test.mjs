@@ -9,6 +9,7 @@ import {
   PACKAGE_NAME,
   PACKAGE_VERSION,
   SOURCE_COMMIT,
+  SOURCE_TAG,
   verifySnapshot,
 } from './icon-picker-vendor.mjs';
 
@@ -27,9 +28,10 @@ async function fixture() {
 test('verifies the committed exact-commit package snapshot', async () => {
   const manifest = await verifySnapshot(source);
   assert.equal(manifest.source.commit, SOURCE_COMMIT);
+  assert.equal(manifest.source.tag, SOURCE_TAG);
   assert.equal(manifest.package.name, PACKAGE_NAME);
   assert.equal(manifest.package.version, PACKAGE_VERSION);
-  assert.equal(manifest.artifact.entryCount, 36);
+  assert.equal(manifest.artifact.entryCount, 38);
   assert.equal(APPROVED_REGISTRY, 'https://packagefeedproxy.microsoft.io/npm/');
 });
 

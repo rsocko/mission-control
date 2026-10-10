@@ -2,5 +2,5 @@ export { getIconUrl, getSimpleIconNames, parseIconValue, serializeIconValue, } f
 export { IconPicker } from './IconPicker';
 export { IconPickerButton } from './IconPickerButton';
 export { IconRenderer } from './IconRenderer';
-export type { IconPickerButtonProps, IconPickerProps, IconPickerSize, IconRendererProps, IconSource, ParsedIcon, } from './types';
+export type { IconPickerButtonProps, IconPickerCssVariable, IconPickerProps, IconPickerSize, IconPickerStyle, IconPickerTheme, IconRendererProps, IconSource, ParsedIcon, } from './types';
 //# sourceMappingURL=index.d.ts.map

@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "package": {
     "name": "@rsocko/icon-picker",
-    "version": "0.1.0-rc.0"
+    "version": "0.1.0-rc.2"
   },
   "source": {
     "repository": "git+https://github.com/rsocko/icon-picker.git",
-    "commit": "7206bbe8dc22d43d95b2e2c3c0020215efb8a2b9",
-    "tag": null
+    "commit": "87079346141c7d91c9e65830dcd83b9f3860abc6",
+    "tag": "v0.1.0-rc.2"
   },
-  "artifactSha256": "822dfdf28a4f8419c778d1e56b00d9628bcbe93918b672a9921c1eeb0ab921be",
+  "artifactSha256": "6494359674d85fe8b4469893fee4bf28070d7ef5e3db3734095aadd97d0fa346",
   "files": [
     {
       "path": "LICENSE",
@@ -17,7 +17,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "c9db48fbd5d342dc29af8b238926126aaeee9b1920a9e6c985c2f42c1a6c5cdf"
+      "sha256": "fcada515194833a46a4161808968163edcd596f955c6d07b5e18fc0db23d2b37"
     },
     {
       "path": "THIRD_PARTY_NOTICES.md",
@@ -29,15 +29,15 @@
     },
     {
       "path": "dist/IconPicker.d.ts.map",
-      "sha256": "81de09d3ee7794a189af97ccdc3d512e78e10c0f8fb2497b184cb843194ff823"
+      "sha256": "c5339babf08398d8ba8b75851b18f0475ac2354d6e5d7aa6b5dcde343e7a5dbb"
     },
     {
       "path": "dist/IconPickerButton.d.ts",
-      "sha256": "e30d974ea32c851ca0e3dd74832611ba079a94e9386349f8ec44885351c5698b"
+      "sha256": "f898273dfde2ada7c45801c4c62010219163bac237a7da39d6960b009049732d"
     },
     {
       "path": "dist/IconPickerButton.d.ts.map",
-      "sha256": "b34dc2934decd397a17ff385e945ec130ae22d837017e20658469f5af643816a"
+      "sha256": "fb3f3de35eb94da4a6cd026d48b328ef5cda45766aeea4a307eb543deed66ea0"
     },
     {
       "path": "dist/IconRenderer.d.ts",
@@ -48,12 +48,12 @@
       "sha256": "28992ba46855ab09cff7bf4cb6a348369d6054c03b9d8796936f0156322ebdf3"
     },
     {
-      "path": "dist/chunks/IconPickerButton-BCeJJAHh.js",
-      "sha256": "983452bafd6eb4e9457427ea71e4337a9fdd0c51ac9b08ddc90271b9da192fcd"
+      "path": "dist/chunks/IconPickerButton-BjUqdo6t.js",
+      "sha256": "0c59918f2954788808805d97601cbfe8a4bede41ec2dc5cb95e9a616f597af31"
     },
     {
-      "path": "dist/chunks/IconPickerButton-BCeJJAHh.js.map",
-      "sha256": "668e92b283c52f8bc7b956847eaed79b2c6ad0e454eb1df115f7be0b61bd2ee8"
+      "path": "dist/chunks/IconPickerButton-BjUqdo6t.js.map",
+      "sha256": "1e5d9ebafd4e71ee32f7a413205f76e00019d77bfa0b6963c2faa0768791e3ae"
     },
     {
       "path": "dist/chunks/IconRenderer-86b851bX.js",
@@ -105,27 +105,27 @@
     },
     {
       "path": "dist/index.d.ts",
-      "sha256": "3b6fd65a528ac313e61287edb549c0ef921aade4d907d25a64cfc87accb04920"
+      "sha256": "81e0f988a2737747cabfbaac85e0a3abd10f0d20b0b7563bd8630f22152f1f99"
     },
     {
       "path": "dist/index.d.ts.map",
-      "sha256": "392850efc090e8bd36a98532629670e0b7ac565feb544a09a834aa4457229f11"
+      "sha256": "f16bc71bb30e2294a63592a4c85c408dcf94bfc41dd0947b0597ca56b8dccb7d"
     },
     {
       "path": "dist/index.js",
-      "sha256": "6f149938a4e681e1071a400da4158b09c1789d772e139ed52408d483b9942abe"
+      "sha256": "06b53d6c2e27dcaefbe1c58ac1e8bdc7d4ed2c5f275b64a7afe0228f347af161"
     },
     {
       "path": "dist/picker.d.ts",
-      "sha256": "f4ce75dff707856334186041074a7194aaaa12cab9e4ae3949eab4a5f3385638"
+      "sha256": "75482c0cd6578770c7514add5d74e81ef93ac9fc5d46404861b38781269b9dfa"
     },
     {
       "path": "dist/picker.d.ts.map",
-      "sha256": "117aed9bd9a1589a2961ea87bcd3da668f11c156b820e0d5b164e49ad2c9d401"
+      "sha256": "0565b606b7c1f42f2b692e0be1bb04544d9909be4dba48e6004e1ea4eecf22c9"
     },
     {
       "path": "dist/picker.js",
-      "sha256": "96283642f762ab51c5e22cbcc11747b8c31056c62f38f374cc9772f99376a080"
+      "sha256": "1830de88827afc2d6cb68b5905993a3858543a276116e77872ba2c3774525a44"
     },
     {
       "path": "dist/renderer.d.ts",
@@ -141,19 +141,27 @@
     },
     {
       "path": "dist/styles.css",
-      "sha256": "140429173e8738afbb4be53f14331deb5fb01a8601155e202829643fd9745f1f"
+      "sha256": "c17cd2eb392e9257114bee6b3a29dac6ad6d5460645a9f8e31e3267ddd36bf05"
+    },
+    {
+      "path": "dist/theme.d.ts",
+      "sha256": "9bcae05cc3864ac63559cbfecccbf0cb2fd0e921bbe556a70995e959e5d2f4d7"
+    },
+    {
+      "path": "dist/theme.d.ts.map",
+      "sha256": "65c1342f714890d68931a0b29f5204f53f9b7cd0cce37cf36df29ed1bd0dbb67"
     },
     {
       "path": "dist/types.d.ts",
-      "sha256": "bf5ed3069384d1de25a7555643b08d06b6614c9a4d330f83d6fbc6b679fe854a"
+      "sha256": "10db6292641d87e3df7598b679ea080e93489de915b332d595ddbb2354c904d1"
     },
     {
       "path": "dist/types.d.ts.map",
-      "sha256": "2c915ea45a0c852bc9d6d0223c31ed8e9403bba69446e827c03b9660e5da06a4"
+      "sha256": "89ebb659b3e7c478f5bef0700aaba2cfee68eded84adb880f718a41edeeaf48d"
     },
     {
       "path": "package.json",
-      "sha256": "cb097bbcf895570765da433719187824a69a892fa2b1c9504271e250b59e321c"
+      "sha256": "23bd1dc48097ceeb978879c3111170f6e07545333cb63f2ff6af36ad7eebf4bb"
     }
   ]
 }

@@ -1,9 +1,9 @@
 # Icon picker package integration
 
 Mission Control consumes a generated package snapshot of
-`@rsocko/icon-picker@0.1.0-rc.0`. The canonical source is
+`@rsocko/icon-picker@0.1.0-rc.2`. The canonical source is
 `https://github.com/rsocko/icon-picker` at merged `main` commit
-`7206bbe8dc22d43d95b2e2c3c0020215efb8a2b9`.
+`87079346141c7d91c9e65830dcd83b9f3860abc6`, tagged `v0.1.0-rc.2`.
 
 The standalone repository is the only editable source of truth. Files under
 `vendor/icon-picker/` are generated package output and must not be hand-edited.
@@ -50,7 +50,7 @@ Synchronization is an explicit operator action. It is never run during
 installation, application startup, tests, or production builds.
 
 ```powershell
-npm run vendor:icon-picker:sync -- --commit 7206bbe8dc22d43d95b2e2c3c0020215efb8a2b9
+npm run vendor:icon-picker:sync -- --commit 87079346141c7d91c9e65830dcd83b9f3860abc6
 ```
 
 The command:
@@ -81,3 +81,9 @@ and legacy bare Lucide names require no database migration.
 
 Mission Control consumes the picker and renderer only inside product workflows.
 The standalone icon-picker deployment owns the public explorer and demo.
+
+Picker consumers use the package default `theme="auto"`. Mission Control's
+root `.dark` class resolves the trigger and its portal to dark mode without
+per-call props. Explicit light or dark overrides remain available, and visual
+customization must use the package's public `--rs-icon-picker-*` variables
+rather than selectors coupled to generated markup.

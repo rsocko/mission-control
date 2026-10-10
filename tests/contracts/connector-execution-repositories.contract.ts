@@ -257,6 +257,28 @@ export function describeConnectorExecutionRepositoriesContract(
         ]));
     });
 
+    it('does not retry terminally failed local creates', async () => {
+      const task = connectorExecutionTask({
+        id: 'failed-local-create',
+        sourceId: 'local:failed-local-create',
+        syncStatus: 'push_failed',
+        pushRetryCount: 5,
+      });
+      await harness.repositories.pulls.insertBatch([{ task, tags: [] }]);
+
+      await expect(harness.repositories.pushes.listCandidates({
+        connectorId: task.connectorInstanceId,
+        includePushing: true,
+      })).resolves.not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: task.id }),
+      ]));
+      await expect(harness.repositories.pushes.claim(
+        task.id,
+        '2026-08-29T20:05:00.000Z',
+        '2026-08-29T19:00:00.000Z',
+      )).resolves.toBe(false);
+    });
+
     it('keeps notification, action, and delivery occurrence writes idempotent', async () => {
       const command = {
         input: {

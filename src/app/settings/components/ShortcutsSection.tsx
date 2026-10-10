@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import {
   GripVertical, Plus, Trash2, RotateCcw, Loader2, Check, Eye, EyeOff,
   Sun, Inbox, ChartNetwork, LayoutDashboard, Columns3, Target, Repeat,
-  CalendarDays, Settings, AppWindow, ExternalLink, Bell, Zap, Activity, Search,
+  CalendarDays, Settings, AppWindow, ExternalLink, Bell, Zap, Activity,
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
@@ -43,7 +43,6 @@ const SHORTCUT_ICONS: Record<ShortcutIconKey, ComponentType<{ size?: number; cla
   triage: Inbox,
   'quick-sort': Zap,
   insights: Activity,
-  'icon-finder': Search,
   houston: HoustonIcon,
   settings: Settings,
 };

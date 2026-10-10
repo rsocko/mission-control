@@ -20,7 +20,6 @@ function collectTsxFiles(directory: string): string[] {
 }
 
 const compositeControlSources = [
-  ['src/app/icons/page.tsx', 1],
   ['src/app/projects/[id]/PhaseAssignView.tsx', 1],
   ['src/app/projects/[id]/tabs/ProjectPhasesTab.tsx', 1],
   ['src/app/settings/components/GeneralSettingsSection.tsx', 1],

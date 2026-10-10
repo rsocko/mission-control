@@ -17,20 +17,22 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const VENDOR_DIRECTORY = join(ROOT, 'vendor', 'icon-picker');
 const UPSTREAM_MANIFEST = 'UPSTREAM.json';
+const SNAPSHOT_MANIFEST = 'icon-picker.snapshot.json';
 const SOURCE_REPOSITORY = 'https://github.com/rsocko/icon-picker.git';
-const SOURCE_COMMIT = '9f038831690938d0ba07203d9c35e69b603697aa';
+const SOURCE_COMMIT = '7206bbe8dc22d43d95b2e2c3c0020215efb8a2b9';
 const APPROVED_REGISTRY = 'https://packagefeedproxy.microsoft.io/npm/';
 const PACKAGE_NAME = '@rsocko/icon-picker';
 const PACKAGE_VERSION = '0.1.0-rc.0';
+const PINNED_NPM_VERSION = '11.19.0';
 const ARTIFACT = Object.freeze({
   filename: 'rsocko-icon-picker-0.1.0-rc.0.tgz',
-  size: 39766,
-  unpackedSize: 129715,
+  size: 39695,
+  unpackedSize: 126787,
   entryCount: 36,
-  integrity: 'sha512-q7L5JT1VyfOO91qu99i+PU0n1c1q28NGYR5Ph+Y7kKBIJqxbObNDiygcfj3e/iAejxfytcueYXMV++s3AQIK0Q==',
-  shasum: '210b611c26c2bbcf497c261245732e517df8d55c',
-  sha256: '7c942b4a63e7c9a5c3d60d375aa13d513092c829e0ad0754af1a7b74b0b08dce',
-  sha512: 'abb2f9253d55c9f38ef75aaef7d8be3d4d27d5cd6adbc346611e4f87e63b90a04826ac5b39b3438b281c7e3ddefe201e8f17f2b5cb9e617315fbeb3701020ad1',
+  integrity: 'sha512-SVLC5q+B6vuWVabZgm2V6ugfiec8kLEhIBgl/+lZDZrsLWtUn6HucMNm2iBRx+l8GgEwXf8gAmklfrHOddtV8w==',
+  shasum: '0b2db4385f35f5636b324285bd219b5c3310c8fe',
+  sha256: '822dfdf28a4f8419c778d1e56b00d9628bcbe93918b672a9921c1eeb0ab921be',
+  sha512: '4952c2e6af81eafb9655a6d9826d95eae81f89e73c90b121201825ffe9590d9aec2d6b549fa1ee70c366da2051c7e97c1a01305dff200269257eb1ce75db55f3',
 });
 const PACKAGE_EXPORTS = Object.freeze({
   '.': {
@@ -80,6 +82,20 @@ function runNpm(arguments_, options = {}) {
     return run(process.execPath, [npmCli, ...arguments_], options);
   }
   return run(process.platform === 'win32' ? 'npm.cmd' : 'npm', arguments_, options);
+}
+
+function runPinnedNpm(arguments_, options = {}) {
+  return runNpm(
+    [
+      'exec',
+      '--yes',
+      `--package=npm@${PINNED_NPM_VERSION}`,
+      '--',
+      'npm',
+      ...arguments_,
+    ],
+    options,
+  );
 }
 
 function hash(bytes, algorithm) {
@@ -139,11 +155,23 @@ async function listFiles(root, current = root) {
 function validateManifest(manifest, bytes) {
   assertExactKeys(
     manifest,
-    ['acquisition', 'artifact', 'package', 'schemaVersion', 'source'],
+    [
+      'acquisition',
+      'artifact',
+      'canonicalization',
+      'package',
+      'schemaVersion',
+      'source',
+    ],
     UPSTREAM_MANIFEST,
   );
   assertExactKeys(manifest.package, ['name', 'version'], 'package provenance');
   assertExactKeys(manifest.source, ['commit', 'repository', 'tag'], 'source provenance');
+  assertExactKeys(
+    manifest.canonicalization,
+    ['artifactContract', 'lineEndings'],
+    'artifact canonicalization',
+  );
   assertExactKeys(
     manifest.artifact,
     [
@@ -166,7 +194,9 @@ function validateManifest(manifest, bytes) {
     || manifest.source.repository !== `git+${SOURCE_REPOSITORY}`
     || manifest.source.commit !== SOURCE_COMMIT
     || manifest.source.tag !== null
-    || manifest.acquisition !== 'npm-pack-from-source'
+    || manifest.acquisition !== 'canonical-npm-pack-from-source'
+    || manifest.canonicalization.lineEndings !== 'lf'
+    || manifest.canonicalization.artifactContract !== 'package-artifact.json'
   ) {
     fail(`${UPSTREAM_MANIFEST} does not match the pinned upstream identity`);
   }
@@ -201,19 +231,39 @@ function validatePackageManifest(packageManifest) {
   }
 }
 
-async function repackSnapshot(snapshotRoot) {
-  const output = await mkdtemp(join(tmpdir(), 'mc-icon-picker-pack-'));
-  try {
-    const raw = runNpm(
-      ['pack', '--json', '--ignore-scripts', '--pack-destination', output],
-      { cwd: snapshotRoot },
-    );
-    const [packed] = JSON.parse(raw);
-    if (!packed?.filename) fail('npm pack did not return artifact metadata');
-    const bytes = await readFile(join(output, packed.filename));
-    return { bytes, metadata: packed };
-  } finally {
-    await rm(output, { recursive: true, force: true });
+async function createSnapshotManifest(snapshotRoot, upstream) {
+  const files = [];
+  for (const path of upstream.artifact.files) {
+    files.push({
+      path,
+      sha256: hash(await readFile(join(snapshotRoot, ...path.split('/'))), 'sha256'),
+    });
+  }
+  return {
+    schemaVersion: 1,
+    package: upstream.package,
+    source: upstream.source,
+    artifactSha256: upstream.artifact.sha256,
+    files,
+  };
+}
+
+function validateSnapshotManifest(snapshot, upstream) {
+  assertExactKeys(
+    snapshot,
+    ['artifactSha256', 'files', 'package', 'schemaVersion', 'source'],
+    SNAPSHOT_MANIFEST,
+  );
+  if (
+    snapshot.schemaVersion !== 1
+    || JSON.stringify(snapshot.package) !== JSON.stringify(upstream.package)
+    || JSON.stringify(snapshot.source) !== JSON.stringify(upstream.source)
+    || snapshot.artifactSha256 !== ARTIFACT.sha256
+    || !Array.isArray(snapshot.files)
+    || JSON.stringify(snapshot.files.map(({ path }) => path))
+      !== JSON.stringify(upstream.artifact.files)
+  ) {
+    fail(`${SNAPSHOT_MANIFEST} does not match the pinned package provenance`);
   }
 }
 
@@ -229,32 +279,37 @@ export async function verifySnapshot(root = VENDOR_DIRECTORY) {
   );
   validatePackageManifest(packageManifest);
 
-  const expectedFiles = [...manifest.artifact.files, UPSTREAM_MANIFEST].sort();
+  const snapshotBytes = await readFile(join(snapshotRoot, SNAPSHOT_MANIFEST));
+  const snapshot = parseJson(snapshotBytes, SNAPSHOT_MANIFEST);
+  validateSnapshotManifest(snapshot, manifest);
+  const canonicalSnapshot = Buffer.from(`${JSON.stringify(snapshot, null, 2)}\n`);
+  if (!canonicalSnapshot.equals(snapshotBytes)) {
+    fail(`${SNAPSHOT_MANIFEST} is not canonically encoded`);
+  }
+
+  const expectedFiles = [
+    ...manifest.artifact.files,
+    SNAPSHOT_MANIFEST,
+    UPSTREAM_MANIFEST,
+  ].sort();
   const actualFiles = await listFiles(snapshotRoot);
   if (JSON.stringify(actualFiles) !== JSON.stringify(expectedFiles)) {
     fail('Vendored files do not exactly match the pinned package file allowlist');
   }
 
-  const { bytes, metadata } = await repackSnapshot(snapshotRoot);
-  if (
-    metadata.name !== PACKAGE_NAME
-    || metadata.version !== PACKAGE_VERSION
-    || metadata.filename !== ARTIFACT.filename
-    || metadata.size !== ARTIFACT.size
-    || metadata.unpackedSize !== ARTIFACT.unpackedSize
-    || metadata.entryCount !== ARTIFACT.entryCount
-    || metadata.integrity !== ARTIFACT.integrity
-    || metadata.shasum !== ARTIFACT.shasum
-    || hash(bytes, 'sha256') !== ARTIFACT.sha256
-    || hash(bytes, 'sha512') !== ARTIFACT.sha512
-  ) {
-    fail('Repacked snapshot does not match the pinned deterministic artifact');
-  }
-  if (
-    JSON.stringify(metadata.files.map((file) => file.path).sort())
-    !== JSON.stringify(manifest.artifact.files)
-  ) {
-    fail('Repacked snapshot files do not match upstream provenance');
+  for (const file of snapshot.files) {
+    assertExactKeys(file, ['path', 'sha256'], 'snapshot file provenance');
+    assertSafePath(file.path);
+    if (!/^[0-9a-f]{64}$/.test(file.sha256)) {
+      fail(`Invalid snapshot SHA-256 for ${file.path}`);
+    }
+    const actualHash = hash(
+      await readFile(join(snapshotRoot, ...file.path.split('/'))),
+      'sha256',
+    );
+    if (actualHash !== file.sha256) {
+      fail(`SHA-256 mismatch for ${file.path}`);
+    }
   }
   return manifest;
 }
@@ -325,7 +380,7 @@ async function syncSnapshot(options) {
       NPM_CONFIG_REGISTRY: APPROVED_REGISTRY,
       SOURCE_COMMIT: requestedCommit,
     };
-    runNpm(
+    runPinnedNpm(
       [
         'ci',
         '--prefer-offline',
@@ -337,7 +392,7 @@ async function syncSnapshot(options) {
       { cwd: repository, env: buildEnvironment },
     );
     await mkdir(artifacts);
-    runNpm(['run', 'package:artifact', '--', artifacts], {
+    runPinnedNpm(['run', 'package:artifact', '--', artifacts], {
       cwd: repository,
       env: buildEnvironment,
     });
@@ -368,6 +423,11 @@ async function syncSnapshot(options) {
     run('tar', ['-xzf', artifactPath, '-C', extracted]);
     await cp(join(extracted, 'package'), stagedSnapshot, { recursive: true });
     await writeFile(join(stagedSnapshot, UPSTREAM_MANIFEST), upstreamBytes);
+    const snapshot = await createSnapshotManifest(stagedSnapshot, upstream);
+    await writeFile(
+      join(stagedSnapshot, SNAPSHOT_MANIFEST),
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+    );
     await verifySnapshot(stagedSnapshot);
 
     await mkdir(dirname(VENDOR_DIRECTORY), { recursive: true });

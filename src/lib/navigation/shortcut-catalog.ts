@@ -10,7 +10,6 @@ export type ShortcutIconKey =
   | 'triage'
   | 'quick-sort'
   | 'insights'
-  | 'icon-finder'
   | 'houston'
   | 'settings';
 
@@ -138,16 +137,6 @@ export const SHORTCUT_PAGES: readonly ShortcutPage[] = [
     iconKey: 'insights',
     iconColor: 'text-pink-400',
     iconBackground: 'bg-pink-400/15',
-  },
-  {
-    id: 'icon-finder',
-    url: '/icons',
-    name: 'Icon Finder',
-    description: 'Search and copy icons',
-    icon: 'shortcut-icon-finder.svg',
-    iconKey: 'icon-finder',
-    iconColor: 'text-indigo-400',
-    iconBackground: 'bg-indigo-400/15',
   },
   {
     id: 'ai',

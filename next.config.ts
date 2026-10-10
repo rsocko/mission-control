@@ -9,15 +9,6 @@ const withBundleAnalyzer = bundleAnalyzer({
 const nextConfig: NextConfig = {
   output: "standalone",
   transpilePackages: ["@rsocko/generic-graph-canvas-shared-workbench"],
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'cdn.jsdelivr.net',
-        pathname: '/gh/homarr-labs/dashboard-icons/**',
-      },
-    ],
-  },
   experimental: {
     useTypeScriptCli: false,
   },

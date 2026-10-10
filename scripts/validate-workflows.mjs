@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { parse } from 'yaml';
 import {
+  discoverPostgresIntegrationTests,
   partitionPostgresIntegrationTests,
   POSTGRES_TEST_RUNTIME_MS,
 } from './select-postgres-integration-shard.mjs';
@@ -231,6 +232,7 @@ for (const file of workflowFiles) {
       {
         docs_only: '${{ steps.classify.outputs.docs_only }}',
         impeccable_changed: '${{ steps.classify.outputs.impeccable_changed }}',
+        postgres_matrix: '${{ steps.classify.outputs.postgres_matrix }}',
         postgres_scope: '${{ steps.classify.outputs.postgres_scope }}',
         vendor_changed: '${{ steps.classify.outputs.vendor_changed }}',
         workflow_policy_changed: '${{ steps.classify.outputs.workflow_policy_changed }}',
@@ -251,6 +253,9 @@ for (const file of workflowFiles) {
       '.gitattributes|vendor/generic-graph-workbench/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json',
       '.github/workflows/*|.impeccable/live/config.json|package.json|package-lock.json|scripts/validate-workflows.mjs',
       'echo "impeccable_changed=${impeccable_changed}" >> "$GITHUB_OUTPUT"',
+      'postgres_matrix=\'{"include":[{"shard":1,"count":1}]}\'',
+      'postgres_matrix=\'{"include":[{"shard":1,"count":2},{"shard":2,"count":2}]}\'',
+      'echo "postgres_matrix=${postgres_matrix}" >> "$GITHUB_OUTPUT"',
       'echo "postgres_scope=${postgres_scope}" >> "$GITHUB_OUTPUT"',
       'echo "vendor_changed=${vendor_changed}" >> "$GITHUB_OUTPUT"',
       'echo "workflow_policy_changed=${workflow_policy_changed}" >> "$GITHUB_OUTPUT"',
@@ -376,7 +381,7 @@ for (const file of workflowFiles) {
     );
     assert.equal(
       postgresIntegrationShards.name,
-      'PostgreSQL integration worker',
+      'PostgreSQL integration worker (${{ matrix.shard }}/${{ matrix.count }})',
       'PostgreSQL integration worker must not claim the required check name',
     );
     for (const invariant of [
@@ -389,10 +394,13 @@ for (const file of workflowFiles) {
         `PostgreSQL integration worker must enforce ${invariant}`,
       );
     }
-    assert.equal(
+    assert.deepEqual(
       postgresIntegrationShards.strategy,
-      undefined,
-      'PostgreSQL integration must use one worker',
+      {
+        'fail-fast': false,
+        matrix: '${{ fromJSON(needs.changes.outputs.postgres_matrix) }}',
+      },
+      'PostgreSQL integration must use one smoke worker or two full-suite workers',
     );
     assert.equal(
       postgresIntegrationShards.steps?.some((step) => step.name?.startsWith('Skip ')),
@@ -445,7 +453,8 @@ for (const file of workflowFiles) {
 case "\${POSTGRES_SCOPE}" in
   full)
     mapfile -t test_files < <(
-      node scripts/select-postgres-integration-shard.mjs 1 1
+      node scripts/select-postgres-integration-shard.mjs \\
+        "\${{ matrix.shard }}" "\${{ matrix.count }}"
     )
     ;;
   smoke)
@@ -470,29 +479,31 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
       "${{ github.event_name == 'pull_request' && needs.changes.outputs.postgres_scope || 'full' }}",
       'PostgreSQL integration must run fully outside pull requests',
     );
-    const postgresTestFiles = (await readdir(path.resolve('tests', 'db')))
-      .filter((testFile) => /^postgres-.*\.integration\.test\.ts$/u.test(testFile))
-      .sort();
-    const postgresTestShards = partitionPostgresIntegrationTests(postgresTestFiles, 1);
+    const postgresTestFiles = await discoverPostgresIntegrationTests();
+    const postgresTestShards = partitionPostgresIntegrationTests(postgresTestFiles, 2);
     assert.ok(
       postgresTestShards.every((testFiles) => testFiles.length > 0),
-      'The PostgreSQL integration worker must contain tests',
+      'Every PostgreSQL integration worker must contain tests',
     );
     assert.deepEqual(
       postgresTestShards.flat().sort(),
       postgresTestFiles,
-      'The PostgreSQL integration worker must cover every integration test exactly once',
+      'The PostgreSQL integration workers must cover every integration test exactly once',
     );
     assert.deepEqual(
       Object.keys(POSTGRES_TEST_RUNTIME_MS)
-        .filter((testFile) => !postgresTestFiles.includes(testFile)),
+        .filter((testFile) =>
+          !postgresTestFiles.some((discoveredTest) => path.basename(discoveredTest) === testFile)
+        ),
       [],
       'PostgreSQL runtime weights must not reference deleted integration tests',
     );
     assert.equal(
-      postgresTestShards[0].includes('postgres-packaged-workflow-parity.integration.test.ts'),
+      postgresTestShards.some((shard) =>
+        shard.includes('db/postgres-packaged-workflow-parity.integration.test.ts')
+      ),
       true,
-      'The PostgreSQL integration worker must include the longest integration test',
+      'A PostgreSQL integration worker must include the longest integration test',
     );
     const pgvectorBenchmark = postgresIntegrationShards.steps?.find(
       (step) => step.name === 'Run pgvector 100k benchmark gate',
@@ -506,8 +517,8 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     assert.equal(
       pgvectorContainer?.if,
-      "github.event_name == 'workflow_dispatch'",
-      'PostgreSQL container discovery must run only with the manual benchmark',
+      "github.event_name == 'workflow_dispatch' && matrix.shard == 1",
+      'PostgreSQL container discovery must run only on the manual benchmark worker',
     );
     assert.equal(
       pgvectorBenchmark?.run,
@@ -516,8 +527,8 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     assert.equal(
       pgvectorBenchmark?.if,
-      "github.event_name == 'workflow_dispatch'",
-      'The pgvector benchmark must run only in manually dispatched CI',
+      "github.event_name == 'workflow_dispatch' && matrix.shard == 1",
+      'The pgvector benchmark must run once in manually dispatched CI',
     );
     assert.equal(
       pgvectorBenchmark?.env?.MC_BENCHMARK_DIMENSIONS,

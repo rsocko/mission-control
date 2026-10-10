@@ -524,6 +524,46 @@ describe('SearchCommand', () => {
     expect(screen.getByText('Task only')).toBeInTheDocument();
   });
 
+  it('shows and expands truncated search results', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
+      if (url.includes('__status_check__')) {
+        return Promise.resolve(jsonResponse({
+          semanticEnabled: false,
+          semanticAvailable: false,
+          results: [],
+        }));
+      }
+      if (url.includes('limit=50')) {
+        return Promise.resolve(jsonResponse({
+          results: [result('target', 'Get Laney phone paired to Rivian')],
+          durationMs: 8,
+          hasMore: false,
+        }));
+      }
+      if (url.includes('mode=keyword')) {
+        return Promise.resolve(jsonResponse({
+          results: [result('first', 'Rivian Pickup')],
+          durationMs: 5,
+          hasMore: true,
+        }));
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    render(<SearchCommand />);
+    fireEvent.change(openSearch(), { target: { value: 'Rivian' } });
+
+    expect(await screen.findByText('More matches are available.')).toBeInTheDocument();
+    expect(screen.getByText(/1\+ result/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show more results' }));
+
+    expect(await screen.findByText('Get Laney phone paired to Rivian')).toBeInTheDocument();
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('limit=50'))).toBe(true);
+  });
+
   it('announces loading, empty, and keyword failure feedback', async () => {
     const firstSearch = deferred<Response>();
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {

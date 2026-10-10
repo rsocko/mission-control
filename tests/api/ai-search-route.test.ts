@@ -112,7 +112,7 @@ describe('AI search route', () => {
       {
         type: 'all',
         mode: 'keyword',
-        limit: 20,
+        limit: 21,
         source: 'Project Alpha',
         status: 'in_progress',
         excludeDone: true,
@@ -125,6 +125,32 @@ describe('AI search route', () => {
       source: 'Project Alpha',
       status: 'in_progress',
       excludeDone: true,
+    });
+  });
+
+  it('reports when additional results exist beyond the requested limit', async () => {
+    mocks.searchWithBranches.mockResolvedValue({
+      results: [
+        { type: 'task', id: 'task-1' },
+        { type: 'task', id: 'task-2' },
+      ],
+      branches: {},
+    });
+
+    const { GET } = await import('@/app/api/ai/search/route');
+    const response = await GET(new Request(
+      'http://localhost/api/ai/search?q=rivian&mode=keyword&limit=1',
+    ));
+    const body = await response.json();
+
+    expect(mocks.searchWithBranches).toHaveBeenCalledWith(
+      'rivian',
+      expect.objectContaining({ limit: 2 }),
+    );
+    expect(body).toMatchObject({
+      total: 1,
+      hasMore: true,
+      results: [{ type: 'task', id: 'task-1' }],
     });
   });
 

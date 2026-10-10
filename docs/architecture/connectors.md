@@ -327,6 +327,11 @@ and dispatcher wakes remain outside database transactions.
 The remaining end-user Finance APIs use the backend-selected
 `FinanceWorkerPersistence.web` sub-port for kids and spending, transactions,
 summaries, finance notifications, dismissal, and operations-overview reads.
+Tyrion policy discovery supplies the authoritative active household profile IDs
+and display names. Mission Control stores them only as a read-through projection
+for overview and attribution controls; it does not mask, derive, or independently
+edit those names. Older Tyrion responses without the additive subject list remain
+accepted during rolling deployment.
 Category write-back keeps provider I/O between a durable claim and a
 claim-token-fenced completion/failure update. PostgreSQL uses native finance
 tables and never falls back to SQLite.

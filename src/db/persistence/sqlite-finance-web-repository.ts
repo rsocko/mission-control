@@ -139,10 +139,22 @@ export function createSqliteFinanceWebPersistence(
          AND transactions.connector_instance_id = ?
          AND transactions.lifecycle_status = 'active'
          AND transactions.date >= ?
+        WHERE EXISTS (
+          SELECT 1
+          FROM finance_attribution_subjects subjects
+          WHERE subjects.connector_id = ?
+            AND subjects.kid_id = kids.id
+        ) OR EXISTS (
+          SELECT 1
+          FROM finance_transactions connector_transactions
+          WHERE connector_transactions.connector_instance_id = ?
+            AND connector_transactions.assigned_kid_id = kids.id
+            AND connector_transactions.lifecycle_status = 'active'
+        )
         GROUP BY kids.id, kids.name, kids.color, kids.avatar,
                  kids.daily_limit, kids.weekly_limit, kids.monthly_limit
         ORDER BY kids.id
-      `).all(connectorId, monthStart) as Awaited<
+      `).all(connectorId, monthStart, connectorId, connectorId) as Awaited<
         ReturnType<FinanceWebPersistence['listKidsWithSpending']>
       >;
     },
@@ -212,9 +224,21 @@ export function createSqliteFinanceWebPersistence(
          AND transactions.connector_instance_id = ?
          AND transactions.lifecycle_status = 'active'
          AND transactions.date >= ? AND transactions.date <= ?
+        WHERE EXISTS (
+          SELECT 1
+          FROM finance_attribution_subjects subjects
+          WHERE subjects.connector_id = ?
+            AND subjects.kid_id = kids.id
+        ) OR EXISTS (
+          SELECT 1
+          FROM finance_transactions connector_transactions
+          WHERE connector_transactions.connector_instance_id = ?
+            AND connector_transactions.assigned_kid_id = kids.id
+            AND connector_transactions.lifecycle_status = 'active'
+        )
         GROUP BY kids.id, kids.name
         ORDER BY kids.id
-      `).all(...params) as Array<{
+      `).all(...params, input.connectorId, input.connectorId) as Array<{
         kidId: string;
         kidName: string;
         total: number;

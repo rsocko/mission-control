@@ -9,6 +9,7 @@ export const TYRION_ATTRIBUTION_PROVENANCE = 'mission-control-normalized-v2';
 export const TYRION_ATTRIBUTION_PATH = '/api/internal/v2/attribution/batch';
 export const TYRION_ATTRIBUTION_POLICY_PATH = '/api/internal/v2/attribution/policy';
 export const TYRION_ATTRIBUTION_MAX_ITEMS = 100;
+export const TYRION_ATTRIBUTION_MAX_SUBJECTS = 100;
 export const TYRION_ATTRIBUTION_MAX_BODY_BYTES = 65_536;
 export const TYRION_ATTRIBUTION_MAX_RESPONSE_BYTES = 262_144;
 
@@ -142,7 +143,23 @@ export const attributionPolicyResponseSchema = z.object({
   policyVersion: z.number().int().positive(),
   policyUpdatedAt: timestampSchema,
   householdCurrency: currencySchema,
-}).strict();
+  subjects: z.array(z.object({
+    kidId: identifierSchema,
+    name: z.string().trim().min(1).max(100),
+  }).strict()).max(TYRION_ATTRIBUTION_MAX_SUBJECTS).default([]),
+}).strict().superRefine((value, context) => {
+  const kidIds = new Set<string>();
+  for (const [index, subject] of value.subjects.entries()) {
+    if (kidIds.has(subject.kidId)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Subject kid identifiers must be unique',
+        path: ['subjects', index, 'kidId'],
+      });
+    }
+    kidIds.add(subject.kidId);
+  }
+});
 
 export const attributionErrorResponseSchema = z.object({
   error: z.object({

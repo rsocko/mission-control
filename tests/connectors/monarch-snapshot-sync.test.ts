@@ -486,6 +486,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
           policyVersion: 7,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
           householdCurrency: 'USD',
+          subjects: [{ kidId: 'kid-one', name: 'Alex' }],
         });
       }
       expect(new Headers(init?.headers).get('authorization'))
@@ -548,6 +549,55 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       policyVersion: 7,
       engineVersion: '2.0.0',
     });
+    expect(sqlite.prepare(`
+      SELECT profiles.name, subjects.policy_version AS policyVersion
+      FROM finance_attribution_subjects subjects
+      INNER JOIN kid_profiles profiles ON profiles.id = subjects.kid_id
+      WHERE subjects.connector_id = ? AND subjects.kid_id = 'kid-one'
+    `).get(connectorConfig.id)).toEqual({
+      name: 'Alex',
+      policyVersion: 7,
+    });
+  });
+
+  it('refreshes authoritative household names when the transaction snapshot is empty', async () => {
+    const followCurrentSynchronizer = createSynchronizer({
+      ...connectorConfig,
+      settings: {
+        ...connectorConfig.settings,
+        tyrionAttributionPolicy: undefined,
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.hostname !== 'tyrion-operations-ui') return page([], null);
+      return Response.json({
+        contractVersion: '2.0',
+        engineVersion: '2.0.0',
+        policyVersion: 8,
+        policyUpdatedAt: '2026-10-10T12:00:00.000Z',
+        householdCurrency: 'USD',
+        subjects: [
+          { kidId: 'kid-one', name: 'Alex' },
+          { kidId: 'kid-two', name: 'Blair' },
+        ],
+      });
+    }));
+
+    await expect(followCurrentSynchronizer.sync({ full: false })).resolves.toMatchObject({
+      itemsAdded: 0,
+      itemsUpdated: 0,
+    });
+    expect(sqlite.prepare(`
+      SELECT profiles.name
+      FROM finance_attribution_subjects subjects
+      INNER JOIN kid_profiles profiles ON profiles.id = subjects.kid_id
+      WHERE subjects.connector_id = ?
+      ORDER BY profiles.name
+    `).all(connectorConfig.id)).toEqual([
+      { name: 'Alex' },
+      { name: 'Blair' },
+    ]);
   });
 
   it('reuses one account reference without an attribution rollout gate', async () => {

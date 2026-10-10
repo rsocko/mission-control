@@ -1693,41 +1693,73 @@ function createAttributionPersistence(
     },
 
     async finish(command) {
-      const fenceClause = command.fenceMode === 'row-generation'
-        ? ''
-        : `AND (
-             current_generation_id = ?
-             OR (current_generation_id IS NULL AND last_successful_generation_id = ?)
-           )`;
-      const result = sqlite.prepare(`
-        UPDATE finance_sync_state
-        SET attribution_status = ?,
-            attribution_last_attempt_at = ?,
-            attribution_last_successful_at = CASE WHEN ? THEN ?
-              ELSE attribution_last_successful_at END,
-            attribution_last_error_code = ?,
-            attribution_policy_version = COALESCE(?, attribution_policy_version),
-            attribution_engine_version = CASE WHEN ? THEN ?
-              ELSE attribution_engine_version END,
-            updated_at = ?
-        WHERE connector_id = ?
-          ${fenceClause}
-      `).run(
-        command.status,
-        command.attemptedAt,
-        command.succeeded && !command.terminalFailureCode ? 1 : 0,
-        command.attemptedAt,
-        command.terminalFailureCode,
-        command.policyVersion,
-        command.succeeded ? 1 : 0,
-        command.engineVersion,
-        command.attemptedAt,
-        command.connectorId,
-        ...(command.fenceMode === 'row-generation'
-          ? []
-          : [command.generationId, command.generationId]),
-      );
-      return { recorded: result.changes === 1 };
+      return sqlite.transaction(() => {
+        const fenceClause = command.fenceMode === 'row-generation'
+          ? ''
+          : `AND (
+               current_generation_id = ?
+               OR (current_generation_id IS NULL AND last_successful_generation_id = ?)
+             )`;
+        const result = sqlite.prepare(`
+          UPDATE finance_sync_state
+          SET attribution_status = ?,
+              attribution_last_attempt_at = ?,
+              attribution_last_successful_at = CASE WHEN ? THEN ?
+                ELSE attribution_last_successful_at END,
+              attribution_last_error_code = ?,
+              attribution_policy_version = COALESCE(?, attribution_policy_version),
+              attribution_engine_version = CASE WHEN ? THEN ?
+                ELSE attribution_engine_version END,
+              updated_at = ?
+          WHERE connector_id = ?
+            ${fenceClause}
+        `).run(
+          command.status,
+          command.attemptedAt,
+          command.succeeded && !command.terminalFailureCode ? 1 : 0,
+          command.attemptedAt,
+          command.terminalFailureCode,
+          command.policyVersion,
+          command.succeeded ? 1 : 0,
+          command.engineVersion,
+          command.attemptedAt,
+          command.connectorId,
+          ...(command.fenceMode === 'row-generation'
+            ? []
+            : [command.generationId, command.generationId]),
+        );
+        if (result.changes !== 1 || command.policyVersion === null) {
+          return { recorded: result.changes === 1 };
+        }
+        const upsertProfile = sqlite.prepare(`
+          INSERT INTO kid_profiles (id, name)
+          VALUES (?, ?)
+          ON CONFLICT(id) DO UPDATE SET name = excluded.name
+        `);
+        const upsertSubject = sqlite.prepare(`
+          INSERT INTO finance_attribution_subjects (
+            id, connector_id, kid_id, policy_version, engine_version,
+            first_seen_at, last_seen_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(connector_id, kid_id) DO UPDATE SET
+            policy_version = excluded.policy_version,
+            engine_version = excluded.engine_version,
+            last_seen_at = excluded.last_seen_at
+        `);
+        for (const subject of command.subjects) {
+          upsertProfile.run(subject.kidId, subject.name);
+          upsertSubject.run(
+            idFactory(),
+            command.connectorId,
+            subject.kidId,
+            command.policyVersion,
+            command.engineVersion,
+            command.attemptedAt,
+            command.attemptedAt,
+          );
+        }
+        return { recorded: true };
+      }).immediate();
     },
 
     async listExceptions(query) {

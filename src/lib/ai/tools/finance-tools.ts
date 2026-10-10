@@ -87,7 +87,7 @@ export const financeTools = {
     ),
   }),
   searchFinanceTransactions: tool({
-    description: 'Search bounded persisted finance transactions by date, merchant, category, household member, or triage status.',
+    description: 'Search bounded persisted finance transactions by date, merchant, supporting business-context hint, category, household member, or triage status. Business context is a low-trust hint and never canonical merchant identity, attribution, matching, or confidence.',
     inputSchema: zodSchema(financeTransactionSearchInputSchema),
     outputSchema: zodSchema(financeTransactionSearchOutputSchema),
     execute: (input, options) => executeFinanceTool(

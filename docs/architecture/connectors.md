@@ -151,6 +151,18 @@ and confirmed-category fields during source upserts. Category write-back is
 recorded in `finance_mutation_audit`; local confirmation occurs only after the
 bridge acknowledges success.
 
+The optional normalized transaction `businessContext` is retained as nullable
+secondary metadata for Finance transaction display and bounded Houston lookup.
+It is limited to the Monarch business-entity name exposed by Tyrion Bridge and
+does not include a raw business object, identifier, or type. Mission Control
+does not use it for merchant identity, attribution, deterministic matching,
+recurrence, insight derivation, reconciliation, confidence, or transaction
+state tokens. A context-only source change updates this nullable display/search
+column without changing the attribution fingerprint. The value follows the
+transaction mirror lifecycle and is removed when that mirrored transaction is
+deleted; rolling back this feature leaves the nullable column in place so older
+application versions continue to ignore it safely.
+
 Each normalized snapshot page is separately submitted to Tyrion's protected
 batch attribution v2 service. Mission Control sends only a deterministic opaque
 connector-scoped source reference, the stable direct account ID already supplied

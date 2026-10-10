@@ -149,6 +149,7 @@ describe('FinanceQuickReview', () => {
         suggestion: {
           kind: 'merchant',
           merchantPattern: 'INVENTED MARKET',
+          businessEntityPattern: 'INVENTED MARKET HOLDINGS',
           kidId: 'kid-alex',
           confidence: 'likely',
           requiresConfirmation: true,
@@ -160,15 +161,139 @@ describe('FinanceQuickReview', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Correct/ }));
     fireEvent.click(screen.getByLabelText('Kids attribution'));
     fireEvent.click(screen.getByRole('option', { name: 'Alex' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Preview reusable Kids rule' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Preview reusable rule' }));
 
     expect(await screen.findByText(/This advisory has not been applied/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Business entity pattern/)).toHaveValue('INVENTED MARKET HOLDINGS');
     const request = JSON.parse(fetchMock.mock.calls[1][1].body as string);
     expect(request).toEqual({
       contractVersion: '1.0',
+      sessionRef: session.sessionRef,
+      resumeToken: session.resumeToken,
+      reviewRef: item.reviewRef,
+      stateToken: item.stateToken,
       merchantName: 'Invented Market',
       kidId: 'kid-alex',
       suggestReusableRule: true,
+    });
+  });
+
+  it('creates an account-scoped rule independently without exposing account references', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(session))
+      .mockResolvedValueOnce(response({
+        contractVersion: '1.0',
+        suggestion: {
+          kind: 'merchant',
+          merchantPattern: 'INVENTED MARKET',
+          businessEntityPattern: null,
+          kidId: 'kid-alex',
+          confidence: 'likely',
+          requiresConfirmation: true,
+        },
+      }))
+      .mockResolvedValueOnce(response({
+        contractVersion: '2.0',
+        outcome: 'created',
+        policyVersion: 8,
+        rule: {
+          id: 'rule-merchant-invented',
+          outcome: 'kid',
+          kidId: 'kid-alex',
+          pattern: 'INVENTED MARKET',
+          businessEntityPattern: null,
+          scope: 'accounts',
+          confidence: 'likely',
+          enabled: true,
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<FinanceQuickReview />);
+    fireEvent.click(await screen.findByRole('button', { name: /Correct/ }));
+    fireEvent.click(screen.getByLabelText('Kids attribution'));
+    fireEvent.click(screen.getByRole('option', { name: 'Alex' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Preview reusable rule' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Create confirmed rule' }));
+
+    expect(await screen.findByText('Rule created')).toBeInTheDocument();
+    const request = JSON.parse(fetchMock.mock.calls[2][1].body as string);
+    expect(request).toMatchObject({
+      contractVersion: '2.0',
+      sessionRef: session.sessionRef,
+      resumeToken: session.resumeToken,
+      reviewRef: item.reviewRef,
+      stateToken: item.stateToken,
+      confirmation: {
+        confirmed: true,
+        globalScopeConfirmed: false,
+      },
+      rule: {
+        outcome: 'kid',
+        kidId: 'kid-alex',
+        pattern: 'INVENTED MARKET',
+        scope: 'accounts',
+      },
+    });
+    expect(request.rule).not.toHaveProperty('accountRefs');
+    expect(request).not.toHaveProperty('expectedPolicyVersion');
+    expect(screen.getByRole('button', { name: 'Save correction' })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('requires a conspicuous additional confirmation for global rules', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(session))
+      .mockResolvedValueOnce(response({
+        contractVersion: '1.0',
+        suggestion: {
+          kind: 'merchant',
+          merchantPattern: 'INVENTED MARKET',
+          businessEntityPattern: null,
+          kidId: 'kid-alex',
+          confidence: 'likely',
+          requiresConfirmation: true,
+        },
+      }))
+      .mockResolvedValueOnce(response({
+        contractVersion: '2.0',
+        outcome: 'created',
+        policyVersion: 8,
+        rule: {
+          id: 'rule-merchant-global',
+          outcome: 'review',
+          kidId: null,
+          pattern: 'INVENTED MARKET',
+          businessEntityPattern: null,
+          scope: 'global',
+          confidence: 'likely',
+          enabled: true,
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<FinanceQuickReview />);
+    fireEvent.click(await screen.findByRole('button', { name: /Correct/ }));
+    fireEvent.click(screen.getByLabelText('Kids attribution'));
+    fireEvent.click(screen.getByRole('option', { name: 'Alex' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Preview reusable rule' }));
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Outcome' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Send to review' }));
+    fireEvent.click(screen.getByRole('radio', { name: /All accounts/ }));
+
+    const createButton = screen.getByRole('button', { name: 'Create confirmed rule' });
+    expect(createButton).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', {
+      name: /apply to matching merchants on every household account/i,
+    }));
+    expect(createButton).toBeEnabled();
+    fireEvent.click(createButton);
+
+    expect(await screen.findByText('Rule created')).toBeInTheDocument();
+    const request = JSON.parse(fetchMock.mock.calls[2][1].body as string);
+    expect(request).toMatchObject({
+      confirmation: { globalScopeConfirmed: true },
+      rule: { outcome: 'review', kidId: null, scope: 'global' },
     });
   });
 

@@ -59,6 +59,7 @@ describe('MonarchBridgeClient', () => {
         date: '2026-08-01',
         amount: -12.5,
         merchant: { name: 'Invented Market', logoUrl: null },
+        businessEntityName: 'Invented Market Holdings',
         category: null,
         account: { id: 'acct-1', displayName: 'Invented Card', mask: null },
         isPending: true,
@@ -87,6 +88,7 @@ describe('MonarchBridgeClient', () => {
       isRecurring: false,
       reviewStatus: 'needs_review',
       reviewAssignee: 'Parent',
+      businessEntityName: 'Invented Market Holdings',
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -131,6 +133,7 @@ describe('MonarchBridgeClient', () => {
     });
 
     expect(result.transactions[0]?.businessContext).toBe('Invented Neighborhood Foods');
+    expect(result.transactions[0]?.businessEntityName).toBeNull();
   });
 
   it('filters native Monarch review state and validates exact merchant/review mutations', async () => {

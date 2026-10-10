@@ -71,7 +71,7 @@ describe('Tyrion connector configuration boundary', () => {
         cardRuleFingerprintParityProven: true,
         cardRuleFingerprintParityProvenAt: '2026-08-22T00:00:00.000Z',
       },
-    }).settings).toEqual({ householdCurrency: 'USD' });
+    }).settings).toEqual({});
   });
 
   it('defaults to follow-current and validates an optional positive policy pin', () => {
@@ -87,8 +87,6 @@ describe('Tyrion connector configuration boundary', () => {
     });
     expect(() => validateFinanceConnectorSettings({
       tyrionAttributionPolicy: { pinnedPolicyVersion: 0 },
-    }, {
-      requireHouseholdCurrency: false,
     })).toThrowError(expect.objectContaining({
       code: 'attribution_policy_pin_invalid',
     }));

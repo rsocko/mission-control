@@ -49,7 +49,6 @@ const config: ConnectorConfig = {
   credentials: { serviceToken: 'invented-service-token' },
   settings: {
     bridgeUrl: 'http://localhost:8100',
-    householdCurrency: 'USD',
     maxRetries: 0,
   },
   syncedLists: [],
@@ -90,6 +89,20 @@ function page(
       'content-type': 'application/json',
       'x-monarch-contract-version': '1.0',
     },
+  });
+}
+
+function policyResponse(input: string | URL | Request): Response | null {
+  const url = new URL(String(input));
+  if (url.pathname !== '/api/internal/v2/attribution/policy') {
+    return null;
+  }
+  return Response.json({
+    contractVersion: '2.0',
+    engineVersion: '2.0.0',
+    policyVersion: 1,
+    policyUpdatedAt: '2024-02-29T12:00:00.000Z',
+    householdCurrency: 'USD',
   });
 }
 
@@ -159,6 +172,8 @@ describe.sequential('Finance insight transaction backfill', () => {
   it('resumes a 37-month plan at immutable window boundaries and replays with no fetches', async () => {
     const fetchedWindows: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const policy = policyResponse(input);
+      if (policy) return policy;
       const url = new URL(String(input));
       const start = url.searchParams.get('start_date')!;
       const end = url.searchParams.get('end_date')!;
@@ -298,6 +313,8 @@ describe.sequential('Finance insight transaction backfill', () => {
     const disabledConfig = { ...config, enabled: false };
     const fetchedWindows: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const policy = policyResponse(input);
+      if (policy) return policy;
       const url = new URL(String(input));
       const start = url.searchParams.get('start_date')!;
       fetchedWindows.push(start);
@@ -361,6 +378,8 @@ describe.sequential('Finance insight transaction backfill', () => {
   it('restarts an interrupted window from page one without committing a partial proof', async () => {
     let failSecondPage = true;
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const policy = policyResponse(input);
+      if (policy) return policy;
       const url = new URL(String(input));
       const start = url.searchParams.get('start_date')!;
       if (!url.searchParams.has('cursor')) {
@@ -395,6 +414,8 @@ describe.sequential('Finance insight transaction backfill', () => {
 
   it('records completion after live provenance captured during the request', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const policy = policyResponse(input);
+      if (policy) return policy;
       const url = new URL(String(input));
       const start = url.searchParams.get('start_date')!;
       return page(
@@ -421,6 +442,8 @@ describe.sequential('Finance insight transaction backfill', () => {
   it('rejects a truncated final page without tombstoning unseen transactions', async () => {
     let truncated = false;
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const policy = policyResponse(input);
+      if (policy) return policy;
       const url = new URL(String(input));
       const start = url.searchParams.get('start_date')!;
       const transactions = [
@@ -467,6 +490,8 @@ describe.sequential('Finance insight transaction backfill', () => {
 
   it('refuses delivery-enabled, changed, conflicting, and oversized plans', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const policy = policyResponse(input);
+      if (policy) return policy;
       const url = new URL(String(input));
       const start = url.searchParams.get('start_date')!;
       return page([transaction('transaction-one', start)]);
@@ -518,7 +543,8 @@ describe.sequential('Finance insight transaction backfill', () => {
     })).rejects.toMatchObject({ code: 'finance_insight_backfill_delivery_enabled' });
 
     sqlite.prepare(`DELETE FROM finance_insight_cutovers`).run();
-    vi.stubGlobal('fetch', vi.fn(async () => page([], null, 50_001)));
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) =>
+      policyResponse(input) ?? page([], null, 50_001)));
     await expect(runFinanceInsightTransactionBackfill({
       config,
       idempotencyKey: 'invented-oversized-key',

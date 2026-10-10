@@ -783,6 +783,7 @@ export interface FinanceAttentionRoutingPersistence {
   reconcile(input: {
     connectorId: string;
     decisionAt: Date;
+    currency?: string;
     sourceSignals?: readonly FinanceAttentionSignal[];
   }): Promise<FinanceAttentionRoutingOutcome>;
 }

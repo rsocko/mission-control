@@ -31,10 +31,6 @@ export interface ConnectorConfig {
     effective: ConnectorDataClassification;
     override: ConnectorDataClassification | null;
   };
-  configurationState?: {
-    status: 'configured' | 'needs-configuration';
-    code: 'household_currency_unavailable' | null;
-  };
   /** Outcome of the most recent manual "Test Connection" click. */
   lastTestStatus?: 'success' | 'failed' | null;
   lastTestError?: string | null;

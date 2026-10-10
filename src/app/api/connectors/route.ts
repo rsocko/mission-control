@@ -203,9 +203,7 @@ export async function POST(request: Request) {
       ),
     };
     if (isFinanceConnectorType(type)) {
-      connectorSettings = validateFinanceConnectorSettings(connectorSettings, {
-        requireHouseholdCurrency: true,
-      });
+      connectorSettings = validateFinanceConnectorSettings(connectorSettings);
     }
     if (type === 'home-assistant') {
       if (typeof name !== 'string' || !name.trim()) {
@@ -430,9 +428,7 @@ export async function PATCH(request: Request) {
         }
       }
       if (updates.settings !== undefined) {
-        updates.settings = validateFinanceConnectorSettings(sanitized.settings, {
-          requireHouseholdCurrency: false,
-        });
+        updates.settings = validateFinanceConnectorSettings(sanitized.settings);
       }
     }
 

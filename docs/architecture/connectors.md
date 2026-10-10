@@ -186,11 +186,12 @@ references are the direct Tyrion Bridge account IDs and do not use this
 namespace. The namespace is identity state, not authentication key material;
 the bearer token remains authentication only.
 
-Finance connector creation requires an exact uppercase ISO-4217
-`settings.householdCurrency`. It is non-secret application state shared by
-connector setup and Finance Insight publication validation. Existing connectors
-without it remain editable, preserve unrelated settings, and report
-`needs-configuration` until an operator selects a supported currency.
+Tyrion is the sole authority for household currency. Its protected
+attribution-policy response includes the exact uppercase ISO-4217 code. Mission
+Control validates and consumes that value for Finance Insight publication,
+backfill, review, and readiness operations without persisting or editing a
+duplicate connector setting. Missing, invalid, or unavailable Tyrion currency
+metadata fails the dependent operation closed.
 
 Attribution metadata is persisted beside the transaction mirror. Current review
 exceptions are unique by connector and transaction, with idempotent manual

@@ -485,6 +485,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
           engineVersion: '2.0.0',
           policyVersion: 7,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+          householdCurrency: 'USD',
         });
       }
       expect(new Headers(init?.headers).get('authorization'))

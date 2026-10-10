@@ -50,6 +50,17 @@ vi.mock('@/lib/notifications/dispatcher-wake', () => ({
   wakeNotificationDeliveryDispatcher: mocks.wake,
 }));
 
+vi.mock('@/lib/connectors/monarch-money/config', () => ({
+  getPersistedFinanceConnectorConfigById: async () => ({
+    credentials: { serviceToken: 'test-service-token' },
+    settings: {},
+  }),
+}));
+
+vi.mock('@/lib/connectors/monarch-money/attribution-client', () => ({
+  resolveTyrionHouseholdCurrency: async () => 'USD',
+}));
+
 describe('finance notification dispatcher support boundary', () => {
   beforeEach(() => {
     mocks.dispatcherSupported = false;

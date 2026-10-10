@@ -176,6 +176,13 @@
       "when": 1791590400000,
       "tag": "0024_finance_transaction_business_context",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791591600000,
+      "tag": "0025_remove_duplicate_tyrion_currency",
+      "breakpoints": true
     }
   ]
 }

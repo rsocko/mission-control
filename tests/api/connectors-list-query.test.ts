@@ -163,7 +163,6 @@ describe('GET /api/connectors list queries', () => {
     });
     expect(created.settings).toEqual({
       bridgeUrl: 'http://tyrion-monarch-bridge:8100',
-      householdCurrency: 'USD',
       maxRetries: 2,
     });
 
@@ -187,7 +186,6 @@ describe('GET /api/connectors list queries', () => {
     expect(updated.credentials).toEqual(created.credentials);
     expect(updated.settings).toEqual({
       bridgeUrl: 'http://custom-tyrion-bridge:8100',
-      householdCurrency: 'USD',
       maxRetries: 3,
     });
 
@@ -202,7 +200,6 @@ describe('GET /api/connectors list queries', () => {
         hasCredentials: true,
         settings: {
           bridgeUrl: 'http://custom-tyrion-bridge:8100',
-          householdCurrency: 'USD',
           maxRetries: 3,
         },
       }),

@@ -159,6 +159,7 @@ function loadAttributionAccountSignals(
   handle: SqliteDatabase,
   connectorId: string,
   decisionAt: Date,
+  currency: string,
 ): FinanceAttentionSignal[] {
   const connector = handle.prepare(`
     SELECT settings FROM connector_configs
@@ -168,7 +169,6 @@ function loadAttributionAccountSignals(
   const settings = typeof connector.settings === 'string'
     ? JSON.parse(connector.settings) as Record<string, unknown>
     : connector.settings;
-  const currency = String(settings.householdCurrency ?? 'USD');
   const policy = parseAttributionAttentionPolicy(settings, currency);
   const rows = handle.prepare(`
     SELECT accounts.upstream_account_id AS accountId,
@@ -681,6 +681,7 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           handles.sqlite,
           input.connectorId,
           decisionAt,
+          input.currency ?? 'USD',
         );
         result.evaluated += accountSignals.length;
         signals.push(...accountSignals);

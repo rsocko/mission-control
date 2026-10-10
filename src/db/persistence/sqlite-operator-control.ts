@@ -5,7 +5,6 @@ import { sqlite } from '@/db';
 import logger from '@/lib/logger';
 import type { FinanceActorType } from '@/lib/connectors/monarch-money/finance-request';
 import {
-  getFinanceConnectorConfigurationState,
   isFinanceConnectorType,
 } from '@/lib/connectors/monarch-money/config';
 import { getPersistedFinanceManagerServiceToken } from '@/lib/connectors/monarch-money/client';
@@ -24,6 +23,7 @@ import {
   normalizeSyncOperatorIdempotencyKey,
   SyncOperatorError,
   type SyncOperatorErrorCode,
+  type FinanceSyncControlStatus,
 } from '@/lib/sync/operator-control';
 
 interface ConnectorRow {
@@ -123,9 +123,18 @@ function metadataResult(job: SyncJob | null): {
   };
 }
 
-export function getFinanceSyncControlStatus(connectorId: string) {
+export function getFinanceSyncConnectorConfig(connectorId: string) {
   const connector = connectorRow(connectorId);
-  const settings = parseRecord(connector.settings);
+  return {
+    credentials: parseRecord(connector.credentials) as Record<string, string>,
+    settings: parseRecord(connector.settings),
+  };
+}
+
+export function getFinanceSyncControlStatus(
+  connectorId: string,
+): FinanceSyncControlStatus {
+  const connector = connectorRow(connectorId);
   const credentials = parseRecord(connector.credentials) as Record<string, string>;
   const control = sqlite.prepare(`
     SELECT scheduler_state AS schedulerState, quarantine_id AS quarantineId,
@@ -161,7 +170,6 @@ export function getFinanceSyncControlStatus(connectorId: string) {
   const deliveryEnabled = cutover?.deliveryEnabled === 1;
   const queued = jobs.queued ?? 0;
   const running = jobs.running ?? 0;
-  const configurationState = getFinanceConnectorConfigurationState(settings);
   const tokenConfigured = Boolean(
     getPersistedFinanceManagerServiceToken({ credentials })
       || process.env.FINANCE_MANAGER_API_TOKEN?.trim(),
@@ -169,7 +177,6 @@ export function getFinanceSyncControlStatus(connectorId: string) {
   const blockers: SyncOperatorErrorCode[] = [];
   if (control?.schedulerState !== 'quarantined') blockers.push('sync_quarantine_required');
   if (queued + running > 0) blockers.push('sync_job_active');
-  if (configurationState.status !== 'configured') blockers.push('household_currency_unavailable');
   if (!tokenConfigured) blockers.push('finance_service_token_unavailable');
   if (!isFinanceInsightShadowIngestEnabled()) {
     blockers.push('finance_insight_shadow_ingest_disabled');
@@ -184,7 +191,12 @@ export function getFinanceSyncControlStatus(connectorId: string) {
     connector: {
       id: connector.id,
       enabled: connector.enabled === 1,
-      configurationState,
+      configurationState: {
+        status: 'unchecked',
+        source: 'tyrion',
+        householdCurrency: null,
+        code: null,
+      },
     },
     scheduler: {
       state: control?.schedulerState ?? 'scheduled',

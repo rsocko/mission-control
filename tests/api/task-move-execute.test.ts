@@ -1500,6 +1500,50 @@ describe('POST /api/tasks/move/execute', () => {
     expect(mockTransferTask).toHaveBeenCalledWith('acme/repo-a:10', 'acme/repo-b');
   });
 
+  it('returns the GitHub reason when native transfer is rejected', async () => {
+    const { GitHubIssueTransferError } = await import(
+      '@/lib/connectors/github-issues/transfer-error'
+    );
+    mockTransferTask.mockRejectedValueOnce(new GitHubIssueTransferError(
+      'Old issue cannot be transferred from private repository to public repository',
+    ));
+    selectResults.push([{
+      id: 'task-1', title: 'GH Issue', description: 'body', connectorType: 'github-issues',
+      connectorInstanceId: 'inst-1', sourceListId: 'acme/repo-a', sourceListName: 'acme/repo-a',
+      status: 'todo', priority: null, dueDate: null, assignee: null,
+      sourceId: 'acme/repo-a:10', metadata: null,
+    }]);
+    selectResults.push([{
+      id: 'inst-1', type: 'github-issues', name: 'GitHub',
+      capabilities: { read: true, write: true },
+    }]);
+    selectResults.push([{ name: 'acme/repo-b', sourceId: 'acme/repo-b' }]);
+    selectResults.push([]);
+    selectResults.push([]);
+    selectResults.push([]);
+
+    const { POST } = await import('@/app/api/tasks/move/execute/route');
+    const res = await POST(new Request(`${BASE}/api/tasks/move/execute`, {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        targetConnectorInstanceId: 'inst-1',
+        targetSourceListId: 'acme/repo-b',
+        sourceAction: 'move',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const data = await res.json();
+
+    expect(res.status).toBe(422);
+    expect(data).toMatchObject({
+      code: 'GITHUB_NATIVE_TRANSFER_REJECTED',
+      error: 'GitHub could not transfer this issue: Old issue cannot be transferred from private repository to public repository',
+    });
+    expect(moveMaterialize).not.toHaveBeenCalled();
+    expect(mockCompleteTask).not.toHaveBeenCalled();
+  });
+
   it('refreshes only the selected GitHub issue before native transfer', async () => {
     mockCanTransferTask.mockReturnValueOnce(false).mockReturnValueOnce(true);
     mockConnectorRefreshSupported = true;

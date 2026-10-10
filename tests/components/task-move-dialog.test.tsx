@@ -167,6 +167,42 @@ describe('TaskMoveDialog errors', () => {
     )).toBeInTheDocument();
   });
 
+  it('shows a safe GitHub transfer rejection reason', async () => {
+    mockExecuteTaskMove.mockRejectedValueOnce(new ApiRequestError(
+      'GitHub could not transfer this issue: Old issue cannot be transferred from private repository to public repository',
+      422,
+      'GITHUB_NATIVE_TRANSFER_REJECTED',
+    ));
+
+    render(
+      <TaskMoveDialog
+        taskId="task-1"
+        taskTitle="Private task title"
+        sourceConnectorType="local"
+        writableConnectors={[{
+          id: 'inst-2',
+          type: 'microsoft-todo',
+          name: 'Microsoft To Do',
+        }]}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Microsoft To Do/i }));
+    await screen.findByRole('button', { name: 'Tasks' });
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    await waitFor(() => expect(mockPreviewTaskMove).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: /Review field mapping/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Continue/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Move Task/i }));
+
+    expect(await screen.findByText(
+      /GitHub could not transfer this issue: Old issue cannot be transferred from private repository to public repository/i,
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/Move failed\. Please try again\./i)).not.toBeInTheDocument();
+  });
+
   it('normalizes a legacy Document Intelligence instance name to OWL', () => {
     render(
       <TaskMoveDialog

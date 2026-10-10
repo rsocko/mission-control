@@ -8,6 +8,7 @@ import {
   previewTaskMove,
   executeTaskMove,
   ApiRequestError,
+  getSafeTaskMoveErrorMessage,
   type MovePreviewResponse,
   type MoveFieldMapping,
 } from '@/lib/api/tasks';
@@ -359,10 +360,11 @@ export function TaskMoveDialog({
       onSuccess(result.newTaskId, sourceAction);
       onClose();
     } catch (err) {
+      const safeApiMessage = getSafeTaskMoveErrorMessage(err);
       setExecuteError({
         message: err instanceof ApiRequestError && err.code === 'SAME_SOURCE_DESTINATION'
           ? 'This task is already in that destination. Choose a different source.'
-          : 'Move failed. Please try again.',
+          : safeApiMessage ?? 'Move failed. Please try again.',
         traceId: err instanceof ApiRequestError ? err.traceId : undefined,
       });
       setExecuting(false);

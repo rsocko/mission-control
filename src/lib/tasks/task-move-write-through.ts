@@ -19,6 +19,7 @@ import {
   GitHubUnknownWriteOutcomeError,
 } from '@/lib/external-identities/github-write-fence';
 import { refreshGitHubIssueMetadata } from '@/lib/connectors/github-issues/issue-transformer';
+import { GitHubIssueTransferError } from '@/lib/connectors/github-issues/transfer-error';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
@@ -89,6 +90,16 @@ class TaskMoveNativeTransferUnavailableError extends Error {
   constructor(readonly cause?: unknown) {
     super('GitHub native transfer could not be prepared');
     this.name = 'TaskMoveNativeTransferUnavailableError';
+  }
+}
+
+class TaskMoveNativeTransferRejectedError extends Error {
+  constructor(
+    readonly reason: string,
+    readonly cause: GitHubIssueTransferError,
+  ) {
+    super('GitHub rejected the issue transfer');
+    this.name = 'TaskMoveNativeTransferRejectedError';
   }
 }
 
@@ -633,6 +644,11 @@ export async function executeWriteThroughTaskMove(
         connector: sourceConnector,
         targetSourceListId: targetListRow?.id,
         write: () => sourceConnector.transferTask!(srcTask.sourceId, targetSourceListId),
+      }).catch((error: unknown) => {
+        if (error instanceof GitHubIssueTransferError) {
+          throw new TaskMoveNativeTransferRejectedError(error.reason, error);
+        }
+        throw error;
       });
       if (transferred.identityVerified !== true) {
         throw new Error('Native GitHub transfer did not verify stable issue identity');
@@ -1307,6 +1323,19 @@ export async function executeWriteThroughTaskMove(
           409,
         ),
         'native_transfer_unavailable',
+        error.cause,
+      );
+    }
+    if (error instanceof TaskMoveNativeTransferRejectedError && !compensationError) {
+      return failureResponse(
+        serviceResult(
+          {
+            error: `GitHub could not transfer this issue: ${error.reason}`,
+            code: 'GITHUB_NATIVE_TRANSFER_REJECTED',
+          },
+          422,
+        ),
+        'native_transfer_rejected',
         error.cause,
       );
     }

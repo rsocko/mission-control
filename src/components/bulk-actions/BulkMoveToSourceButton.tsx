@@ -16,6 +16,7 @@ import Image from 'next/image';
 import { toast } from '@/lib/toast';
 import {
   executeTaskMove,
+  getSafeTaskMoveErrorMessage,
   previewTaskMove,
   type MoveFieldMapping,
   type MovePreviewResponse,
@@ -235,7 +236,7 @@ export function BulkMoveToSourceButton({ selectedTaskIds, onComplete }: BulkMove
     const total = selectedTaskIds.length;
     setProgress({ done: 0, total });
 
-    const failed: string[] = [];
+    const failureMessages: Array<string | null> = [];
     for (let index = 0; index < selectedTaskIds.length; index++) {
       const taskId = selectedTaskIds[index];
       const preview = previews.find((item) => item.task.id === taskId);
@@ -248,20 +249,26 @@ export function BulkMoveToSourceButton({ selectedTaskIds, onComplete }: BulkMove
           subtaskStrategy: preview?.subtasks?.strategy ?? 'move-as-subtasks',
           addCrossReference: true,
         });
-      } catch {
-        failed.push(taskId);
+      } catch (error) {
+        failureMessages.push(getSafeTaskMoveErrorMessage(error));
       }
       setProgress({ done: index + 1, total });
     }
 
     setExecuting(false);
     setDialogOpen(false);
-    if (failed.length === 0) {
+    const safeReasons = [...new Set(
+      failureMessages.filter((message): message is string => !!message),
+    )];
+    const sharedReason = safeReasons.length === 1 ? safeReasons[0] : null;
+    if (failureMessages.length === 0) {
       toast.success(`Moved ${total} task${total > 1 ? 's' : ''} to ${selectedConnector.name}`);
-    } else if (failed.length === total) {
-      toast.error(`All ${total} moves failed`);
+    } else if (failureMessages.length === total) {
+      toast.error(sharedReason ?? `All ${total} moves failed`);
     } else {
-      toast.warning(`${total - failed.length} moved, ${failed.length} failed`);
+      toast.warning(
+        `${total - failureMessages.length} moved, ${failureMessages.length} failed${sharedReason ? `: ${sharedReason}` : ''}`,
+      );
     }
     onComplete();
   }

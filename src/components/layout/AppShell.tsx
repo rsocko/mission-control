@@ -288,6 +288,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setShowHealthTooltip={setShowHealthTooltip}
       syncProgress={syncContextValue.progress}
       syncProgresses={syncContextValue.activeProgresses}
+      queuedSyncConnectorIds={syncContextValue.queuedConnectorIds}
       onSyncConnector={syncContextValue.triggerSync}
     >
       {children}
@@ -309,6 +310,7 @@ function AppShellInner({
   setShowHealthTooltip,
   syncProgress,
   syncProgresses,
+  queuedSyncConnectorIds,
   onSyncConnector,
   children,
 }: {
@@ -319,6 +321,7 @@ function AppShellInner({
   setShowHealthTooltip: (v: boolean) => void;
   syncProgress: import('@/lib/hooks/useSyncStream').SyncProgress;
   syncProgresses: import('@/lib/hooks/useSyncStream').SyncProgress[];
+  queuedSyncConnectorIds: string[];
   onSyncConnector: (connectorId: string) => void;
   children: React.ReactNode;
 }) {
@@ -365,6 +368,7 @@ function AppShellInner({
         syncStatus={health?.connectors ?? []}
         syncProgress={syncProgress}
         syncProgresses={syncProgresses}
+        queuedSyncConnectorIds={queuedSyncConnectorIds}
         onSyncConnector={onSyncConnector}
         showSyncBanner={showSyncBanner}
         onShowSyncBannerChange={setShowSyncBanner}

@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 
+vi.unmock('drizzle-orm');
+
 const poison = vi.hoisted(() => ({ triggered: false }));
 
 vi.mock('@/db', () => {

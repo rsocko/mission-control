@@ -176,6 +176,36 @@ export class FinanceManagerConnector implements IConnector {
           'Finance insight shadow ingestion failed',
         );
       }
+      try {
+        const { runFinanceAutomation } = await import(
+          '@/lib/finance-insights/automation-consumer'
+        );
+        const automation = await runFinanceAutomation({
+          config,
+          syncResult: result,
+          publicationId: 'publicationId' in publication ? publication.publicationId : null,
+          signal: context.signal,
+        });
+        if (automation.jobsRun > 0) {
+          logger.info(
+            {
+              jobsRun: automation.jobsRun,
+              deliveriesApplied: automation.deliveriesApplied,
+            },
+            'Finance automation delivery completed',
+          );
+        }
+      } catch (error) {
+        if (context.signal?.aborted) throw error;
+        logger.warn(
+          {
+            code: error instanceof Error && 'code' in error
+              ? String((error as { code: unknown }).code)
+              : 'finance_automation_failed',
+          },
+          'Finance automation delivery failed and will retry on the next schedule',
+        );
+      }
       await pruneFinanceInsightOccurrenceCache();
       const { reconcileFinanceAttention } = await import('@/lib/finance/attention-routing');
       const attention = await reconcileFinanceAttention({ connectorId: config.id });
@@ -283,8 +313,8 @@ export class FinanceManagerConnector implements IConnector {
   }
 
   async fetchNotifications(): Promise<InboundNotification[]> {
-    // Tyrion's finance automation outbox has no protected cross-process transport yet.
-    // Do not infer its pending deliveries or connector-health recovery from projection success.
+    // Durable Tyrion automation deliveries are consumed during scheduled domain sync.
+    // Returning them here would bypass exact-version acknowledgement and atomic routing.
     return [];
   }
 

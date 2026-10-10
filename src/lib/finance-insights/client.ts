@@ -34,11 +34,22 @@ import {
   type SourceGenerationCreateRequestV1,
   type SourceGenerationResultV1,
 } from './contract';
+import {
+  financeAutomationDeliveryAckRequestSchema,
+  financeAutomationDeliveryAckResultSchema,
+  financeAutomationJobRequestTransportSchema,
+  financeAutomationJobResultSchema,
+  type FinanceAutomationDeliveryAckResult,
+  type FinanceAutomationJobResult,
+} from './automation-contract';
 
 const PRIVATE_TYRION_FINANCE_INSIGHT_ORIGIN = 'http://tyrion-operations-ui:3000';
 const SOURCE_GENERATIONS_PATH = '/api/internal/v1/finance/insights/source-generations';
 const OCCURRENCES_PATH = '/api/internal/v1/finance/insights/occurrences';
 const EVALUATIONS_PATH = '/api/internal/v1/finance/insights/evaluations';
+const AUTOMATION_JOBS_PATH = '/api/internal/v1/finance/insights/automation/jobs';
+const AUTOMATION_ACK_PATH =
+  '/api/internal/v1/finance/insights/automation/deliveries/ack';
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RETRIES = 2;
@@ -47,6 +58,7 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_BACKOFF_DELAY_MS = 10_000;
 const MAX_RETRY_AFTER_MS = 300_000;
 const MAX_OCCURRENCE_SNAPSHOT_ITEMS = 500;
+const MAX_AUTOMATION_REQUEST_BYTES = 16 * 1024 * 1024;
 
 export interface TyrionFinanceInsightConfig {
   serviceToken: string;
@@ -277,6 +289,41 @@ export class TyrionFinanceInsightClient {
     );
   }
 
+  runAutomationJob(
+    request: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<FinanceAutomationJobResult> {
+    return this.request(
+      AUTOMATION_JOBS_PATH,
+      'POST',
+      request,
+      financeAutomationJobRequestTransportSchema,
+      financeAutomationJobResultSchema,
+      200,
+      signal,
+      MAX_AUTOMATION_REQUEST_BYTES,
+    );
+  }
+
+  acknowledgeAutomationDeliveries(
+    request: {
+      contractVersion: '1.0';
+      acknowledgedAt: string;
+      deliveries: Array<{ deliveryKey: string; expectedVersion: number }>;
+    },
+    signal?: AbortSignal,
+  ): Promise<FinanceAutomationDeliveryAckResult> {
+    return this.request(
+      AUTOMATION_ACK_PATH,
+      'POST',
+      request,
+      financeAutomationDeliveryAckRequestSchema,
+      financeAutomationDeliveryAckResultSchema,
+      200,
+      signal,
+    );
+  }
+
   async listOccurrences(
     query: OccurrenceListQueryV1,
     signal?: AbortSignal,
@@ -454,6 +501,7 @@ export class TyrionFinanceInsightClient {
     responseSchema: JsonSchema<Result>,
     expectedStatus: number,
     signal?: AbortSignal,
+    maxRequestBytes = FINANCE_INSIGHT_MAX_REQUEST_BYTES,
   ): Promise<Result> {
     if (!this.config.shadowIngestEnabled) {
       throw new TyrionFinanceInsightError(
@@ -475,7 +523,7 @@ export class TyrionFinanceInsightClient {
         );
       }
       body = JSON.stringify(parsedRequest);
-      if (new TextEncoder().encode(body).byteLength > FINANCE_INSIGHT_MAX_REQUEST_BYTES) {
+      if (new TextEncoder().encode(body).byteLength > maxRequestBytes) {
         throw new TyrionFinanceInsightError(
           'payload_too_large',
           'Tyrion finance insight request exceeds the size limit',

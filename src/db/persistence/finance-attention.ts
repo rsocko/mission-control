@@ -51,8 +51,11 @@ export const FINANCE_ATTENTION_MAX_REPAIR_SCOPE = 10_000;
 
 export type FinanceAttentionSignalKind =
   | 'attributionReviewRequired'
-  | 'writeBackFailed';
+  | 'writeBackFailed'
+  | 'duplicateTransactionCandidate'
+  | 'connectorDegraded';
 export type FinanceAttentionRoute =
+  | 'informationalNotification'
   | 'actionableNotification'
   | 'task'
   | 'statusOnly'
@@ -68,6 +71,9 @@ export interface FinanceAttentionSignal {
   sourceAsOf: string;
   activityKey: string;
   actionable: boolean;
+  attention?: 'informational' | 'actionable';
+  freshness?: 'fresh' | 'stale' | 'unavailable';
+  details?: Readonly<Record<string, unknown>>;
   settlementReason: string | null;
 }
 
@@ -170,7 +176,6 @@ export function selectFinanceAttentionRoute(
   decisionAt: Date,
 ): FinanceAttentionRoute {
   if (signal.sourceLifecycle !== 'open') return 'settled';
-  if (!signal.actionable) return 'statusOnly';
 
   const sourceAsOf = financeAttentionValidTimestamp(signal.sourceAsOf);
   const conditionSince = financeAttentionValidTimestamp(signal.conditionSince);
@@ -182,11 +187,28 @@ export function selectFinanceAttentionRoute(
   ) {
     return 'stale';
   }
+  if (signal.freshness && signal.freshness !== 'fresh') return 'stale';
   const maximumAge = signal.signalKind === 'attributionReviewRequired'
     ? ATTRIBUTION_FRESHNESS_MS
-    : WRITE_BACK_FRESHNESS_MS;
+    : signal.signalKind === 'duplicateTransactionCandidate'
+      ? 24 * 60 * 60 * 1_000
+      : signal.signalKind === 'connectorDegraded'
+        ? 15 * 60 * 1_000
+        : WRITE_BACK_FRESHNESS_MS;
   if (decisionAt.getTime() - sourceAsOf > maximumAge) return 'stale';
+  if (signal.attention === 'informational') return 'informationalNotification';
+  if (!signal.actionable) return 'statusOnly';
   if (signal.signalKind === 'writeBackFailed') return 'task';
+  if (signal.signalKind === 'duplicateTransactionCandidate') {
+    return decisionAt.getTime() - conditionSince >= 24 * 60 * 60 * 1_000
+      ? 'task'
+      : 'actionableNotification';
+  }
+  if (signal.signalKind === 'connectorDegraded') {
+    return decisionAt.getTime() - conditionSince >= 4 * 60 * 60 * 1_000
+      ? 'task'
+      : 'actionableNotification';
+  }
   return decisionAt.getTime() - conditionSince >= ATTRIBUTION_ESCALATION_MS
     ? 'task'
     : 'actionableNotification';
@@ -280,6 +302,7 @@ export function financeAttentionMetadata(
       route,
       freshness: route === 'stale' ? 'stale' : 'fresh',
       settlementReason: signal.settlementReason,
+      details: signal.details ?? {},
     },
   };
 }
@@ -361,7 +384,13 @@ export function financeAttentionMyDayCandidateRank(
   const signalKind = typeof attention.signalKind === 'string' ? attention.signalKind : '';
   const dueRank = taskDueRank(task.dueDate, today);
   const policyRank = dueRank
-    ?? (signalKind === 'writeBackFailed' ? 2 : task.priority === 'critical' ? 3 : null);
+    ?? (
+      signalKind === 'writeBackFailed'
+      || signalKind === 'duplicateTransactionCandidate'
+      || signalKind === 'connectorDegraded'
+        ? 2
+        : task.priority === 'critical' ? 3 : null
+    );
   if (policyRank === null) return null;
   const conditionSince = typeof attention.conditionSince === 'string'
     ? attention.conditionSince
@@ -408,16 +437,50 @@ export function financeAttentionNotificationInput(
   | 'metadata'
 >> & { level: NotificationLevel } {
   const sourceId = financeAttentionSourceId(signal);
+  const presentation = signal.signalKind === 'duplicateTransactionCandidate'
+    ? {
+        title: 'Review a possible duplicate transaction',
+        body: signal.attention === 'informational'
+          ? 'Two nearby transactions may be related. Review them in Finance.'
+          : 'Two transactions appear to be duplicates and need review.',
+        level: signal.attention === 'informational' ? 'fyi' as const : 'action_needed' as const,
+        templateKey: 'finance-duplicate-transaction',
+        groupKey: `finance-duplicates:${signal.connectorId}`,
+        relatedEntityType: 'finance-duplicate-candidate',
+        navigationTarget: '/finance/review',
+        notificationType: 'duplicateTransactionCandidate',
+      }
+    : signal.signalKind === 'connectorDegraded'
+      ? {
+          title: 'Monarch connection needs attention',
+          body: 'Finance data may be stale. Review the Tyrion connector health and sync status.',
+          level: signal.attention === 'informational' ? 'heads_up' as const : 'action_needed' as const,
+          templateKey: 'finance-connector-health',
+          groupKey: `finance-connector-health:${signal.connectorId}`,
+          relatedEntityType: 'finance-connector-health',
+          navigationTarget: '/settings/connectors',
+          notificationType: 'connectorDegraded',
+        }
+      : {
+          title: 'Review a finance attribution exception',
+          body: 'An attribution decision needs review in Finance.',
+          level: 'heads_up' as const,
+          templateKey: 'finance-attribution-review',
+          groupKey: `finance-attribution:${signal.connectorId}`,
+          relatedEntityType: 'finance-attribution-exception',
+          navigationTarget: '/finance/review',
+          notificationType: 'financeAttributionReview',
+        };
   return {
     id: financeAttentionNotificationId(signal),
     sourceId,
     connectorType: 'finance-manager',
     connectorInstanceId: signal.connectorId,
-    title: 'Review a finance attribution exception',
-    body: 'An attribution decision needs review in Finance.',
-    level: 'heads_up',
+    title: presentation.title,
+    body: presentation.body,
+    level: presentation.level,
     category: 'finance',
-    templateKey: 'finance-attribution-review',
+    templateKey: presentation.templateKey,
     readState: 'unread',
     sourceState: 'active',
     sourceActivityAt: signal.sourceAsOf,
@@ -425,16 +488,22 @@ export function financeAttentionNotificationInput(
     reopenPolicy: 'handled_and_dismissed',
     receivedAt: signal.conditionSince,
     sortAt: signal.sourceAsOf,
-    groupKey: `finance-attribution:${signal.connectorId}`,
+    groupKey: presentation.groupKey,
     dedupeKey: sourceId,
-    relatedEntityType: 'finance-attribution-exception',
+    relatedEntityType: presentation.relatedEntityType,
     relatedEntityId: signal.sourceRef,
-    navigationTarget: '/finance/review',
-    isActionable: true,
+    navigationTarget: presentation.navigationTarget,
+    isActionable: signal.attention !== 'informational',
     occurrenceKey: signal.activityKey,
     metadata: {
-      notificationType: 'financeAttributionReview',
-      ...financeAttentionMetadata(signal, 'actionableNotification', decisionAt),
+      notificationType: presentation.notificationType,
+      ...financeAttentionMetadata(
+        signal,
+        signal.attention === 'informational'
+          ? 'informationalNotification'
+          : 'actionableNotification',
+        decisionAt,
+      ),
     },
   };
 }
@@ -513,6 +582,7 @@ export interface FinanceAttentionRoutingPersistence {
   reconcile(input: {
     connectorId: string;
     decisionAt: Date;
+    sourceSignals?: readonly FinanceAttentionSignal[];
   }): Promise<FinanceAttentionRoutingOutcome>;
 }
 

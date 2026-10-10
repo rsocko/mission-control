@@ -2,7 +2,7 @@
 title: "Tyrion Recovery and Finance Insight Readiness"
 status: accepted
 created: 2026-08-22
-last_reviewed: 2026-08-22
+last_reviewed: 2026-10-09
 category: operations
 related:
   - "[Finance Attention Projection Repair](./finance-attention-repair.md)"
@@ -76,6 +76,39 @@ Keep `TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED=true`, while leaving:
 - `TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED` off
 - `TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED` off
 - Finance Insight cutover delivery off
+
+Keep `TYRION_FINANCE_AUTOMATION_ENABLED=false` during readiness. The automation
+consumer shares the protected Finance Insights bearer boundary and requires
+Tyrion's `TYRION_FINANCE_AUTOMATION_WRITE_ENABLED=true`. Enable both sides only
+after the Finance source generation is complete and current. The optional
+`TYRION_FINANCE_AUTOMATION_INTERVAL_MINUTES` controls the stable schedule
+bucket and defaults to 15 minutes.
+
+When enabled, each scheduled Finance domain sync sends normalized persisted
+facts to `duplicateTransactions` and a bounded Bridge/sync observation to
+`connectorHealth`. Mission Control applies Tyrion's embedded delivery snapshot
+through the atomic Finance attention adapter before acknowledging the exact
+delivery key and version. A crash before acknowledgement is safe: Tyrion
+replays the delivery and Mission Control's stable source/activity identities
+make the local apply idempotent. A stale acknowledgement conflicts and retries;
+it never clears a newer outbox version.
+
+Duplicate candidates remain notifications until the approved 24-hour
+actionable threshold, then become one high-priority Finance task and ordinary
+My Day candidate. Informational adjacent-date candidates never become tasks.
+Connector-health attention becomes a task only after four hours. Fresh
+authoritative Tyrion settlement resolves the notification and completes or
+cancels related work; process restart, notification dismissal, and projection
+success alone never imply recovery. Navigation is limited to the fixed
+`/finance/review` and `/settings/connectors` routes, and metadata stores only
+bounded evidence plus opaque signal/source references.
+
+Operational logs contain only job and delivery counts or stable error codes.
+Do not log automation requests, merchant names, amounts, transaction
+references, delivery payloads, or Tyrion state paths. Rollback is to set
+`TYRION_FINANCE_AUTOMATION_ENABLED=false`; existing attention remains
+reconcilable when the gate is re-enabled, and Tyrion retains unacknowledged
+deliveries. There is no Mission Control schema migration for this consumer.
 
 Mission Control v2 sends `accountRef` as the stable Tyrion Bridge Account DTO
 `id` verbatim. It does not derive an `account-v1:` value from the connector

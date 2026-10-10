@@ -504,11 +504,19 @@ async function createOrUpdateTask(
     FINANCE_ATTENTION_TASK_CONNECTOR_INSTANCE_ID,
     signal.signalKind === 'writeBackFailed'
       ? 'Resolve a failed finance write-back'
-      : 'Review a finance attribution exception',
+      : signal.signalKind === 'duplicateTransactionCandidate'
+        ? 'Review a possible duplicate transaction'
+        : signal.signalKind === 'connectorDegraded'
+          ? 'Restore the Monarch connection'
+          : 'Review a finance attribution exception',
     signal.signalKind === 'writeBackFailed'
       ? 'A confirmed Finance change could not be verified. Review it in Finance.'
-      : 'An unresolved attribution decision requires review in Finance.',
-    signal.signalKind === 'writeBackFailed' ? 'high' : 'medium',
+      : signal.signalKind === 'duplicateTransactionCandidate'
+        ? 'A high-confidence duplicate candidate remains unresolved. Review it in Finance.'
+        : signal.signalKind === 'connectorDegraded'
+          ? 'The Tyrion connector remains unavailable or stale. Restore and verify a healthy sync.'
+          : 'An unresolved attribution decision requires review in Finance.',
+    signal.signalKind === 'attributionReviewRequired' ? 'medium' : 'high',
     now,
     now,
     now,
@@ -754,7 +762,8 @@ export function createPostgresFinanceAttentionRoutingPersistence(
           stalePreserved: 0,
           statusOnly: 0,
         };
-        const signals: FinanceAttentionSignal[] = [];
+        const signals: FinanceAttentionSignal[] = [...(input.sourceSignals ?? [])];
+        result.evaluated += signals.length;
         const since = new Date(
           decisionAt.getTime() - FINANCE_ATTENTION_SOURCE_LOOKBACK_MS,
         ).toISOString();
@@ -816,7 +825,11 @@ export function createPostgresFinanceAttentionRoutingPersistence(
             result.statusOnly++;
             continue;
           }
-          if (decidedRoute === 'actionableNotification' && !task) {
+          if (
+            (decidedRoute === 'actionableNotification'
+              || decidedRoute === 'informationalNotification')
+            && !task
+          ) {
             const created = await createPendingNotification(client, signal, decisionAt);
             hasPendingDelivery ||= created.pendingDelivery;
             if (created.created) {

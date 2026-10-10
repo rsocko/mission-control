@@ -11,7 +11,7 @@ import {
   SelectLabel,
   SelectSeparator,
 } from '@/components/ui/select';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import {
   groupProjectTargets,

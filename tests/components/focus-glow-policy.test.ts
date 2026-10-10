@@ -41,7 +41,6 @@ const compositeControlSources = [
   ['src/components/task-detail/TaskMoveDialog.tsx', 1],
   ['src/components/task-detail/TaskTagsSection.tsx', 1],
   ['src/components/task-list/TaskContextMenu.tsx', 1],
-  ['src/components/ui/icon-picker/IconPicker.tsx', 1],
   ['src/components/ui/SearchInput.tsx', 1],
 ] as const;
 

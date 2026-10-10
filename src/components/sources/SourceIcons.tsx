@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { Globe, List } from 'lucide-react';
-import { IconRenderer } from '@/components/ui/icon-picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { canonicalTaskSourceType } from '@/lib/tasks/source-hierarchy';
 import { cn } from '@/lib/utils';

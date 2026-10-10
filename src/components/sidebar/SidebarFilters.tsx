@@ -4,7 +4,7 @@ import React from 'react';
 import Image from 'next/image';
 import { Bot, Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Filter, Pencil, Plus, Repeat, Trash2 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
-import { IconRenderer } from '@/components/ui/icon-picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { ConnectorIcon, SourceListIcon } from '@/components/sources/SourceIcons';
 import {
   Select,

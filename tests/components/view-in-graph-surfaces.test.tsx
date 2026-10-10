@@ -148,12 +148,14 @@ describe('View in Graph collection surfaces', () => {
       />,
     );
 
-    expect(screen.getByRole('img', { name: 'lucide:pin' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'lucide:list-filter' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'lucide icon: pin' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'lucide icon: list-filter' })).toBeInTheDocument();
     expect(screen.queryByText('pin')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save current filters as a quick filter' }));
     expect(startNewQuickFilter).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: 'lucide:list-filter Needs triage' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'lucide icon: list-filter Needs triage' }),
+    );
     expect(applyQuickFilter).toHaveBeenCalledWith(expect.objectContaining({ id: 'triage' }));
     fireEvent.click(screen.getByRole('button', { name: 'Edit Planning' }));
     expect(editView).toHaveBeenCalledWith(expect.objectContaining({ id: 'planning' }));

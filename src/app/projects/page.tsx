@@ -26,7 +26,7 @@ import {
   type PortfolioSummary,
 } from '@/components/projects/ProjectsPortfolioDashboard';
 import { useProjectsSidebar } from '@/components/projects/ProjectsSidebarContext';
-import { IconRenderer } from '@/components/ui/icon-picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { fadeSlideUp } from '@/lib/motion';
 

@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import { Palette, Trash2, X, EyeOff, Plus, Tag, Type, List, Plug } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { IconPickerButton } from '@/components/ui/icon-picker';
+import { IconPickerButton } from '@rsocko/icon-picker/picker';
 import { modalContent, modalOverlay } from '@/lib/motion';
 import { COLOR_PRESETS } from '@/lib/constants/colors';
 import { DatePicker } from '@/components/ui/date-picker';

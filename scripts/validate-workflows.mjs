@@ -248,7 +248,7 @@ for (const file of workflowFiles) {
       'docs/*|README.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|DESIGN.md|PRODUCT.md|SECURITY.md|SUPPORT.md',
       '.github/agents/*|.github/hooks/impeccable.json|.github/skills/impeccable/*|.github/workflows/ci.yml|.impeccable/live/config.json|scripts/validate-impeccable.mjs|src/app/layout.tsx',
       'public/*|src/app/*.css|src/app/*/components/*|src/app/*/error.tsx|src/app/*/layout.tsx|src/app/*/loading.tsx|src/app/*/not-found.tsx|src/app/*/page.tsx|src/components/*|src/lib/hooks/*|tests/components/*|tests/lib/constants/connector-icons.test.ts',
-      '.gitattributes|vendor/generic-graph-workbench/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json',
+      '.gitattributes|vendor/generic-graph-workbench/*|vendor/icon-picker/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/icon-picker-vendor.mjs|scripts/icon-picker-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json',
       '.github/workflows/*|.impeccable/live/config.json|package.json|package-lock.json|scripts/validate-workflows.mjs',
       'echo "impeccable_changed=${impeccable_changed}" >> "$GITHUB_OUTPUT"',
       'echo "postgres_scope=${postgres_scope}" >> "$GITHUB_OUTPUT"',
@@ -297,8 +297,8 @@ for (const file of workflowFiles) {
       );
     }
     for (const [name, command] of [
-      ['Verify Generic Graph vendor snapshot', 'npm run vendor:verify'],
-      ['Test Generic Graph vendor tooling', 'npm run test:vendor'],
+      ['Verify committed vendor snapshots', 'npm run vendor:verify'],
+      ['Test vendor tooling', 'npm run test:vendor'],
     ]) {
       const step = lint.steps?.find((candidate) => candidate.name === name);
       assert.equal(step?.run, command, `${name} must run the repository-owned command`);

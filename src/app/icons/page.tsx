@@ -5,23 +5,25 @@ import { Search, X, Loader2, Check } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import emojilib from 'emojilib';
 import { cn } from '@/lib/utils/cn';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import {
   iconMaskCacheKey,
   loadIconifyMasks,
-} from '@/components/ui/icon-picker/iconify';
+} from './iconify';
 import {
   type IconSource,
   type ParsedIcon,
-  POPULAR_LUCIDE,
-  POPULAR_MDI,
-  POPULAR_PHOSPHOR,
-  POPULAR_DASHBOARD_ICONS,
-  POPULAR_SIMPLE_ICONS,
   serializeIconValue,
   getIconUrl,
   getSimpleIconNames,
-} from '@/components/ui/icon-picker/types';
+} from '@rsocko/icon-picker/core';
+import {
+  POPULAR_DASHBOARD_ICONS,
+  POPULAR_LUCIDE,
+  POPULAR_MDI,
+  POPULAR_PHOSPHOR,
+  POPULAR_SIMPLE_ICONS,
+} from './catalog';
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 

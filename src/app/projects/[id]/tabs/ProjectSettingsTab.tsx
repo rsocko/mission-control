@@ -21,7 +21,7 @@ import { toast } from '@/lib/toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { IconPickerButton } from '@/components/ui/icon-picker';
+import { IconPickerButton } from '@rsocko/icon-picker/picker';
 import { ContextAppearancePicker } from '@/components/context-theme/ContextAppearancePicker';
 import {
   Select,

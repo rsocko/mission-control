@@ -1,4 +1,4 @@
-import type { IconSource } from './types';
+import type { IconSource } from '@rsocko/icon-picker/core';
 
 interface IconifyIconSet {
   width?: number;
@@ -37,9 +37,9 @@ export async function loadIconifyMasks(
   if (missingNames.length > 0) {
     try {
       const params = new URLSearchParams({ icons: missingNames.join(',') });
-      const res = await fetch(`https://api.iconify.design/${source}.json?${params}`);
-      if (res.ok) {
-        const data: IconifyIconSet = await res.json();
+      const response = await fetch(`https://api.iconify.design/${source}.json?${params}`);
+      if (response.ok) {
+        const data: IconifyIconSet = await response.json();
         for (const name of missingNames) {
           const alias = data.aliases?.[name];
           const icon = data.icons[name] ?? (alias ? data.icons[alias.parent] : undefined);
@@ -58,7 +58,7 @@ export async function loadIconifyMasks(
         }
       }
     } catch {
-      // Callers fall back to direct Iconify rendering when the batch request fails.
+      // The explorer falls back to direct package rendering after provider failures.
     }
   }
 

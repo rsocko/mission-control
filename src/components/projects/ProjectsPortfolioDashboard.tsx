@@ -12,7 +12,7 @@ import {
   Layers,
   Search,
 } from 'lucide-react';
-import { IconRenderer } from '@/components/ui/icon-picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { SearchInput } from '@/components/ui/SearchInput';
 import {
   buildCategoryPortfolioRows,

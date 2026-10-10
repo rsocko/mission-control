@@ -121,7 +121,9 @@ vi.mock('@/lib/utils/synthetic-tags', () => ({
 }));
 
 vi.mock('@/types/dashboard', () => ({
-  CONNECTOR_ICONS: {},
+  CONNECTOR_ICONS: {
+    'finance-manager': '/icons/connectors/tyrion.svg',
+  },
   PRIORITY_COLORS: { high: 'text-red-400 border-red-800/30 bg-red-900/20', none: '' },
   PRIORITY_LABELS: { high: 'P1', none: '' },
   STATUS_COLORS: { 'in-progress': 'text-blue-400' },
@@ -211,6 +213,27 @@ describe('TaskRow', () => {
 
     expect(screen.getByText('Home Assistant (Natick)')).toHaveClass('min-w-0', 'truncate');
     expect(screen.getByText('Home Assistant (Natick)')).not.toHaveClass('max-w-[120px]');
+  });
+
+  it('labels a Mission Control-owned Finance task as Tyrion', () => {
+    render(
+      <TaskRow
+        task={{
+          ...baseTask,
+          connectorType: 'mission-control',
+          connectorInstanceId: 'mission-control',
+          sourceListId: 'tyrion-finance',
+          sourceListName: 'Tyrion',
+        }}
+        {...actionProps}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: 'Tyrion' })).toHaveAttribute(
+      'src',
+      '/icons/connectors/tyrion.svg',
+    );
+    expect(screen.getByText('Tyrion')).toBeInTheDocument();
   });
 
   describe('ProjectBadge', () => {

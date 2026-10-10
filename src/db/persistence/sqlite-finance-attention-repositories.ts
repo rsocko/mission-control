@@ -42,6 +42,8 @@ import {
   financeAttentionTaskId,
   FINANCE_ATTENTION_TASK_CONNECTOR_INSTANCE_ID,
   FINANCE_ATTENTION_TASK_CONNECTOR_TYPE,
+  FINANCE_ATTENTION_TASK_SOURCE_LABEL,
+  FINANCE_ATTENTION_TASK_SOURCE_LIST_ID,
   financeAttentionValidTimestamp,
   financeAttentionWriteBackSignal,
   FINANCE_MY_DAY_DAILY_CAP,
@@ -421,6 +423,8 @@ function createOrUpdateTask(
             localDisposition: 'active' as const,
           }
         : {}),
+      sourceListId: FINANCE_ATTENTION_TASK_SOURCE_LIST_ID,
+      sourceListName: FINANCE_ATTENTION_TASK_SOURCE_LABEL,
       lastSyncedAt: decisionAt.toISOString(),
       updatedAt: decisionAt.toISOString(),
       metadata,
@@ -458,8 +462,8 @@ function createOrUpdateTask(
     createdAt: decisionAt.toISOString(),
     updatedAt: decisionAt.toISOString(),
     lastSyncedAt: decisionAt.toISOString(),
-    sourceListId: 'local',
-    sourceListName: 'Local',
+    sourceListId: FINANCE_ATTENTION_TASK_SOURCE_LIST_ID,
+    sourceListName: FINANCE_ATTENTION_TASK_SOURCE_LABEL,
     metadata,
     syncStatus: 'synced',
   };

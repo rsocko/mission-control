@@ -58,12 +58,14 @@ import {
   triageItems,
   weeklyOneThing,
 } from '../schema';
+import { canonicalTaskSourceType } from '@/lib/tasks/source-hierarchy';
 import { taskTimeActivities } from '../schema/tasks';
 import type { PostgresDatabase, PostgresTransaction } from '../runtime';
 import {
   compileCanonicalTaskFilter,
   compileQuickFilterCondition,
   enabledGitHubConnectorCondition,
+  getCanonicalTaskSourceCondition,
   getTaskSourceVisibilityConditions,
   withCondition,
   type PostgresCanonicalTaskFilterInputs,
@@ -530,13 +532,18 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
   async getSourceCounts(spec: TaskFilterSpec): Promise<TaskSourceCounts> {
     const compiled = compileCanonicalTaskFilter(spec, await this.resolveInputs(spec));
     const rows = await this.db
-      .select({ connectorType: tasks.connectorType, count: sql<number>`count(*)` })
+      .select({
+        connectorType: tasks.connectorType,
+        sourceListId: tasks.sourceListId,
+        count: sql<number>`count(*)`,
+      })
       .from(tasks)
       .where(compiled.baseWhere)
-      .groupBy(tasks.connectorType);
+      .groupBy(tasks.connectorType, tasks.sourceListId);
 
     return rows.reduce<TaskSourceCounts>((accumulator, row) => {
-      accumulator[row.connectorType] = Number(row.count ?? 0);
+      const sourceType = canonicalTaskSourceType(row.connectorType, row.sourceListId);
+      accumulator[sourceType] = (accumulator[sourceType] ?? 0) + Number(row.count ?? 0);
       return accumulator;
     }, {});
   }
@@ -980,10 +987,8 @@ class PostgresTaskReadRepository implements TaskReadRepository {
           AND ${quickSortLog.triagedAt} > ${input.skipCutoff}
       )`,
     ];
-    if (input.sourceTypes.length === 1) {
-      conditions.push(eq(tasks.connectorType, input.sourceTypes[0]));
-    } else if (input.sourceTypes.length > 1) {
-      conditions.push(inArray(tasks.connectorType, [...input.sourceTypes]));
+    if (input.sourceTypes.length > 0) {
+      conditions.push(getCanonicalTaskSourceCondition(input.sourceTypes));
     }
     if (input.sourceListId) {
       conditions.push(eq(tasks.sourceListId, input.sourceListId));

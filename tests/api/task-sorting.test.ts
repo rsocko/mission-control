@@ -215,6 +215,39 @@ describe('GET /api/tasks — sortBy=createdAt support (PR #307)', () => {
       availableTags: [],
     });
   });
+
+  it('serializes Tyrion presentation without changing Mission Control ownership', async () => {
+    readTaskCollection.mockResolvedValue({
+      ...EMPTY_COLLECTION,
+      rows: [{
+        ...row('finance-task'),
+        sourceId: 'finance-attention:v1:signal',
+        connectorType: 'mission-control',
+        connectorInstanceId: 'mission-control',
+        sourceListId: 'tyrion-finance',
+        sourceListName: 'Tyrion',
+        metadata: { financeAttention: { signalKind: 'writeBackFailed' } },
+      }],
+      total: 1,
+      sourceCounts: { 'finance-manager': 1 },
+    });
+
+    const { GET } = await import('@/app/api/tasks/route');
+    const response = await GET(new Request(`${BASE}/api/tasks`));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      tasks: [{
+        id: 'finance-task',
+        connectorType: 'mission-control',
+        connectorInstanceId: 'mission-control',
+        sourceListId: 'tyrion-finance',
+        sourceListName: 'Tyrion',
+        taskSourceModel: 'mc-owned',
+      }],
+      sourceCounts: { 'finance-manager': 1 },
+    });
+  });
 });
 
 describe('GET /api/tasks — sort updates task list (PR #295)', () => {

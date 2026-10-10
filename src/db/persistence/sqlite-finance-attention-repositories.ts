@@ -440,13 +440,21 @@ function createOrUpdateTask(
     connectorInstanceId: FINANCE_ATTENTION_TASK_CONNECTOR_INSTANCE_ID,
     title: signal.signalKind === 'writeBackFailed'
       ? 'Resolve a failed finance write-back'
-      : 'Review a finance attribution exception',
+      : signal.signalKind === 'duplicateTransactionCandidate'
+        ? 'Review a possible duplicate transaction'
+        : signal.signalKind === 'connectorDegraded'
+          ? 'Restore the Monarch connection'
+          : 'Review a finance attribution exception',
     description: signal.signalKind === 'writeBackFailed'
       ? 'A confirmed Finance change could not be verified. Review it in Finance.'
-      : 'An unresolved attribution decision requires review in Finance.',
+      : signal.signalKind === 'duplicateTransactionCandidate'
+        ? 'A high-confidence duplicate candidate remains unresolved. Review it in Finance.'
+        : signal.signalKind === 'connectorDegraded'
+          ? 'The Tyrion connector remains unavailable or stale. Restore and verify a healthy sync.'
+          : 'An unresolved attribution decision requires review in Finance.',
     status: 'todo',
     localDisposition: 'active' as const,
-    priority: signal.signalKind === 'writeBackFailed' ? 'high' : 'medium',
+    priority: signal.signalKind === 'attributionReviewRequired' ? 'medium' : 'high',
     createdAt: decisionAt.toISOString(),
     updatedAt: decisionAt.toISOString(),
     lastSyncedAt: decisionAt.toISOString(),
@@ -633,12 +641,13 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           stalePreserved: 0,
           statusOnly: 0,
         };
-        const signals: FinanceAttentionSignal[] = [];
+        const signals: FinanceAttentionSignal[] = [...(input.sourceSignals ?? [])];
         const pendingNotifications: Array<{
           signal: FinanceAttentionSignal;
           existing: typeof notifications.$inferSelect | undefined;
           materiallyWorsened: boolean;
         }> = [];
+        result.evaluated += signals.length;
         const collectSignals = (batch: FinanceAttentionSignal[]) => {
           result.evaluated += batch.length;
           signals.push(...batch);
@@ -711,7 +720,11 @@ export function createSqliteFinanceAttentionRoutingPersistence(
             result.statusOnly++;
             continue;
           }
-          if (decidedRoute === 'actionableNotification' && !task) {
+          if (
+            (decidedRoute === 'actionableNotification'
+              || decidedRoute === 'informationalNotification')
+            && !task
+          ) {
             const existing = findNotification(transaction, sourceId);
             pendingNotifications.push({
               signal,

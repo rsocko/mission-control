@@ -673,7 +673,8 @@ async function loadPlanAsync(
              coverage_end AS "coverageEnd", currency,
              bridge_contract_version AS "bridgeContractVersion",
              window_count AS "windowCount", next_window_ordinal AS "nextWindowOrdinal",
-             status
+             status, last_error_code AS "lastErrorCode",
+             completed_at AS "completedAt", created_at AS "createdAt", updated_at AS "updatedAt"
      FROM finance_insight_transaction_backfill_plans
      WHERE connector_id = $1 AND idempotency_key = $2`,
     [connectorId, idempotencyKey],
@@ -689,6 +690,25 @@ function createBackfillPersistence(pool: Pool): FinanceInsightBackfillPersistenc
 
     async loadPlan(connectorId: string, idempotencyKey: string) {
       return loadPlanAsync(pool, connectorId, idempotencyKey);
+    },
+
+    async readLatestPlan(connectorId: string) {
+      const rows = await query<FinanceInsightBackfillPlan>(
+        pool,
+        `SELECT id, connector_id AS "connectorId", idempotency_key AS "idempotencyKey",
+                horizon_months AS "horizonMonths", coverage_start AS "coverageStart",
+                coverage_end AS "coverageEnd", currency,
+                bridge_contract_version AS "bridgeContractVersion",
+                window_count AS "windowCount", next_window_ordinal AS "nextWindowOrdinal",
+                status, last_error_code AS "lastErrorCode",
+                completed_at AS "completedAt", created_at AS "createdAt", updated_at AS "updatedAt"
+         FROM finance_insight_transaction_backfill_plans
+         WHERE connector_id = $1
+         ORDER BY updated_at DESC, created_at DESC, id DESC
+         LIMIT 1`,
+        [connectorId],
+      );
+      return rows[0] ?? null;
     },
 
     async createPlan(input) {
@@ -893,7 +913,7 @@ function createBackfillPersistence(pool: Pool): FinanceInsightBackfillPersistenc
             FROM finance_insight_transaction_window_proofs WHERE plan_id = $1`,
            [command.planId],
          );
-         if ((previousCount[0]?.itemCount ?? 0) + facts.length > command.maxTotalItemCount) {
+         if (Number(previousCount[0]?.itemCount ?? 0) + facts.length > command.maxTotalItemCount) {
            throw new FinanceInsightBackfillTooLargeError();
          }
          await client.query(

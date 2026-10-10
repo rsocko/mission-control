@@ -76,7 +76,14 @@ vi.mock('@/lib/persistence/runtime', () => ({
 }));
 
 vi.mock('@/lib/connectors/monarch-money/transaction-backfill', () => ({
-  FinanceInsightBackfillError: class FinanceInsightBackfillError extends Error {},
+  FinanceInsightBackfillError: class FinanceInsightBackfillError extends Error {
+    constructor(
+      readonly code: string,
+      readonly status: number,
+    ) {
+      super(code);
+    }
+  },
   runFinanceInsightTransactionProjectionRepair: mocks.runProjectionRepair,
 }));
 
@@ -470,6 +477,44 @@ describe('finance connector routes', () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
       error: 'finance_insight_repair_active_work',
+    });
+  });
+
+  it('returns only the sanitized stage-specific backfill failure', async () => {
+    mocks.getPersistedConfig.mockResolvedValue({
+      id: 'persisted-finance',
+      type: 'finance-manager',
+      enabled: false,
+    });
+    mocks.runExclusive.mockImplementation(async (_connectorId, operation) => operation());
+    const { FinanceInsightBackfillError } = await import(
+      '@/lib/connectors/monarch-money/transaction-backfill'
+    );
+    mocks.runProjectionRepair.mockRejectedValue(
+      new FinanceInsightBackfillError(
+        'finance_insight_backfill_persistence_failed',
+        500,
+      ),
+    );
+    const { POST } = await import('@/app/api/finance/sync/route');
+    const response = await POST(new Request('http://localhost/api/finance/sync', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        host: 'localhost',
+        origin: 'http://localhost',
+        'sec-fetch-site': 'same-origin',
+        'x-mc-api-key': 'test-finance-api-key',
+      },
+      body: JSON.stringify({
+        connectorId: 'persisted-finance',
+        insightBackfill: { idempotencyKey: 'invented-operator-key' },
+      }),
+    }));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: 'finance_insight_backfill_persistence_failed',
     });
   });
 

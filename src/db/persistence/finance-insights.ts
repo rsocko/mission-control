@@ -236,6 +236,10 @@ export interface FinanceInsightBackfillPlan {
   windowCount: number;
   nextWindowOrdinal: number;
   status: 'running' | 'completed';
+  lastErrorCode: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface FinanceInsightBackfillWindowProof {
@@ -358,6 +362,7 @@ export interface FinanceInsightBackfillPersistence {
   /** Throws `FinanceInsightBackfillDeliveryEnabledError` when delivery is live. */
   assertDeliveryDisabled(connectorId: string): Promise<void>;
   loadPlan(connectorId: string, idempotencyKey: string): Promise<FinanceInsightBackfillPlan | null>;
+  readLatestPlan(connectorId: string): Promise<FinanceInsightBackfillPlan | null>;
   /**
    * Atomically returns the existing plan for `idempotencyKey` or creates one.
    * Fences on delivery being disabled. Callers validate that an existing

@@ -378,7 +378,8 @@ function loadPlanSync(
            coverage_end AS coverageEnd, currency,
            bridge_contract_version AS bridgeContractVersion,
            window_count AS windowCount, next_window_ordinal AS nextWindowOrdinal,
-           status
+           status, last_error_code AS lastErrorCode,
+           completed_at AS completedAt, created_at AS createdAt, updated_at AS updatedAt
     FROM finance_insight_transaction_backfill_plans
     WHERE connector_id = ? AND idempotency_key = ?
   `).get(connectorId, idempotencyKey) as FinanceInsightBackfillPlan | undefined;
@@ -395,6 +396,23 @@ function createBackfillPersistence(
 
     async loadPlan(connectorId: string, idempotencyKey: string) {
       return loadPlanSync(sqlite, connectorId, idempotencyKey);
+    },
+
+    async readLatestPlan(connectorId: string) {
+      const row = sqlite.prepare(`
+        SELECT id, connector_id AS connectorId, idempotency_key AS idempotencyKey,
+               horizon_months AS horizonMonths, coverage_start AS coverageStart,
+               coverage_end AS coverageEnd, currency,
+               bridge_contract_version AS bridgeContractVersion,
+               window_count AS windowCount, next_window_ordinal AS nextWindowOrdinal,
+               status, last_error_code AS lastErrorCode,
+               completed_at AS completedAt, created_at AS createdAt, updated_at AS updatedAt
+        FROM finance_insight_transaction_backfill_plans
+        WHERE connector_id = ?
+        ORDER BY updated_at DESC, created_at DESC, id DESC
+        LIMIT 1
+      `).get(connectorId) as FinanceInsightBackfillPlan | undefined;
+      return row ?? null;
     },
 
     async createPlan(input) {

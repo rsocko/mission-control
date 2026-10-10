@@ -66,6 +66,7 @@ const transactionSchema = z.object({
     name: z.string(),
     logoUrl: z.string().url().nullable(),
   }).strict(),
+  businessEntityName: z.string().trim().min(1).max(160).nullable(),
   category: z.object({
     id: z.string().min(1),
     name: z.string(),

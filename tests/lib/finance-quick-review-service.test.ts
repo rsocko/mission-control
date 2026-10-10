@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   assertQuickReviewCategoryCorrectionSupported,
   buildQuickReviewMerchantRuleRequest,
+  buildQuickReviewRuleSuggestionRequest,
   merchantNameForRank,
   runExclusiveQuickReviewAction,
   runQuickReviewWriteSequence,
@@ -110,6 +111,7 @@ describe('finance quick review write sequence', () => {
       suggestion: {
         kind: 'merchant',
         merchantPattern: 'INVENTED MARKET',
+        businessEntityPattern: null,
         kidId: 'kid-alex',
         confidence: 'likely',
         requiresConfirmation: true,
@@ -120,6 +122,23 @@ describe('finance quick review write sequence', () => {
       expectedPolicyVersion: 7,
       idempotencyKey: '4948bf5e-cd3d-47fe-8935-4e00949d1f3c',
       rule: { accountRefs: ['server-owned-account'] },
+    });
+  });
+
+  it('uses server-owned account and business entity context for rule suggestions', () => {
+    expect(buildQuickReviewRuleSuggestionRequest({
+      merchantName: 'Invented Market',
+      businessEntityName: 'Invented Market Holdings',
+      accountRef: 'server-owned-account',
+      kidId: 'kid-alex',
+    })).toEqual({
+      contractVersion: '1.0',
+      merchantName: 'Invented Market',
+      businessEntityName: 'Invented Market Holdings',
+      accountRef: 'server-owned-account',
+      scope: 'accounts',
+      kidId: 'kid-alex',
+      suggestReusableRule: true,
     });
   });
 });

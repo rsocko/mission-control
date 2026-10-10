@@ -408,7 +408,7 @@ export function FinanceQuickReview() {
       setRuleOutcome('kid');
       setRuleScope('accounts');
       setRuleConfidence(parsed.data.suggestion?.confidence ?? 'likely');
-      setBusinessEntityPattern('');
+      setBusinessEntityPattern(parsed.data.suggestion?.businessEntityPattern ?? '');
       setGlobalScopeConfirmed(false);
       setStatus(parsed.data.suggestion
         ? 'Rule suggestion ready. It has not been applied.'

@@ -4,6 +4,7 @@ import {
   financeMerchantRuleCreateRequestSchema,
   financeVendorResearchRequestSchema,
   tyrionMerchantRuleCreateRequestSchema,
+  tyrionQuickReviewRuleResponseSchema,
 } from '@/lib/finance/quick-review-contract';
 
 const baseAction = {
@@ -109,5 +110,25 @@ describe('finance quick review contract', () => {
       ...base,
       rule: { ...base.rule, outcome: 'review', kidId: 'kid-alex' },
     }).success).toBe(false);
+  });
+
+  it('requires the server-owned policy version on rule suggestions', () => {
+    const response = {
+      contractVersion: '1.0',
+      policyVersion: 7,
+      suggestion: {
+        kind: 'merchant',
+        merchantPattern: 'INVENTED MARKET',
+        businessEntityPattern: 'INVENTED MARKET HOLDINGS',
+        kidId: 'kid-alex',
+        confidence: 'likely',
+        requiresConfirmation: true,
+      },
+    };
+    expect(tyrionQuickReviewRuleResponseSchema.safeParse(response).success).toBe(true);
+    const missingPolicyVersion = Object.fromEntries(
+      Object.entries(response).filter(([key]) => key !== 'policyVersion'),
+    );
+    expect(tyrionQuickReviewRuleResponseSchema.safeParse(missingPolicyVersion).success).toBe(false);
   });
 });

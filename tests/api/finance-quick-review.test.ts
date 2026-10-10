@@ -256,6 +256,7 @@ describe('finance quick review API boundary', () => {
       suggestion: {
         kind: 'merchant',
         merchantPattern: 'INVENTED MARKET',
+        businessEntityPattern: 'INVENTED MARKET HOLDINGS',
         kidId: 'kid-alex',
         confidence: 'likely',
         requiresConfirmation: true,

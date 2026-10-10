@@ -24,6 +24,7 @@ import {
   type TyrionQuickReviewRuleResponse,
   type TyrionMerchantRuleCreateRequest,
   type TyrionQuickReviewRankRequest,
+  type TyrionQuickReviewRuleRequest,
   TYRION_MERCHANT_RULE_CONTRACT_VERSION,
 } from '@/lib/finance/quick-review-contract';
 
@@ -612,14 +613,34 @@ export async function previewQuickReviewMerchantRule(
       400,
     );
   }
-  const suggestion = await new TyrionFinanceReviewClient().suggestRule({
-    contractVersion: FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
-    merchantName: request.merchantName,
-    kidId: request.kidId,
-    suggestReusableRule: true,
-  }, signal);
+  const suggestion = await new TyrionFinanceReviewClient().suggestRule(
+    buildQuickReviewRuleSuggestionRequest({
+      merchantName: request.merchantName,
+      businessEntityName: target.transaction.businessEntityName,
+      accountRef: target.transaction.account.id,
+      kidId: request.kidId,
+    }),
+    signal,
+  );
   target.ruleSuggestion = suggestion;
   return suggestion;
+}
+
+export function buildQuickReviewRuleSuggestionRequest(input: {
+  merchantName: string;
+  businessEntityName: string | null;
+  accountRef: string;
+  kidId: string;
+}): TyrionQuickReviewRuleRequest {
+  return {
+    contractVersion: FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
+    merchantName: input.merchantName,
+    businessEntityName: input.businessEntityName,
+    accountRef: input.accountRef,
+    scope: 'accounts',
+    kidId: input.kidId,
+    suggestReusableRule: true,
+  };
 }
 
 export async function createQuickReviewMerchantRule(

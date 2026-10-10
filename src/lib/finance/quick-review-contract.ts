@@ -333,6 +333,9 @@ export const tyrionQuickReviewResearchResponseSchema = z.object({
 export const tyrionQuickReviewRuleRequestSchema = z.object({
   contractVersion: z.literal(FINANCE_QUICK_REVIEW_CONTRACT_VERSION),
   merchantName: normalizedTyrionNameSchema,
+  businessEntityName: normalizedTyrionNameSchema.nullable(),
+  accountRef: tyrionOpaqueRefSchema,
+  scope: z.literal('accounts'),
   kidId: tyrionOpaqueRefSchema,
   suggestReusableRule: z.boolean(),
 }).strict();
@@ -343,6 +346,7 @@ export const tyrionQuickReviewRuleResponseSchema = z.object({
   suggestion: z.object({
     kind: z.literal('merchant'),
     merchantPattern: z.string().trim().min(1).max(120),
+    businessEntityPattern: z.string().trim().min(2).max(160).nullable(),
     kidId: tyrionOpaqueRefSchema,
     confidence: z.literal('likely'),
     requiresConfirmation: z.literal(true),

@@ -59,6 +59,7 @@ describe('MonarchBridgeClient', () => {
         date: '2026-08-01',
         amount: -12.5,
         merchant: { name: 'Invented Market', logoUrl: null },
+        businessEntityName: 'Invented Market Holdings',
         category: null,
         account: { id: 'acct-1', displayName: 'Invented Card', mask: null },
         isPending: true,
@@ -87,6 +88,7 @@ describe('MonarchBridgeClient', () => {
       isRecurring: false,
       reviewStatus: 'needs_review',
       reviewAssignee: 'Parent',
+      businessEntityName: 'Invented Market Holdings',
     });
 
     expect(fetchMock).toHaveBeenCalledWith(

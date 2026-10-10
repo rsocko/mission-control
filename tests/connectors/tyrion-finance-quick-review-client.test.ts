@@ -114,6 +114,7 @@ describe('TyrionFinanceReviewClient', () => {
       suggestion: {
         kind: 'merchant',
         merchantPattern: 'INVENTED MARKET',
+        businessEntityPattern: 'INVENTED MARKET HOLDINGS',
         kidId: 'opaque-kid-ref',
         confidence: 'likely',
         requiresConfirmation: true,
@@ -123,12 +124,20 @@ describe('TyrionFinanceReviewClient', () => {
     const response = await new TyrionFinanceReviewClient(TOKEN, fetchMock).suggestRule({
       contractVersion: '1.0',
       merchantName: 'Invented Market',
+      businessEntityName: 'Invented Market Holdings',
+      accountRef: 'account-current',
+      scope: 'accounts',
       kidId: 'opaque-kid-ref',
       suggestReusableRule: true,
     });
 
     expect(response.suggestion?.requiresConfirmation).toBe(true);
     expect(fetchMock.mock.calls[0][0]).toContain('/rule-suggestion');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      businessEntityName: 'Invented Market Holdings',
+      accountRef: 'account-current',
+      scope: 'accounts',
+    });
   });
 
   it('creates a confirmed merchant rule through the exact v2 private endpoint', async () => {

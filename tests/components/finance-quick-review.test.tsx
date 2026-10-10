@@ -134,6 +134,7 @@ describe('FinanceQuickReview', () => {
         suggestion: {
           kind: 'merchant',
           merchantPattern: 'INVENTED MARKET',
+          businessEntityPattern: 'INVENTED MARKET HOLDINGS',
           kidId: 'kid-alex',
           confidence: 'likely',
           requiresConfirmation: true,
@@ -148,6 +149,7 @@ describe('FinanceQuickReview', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Preview reusable rule' }));
 
     expect(await screen.findByText(/This advisory has not been applied/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Business entity pattern/)).toHaveValue('INVENTED MARKET HOLDINGS');
     const request = JSON.parse(fetchMock.mock.calls[1][1].body as string);
     expect(request).toEqual({
       contractVersion: '1.0',
@@ -169,6 +171,7 @@ describe('FinanceQuickReview', () => {
         suggestion: {
           kind: 'merchant',
           merchantPattern: 'INVENTED MARKET',
+          businessEntityPattern: null,
           kidId: 'kid-alex',
           confidence: 'likely',
           requiresConfirmation: true,
@@ -231,6 +234,7 @@ describe('FinanceQuickReview', () => {
         suggestion: {
           kind: 'merchant',
           merchantPattern: 'INVENTED MARKET',
+          businessEntityPattern: null,
           kidId: 'kid-alex',
           confidence: 'likely',
           requiresConfirmation: true,

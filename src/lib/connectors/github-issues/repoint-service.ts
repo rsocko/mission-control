@@ -28,6 +28,7 @@ import {
   type GitHubRestIssue,
   type GitHubRestRepository,
 } from './github-client';
+import { GitHubIssueTransferError } from './transfer-error';
 import {
   assertTrustedGitHubUrl,
   issueEvidenceFromRest,
@@ -539,7 +540,7 @@ export async function transferGitHubIssueByStableIdentity(
     repositoryId: targetRepositoryStableId,
   });
   if (response.errors?.length) {
-    throw new Error(`GitHub issue transfer failed: ${response.errors[0].message}`);
+    throw new GitHubIssueTransferError(response.errors[0].message);
   }
   const transferred = response.data?.transferIssue?.issue;
   if (

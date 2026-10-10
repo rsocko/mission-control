@@ -22,6 +22,17 @@ export class ApiRequestError extends Error {
   }
 }
 
+export function getSafeTaskMoveErrorMessage(error: unknown): string | null {
+  if (!(error instanceof ApiRequestError)) return null;
+  if (
+    error.code === 'GITHUB_NATIVE_TRANSFER_REJECTED'
+    || error.code === 'GITHUB_NATIVE_TRANSFER_UNAVAILABLE'
+  ) {
+    return error.message;
+  }
+  return null;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {

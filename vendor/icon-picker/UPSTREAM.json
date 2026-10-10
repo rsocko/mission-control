@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "package": {
+    "name": "@rsocko/icon-picker",
+    "version": "0.1.0-rc.0"
+  },
+  "source": {
+    "repository": "git+https://github.com/rsocko/icon-picker.git",
+    "commit": "9f038831690938d0ba07203d9c35e69b603697aa",
+    "tag": null
+  },
+  "artifact": {
+    "filename": "rsocko-icon-picker-0.1.0-rc.0.tgz",
+    "size": 39766,
+    "unpackedSize": 129715,
+    "entryCount": 36,
+    "integrity": "sha512-q7L5JT1VyfOO91qu99i+PU0n1c1q28NGYR5Ph+Y7kKBIJqxbObNDiygcfj3e/iAejxfytcueYXMV++s3AQIK0Q==",
+    "shasum": "210b611c26c2bbcf497c261245732e517df8d55c",
+    "sha256": "7c942b4a63e7c9a5c3d60d375aa13d513092c829e0ad0754af1a7b74b0b08dce",
+    "sha512": "abb2f9253d55c9f38ef75aaef7d8be3d4d27d5cd6adbc346611e4f87e63b90a04826ac5b39b3438b281c7e3ddefe201e8f17f2b5cb9e617315fbeb3701020ad1",
+    "files": [
+      "LICENSE",
+      "README.md",
+      "THIRD_PARTY_NOTICES.md",
+      "dist/IconPicker.d.ts",
+      "dist/IconPicker.d.ts.map",
+      "dist/IconPickerButton.d.ts",
+      "dist/IconPickerButton.d.ts.map",
+      "dist/IconRenderer.d.ts",
+      "dist/IconRenderer.d.ts.map",
+      "dist/chunks/IconPickerButton-BCeJJAHh.js",
+      "dist/chunks/IconPickerButton-BCeJJAHh.js.map",
+      "dist/chunks/IconRenderer-86b851bX.js",
+      "dist/chunks/IconRenderer-86b851bX.js.map",
+      "dist/classnames.d.ts",
+      "dist/classnames.d.ts.map",
+      "dist/core.d.ts",
+      "dist/core.d.ts.map",
+      "dist/core.js",
+      "dist/core.js.map",
+      "dist/data.d.ts",
+      "dist/data.d.ts.map",
+      "dist/iconify.d.ts",
+      "dist/iconify.d.ts.map",
+      "dist/index.d.ts",
+      "dist/index.d.ts.map",
+      "dist/index.js",
+      "dist/picker.d.ts",
+      "dist/picker.d.ts.map",
+      "dist/picker.js",
+      "dist/renderer.d.ts",
+      "dist/renderer.d.ts.map",
+      "dist/renderer.js",
+      "dist/styles.css",
+      "dist/types.d.ts",
+      "dist/types.d.ts.map",
+      "package.json"
+    ]
+  },
+  "acquisition": "npm-pack-from-source"
+}

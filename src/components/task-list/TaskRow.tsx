@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { ArrowLeftRight, Bell, ChartNetwork, Clock, RotateCcw, Timer } from 'lucide-react';
-import { IconRenderer } from '@/components/ui/icon-picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import { SubtaskPill } from '@/components/ui/SubtaskPill';

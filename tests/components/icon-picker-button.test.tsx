@@ -1,14 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { IconPickerButton } from '@/components/ui/icon-picker/IconPickerButton';
-
-vi.mock('@/components/ui/icon-picker/IconPicker', () => ({
-  IconPicker: () => <input aria-label="Search icons" />,
-}));
-
-vi.mock('@/components/ui/icon-picker/IconRenderer', () => ({
-  IconRenderer: () => <span>Selected icon</span>,
-}));
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { IconPickerButton } from '@rsocko/icon-picker/picker';
 
 function setViewport(width: number, height: number) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
@@ -31,8 +23,16 @@ function mockTriggerRect(rect: Partial<DOMRect>) {
 }
 
 describe('IconPickerButton', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({}),
+    }));
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('opens above the trigger and clamps to the viewport when space is constrained', () => {
@@ -43,7 +43,7 @@ describe('IconPickerButton', () => {
     fireEvent.click(screen.getByTitle('Pick an icon'));
 
     const dialog = screen.getByRole('dialog', { name: 'Choose an icon' });
-    expect(dialog).toHaveStyle({
+    expect(dialog.parentElement).toHaveStyle({
       height: '488px',
       left: '572px',
       top: '8px',
@@ -67,12 +67,20 @@ describe('IconPickerButton', () => {
     fireEvent.click(screen.getByTitle('Pick an icon'));
 
     const dialog = screen.getByRole('dialog', { name: 'Choose an icon' });
-    expect(dialog).toHaveStyle({ height: '520px', left: '100px', top: '144px' });
+    expect(dialog.parentElement).toHaveStyle({
+      height: '520px',
+      left: '100px',
+      top: '144px',
+    });
 
     setViewport(1200, 400);
     act(() => window.dispatchEvent(new Event('resize')));
 
-    expect(dialog).toHaveStyle({ height: '248px', left: '100px', top: '144px' });
+    expect(dialog.parentElement).toHaveStyle({
+      height: '248px',
+      left: '100px',
+      top: '144px',
+    });
   });
 
   it('uses the viewport as an overlay when neither side is usable', () => {
@@ -89,7 +97,7 @@ describe('IconPickerButton', () => {
     render(<IconPickerButton value={null} onChange={vi.fn()} />);
     fireEvent.click(screen.getByTitle('Pick an icon'));
 
-    expect(screen.getByRole('dialog', { name: 'Choose an icon' })).toHaveStyle({
+    expect(screen.getByRole('dialog', { name: 'Choose an icon' }).parentElement).toHaveStyle({
       height: '284px',
       left: '8px',
       top: '8px',
@@ -108,7 +116,7 @@ describe('IconPickerButton', () => {
       </div>,
     );
     fireEvent.click(screen.getByTitle('Pick an icon'));
-    fireEvent.mouseDown(screen.getByRole('textbox', { name: 'Search icons' }));
+    fireEvent.mouseDown(screen.getByRole('searchbox', { name: 'Search icons' }));
 
     expect(handleMouseDown).not.toHaveBeenCalled();
   });

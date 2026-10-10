@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { CheckCircle2, ChevronRight, Eye, EyeOff, Layers, Loader2, Plus } from 'lucide-react';
 import { toast } from '@/lib/toast';
-import { IconRenderer } from '@/components/ui/icon-picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MobileSheet } from '@/components/ui/MobileSheet';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';

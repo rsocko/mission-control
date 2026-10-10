@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { ArrowLeftRight, Globe } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 
 const CONNECTOR_NAMES: Record<string, string> = {

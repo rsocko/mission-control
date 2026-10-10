@@ -39,7 +39,8 @@ import { runSourceListRenameRequest, settleSourceListRename } from '../source-li
 import { ContextAppearancePicker } from '@/components/context-theme/ContextAppearancePicker';
 import type { ContextAppearance } from '@/types';
 
-import { IconPickerButton as EmojiPickerButton, IconRenderer } from '@/components/ui/icon-picker';
+import { IconPickerButton as EmojiPickerButton } from '@rsocko/icon-picker/picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 
 type SourceListSort = 'name' | 'connector' | 'type' | 'manual';
 

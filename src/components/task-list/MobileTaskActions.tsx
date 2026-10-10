@@ -13,7 +13,7 @@ import { getLocalToday } from '@/lib/utils/client-date';
 import { getNextRecurringDate } from '@/lib/utils/recurrence';
 import { getDeepLinkInfo } from '@/lib/utils/deep-links';
 import { calendarClassNames } from '@/components/ui/calendar-classes';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { triggerHapticFeedback } from '@/lib/utils/haptics';
 import type { TaskContextMenuActions, HubProject, TaskProjectPhaseMembership } from './TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';

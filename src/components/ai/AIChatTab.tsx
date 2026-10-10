@@ -7,7 +7,7 @@ import { HoustonIcon } from '@/components/ui/HoustonIcon';
 import { ChatMessageRow } from '@/components/ai/ChatMessageRow';
 import { AgentButton, SuggestionChip } from '@/components/ai/ChatWidgets';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { formatResult } from '@/lib/ai/chatFormatters';
 import type { ChatMessage, HubProject, ProviderInfo, SidebarResult } from '@/lib/ai/chatTypes';
 import type { ToolApprovalHandler } from '@/components/ai/ToolCard';

@@ -1,19 +1,26 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { IconPicker, IconRenderer } from '@/components/ui/icon-picker';
+import { IconPicker } from '@rsocko/icon-picker/picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import {
   getIconUrl,
   getSimpleIconNames,
-  POPULAR_DASHBOARD_ICONS,
-} from '@/components/ui/icon-picker/types';
+  parseIconValue,
+  serializeIconValue,
+} from '@rsocko/icon-picker/core';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('IconRenderer', () => {
-  it('includes the Home Assistant logo in the source icon picker', () => {
-    expect(POPULAR_DASHBOARD_ICONS).toContain('home-assistant');
+  it('preserves every supported stored value without a database migration', () => {
+    expect(parseIconValue('🚀')).toEqual({ source: 'emoji', name: '🚀' });
+    expect(parseIconValue('lucide:rocket')).toEqual({ source: 'lucide', name: 'rocket' });
+    expect(parseIconValue('rocket')).toEqual({ source: 'lucide', name: 'rocket' });
+    expect(serializeIconValue({ source: 'emoji', name: '🚀' })).toBe('🚀');
+    expect(serializeIconValue({ source: 'dash', name: 'home-assistant' }))
+      .toBe('dash:home-assistant');
   });
 
   it('normalizes current and legacy Simple Icons catalog responses', () => {
@@ -38,9 +45,9 @@ describe('IconRenderer', () => {
   it('inherits the theme color for uncolored monochrome icons', () => {
     render(<IconRenderer value="pin" size={16} />);
 
-    const icon = screen.getByRole('img', { name: 'lucide:pin' });
+    const icon = screen.getByRole('img', { name: 'lucide icon: pin' });
     expect(icon.tagName).toBe('SPAN');
-    expect(icon).toHaveClass('bg-current');
+    expect(icon).toHaveClass('rs-icon-picker__renderer-mask');
     expect(icon).toHaveStyle({ width: '16px', height: '16px' });
     expect(icon.style.maskImage).toContain('/lucide/pin.svg');
   });
@@ -50,21 +57,21 @@ describe('IconRenderer', () => {
 
     // The masked icon renders optimistically alongside a hidden probe <img>
     // used solely to detect load failures (mask-image has no error event).
-    expect(screen.getByRole('img', { name: 'lucide:pin' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'lucide icon: pin' })).toBeInTheDocument();
     expect(screen.queryByTestId('fallback')).not.toBeInTheDocument();
 
     const probe = document.querySelector('img[aria-hidden="true"]');
     expect(probe).not.toBeNull();
     fireEvent.error(probe as HTMLImageElement);
 
-    expect(screen.queryByRole('img', { name: 'lucide:pin' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'lucide icon: pin' })).not.toBeInTheDocument();
     expect(screen.getByTestId('fallback')).toBeInTheDocument();
   });
 
   it('requests the selected color when one is set', () => {
     render(<IconRenderer value="lucide:pin" size={16} color="#3b82f6" />);
 
-    expect(screen.getByRole('img', { name: 'lucide:pin' })).toHaveAttribute(
+    expect(screen.getByRole('img', { name: 'lucide icon: pin' })).toHaveAttribute(
       'src',
       expect.stringContaining('color=%233b82f6'),
     );
@@ -91,7 +98,7 @@ describe('IconRenderer', () => {
     render(<IconPicker value={null} onChange={vi.fn()} />);
 
     const sourceGroup = screen.getByRole('group', { name: 'Icon sources' });
-    expect(sourceGroup).toHaveClass('flex-wrap');
+    expect(sourceGroup).toHaveClass('rs-icon-picker__filters');
     for (const source of ['Emoji', 'Lucide', 'Material', 'Phosphor', 'Apps', 'Brands']) {
       expect(screen.getByRole('button', { name: source })).toBeVisible();
     }
@@ -152,8 +159,10 @@ describe('IconRenderer', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const { rerender } = render(<IconPicker value={null} onChange={vi.fn()} />);
-    fireEvent.change(screen.getByPlaceholderText('Search emoji, icons, brands…'), {
+    const { rerender } = render(
+      <IconPicker value={null} onChange={vi.fn()} searchDebounceMs={0} />,
+    );
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search icons' }), {
       target: { value: 'city' },
     });
 
@@ -165,7 +174,14 @@ describe('IconRenderer', () => {
     expect(aliasResult.style.maskImage).toContain(encodeURIComponent('M12 2v20'));
 
     const maskImage = result.style.maskImage;
-    rerender(<IconPicker value={null} onChange={vi.fn()} color="#3b82f6" />);
+    rerender(
+      <IconPicker
+        value={null}
+        onChange={vi.fn()}
+        color="#3b82f6"
+        searchDebounceMs={0}
+      />,
+    );
     expect(await screen.findByRole('img', { name: 'mdi:city' })).toHaveStyle({
       backgroundColor: '#3b82f6',
     });
@@ -177,13 +193,18 @@ describe('IconRenderer', () => {
     });
   });
 
-  it('falls back to direct Iconify rendering when a batch request fails', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }));
+  it('surfaces provider failures without discarding built-in choices', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
 
-    render(<IconPicker value={null} onChange={vi.fn()} />);
+    render(<IconPicker value={null} onChange={vi.fn()} searchDebounceMs={0} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Lucide' }));
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search icons' }), {
+      target: { value: 'rocketship' },
+    });
 
-    const result = await screen.findByRole('img', { name: 'lucide:settings' });
-    expect(result.style.maskImage).toContain('/lucide/settings.svg');
-    expect(result).not.toHaveClass('animate-pulse');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'One provider is temporarily unavailable.',
+    );
+    expect(screen.getByRole('button', { name: 'Retry providers' })).toBeInTheDocument();
   });
 });

@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { PlanningHorizonFieldLabel, PlanningHorizonOption } from '@/components/PlanningHorizonVisuals';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { getTagPillStyle, CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { modalOverlay, modalContent } from '@/lib/motion';
 import { ParsedTask, getDateSuggestions, parseTaskInputForSubmission } from '@/lib/parse-task-input';

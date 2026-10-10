@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { IconPicker } from '@/components/ui/icon-picker/IconPicker';
-import { IconPickerButton } from '@/components/ui/icon-picker/IconPickerButton';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconPicker, IconPickerButton } from '@rsocko/icon-picker/picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 
 const DEMO_VALUES = [
   '🚀',

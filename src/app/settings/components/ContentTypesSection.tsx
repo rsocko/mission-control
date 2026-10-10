@@ -8,8 +8,8 @@ import {
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { settingsLogger } from '@/lib/client-logger';
-import { IconPickerButton } from '@/components/ui/icon-picker';
-import { IconRenderer } from '@/components/ui/icon-picker';
+import { IconPickerButton } from '@rsocko/icon-picker/picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 

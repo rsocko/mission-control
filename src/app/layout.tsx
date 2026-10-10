@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { SerwistProvider } from "@serwist/turbopack/react";
 import "./globals.css";
 import "highlight.js/styles/github-dark.css";
+import "@rsocko/icon-picker/styles.css";
 import { AppShell } from "@/components/layout/AppShell";
 import { ReactQueryProvider } from "@/components/providers/ReactQueryProvider";
 import { AppMotionProvider } from "@/components/providers/AppMotionProvider";

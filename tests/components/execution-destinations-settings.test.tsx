@@ -41,7 +41,7 @@ describe('ExecutionDestinationsSection', () => {
       '/icons/connectors/github.svg',
     );
 
-    expect(screen.getByAltText('dash:microsoft-copilot')).toHaveAttribute(
+    expect(screen.getByAltText('dash icon: microsoft-copilot')).toHaveAttribute(
       'src',
       'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/microsoft-copilot.svg',
     );

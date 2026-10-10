@@ -22,7 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { ViewInGraphLink } from '@/components/graph/ViewInGraphLink';
 import { ContextThemeSurface } from '@/components/context-theme/ContextThemeSurface';

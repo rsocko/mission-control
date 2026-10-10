@@ -4,7 +4,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type ComponentType } from 'react';
 import { ChevronDown, FolderKanban } from 'lucide-react';
-import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { uiLogger } from '@/lib/client-logger';
 import {

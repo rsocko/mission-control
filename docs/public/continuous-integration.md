@@ -6,14 +6,15 @@ policy, lint, run unit tests, smoke-test the worker runtime, and build the
 production application. Fork pull requests use a read-only `GITHUB_TOKEN`,
 receive no protected secrets, and cannot publish a container.
 
-The live PostgreSQL integration suite uses one worker and reports through a
-stable aggregate status check. Pull requests limited to explicitly classified
-frontend paths run connection, schema, and web-composition smoke coverage.
-Backend, workflow, package, mixed, empty, and unclassifiable changes fail closed
-to the complete PostgreSQL integration suite. Pushes to `main` and manual runs
-also run the complete suite. Test files remain serial to prevent destructive
-setup and cleanup from racing. The 100,000-row pgvector benchmark remains
-manual-dispatch only.
+The live PostgreSQL integration suite reports through a stable aggregate status
+check. Pull requests limited to explicitly classified frontend paths use one
+worker for connection, schema, and web-composition smoke coverage. Backend,
+workflow, package, mixed, empty, and unclassifiable changes fail closed to the
+complete database and API-route suite, split across two runtime-weighted
+workers. Pushes to `main` and manual runs also use both full-suite workers.
+Files remain serial within each isolated worker because many tests
+destructively reset shared schema state. The 100,000-row pgvector benchmark
+remains manual-dispatch only and runs once.
 
 Changes limited to `docs/**` or the standard root documentation files
 (`README.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `DESIGN.md`,

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const DEFAULT_RUNTIME_MS = 500;
 const FILE_STARTUP_MS = 1_000;
-const POSTGRES_TEST_PATTERN = /^postgres-.*\.integration\.test\.ts$/u;
+const POSTGRES_TEST_PATTERN = /postgres.*\.integration\.test\.ts$/u;
 
 // Runtime observations from successful CI runs. Unknown files still participate
 // automatically and receive a conservative startup-weight estimate.
@@ -64,7 +64,27 @@ export const POSTGRES_TEST_RUNTIME_MS = Object.freeze({
 });
 
 export function estimatedPostgresTestWeight(file) {
-  return (POSTGRES_TEST_RUNTIME_MS[file] ?? DEFAULT_RUNTIME_MS) + FILE_STARTUP_MS;
+  return (POSTGRES_TEST_RUNTIME_MS[path.basename(file)] ?? DEFAULT_RUNTIME_MS) + FILE_STARTUP_MS;
+}
+
+export async function discoverPostgresIntegrationTests() {
+  const testsDirectory = path.resolve('tests');
+
+  async function walk(relativeDirectory = '') {
+    const entries = await readdir(path.join(testsDirectory, relativeDirectory), {
+      withFileTypes: true,
+    });
+    const nested = await Promise.all(entries.map(async (entry) => {
+      const relativePath = path.join(relativeDirectory, entry.name);
+      if (entry.isDirectory()) return walk(relativePath);
+      return POSTGRES_TEST_PATTERN.test(entry.name)
+        ? [relativePath.split(path.sep).join('/')]
+        : [];
+    }));
+    return nested.flat();
+  }
+
+  return (await walk()).sort();
 }
 
 export function partitionPostgresIntegrationTests(files, shardCount) {
@@ -107,13 +127,12 @@ async function main() {
     throw new Error('Usage: node scripts/select-postgres-integration-shard.mjs <index> <count>');
   }
 
-  const testDirectory = path.resolve('tests', 'db');
-  const files = (await readdir(testDirectory)).filter((file) => POSTGRES_TEST_PATTERN.test(file));
+  const files = await discoverPostgresIntegrationTests();
   const selected = partitionPostgresIntegrationTests(files, shardCount)[shardIndex - 1];
   if (selected.length === 0) {
     throw new Error(`PostgreSQL integration shard ${shardIndex}/${shardCount} is empty`);
   }
-  process.stdout.write(`${selected.map((file) => `tests/db/${file}`).join('\n')}\n`);
+  process.stdout.write(`${selected.map((file) => `tests/${file}`).join('\n')}\n`);
 }
 
 const entrypoint = process.argv[1] ? path.resolve(process.argv[1]) : '';

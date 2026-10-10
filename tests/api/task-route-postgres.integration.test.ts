@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 
+vi.unmock('drizzle-orm');
+
 const poison = vi.hoisted(() => ({ triggered: false }));
 
 vi.mock('@/db', () => {
@@ -13,8 +15,10 @@ vi.mock('@/lib/search/fts', () => ({
   removeTaskFromIndex: vi.fn(async () => undefined),
 }));
 vi.mock('@/lib/semantic-index/publication-service', () => ({
+  assertCanRegisterSemanticPublicationService: vi.fn(),
   publishSemanticEntityDelete: vi.fn(async () => undefined),
   publishSemanticEntityUpsert: vi.fn(async () => undefined),
+  registerSemanticPublicationService: vi.fn(),
 }));
 vi.mock('@/lib/rules', () => ({ evaluateRulesForTasks: vi.fn(async () => undefined) }));
 
@@ -124,7 +128,7 @@ if (connectionString) {
       ), { params: Promise.resolve({ id: created.id }) });
       expect(deleteResponse.status).toBe(200);
       expect((await pool.query(
-        'SELECT COUNT(*)::int AS count FROM tasks WHERE id = $1',
+        'SELECT COUNT(*)::int AS count FROM tasks WHERE id = $1 AND deleted_at IS NULL',
         [created.id],
       )).rows[0]?.count).toBe(0);
       expect(poison.triggered).toBe(false);

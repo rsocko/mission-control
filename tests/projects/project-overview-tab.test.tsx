@@ -90,7 +90,7 @@ describe('project overview tab', () => {
     await renderProjectTab('Overview');
 
     expect(await screen.findByRole('heading', { name: 'Description' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: '40% of project tasks complete' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '40% of project tasks resolved' })).toBeInTheDocument();
     expect(screen.getByText('Delivery of the reporting workspace.')).toBeInTheDocument();
     expect(screen.getByLabelText('Progress reports')).toBeInTheDocument();
 
@@ -110,7 +110,7 @@ describe('project overview tab', () => {
     await renderProjectTab('Overview');
 
     const discovery = await screen.findByRole('button', { name: 'Open Discovery in Plan' });
-    expect(within(discovery).getByText('1/2')).toBeInTheDocument();
+    expect(within(discovery).getByText('1/2 resolved')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Build in Plan' })).toBeInTheDocument();
 
     fireEvent.click(discovery);
@@ -189,7 +189,7 @@ describe('project overview tab', () => {
     await renderProjectTab('Overview');
 
     expect(await screen.findByText('No recent task activity yet.')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: '0% of project tasks complete' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '0% of project tasks resolved' })).toBeInTheDocument();
     expect(screen.getByText(/No phases defined yet/)).toBeInTheDocument();
     expect(screen.queryByText(/needs? a phase/)).not.toBeInTheDocument();
 

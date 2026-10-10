@@ -74,6 +74,13 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({
+    contractVersion: '2.0',
+    engineVersion: '2.0.0',
+    policyVersion: 1,
+    policyUpdatedAt: now,
+    householdCurrency: 'USD',
+  })));
   sqlite.exec(`
     DELETE FROM connector_sync_operator_runs;
     DELETE FROM connector_sync_controls;
@@ -92,7 +99,6 @@ beforeEach(() => {
     connectorId,
     JSON.stringify({
       bridgeUrl: 'https://tyrion.example/api/connector/v1',
-      householdCurrency: 'USD',
     }),
     now,
     now,
@@ -108,6 +114,7 @@ afterAll(() => {
   delete process.env.MC_DB_PATH;
   delete process.env.FINANCE_MANAGER_API_TOKEN;
   delete process.env.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED;
+  vi.unstubAllGlobals();
 });
 
 describe.sequential('finance operator sync control', () => {
@@ -202,8 +209,6 @@ describe.sequential('finance operator sync control', () => {
   });
 
   it('permits exactly one idempotent canary while the connector stays disabled', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
     await operator.quarantineFinanceConnectorSync({
       connectorId,
       actorType: 'service',
@@ -236,8 +241,7 @@ describe.sequential('finance operator sync control', () => {
       connector: { enabled: false },
       canary: { status: 'queued' },
     });
-    expect(fetchMock).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
+    expect(fetch).toHaveBeenCalled();
   });
 
   it('keeps quarantine after failure and releases only after a successful canary', async () => {

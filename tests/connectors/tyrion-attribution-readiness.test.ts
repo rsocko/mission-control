@@ -165,6 +165,7 @@ beforeEach(() => {
     engineVersion: '2.0.0',
     policyVersion: 2,
     policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+    householdCurrency: 'USD',
   })));
 });
 
@@ -240,6 +241,7 @@ describe('Tyrion attribution policy readiness', () => {
           engineVersion: '2.0.0',
           policyVersion: 2,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+          householdCurrency: 'USD',
         });
       }
       const request = JSON.parse(String(init?.body)) as {
@@ -313,6 +315,7 @@ describe('Tyrion attribution policy readiness', () => {
           engineVersion: '2.0.0',
           policyVersion: 2,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+          householdCurrency: 'USD',
         });
       }
       const request = JSON.parse(String(init?.body)) as {
@@ -349,6 +352,7 @@ describe('Tyrion attribution policy readiness', () => {
           engineVersion: '2.0.0',
           policyVersion: 3,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+          householdCurrency: 'USD',
         });
       }
       const request = JSON.parse(String(init?.body)) as {
@@ -389,6 +393,7 @@ describe('Tyrion attribution policy readiness', () => {
           engineVersion: '2.0.0',
           policyVersion: 3,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+          householdCurrency: 'USD',
         });
       }
       batch += 1;

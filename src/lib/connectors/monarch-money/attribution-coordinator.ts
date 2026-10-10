@@ -187,7 +187,20 @@ export class FinanceAttributionCoordinator {
     }
     if (dependencies.client) {
       this.client = dependencies.client;
-      this.config = dependencies.client.config;
+      const identityNamespace = (
+        dependencies.client.config as Partial<TyrionAttributionConfig>
+      ).identityNamespace;
+      if (!identityNamespace) {
+        throw new TyrionAttributionError(
+          'attribution_not_configured',
+          'Tyrion attribution service configuration is unavailable',
+          false,
+        );
+      }
+      this.config = {
+        ...dependencies.client.config,
+        identityNamespace,
+      };
       this.policyFence = dependencies.client.config.expectedPolicyVersion;
     }
   }

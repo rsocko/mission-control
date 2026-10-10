@@ -3,9 +3,13 @@ import 'server-only';
 import logger from '@/lib/logger';
 import type { FinanceActorType } from '@/lib/connectors/monarch-money/finance-request';
 import {
-  getFinanceConnectorConfigurationState,
+  getPersistedFinanceConnectorConfigById,
   isFinanceConnectorType,
 } from '@/lib/connectors/monarch-money/config';
+import {
+  resolveTyrionHouseholdCurrency,
+  TyrionAttributionError,
+} from '@/lib/connectors/monarch-money/attribution-client';
 import {
   FinanceOperatorPersistenceError,
   type FinanceOperatorPersistence,
@@ -30,6 +34,7 @@ export type FinanceCutoverBlocker =
   | 'finance_insight_connector_unavailable'
   | 'finance_connector_disabled'
   | 'household_currency_unavailable'
+  | 'tyrion_configuration_unavailable'
   | 'insight_shadow_ingest_disabled'
   | 'finance_notification_gate_enabled'
   | 'finance_insight_cutover_generation_unavailable'
@@ -97,7 +102,37 @@ export async function getFinanceInsightCutoverReadiness(
   if (!isFinanceConnectorType(inputs.connector.type)) {
     throw new FinanceCutoverOperatorError('invalid_finance_connector_type', 400);
   }
-  const configurationState = getFinanceConnectorConfigurationState(inputs.connector.settings);
+  let configurationState:
+    | {
+        status: 'configured';
+        source: 'tyrion';
+        householdCurrency: string;
+        code: null;
+      }
+    | {
+        status: 'unavailable';
+        source: 'tyrion';
+        householdCurrency: null;
+        code: string;
+      };
+  try {
+    const config = await getPersistedFinanceConnectorConfigById(connectorId);
+    configurationState = {
+      status: 'configured',
+      source: 'tyrion',
+      householdCurrency: await resolveTyrionHouseholdCurrency(config),
+      code: null,
+    };
+  } catch (error) {
+    configurationState = {
+      status: 'unavailable',
+      source: 'tyrion',
+      householdCurrency: null,
+      code: error instanceof TyrionAttributionError
+        ? error.code
+        : 'tyrion_configuration_unavailable',
+    };
+  }
   const immediateNotificationsEnabled = gateEnabled(FINANCE_IMMEDIATE_NOTIFICATION_GATE);
   const monthlyDigestEnabled = gateEnabled(FINANCE_MONTHLY_DIGEST_GATE);
   const blockers: FinanceCutoverBlocker[] = [];
@@ -106,7 +141,11 @@ export async function getFinanceInsightCutoverReadiness(
   }
   if (!inputs.connector.enabled) blockers.push('finance_connector_disabled');
   if (configurationState.status !== 'configured') {
-    blockers.push('household_currency_unavailable');
+    blockers.push(
+      configurationState.code === 'household_currency_unavailable'
+        ? 'household_currency_unavailable'
+        : 'tyrion_configuration_unavailable',
+    );
   }
   if (!isFinanceInsightShadowIngestEnabled()) {
     blockers.push('insight_shadow_ingest_disabled');

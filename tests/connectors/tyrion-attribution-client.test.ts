@@ -340,6 +340,7 @@ describe('Tyrion attribution v2 client', () => {
       engineVersion: '2.0.0',
       policyVersion: 3,
       policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+      householdCurrency: 'USD',
     }));
     const followCurrent = new TyrionAttributionClient(
       { ...config, expectedPolicyVersion: null },

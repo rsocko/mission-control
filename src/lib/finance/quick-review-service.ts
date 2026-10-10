@@ -11,6 +11,7 @@ import {
 import { applyManualAttributionDecision } from '@/lib/connectors/monarch-money/attribution-service';
 import { FinanceManagerConnector } from '@/lib/connectors/monarch-money';
 import { TyrionFinanceReviewClient } from '@/lib/connectors/monarch-money/quick-review-client';
+import { resolveTyrionHouseholdCurrency } from '@/lib/connectors/monarch-money/attribution-client';
 import {
   FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
   type FinanceReviewActionRequest,
@@ -62,16 +63,6 @@ function sessionStore(): Map<string, ServerSession> {
 
 function opaque(prefix: string): string {
   return `${prefix}_${randomUUID().replaceAll('-', '')}`;
-}
-
-function householdCurrency(settings: unknown): string {
-  const value = settings && typeof settings === 'object'
-    ? (settings as Record<string, unknown>).householdCurrency
-    : null;
-  if (typeof value !== 'string' || !/^[A-Z]{3}$/.test(value)) {
-    throw new Error('Finance connector household currency is not configured');
-  }
-  return value;
 }
 
 function dateRange(request: FinanceReviewSessionRequest): { startDate: string; endDate: string } {
@@ -356,7 +347,7 @@ export async function startQuickReviewSession(
       || leftRank.sourceRef.localeCompare(rightRank.sourceRef);
   });
   const categories = categoryResponse.categories.filter((category) => category.isActive);
-  const currency = householdCurrency(config.settings);
+  const currency = await resolveTyrionHouseholdCurrency(config, signal);
   const targets: SessionTarget[] = ordered.map((transaction): SessionTarget => {
     const local = localByUpstreamId.get(transaction.id);
     const rankedItem = scoreByRef.get(sourceRefs.get(transaction.id)!)!;

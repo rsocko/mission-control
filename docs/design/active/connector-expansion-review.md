@@ -116,10 +116,10 @@ Fully implemented as `finance-manager` connector (dual-registered as `monarch-mo
   `tests/connectors/finance-attention-routing.test.ts`, finance API tests, and
   finance component/E2E coverage.
 
-Production readiness follow-ups remain for
-[configuring the required household currency through Settings](https://github.com/rsocko/mission-control/issues/1399)
-and
+The remaining production readiness follow-up is
 [exposing the reviewed Finance Insight cutover and rollback workflow](https://github.com/rsocko/mission-control/issues/1398).
+Tyrion now owns household currency configuration and Mission Control consumes it
+through the protected service contract.
 
 #### Planned complementary budget alerts
 

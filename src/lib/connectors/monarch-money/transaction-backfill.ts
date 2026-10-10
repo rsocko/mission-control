@@ -16,10 +16,13 @@ import { financeInsightDigestV1, type CanonicalJsonValue } from '@/lib/finance-i
 import {
   FINANCE_INSIGHT_ITEM_LIMITS,
 } from '@/lib/finance-insights/contract';
-import { resolveFinanceInsightCurrency } from '@/lib/finance-insights/settings';
 import logger from '@/lib/logger';
 import type { ConnectorConfig } from '@/types';
 import { FinanceAttributionCoordinator } from './attribution-coordinator';
+import {
+  resolveTyrionHouseholdCurrency,
+  TyrionAttributionError,
+} from './attribution-client';
 import { MonarchBridgeClient, MonarchBridgeError } from './client';
 import {
   buildFinanceInsightHistoryWindows,
@@ -141,12 +144,18 @@ export function planFinanceInsightBackfillWindows(
   return windows;
 }
 
-function resolveBackfillCurrency(config: ConnectorConfig): string {
-  const currency = resolveFinanceInsightCurrency(config);
-  if (!currency) {
-    throw new FinanceInsightBackfillError('finance_insight_currency_unavailable', 409);
+async function resolveBackfillCurrency(
+  config: ConnectorConfig,
+  signal?: AbortSignal,
+): Promise<string> {
+  try {
+    return await resolveTyrionHouseholdCurrency(config, signal);
+  } catch (error) {
+    if (error instanceof TyrionAttributionError) {
+      throw new FinanceInsightBackfillError(error.code, error.status ?? 503);
+    }
+    throw error;
   }
-  return currency;
 }
 
 function normalizedBackfillError(
@@ -585,7 +594,7 @@ async function runTransactionBackfill(
   const clock = input.clock ?? (() => new Date());
   const startedAt = clock();
   await runBackfillStage('safety', async () => input.assertSafe?.());
-  const currency = resolveBackfillCurrency(input.config);
+  const currency = await resolveBackfillCurrency(input.config, input.signal);
   const repositories = await runBackfillStage(
     'configuration',
     () => getWorkerPersistenceRepositories(),

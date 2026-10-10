@@ -51,13 +51,13 @@ Stop on a migration error, digest mismatch, unexpected worker revision, or
 backup verification failure. Restore the prior artifact and database backup
 before retrying.
 
-## 2. Configure application state and policy
+## 2. Configure Tyrion policy
 
-In **Settings > Connectors > Tyrion**, set the exact uppercase ISO-4217
-household currency. Currency is ordinary connector/application state in
-`settings.householdCurrency`; it is not an environment variable or secret.
-Legacy connectors without it report `needs-configuration` and unrelated edits
-preserve that state.
+In Tyrion, confirm the household currency is configured as an exact uppercase
+ISO-4217 code. Tyrion is authoritative; Mission Control reads the value from the
+protected attribution-policy response and does not store or edit a duplicate.
+Missing or invalid Tyrion currency configuration fails readiness and publication
+closed.
 
 Configure the service token through the existing credential mechanism. In
 **Attribution policy readiness**, choose whether this connector follows

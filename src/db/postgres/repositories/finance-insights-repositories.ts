@@ -960,7 +960,8 @@ function createBackfillPersistence(pool: Pool): FinanceInsightBackfillPersistenc
       await query(
          pool,
          `UPDATE finance_insight_transaction_backfill_plans
-          SET last_error_code = $1, updated_at = $2 WHERE id = $3`,
+          SET last_error_code = $1, updated_at = $2
+          WHERE id = $3 AND status = 'running'`,
          [errorCode, now, planId],
       );
     },

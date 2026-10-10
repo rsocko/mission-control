@@ -9,6 +9,7 @@ import {
   FinanceInsightBackfillTooLargeError,
   FinanceInsightBackfillWindowIncompleteError,
   type FinanceInsightBackfillPlan,
+  type FinanceInsightBackfillPromotionCommand,
   type FinanceInsightBackfillWindowProof,
   type FinanceInsightPersistence,
 } from '@/db/persistence/finance-insights';
@@ -296,13 +297,13 @@ type ProjectionWindowProof = {
   digest: string;
 };
 
-async function promoteCompletedPlan(
+async function buildCompletedPlanPromotion(
   finance: FinanceInsightPersistence,
   connectorId: string,
   plan: FinanceInsightBackfillPlan,
   completedAt: Date,
-): Promise<void> {
-  if (plan.horizonMonths !== FINANCE_INSIGHT_HISTORY_MONTHS) return;
+): Promise<FinanceInsightBackfillPromotionCommand | null> {
+  if (plan.horizonMonths !== FINANCE_INSIGHT_HISTORY_MONTHS) return null;
   const operationalProofs = await runBackfillStage(
     'proof',
     () => finance.backfill.loadWindowProofs(plan.id),
@@ -378,23 +379,71 @@ async function promoteCompletedPlan(
   });
   const completedAtValue = completedAt.toISOString();
 
-  await runBackfillStage('promotion', () => finance.backfill.promoteCompletedPlan({
-      connectorId,
-      planId: plan.id,
-      idempotencyKey: plan.idempotencyKey,
-      generationId,
-      sourceAsOf,
-      itemCount: facts.length,
-      contentDigest,
-      coverageStart: plan.coverageStart,
-      coverageEnd: plan.coverageEnd,
-      windowCount: windowProofs.length,
-      windowsDigest,
-      bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
-      completedAt: completedAtValue,
-      facts,
-      windows: windowProofs,
-    }));
+  return {
+    connectorId,
+    planId: plan.id,
+    idempotencyKey: plan.idempotencyKey,
+    generationId,
+    sourceAsOf,
+    itemCount: facts.length,
+    contentDigest,
+    coverageStart: plan.coverageStart,
+    coverageEnd: plan.coverageEnd,
+    windowCount: windowProofs.length,
+    windowsDigest,
+    bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
+    completedAt: completedAtValue,
+    facts,
+    windows: windowProofs,
+  };
+}
+
+async function assertCompletedPlanPromotion(
+  finance: FinanceInsightPersistence,
+  command: FinanceInsightBackfillPromotionCommand,
+): Promise<void> {
+  const [state, storedFacts, storedWindows] = await runBackfillStage(
+    'proof',
+    () => Promise.all([
+      finance.projection.readState(command.connectorId),
+      finance.projection.readPromotedTransactionFacts(
+        command.connectorId,
+        command.generationId,
+      ),
+      finance.projection.readWindowProofs(command.connectorId, command.generationId),
+    ]),
+  );
+  if (
+    state?.status !== 'succeeded'
+    || state.generationId !== command.generationId
+    || state.sourceAsOf !== command.sourceAsOf
+    || state.itemCount !== command.itemCount
+    || state.contentDigest !== command.contentDigest
+    || state.coverageStart !== command.coverageStart
+    || state.coverageEnd !== command.coverageEnd
+    || state.windowCount !== command.windowCount
+    || state.windowsDigest !== command.windowsDigest
+    || state.bridgeContractVersion !== command.bridgeContractVersion
+    || financeInsightDigestV1(storedFacts as CanonicalJsonValue) !== command.contentDigest
+    || financeInsightDigestV1(storedWindows as unknown as CanonicalJsonValue)
+      !== command.windowsDigest
+  ) {
+    throw new FinanceInsightBackfillProjectionConflictError();
+  }
+}
+
+async function promoteCompletedPlan(
+  finance: FinanceInsightPersistence,
+  connectorId: string,
+  plan: FinanceInsightBackfillPlan,
+  completedAt: Date,
+): Promise<void> {
+  const command = await buildCompletedPlanPromotion(finance, connectorId, plan, completedAt);
+  if (!command) return;
+  await runBackfillStage(
+    'promotion',
+    () => finance.backfill.promoteCompletedPlan(command),
+  );
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -594,7 +643,6 @@ async function runTransactionBackfill(
   const clock = input.clock ?? (() => new Date());
   const startedAt = clock();
   await runBackfillStage('safety', async () => input.assertSafe?.());
-  const currency = await resolveBackfillCurrency(input.config, input.signal);
   const repositories = await runBackfillStage(
     'configuration',
     () => getWorkerPersistenceRepositories(),
@@ -603,6 +651,79 @@ async function runTransactionBackfill(
     repositories.execution.support.assertConfigSupported(input.config);
   });
   const { finance } = repositories;
+  const financeInsights = finance.insights;
+  const existingPlan = await runBackfillStage(
+    'plan',
+    () => financeInsights.backfill.loadPlan(input.config.id, idempotencyKey),
+  );
+  if (existingPlan?.status === 'completed') {
+    try {
+      if (
+        existingPlan.horizonMonths !== horizonMonths
+        || existingPlan.bridgeContractVersion !== MONARCH_BRIDGE_CONTRACT_VERSION
+        || existingPlan.nextWindowOrdinal !== existingPlan.windowCount
+        || existingPlan.completedAt === null
+      ) {
+        throw new FinanceInsightBackfillError(
+          'finance_insight_backfill_idempotency_conflict',
+          409,
+        );
+      }
+      await assertDeliveryDisabled(financeInsights, input.config.id);
+      const windows = planFinanceInsightBackfillWindows(
+        existingPlan.coverageEnd,
+        existingPlan.horizonMonths,
+      );
+      const proofs = await runBackfillStage(
+        'proof',
+        () => financeInsights.backfill.loadWindowProofs(existingPlan.id),
+      );
+      if (
+        proofs.length !== existingPlan.windowCount
+        || windows.length !== existingPlan.windowCount
+      ) {
+        throw new FinanceInsightBackfillError(
+          'finance_insight_backfill_window_conflict',
+          409,
+        );
+      }
+      let totalItemCount = 0;
+      for (const [index, proof] of proofs.entries()) {
+        await verifyProof(
+          financeInsights,
+          input.config.id,
+          proof,
+          windows[index]!,
+          existingPlan.currency,
+        );
+        totalItemCount += proof.itemCount;
+      }
+      if (totalItemCount > FINANCE_INSIGHT_ITEM_LIMITS.transaction) {
+        throw new FinanceInsightBackfillError('transaction_generation_too_large', 409);
+      }
+      const command = await buildCompletedPlanPromotion(
+        financeInsights,
+        input.config.id,
+        existingPlan,
+        new Date(existingPlan.completedAt),
+      );
+      if (command) {
+        await assertCompletedPlanPromotion(financeInsights, command);
+      }
+      return {
+        planId: existingPlan.id,
+        status: 'completed',
+        completedWindows: proofs.length,
+        totalWindows: existingPlan.windowCount,
+        coverageStart: existingPlan.coverageStart,
+        coverageEnd: existingPlan.coverageEnd,
+        itemCount: totalItemCount,
+      };
+    } catch (error) {
+      throw normalizedBackfillError(error, 'proof');
+    }
+  }
+  const currency = await resolveBackfillCurrency(input.config, input.signal);
   await runBackfillStage(
     'identity',
     () => finance.identity.ensureNamespace({
@@ -611,7 +732,6 @@ async function runTransactionBackfill(
       updatedAt: startedAt.toISOString(),
     }),
   );
-  const financeInsights = finance.insights;
   const plan = await createOrLoadPlan(financeInsights, {
     connectorId: input.config.id,
     idempotencyKey,

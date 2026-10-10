@@ -83,7 +83,9 @@ function stableValue(value: unknown): string {
 }
 
 function transactionFingerprint(transaction: FinanceSnapshotTransaction): string {
-  return stableValue(transaction);
+  const identityFacts = { ...transaction };
+  delete identityFacts.businessContext;
+  return stableValue(identityFacts);
 }
 
 function parseCredentials(value: unknown): Record<string, unknown> {
@@ -641,14 +643,14 @@ function createSnapshotPersistence(
         const insert = sqlite.prepare(`
           INSERT INTO finance_transactions (
             id, connector_instance_id, upstream_transaction_id, date, amount,
-            merchant_name, merchant_logo_url, category_id, original_category,
+            merchant_name, merchant_logo_url, business_context, category_id, original_category,
             confirmed_category, account_id, account_name, card_last4,
             assigned_kid_id, kid_assignment_method, triage_status, flag_reason,
             is_pending, is_recurring, notes, tags, tag_references, lifecycle_status, deleted_at,
             provenance_provider, provenance_fetched_at, source_fingerprint, source_url,
             last_seen_generation_id, first_seen_at, last_seen_at, synced_at
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?,
             NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, 'active', NULL,
             ?, ?, ?, NULL, ?, ?, ?, ?
           )
@@ -656,9 +658,9 @@ function createSnapshotPersistence(
         const update = sqlite.prepare(`
           UPDATE finance_transactions
           SET date = ?, amount = ?, merchant_name = ?, merchant_logo_url = ?,
-              category_id = ?, original_category = ?, account_id = ?, account_name = ?,
-              card_last4 = ?, is_pending = ?, is_recurring = ?, notes = ?, tags = ?,
-              tag_references = ?,
+              business_context = ?, category_id = ?, original_category = ?,
+              account_id = ?, account_name = ?, card_last4 = ?, is_pending = ?,
+              is_recurring = ?, notes = ?, tags = ?, tag_references = ?,
               lifecycle_status = 'active', deleted_at = NULL, provenance_provider = ?,
               provenance_fetched_at = ?, source_fingerprint = ?,
               last_seen_generation_id = ?, last_seen_at = ?, synced_at = ?
@@ -676,6 +678,7 @@ function createSnapshotPersistence(
             transaction.amount,
             transaction.merchant.name,
             transaction.merchant.logoUrl,
+            transaction.businessContext ?? null,
             transaction.category?.id ?? null,
             transaction.category?.name ?? null,
             transaction.account.id,

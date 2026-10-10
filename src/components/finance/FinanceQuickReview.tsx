@@ -109,6 +109,13 @@ function confidenceLabel(value: number | null) {
   return `Low · ${Math.round(value * 100)}%`;
 }
 
+function distinctBusinessContext(item: FinanceReviewItem): string | null {
+  const context = item.businessContext?.trim();
+  if (!context) return null;
+  const comparable = (value: string) => value.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+  return comparable(context) === comparable(item.payee) ? null : context;
+}
+
 function isTypingTarget(target: EventTarget | null) {
   return target instanceof HTMLInputElement
     || target instanceof HTMLSelectElement
@@ -168,6 +175,7 @@ export function FinanceQuickReview() {
   const actionRegionRef = useRef<HTMLDivElement>(null);
 
   const item = session?.current ?? null;
+  const businessContext = item ? distinctBusinessContext(item) : null;
   const completion = session && session.progress.total > 0
     ? Math.round(((session.progress.reviewed + session.progress.skipped) / session.progress.total) * 100)
     : 0;
@@ -639,6 +647,13 @@ export function FinanceQuickReview() {
                 <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] p-4 sm:p-5">
                   <div className="min-w-0">
                     <h2 className="truncate text-xl font-semibold text-[var(--text-primary)]">{item.payee}</h2>
+                    {businessContext && (
+                      <p className="mt-1 truncate text-xs text-[var(--text-muted)]">
+                        <span className="font-medium text-[var(--text-secondary)]">Business context</span>
+                        {' · '}
+                        {businessContext}
+                      </p>
+                    )}
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">{item.accountName} · {new Date(`${item.date}T00:00:00`).toLocaleDateString()}</p>
                   </div>
                   <p className="shrink-0 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{currency(item)}</p>

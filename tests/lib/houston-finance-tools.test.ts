@@ -81,7 +81,7 @@ function seedProjection() {
   sqlite.prepare(`
     INSERT INTO finance_transactions (
       id, connector_instance_id, upstream_transaction_id, date, amount,
-      merchant_name, original_category, confirmed_category, account_id,
+      merchant_name, business_context, original_category, confirmed_category, account_id,
       account_name, card_last4, assigned_kid_id, triage_status, is_pending,
       is_recurring, notes, tags, lifecycle_status, provenance_provider,
       provenance_fetched_at, source_fingerprint, last_seen_generation_id,
@@ -90,7 +90,7 @@ function seedProjection() {
       attribution_reasons, attribution_review_state
     ) VALUES (
       'local-transaction-id', ?, 'raw-upstream-transaction-id', '2026-08-12', -42.75,
-      'Invented Market', 'Food', 'Groceries', 'raw-account-id',
+      'Invented Market', 'Invented Neighborhood Foods', 'Food', 'Groceries', 'raw-account-id',
       'Private Account', '9876', 'invented-kid-id', 'pending', 0,
       0, 'private note', '[]', 'active', 'live', ?,
       'private-fingerprint', 'private-generation-id', ?, ?, ?, 'attributed',
@@ -260,6 +260,9 @@ describe.sequential('Houston finance facade', () => {
         kidName: 'Avery',
         confidence: 'likely',
       },
+      supportingHints: {
+        businessContext: 'Invented Neighborhood Foods',
+      },
     });
     expect(exceptions.exceptions[0]).toMatchObject({
       merchant: 'Invented Market',
@@ -298,6 +301,29 @@ describe.sequential('Houston finance facade', () => {
       }
     }
     expect(mocks.sqliteCompatibilityAccess).not.toHaveBeenCalled();
+  });
+
+  it('uses business context only as a bounded lookup hint, not transaction identity', async () => {
+    const before = (await facade.searchFinanceTransactions(
+      { query: 'Neighborhood Foods', limit: 1 },
+      { now: new Date(now) },
+    )).transactions[0];
+    expect(before.supportingHints.businessContext).toBe('Invented Neighborhood Foods');
+
+    sqlite.prepare(`
+      UPDATE finance_transactions
+      SET business_context = 'Invented Community Grocer'
+      WHERE id = 'local-transaction-id'
+    `).run();
+    const after = (await facade.searchFinanceTransactions(
+      { query: 'Community Grocer', limit: 1 },
+      { now: new Date(now) },
+    )).transactions[0];
+
+    expect(after.supportingHints.businessContext).toBe('Invented Community Grocer');
+    expect(after.target).toEqual(before.target);
+    expect(after.factsViaTyrionBridge.merchant).toBe('Invented Market');
+    expect(after.tyrionDerived).toEqual(before.tyrionDerived);
   });
 
   it('marks old and failed projections as stale or partial rather than current', async () => {

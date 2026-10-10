@@ -579,6 +579,7 @@ export function describeFinanceInsightPersistenceContract(
         });
         expect(second).toEqual(first);
         expect(first.horizonMonths).toBe(3);
+        await expect(backfill.readLatestPlan(CONNECTOR_ID)).resolves.toEqual(first);
       });
 
       it('advances a plan window-by-window to completion, and fences an oversized or incomplete window', async () => {
@@ -650,7 +651,7 @@ export function describeFinanceInsightPersistenceContract(
           bridgeContractVersion: '1.0',
           completedAt: BASE_TIME,
           expectedItemCount: 1,
-          maxTotalItemCount: 500,
+          maxTotalItemCount: 2,
         });
         expect(window0).toEqual({ itemCount: 1 });
         await expect(backfill.loadPlan(CONNECTOR_ID, 'plan-windows'))
@@ -676,12 +677,19 @@ export function describeFinanceInsightPersistenceContract(
           bridgeContractVersion: '1.0',
           completedAt: BASE_TIME,
           expectedItemCount: 1,
-          maxTotalItemCount: 500,
+          maxTotalItemCount: 2,
         });
 
         await expect(backfill.loadPlan(CONNECTOR_ID, 'plan-windows'))
           .resolves.toMatchObject({ status: 'completed', nextWindowOrdinal: 2 });
         await expect(backfill.loadWindowProofs(plan.id)).resolves.toHaveLength(2);
+        await backfill.recordPlanFailure(plan.id, 'finance_insight_backfill_proof_failed', BASE_TIME);
+        await expect(backfill.readLatestPlan(CONNECTOR_ID)).resolves.toMatchObject({
+          id: plan.id,
+          status: 'completed',
+          nextWindowOrdinal: 2,
+          lastErrorCode: 'finance_insight_backfill_proof_failed',
+        });
       });
 
       it('promotes a completed plan idempotently, and conflicts (not silently overwrites) when a different generation is already current', async () => {

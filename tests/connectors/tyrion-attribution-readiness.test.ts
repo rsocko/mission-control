@@ -77,6 +77,23 @@ function runtime(options: {
     lastErrorCode: options.historyError ?? null,
     updatedAt: '2026-08-12T12:00:00.000Z',
   });
+  const readLatestPlan = vi.fn().mockResolvedValue({
+    id: 'private-plan-id',
+    connectorId: 'finance-connector',
+    idempotencyKey: 'private-operator-key',
+    horizonMonths: 37,
+    coverageStart: '2023-08-01',
+    coverageEnd: '2026-08-31',
+    currency: 'USD',
+    bridgeContractVersion: '1.0',
+    windowCount: 4,
+    nextWindowOrdinal: 2,
+    status: 'running',
+    lastErrorCode: 'finance_insight_backfill_provider_failed',
+    completedAt: null,
+    createdAt: '2026-08-12T11:00:00.000Z',
+    updatedAt: '2026-08-12T12:00:00.000Z',
+  });
   const patchSettingsState = vi.fn().mockResolvedValue({
     settings: {},
     state: {},
@@ -106,12 +123,14 @@ function runtime(options: {
         },
         insights: {
           projection: { readState },
+          backfill: { readLatestPlan },
         },
       },
     },
     readAttributionAccountSummary,
     readAttributionPreview,
     readState,
+    readLatestPlan,
     patchSettingsState,
   };
 }
@@ -184,9 +203,22 @@ describe('Tyrion attribution policy readiness', () => {
     });
     expect(readiness.historyProjection?.lastErrorCode)
       .toBe('insight_history_incomplete_snapshot');
+    expect(readiness.historyBackfill).toEqual({
+      status: 'running',
+      completedWindows: 2,
+      totalWindows: 4,
+      horizonMonths: 37,
+      coverageStart: '2023-08-01',
+      coverageEnd: '2026-08-31',
+      lastErrorCode: 'finance_insight_backfill_provider_failed',
+      completedAt: null,
+      updatedAt: '2026-08-12T12:00:00.000Z',
+    });
     expect(JSON.stringify(readiness)).not.toContain('identityNamespace');
     expect(JSON.stringify(readiness)).not.toContain('invented-service-token');
     expect(JSON.stringify(readiness)).not.toContain(accountOne);
+    expect(JSON.stringify(readiness)).not.toContain('private-plan-id');
+    expect(JSON.stringify(readiness)).not.toContain('private-operator-key');
     expect(setup.readAttributionPreview).not.toHaveBeenCalled();
   });
 

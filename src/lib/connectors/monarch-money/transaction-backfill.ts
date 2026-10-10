@@ -17,6 +17,7 @@ import {
   FINANCE_INSIGHT_ITEM_LIMITS,
 } from '@/lib/finance-insights/contract';
 import { resolveFinanceInsightCurrency } from '@/lib/finance-insights/settings';
+import logger from '@/lib/logger';
 import type { ConnectorConfig } from '@/types';
 import { FinanceAttributionCoordinator } from './attribution-coordinator';
 import { MonarchBridgeClient, MonarchBridgeError } from './client';
@@ -52,6 +53,30 @@ export class FinanceInsightBackfillError extends Error {
     this.name = 'FinanceInsightBackfillError';
   }
 }
+
+type FinanceInsightBackfillStage =
+  | 'configuration'
+  | 'identity'
+  | 'plan'
+  | 'safety'
+  | 'provider'
+  | 'persistence'
+  | 'proof'
+  | 'promotion';
+
+const UNKNOWN_BACKFILL_ERROR_CODES: Record<
+  FinanceInsightBackfillStage,
+  string
+> = {
+  configuration: 'finance_insight_backfill_configuration_failed',
+  identity: 'finance_insight_backfill_identity_failed',
+  plan: 'finance_insight_backfill_plan_failed',
+  safety: 'finance_insight_backfill_safety_check_failed',
+  provider: 'finance_insight_backfill_provider_failed',
+  persistence: 'finance_insight_backfill_persistence_failed',
+  proof: 'finance_insight_backfill_proof_failed',
+  promotion: 'finance_insight_backfill_promotion_failed',
+};
 
 function dateOnly(value: Date): string {
   return value.toISOString().slice(0, 10);
@@ -124,7 +149,10 @@ function resolveBackfillCurrency(config: ConnectorConfig): string {
   return currency;
 }
 
-function normalizedBackfillError(error: unknown): FinanceInsightBackfillError {
+function normalizedBackfillError(
+  error: unknown,
+  stage: FinanceInsightBackfillStage,
+): FinanceInsightBackfillError {
   if (error instanceof FinanceInsightBackfillError) return error;
   if (error instanceof FinanceInsightProjectionRepairError) {
     return new FinanceInsightBackfillError(error.code, error.status);
@@ -141,18 +169,32 @@ function normalizedBackfillError(error: unknown): FinanceInsightBackfillError {
   if (error instanceof MonarchBridgeError) {
     return new FinanceInsightBackfillError(error.code, error.status ?? 502);
   }
-  return new FinanceInsightBackfillError('finance_insight_backfill_failed', 500);
+  const code = UNKNOWN_BACKFILL_ERROR_CODES[stage];
+  logger.error(
+    { module: 'finance-insight-backfill', stage, code },
+    'Finance insight backfill stage failed',
+  );
+  return new FinanceInsightBackfillError(code, 500);
+}
+
+async function runBackfillStage<T>(
+  stage: FinanceInsightBackfillStage,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw normalizedBackfillError(error, stage);
+  }
 }
 
 async function assertDeliveryDisabled(
   finance: FinanceInsightPersistence,
   connectorId: string,
 ): Promise<void> {
-  try {
+  await runBackfillStage('persistence', async () => {
     await finance.backfill.assertDeliveryDisabled(connectorId);
-  } catch (error) {
-    throw normalizedBackfillError(error);
-  }
+  });
 }
 
 async function createOrLoadPlan(
@@ -168,9 +210,7 @@ async function createOrLoadPlan(
 ): Promise<FinanceInsightBackfillPlan> {
   const windows = planFinanceInsightBackfillWindows(input.coverageEnd, input.horizonMonths);
   const coverageStart = windows[0]!.start;
-  let plan: FinanceInsightBackfillPlan;
-  try {
-    plan = await finance.backfill.createPlan({
+  const plan = await runBackfillStage('plan', () => finance.backfill.createPlan({
       connectorId: input.connectorId,
       idempotencyKey: input.idempotencyKey,
       horizonMonths: input.horizonMonths,
@@ -180,10 +220,7 @@ async function createOrLoadPlan(
       bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
       windowCount: windows.length,
       now: input.now,
-    });
-  } catch (error) {
-    throw normalizedBackfillError(error);
-  }
+    }));
   if (
     plan.horizonMonths !== input.horizonMonths
     || plan.currency !== input.currency
@@ -210,11 +247,14 @@ async function verifyProof(
   ) {
     throw new FinanceInsightBackfillError('finance_insight_backfill_window_conflict', 409);
   }
-  const facts = (await finance.projection.readOperationalProjectionFacts(
-    connectorId,
-    expected.start,
-    'transaction',
-    expected.end,
+  const facts = (await runBackfillStage(
+    'proof',
+    () => finance.projection.readOperationalProjectionFacts(
+      connectorId,
+      expected.start,
+      'transaction',
+      expected.end,
+    ),
   )).transaction;
   if (
     facts.length !== proof.itemCount
@@ -254,7 +294,10 @@ async function promoteCompletedPlan(
   completedAt: Date,
 ): Promise<void> {
   if (plan.horizonMonths !== FINANCE_INSIGHT_HISTORY_MONTHS) return;
-  const operationalProofs = await finance.backfill.loadWindowProofs(plan.id);
+  const operationalProofs = await runBackfillStage(
+    'proof',
+    () => finance.backfill.loadWindowProofs(plan.id),
+  );
   const operationalWindows = planFinanceInsightBackfillWindows(
     plan.coverageEnd,
     plan.horizonMonths,
@@ -268,11 +311,14 @@ async function promoteCompletedPlan(
   for (const [index, proof] of operationalProofs.entries()) {
     await verifyProof(finance, connectorId, proof, operationalWindows[index]!, plan.currency);
   }
-  const facts = (await finance.projection.readOperationalProjectionFacts(
-    connectorId,
-    plan.coverageStart,
-    'transaction',
-    plan.coverageEnd,
+  const facts = (await runBackfillStage(
+    'proof',
+    () => finance.projection.readOperationalProjectionFacts(
+      connectorId,
+      plan.coverageStart,
+      'transaction',
+      plan.coverageEnd,
+    ),
   )).transaction;
   if (facts.length > FINANCE_INSIGHT_ITEM_LIMITS.transaction) {
     throw new FinanceInsightBackfillError('transaction_generation_too_large', 409);
@@ -323,8 +369,7 @@ async function promoteCompletedPlan(
   });
   const completedAtValue = completedAt.toISOString();
 
-  try {
-    await finance.backfill.promoteCompletedPlan({
+  await runBackfillStage('promotion', () => finance.backfill.promoteCompletedPlan({
       connectorId,
       planId: plan.id,
       idempotencyKey: plan.idempotencyKey,
@@ -340,10 +385,7 @@ async function promoteCompletedPlan(
       completedAt: completedAtValue,
       facts,
       windows: windowProofs,
-    });
-  } catch (error) {
-    throw normalizedBackfillError(error);
-  }
+    }));
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -382,14 +424,17 @@ async function captureWindow(input: {
   let updated = 0;
   try {
     for (let pageNumber = 0; pageNumber < BACKFILL_MAX_PAGES_PER_WINDOW; pageNumber++) {
-      await input.assertSafe?.();
+      await runBackfillStage('safety', async () => input.assertSafe?.());
       throwIfAborted(input.signal);
-      const page = await client.getTransactionsPage({
-        startDate: input.window.start,
-        endDate: input.window.end,
-        limit: BACKFILL_PAGE_SIZE,
-        cursor,
-      }, input.signal);
+      const page = await runBackfillStage(
+        'provider',
+        () => client.getTransactionsPage({
+          startDate: input.window.start,
+          endDate: input.window.end,
+          limit: BACKFILL_PAGE_SIZE,
+          cursor,
+        }, input.signal),
+      );
       if (
         page.page.limit > BACKFILL_PAGE_SIZE
         || page.transactions.length > BACKFILL_PAGE_SIZE
@@ -403,10 +448,13 @@ async function captureWindow(input: {
         throw new FinanceInsightBackfillError('finance_insight_backfill_page_conflict', 409);
       }
       for (const transaction of page.transactions) {
-        const priorWindowDate = await insights.backfill.findPriorWindowTransactionDate(
-          connectorId,
-          input.plan.id,
-          transaction.id,
+        const priorWindowDate = await runBackfillStage(
+          'persistence',
+          () => insights.backfill.findPriorWindowTransactionDate(
+            connectorId,
+            input.plan.id,
+            transaction.id,
+          ),
         );
         if (
           transaction.date < input.window.start
@@ -431,13 +479,16 @@ async function captureWindow(input: {
       if (sourceAsOf === null || Date.parse(fetchedAt) < Date.parse(sourceAsOf)) {
         sourceAsOf = fetchedAt;
       }
-      const counts = await insights.backfill.upsertTransactionPage({
-        connectorId,
-        generationRef,
-        transactions: page.transactions,
-        provenance: { ...page.provenance, fetchedAt },
-        now: new Date().toISOString(),
-      });
+      const counts = await runBackfillStage(
+        'persistence',
+        () => insights.backfill.upsertTransactionPage({
+          connectorId,
+          generationRef,
+          transactions: page.transactions,
+          provenance: { ...page.provenance, fetchedAt },
+          now: new Date().toISOString(),
+        }),
+      );
       added += counts.added;
       updated += counts.updated;
       await attribution?.attributePage(page.transactions, fetchedAt, input.signal);
@@ -457,11 +508,12 @@ async function captureWindow(input: {
     if (expectedTotal === null || seenIds.size !== expectedTotal) {
       throw new FinanceInsightBackfillError('finance_insight_backfill_window_incomplete', 409);
     }
+    const capturedSourceAsOf = sourceAsOf;
     throwIfAborted(input.signal);
     const completedAt = new Date().toISOString();
-    let itemCount: number;
-    try {
-      const result = await insights.backfill.recordWindowCapture({
+    const result = await runBackfillStage(
+      'persistence',
+      () => insights.backfill.recordWindowCapture({
         connectorId,
         planId: input.plan.id,
         windowOrdinal: input.window.ordinal,
@@ -469,23 +521,26 @@ async function captureWindow(input: {
         windowStart: input.window.start,
         windowEnd: input.window.end,
         generationRef,
-        sourceAsOf,
+        sourceAsOf: capturedSourceAsOf,
         currency: input.plan.currency,
         bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
         completedAt,
         expectedItemCount: seenIds.size,
         maxTotalItemCount: FINANCE_INSIGHT_ITEM_LIMITS.transaction,
-      });
-      itemCount = result.itemCount;
-    } catch (error) {
-      throw normalizedBackfillError(error);
-    }
-    await input.assertSafe?.();
-    await attribution?.finish(completedAt);
+      }),
+    );
+    const itemCount = result.itemCount;
+    await runBackfillStage('safety', async () => input.assertSafe?.());
+    await runBackfillStage('persistence', async () => attribution?.finish(completedAt));
     return { added, updated, itemCount };
   } catch (error) {
-    await attribution?.finish(new Date().toISOString());
-    throw normalizedBackfillError(error);
+    const normalized = normalizedBackfillError(error, 'persistence');
+    try {
+      await attribution?.finish(new Date().toISOString());
+    } catch (finishError) {
+      normalizedBackfillError(finishError, 'persistence');
+    }
+    throw normalized;
   }
 }
 
@@ -529,16 +584,24 @@ async function runTransactionBackfill(
   }
   const clock = input.clock ?? (() => new Date());
   const startedAt = clock();
-  await input.assertSafe?.();
+  await runBackfillStage('safety', async () => input.assertSafe?.());
   const currency = resolveBackfillCurrency(input.config);
-  const repositories = await getWorkerPersistenceRepositories();
-  repositories.execution.support.assertConfigSupported(input.config);
-  const { finance } = repositories;
-  await finance.identity.ensureNamespace({
-    connectorId: input.config.id,
-    candidate: createFinanceIdentityNamespace(),
-    updatedAt: startedAt.toISOString(),
+  const repositories = await runBackfillStage(
+    'configuration',
+    () => getWorkerPersistenceRepositories(),
+  );
+  await runBackfillStage('configuration', async () => {
+    repositories.execution.support.assertConfigSupported(input.config);
   });
+  const { finance } = repositories;
+  await runBackfillStage(
+    'identity',
+    () => finance.identity.ensureNamespace({
+      connectorId: input.config.id,
+      candidate: createFinanceIdentityNamespace(),
+      updatedAt: startedAt.toISOString(),
+    }),
+  );
   const financeInsights = finance.insights;
   const plan = await createOrLoadPlan(financeInsights, {
     connectorId: input.config.id,
@@ -548,25 +611,28 @@ async function runTransactionBackfill(
     coverageEnd: dateOnly(startedAt),
     now: startedAt.toISOString(),
   });
-  const windows = planFinanceInsightBackfillWindows(plan.coverageEnd, plan.horizonMonths);
-  const existingProofs = await financeInsights.backfill.loadWindowProofs(plan.id);
-  let totalItemCount = 0;
-  for (const [index, proof] of existingProofs.entries()) {
-    const expected = windows[index];
-    if (!expected || proof.windowOrdinal !== index) {
-      throw new FinanceInsightBackfillError('finance_insight_backfill_window_conflict', 409);
-    }
-    await verifyProof(financeInsights, input.config.id, proof, expected, currency);
-    totalItemCount += proof.itemCount;
-  }
-  if (totalItemCount > FINANCE_INSIGHT_ITEM_LIMITS.transaction) {
-    throw new FinanceInsightBackfillError('transaction_generation_too_large', 409);
-  }
-  let completedWindows = existingProofs.length;
-  let remaining = maxWindows;
   try {
+    const windows = planFinanceInsightBackfillWindows(plan.coverageEnd, plan.horizonMonths);
+    const existingProofs = await runBackfillStage(
+      'proof',
+      () => financeInsights.backfill.loadWindowProofs(plan.id),
+    );
+    let totalItemCount = 0;
+    for (const [index, proof] of existingProofs.entries()) {
+      const expected = windows[index];
+      if (!expected || proof.windowOrdinal !== index) {
+        throw new FinanceInsightBackfillError('finance_insight_backfill_window_conflict', 409);
+      }
+      await verifyProof(financeInsights, input.config.id, proof, expected, currency);
+      totalItemCount += proof.itemCount;
+    }
+    if (totalItemCount > FINANCE_INSIGHT_ITEM_LIMITS.transaction) {
+      throw new FinanceInsightBackfillError('transaction_generation_too_large', 409);
+    }
+    let completedWindows = existingProofs.length;
+    let remaining = maxWindows;
     while (completedWindows < windows.length && remaining > 0) {
-      await input.assertSafe?.();
+      await runBackfillStage('safety', async () => input.assertSafe?.());
       await assertDeliveryDisabled(financeInsights, input.config.id);
       const result = await captureWindow({
         finance,
@@ -582,27 +648,43 @@ async function runTransactionBackfill(
       remaining--;
     }
     if (completedWindows === windows.length) {
-      await input.assertSafe?.();
+      await runBackfillStage('safety', async () => input.assertSafe?.());
       await promoteCompletedPlan(financeInsights, input.config.id, {
         ...plan,
         status: 'completed',
         nextWindowOrdinal: completedWindows,
       }, clock());
     }
+    return {
+      planId: plan.id,
+      status: completedWindows === windows.length ? 'completed' : 'running',
+      completedWindows,
+      totalWindows: windows.length,
+      coverageStart: plan.coverageStart,
+      coverageEnd: plan.coverageEnd,
+      itemCount: totalItemCount,
+    };
   } catch (error) {
-    const normalized = normalizedBackfillError(error);
-    await financeInsights.backfill.recordPlanFailure(plan.id, normalized.code, new Date().toISOString());
+    const normalized = normalizedBackfillError(error, 'persistence');
+    try {
+      await financeInsights.backfill.recordPlanFailure(
+        plan.id,
+        normalized.code,
+        new Date().toISOString(),
+      );
+    } catch {
+      logger.error(
+        {
+          module: 'finance-insight-backfill',
+          stage: 'failure-recording',
+          code: 'finance_insight_backfill_failure_recording_failed',
+          primaryCode: normalized.code,
+        },
+        'Finance insight backfill failure recording failed',
+      );
+    }
     throw normalized;
   }
-  return {
-    planId: plan.id,
-    status: completedWindows === windows.length ? 'completed' : 'running',
-    completedWindows,
-    totalWindows: windows.length,
-    coverageStart: plan.coverageStart,
-    coverageEnd: plan.coverageEnd,
-    itemCount: totalItemCount,
-  };
 }
 
 export function runFinanceInsightTransactionBackfill(

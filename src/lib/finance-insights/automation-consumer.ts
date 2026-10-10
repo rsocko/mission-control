@@ -3,7 +3,11 @@ import 'server-only';
 import { getTimezone } from '@/lib/mode';
 import logger from '@/lib/logger';
 import type { ConnectorConfig, DomainSyncResult } from '@/types';
-import type { FinanceAttentionSignal } from '@/db/persistence/finance-attention';
+import type {
+  FinanceAttentionDelivery,
+  FinanceAttentionRoutingResult,
+  FinanceAttentionSignal,
+} from '@/db/persistence/finance-attention';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { reconcileFinanceAttention } from '@/lib/finance/attention-routing';
 import { MONARCH_BRIDGE_CONTRACT_VERSION } from '@/lib/connectors/monarch-money/constants';
@@ -212,28 +216,45 @@ export function toFinanceAutomationAttentionSignal(
   };
 }
 
-async function applyAndAcknowledge(
-  client: TyrionFinanceInsightClient,
+export interface FinanceAutomationDeliveryMetrics {
+  received: number;
+  applied: number;
+  replayed: number;
+  outOfOrder: number;
+  acknowledged: number;
+}
+
+export async function applyAndAcknowledge(
+  client: Pick<TyrionFinanceInsightClient, 'acknowledgeAutomationDeliveries'>,
   result: FinanceAutomationJobResult,
   now: Date,
   signal?: AbortSignal,
-): Promise<void> {
+  applyDeliveries: (input: {
+    connectorId: string;
+    now: Date;
+    deliveries?: readonly FinanceAttentionDelivery[];
+    sourceSignals?: readonly FinanceAttentionSignal[];
+  }) => Promise<FinanceAttentionRoutingResult> = reconcileFinanceAttention,
+): Promise<FinanceAutomationDeliveryMetrics> {
   const applicationSignals = automationApplicationSignals(result);
+  let deliveryResult: FinanceAttentionRoutingResult | null = null;
   if (applicationSignals.deliveries.length > 0) {
-    await reconcileFinanceAttention({
+    deliveryResult = await applyDeliveries({
       connectorId: result.connectorRef,
       now,
-      sourceSignals: applicationSignals.deliveries,
+      deliveries: applicationSignals.deliveries,
     });
   }
   if (applicationSignals.current.length > 0) {
-    await reconcileFinanceAttention({
+    await applyDeliveries({
       connectorId: result.connectorRef,
       now,
       sourceSignals: applicationSignals.current,
     });
   }
-  if (result.deliveries.length === 0) return;
+  if (result.deliveries.length === 0) {
+    return { received: 0, applied: 0, replayed: 0, outOfOrder: 0, acknowledged: 0 };
+  }
   const requestedKeys = result.deliveries.map((delivery) => delivery.deliveryKey);
   const acknowledgment = await client.acknowledgeAutomationDeliveries({
     contractVersion: CONTRACT_VERSION,
@@ -251,6 +272,13 @@ async function applyAndAcknowledge(
       409,
     );
   }
+  return {
+    received: deliveryResult?.deliveriesReceived ?? 0,
+    applied: deliveryResult?.deliveriesApplied ?? 0,
+    replayed: deliveryResult?.deliveriesReplayed ?? 0,
+    outOfOrder: deliveryResult?.deliveriesOutOfOrder ?? 0,
+    acknowledged: acknowledgment.acknowledged.length,
+  };
 }
 
 export function isCompleteAcknowledgment(
@@ -271,14 +299,17 @@ export function isCompleteAcknowledgment(
 
 export function automationApplicationSignals(
   result: FinanceAutomationJobResult,
-): { deliveries: FinanceAttentionSignal[]; current: FinanceAttentionSignal[] } {
+): { deliveries: FinanceAttentionDelivery[]; current: FinanceAttentionSignal[] } {
   const deliveredSignalIds = new Set(
     result.deliveries.map((delivery) => delivery.signalId),
   );
   return {
-    deliveries: result.deliveries.map((delivery) => (
-      toFinanceAutomationAttentionSignal(delivery.signal, delivery.version)
-    )),
+    deliveries: result.deliveries.map((delivery) => ({
+      deliveryKey: delivery.deliveryKey,
+      version: delivery.version,
+      action: delivery.action,
+      signal: toFinanceAutomationAttentionSignal(delivery.signal, delivery.version),
+    })),
     current: result.signals
       .filter((signal) => !deliveredSignalIds.has(signal.signalId))
       .map((signal) => toFinanceAutomationAttentionSignal(signal, 0)),
@@ -301,9 +332,25 @@ export async function runFinanceAutomation(input: {
   now?: Date;
   signal?: AbortSignal;
   environment?: Readonly<Record<string, string | undefined>>;
-}): Promise<{ jobsRun: number; deliveriesApplied: number }> {
+}): Promise<{
+  jobsRun: number;
+  deliveriesReceived: number;
+  deliveriesApplied: number;
+  deliveriesReplayed: number;
+  deliveriesOutOfOrder: number;
+  deliveriesAcknowledged: number;
+}> {
   const environment = input.environment ?? process.env;
-  if (!enabled(environment)) return { jobsRun: 0, deliveriesApplied: 0 };
+  if (!enabled(environment)) {
+    return {
+      jobsRun: 0,
+      deliveriesReceived: 0,
+      deliveriesApplied: 0,
+      deliveriesReplayed: 0,
+      deliveriesOutOfOrder: 0,
+      deliveriesAcknowledged: 0,
+    };
+  }
   const now = input.now ?? new Date();
   const scheduledFor = scheduleInstant(now, environment);
   const client = new TyrionFinanceInsightClient(
@@ -394,7 +441,13 @@ export async function runFinanceAutomation(input: {
     automationPolicy: automationPolicy(resolvedPolicyVersion),
   });
 
-  let deliveriesApplied = 0;
+  const deliveryMetrics: FinanceAutomationDeliveryMetrics = {
+    received: 0,
+    applied: 0,
+    replayed: 0,
+    outOfOrder: 0,
+    acknowledged: 0,
+  };
   for (const job of jobs) {
     const result = await client.runAutomationJob(job, input.signal);
     if (!isCorrelatedAutomationResult(result, job)) {
@@ -404,8 +457,19 @@ export async function runFinanceAutomation(input: {
         false,
       );
     }
-    await applyAndAcknowledge(client, result, now, input.signal);
-    deliveriesApplied += result.deliveries.length;
+    const metrics = await applyAndAcknowledge(client, result, now, input.signal);
+    deliveryMetrics.received += metrics.received;
+    deliveryMetrics.applied += metrics.applied;
+    deliveryMetrics.replayed += metrics.replayed;
+    deliveryMetrics.outOfOrder += metrics.outOfOrder;
+    deliveryMetrics.acknowledged += metrics.acknowledged;
   }
-  return { jobsRun: jobs.length, deliveriesApplied };
+  return {
+    jobsRun: jobs.length,
+    deliveriesReceived: deliveryMetrics.received,
+    deliveriesApplied: deliveryMetrics.applied,
+    deliveriesReplayed: deliveryMetrics.replayed,
+    deliveriesOutOfOrder: deliveryMetrics.outOfOrder,
+    deliveriesAcknowledged: deliveryMetrics.acknowledged,
+  };
 }

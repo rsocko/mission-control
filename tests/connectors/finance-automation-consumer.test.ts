@@ -6,6 +6,7 @@ import {
   type FinanceAutomationSignal,
 } from '@/lib/finance-insights/automation-contract';
 import {
+  applyAndAcknowledge,
   automationApplicationSignals,
   deriveConsecutiveFailures,
   isCorrelatedAutomationResult,
@@ -108,6 +109,68 @@ describe('finance automation consumer contracts', () => {
     })).toThrow();
   });
 
+  it('commits delivery application before acknowledgement and safely retries the crash window', async () => {
+    const result = financeAutomationJobResultSchema.parse(jobResult());
+    let persisted = false;
+    let acknowledgementAttempts = 0;
+    const client = {
+      acknowledgeAutomationDeliveries: async () => {
+        acknowledgementAttempts++;
+        if (acknowledgementAttempts === 1) throw new Error('simulated process interruption');
+        return {
+          contractVersion: '1.0' as const,
+          acknowledged: [deliveryKey],
+          conflicts: [],
+        };
+      },
+    };
+    const apply = async () => {
+      const replayed = persisted;
+      persisted = true;
+      return {
+        evaluated: replayed ? 0 : 1,
+        notificationsCreated: 0,
+        notificationsUpdated: 0,
+        tasksCreated: replayed ? 0 : 1,
+        tasksUpdated: 0,
+        tasksSettled: 0,
+        taskPromoted: replayed ? 0 : 1,
+        autoIncluded: replayed ? 0 : 1,
+        deferred: 0,
+        settled: 0,
+        stalePreserved: 0,
+        statusOnly: 0,
+        deliveriesReceived: 1,
+        deliveriesApplied: replayed ? 0 : 1,
+        deliveriesReplayed: replayed ? 1 : 0,
+        deliveriesOutOfOrder: 0,
+      };
+    };
+
+    await expect(applyAndAcknowledge(
+      client,
+      result,
+      new Date(sourceAsOf),
+      undefined,
+      apply,
+    )).rejects.toThrow('simulated process interruption');
+    expect(persisted).toBe(true);
+
+    await expect(applyAndAcknowledge(
+      client,
+      result,
+      new Date(sourceAsOf),
+      undefined,
+      apply,
+    )).resolves.toEqual({
+      received: 1,
+      applied: 0,
+      replayed: 1,
+      outOfOrder: 0,
+      acknowledged: 1,
+    });
+  });
+
   it('rejects unnormalized requests and response identity mismatches', () => {
     const request = {
       contractVersion: '1.0',
@@ -161,6 +224,13 @@ describe('finance automation consumer contracts', () => {
       ...jobResult(),
       deliveries: [{
         ...jobResult().deliveries[0],
+        action: 'settle',
+      }],
+    })).toThrow();
+    expect(() => financeAutomationJobResultSchema.parse({
+      ...jobResult(),
+      deliveries: [{
+        ...jobResult().deliveries[0],
         deliveryKey: `finance-automation:signal-v1_${'c'.repeat(43)}`,
       }],
     })).toThrow();
@@ -194,8 +264,8 @@ describe('finance automation consumer contracts', () => {
       signals: [current],
     });
 
-    expect(application.deliveries[0]?.activityKey).toContain(':2:');
-    expect(application.deliveries[0]?.settlementReason)
+    expect(application.deliveries[0]?.signal.activityKey).toContain(':2:');
+    expect(application.deliveries[0]?.signal.settlementReason)
       .toBe('authoritative_state_verified');
     expect(application.current).toEqual([]);
     const escalation = automationApplicationSignals({
@@ -267,6 +337,7 @@ describe('finance automation consumer contracts', () => {
     expect(notification.metadata).toMatchObject({
       financeAttention: { signalFamily: 'anomaly' },
     });
+    if (!notification.templateKey) throw new Error('Expected a Finance template key');
     expect(financeNotificationCatalogKey(notification.templateKey))
       .toBe('finance_duplicate_transaction');
     expect(financeNotificationCatalogKey('finance-connector-health'))

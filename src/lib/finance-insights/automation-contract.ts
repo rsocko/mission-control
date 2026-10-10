@@ -235,6 +235,7 @@ export const financeAutomationJobResultSchema = z.strictObject({
       || delivery.deliveryKey !== `finance-automation:${delivery.signalId}`
       || delivery.signal.connectorRef !== value.connectorRef
       || delivery.signal.kind !== expectedSignalKind
+      || (delivery.action === 'settle') !== (delivery.signal.state === 'settled')
     ) {
       context.addIssue({ code: 'custom', path: ['deliveries', index], message: 'snapshot mismatch' });
     }

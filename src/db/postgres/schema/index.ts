@@ -321,6 +321,7 @@ export {
   financeAttributionExceptions,
   financeAttributionAudit,
   financeAttentionRepairAudit,
+  financeAttentionDeliveryReceipts,
   kidProfiles,
   kidCardRules,
   kidMerchantRules,

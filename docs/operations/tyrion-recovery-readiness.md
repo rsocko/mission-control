@@ -388,6 +388,9 @@ scheduled or active job appears.
 
 ## 9. Stage Finance Insight cutover and delivery
 
+Follow the [Finance Insight cutover runbook](./finance-insight-cutover.md) for
+the supported authenticated CLI, exact prerequisites, and safe rollback.
+
 Let a normal post-release sync complete with shadow ingestion on and all
 delivery gates off. Copy the exact `publication.sourceGeneration` from:
 

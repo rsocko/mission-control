@@ -63,7 +63,7 @@ describe('PostgreSQL schema', () => {
     const sqliteTables = exportedTables(sqliteSchema);
     const postgresTables = sharedTables(postgresSchema);
 
-    expect(Object.keys(postgresTables)).toHaveLength(171);
+    expect(Object.keys(postgresTables)).toHaveLength(172);
     expect(Object.keys(postgresTables).sort()).toEqual(Object.keys(sqliteTables).sort());
 
     for (const [exportName, sqliteTable] of Object.entries(sqliteTables)) {
@@ -277,7 +277,7 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(27);
+    expect(migrations).toHaveLength(28);
     expect(migrations).toContain('0020_paperclip_provider_config.sql');
     expect(migrations).toContain('0021_tough_arachne.sql');
     expect(migrations).toContain('0022_exotic_ben_urich.sql');
@@ -285,6 +285,7 @@ describe('PostgreSQL schema', () => {
     expect(migrations).toContain('0024_finance_transaction_business_context.sql');
     expect(migrations).toContain('0025_remove_duplicate_tyrion_currency.sql');
     expect(migrations).toContain('0026_tyrion_finance_source_identity.sql');
+    expect(migrations).toContain('0027_finance_attention_delivery_receipts.sql');
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.

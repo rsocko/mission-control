@@ -110,6 +110,7 @@ describe('TyrionFinanceReviewClient', () => {
   it('uses the separate advisory rule-suggestion operation', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       contractVersion: '1.0',
+      policyVersion: 7,
       suggestion: {
         kind: 'merchant',
         merchantPattern: 'INVENTED MARKET',
@@ -128,5 +129,90 @@ describe('TyrionFinanceReviewClient', () => {
 
     expect(response.suggestion?.requiresConfirmation).toBe(true);
     expect(fetchMock.mock.calls[0][0]).toContain('/rule-suggestion');
+  });
+
+  it('creates a confirmed merchant rule through the exact v2 private endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      contractVersion: '2.0',
+      outcome: 'created',
+      policyVersion: 8,
+      rule: {
+        id: 'rule-merchant-invented',
+        outcome: 'kid',
+        kidId: 'kid-alex',
+        pattern: 'INVENTED MARKET',
+        businessEntityPattern: null,
+        scope: 'accounts',
+        accountRefs: ['account-current'],
+        confidence: 'likely',
+        enabled: true,
+      },
+    }), { status: 200 }));
+
+    const result = await new TyrionFinanceReviewClient(TOKEN, fetchMock).createMerchantRule({
+      contractVersion: '2.0',
+      expectedPolicyVersion: 7,
+      idempotencyKey: '4948bf5e-cd3d-47fe-8935-4e00949d1f3c',
+      confirmation: {
+        confirmed: true,
+        confirmedAt: '2026-10-09T20:00:00.000-04:00',
+      },
+      rule: {
+        outcome: 'kid',
+        kidId: 'kid-alex',
+        pattern: 'INVENTED MARKET',
+        businessEntityPattern: null,
+        scope: 'accounts',
+        accountRefs: ['account-current'],
+        confidence: 'likely',
+      },
+    });
+
+    expect(result.policyVersion).toBe(8);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://tyrion-operations-ui:3000/api/internal/v2/attribution/rules',
+      expect.objectContaining({ method: 'POST', cache: 'no-store', redirect: 'error' }),
+    );
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`);
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      expectedPolicyVersion: 7,
+      rule: { accountRefs: ['account-current'] },
+    });
+  });
+
+  it('rejects a merchant rule response that changes the confirmed scope', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      contractVersion: '2.0',
+      outcome: 'created',
+      policyVersion: 8,
+      rule: {
+        id: 'rule-merchant-invented',
+        outcome: 'review',
+        kidId: null,
+        pattern: 'INVENTED MARKET',
+        businessEntityPattern: null,
+        scope: 'global',
+        accountRefs: [],
+        confidence: 'likely',
+        enabled: true,
+      },
+    }), { status: 200 }));
+
+    await expect(new TyrionFinanceReviewClient(TOKEN, fetchMock).createMerchantRule({
+      contractVersion: '2.0',
+      expectedPolicyVersion: 7,
+      idempotencyKey: '4948bf5e-cd3d-47fe-8935-4e00949d1f3c',
+      confirmation: { confirmed: true, confirmedAt: '2026-10-09T20:00:00.000-04:00' },
+      rule: {
+        outcome: 'review',
+        kidId: null,
+        pattern: 'INVENTED MARKET',
+        businessEntityPattern: null,
+        scope: 'accounts',
+        accountRefs: ['account-current'],
+        confidence: 'likely',
+      },
+    })).rejects.toMatchObject({ code: 'invalid_contract', status: 502 });
   });
 });

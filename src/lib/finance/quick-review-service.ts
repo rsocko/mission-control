@@ -18,7 +18,13 @@ import {
   type FinanceReviewItem,
   type FinanceReviewSession,
   type FinanceReviewSessionRequest,
+  type FinanceMerchantRuleCreateRequest,
+  type FinanceMerchantRuleCreateResponse,
+  type FinanceQuickReviewRuleSuggestionRequest,
+  type TyrionQuickReviewRuleResponse,
+  type TyrionMerchantRuleCreateRequest,
   type TyrionQuickReviewRankRequest,
+  TYRION_MERCHANT_RULE_CONTRACT_VERSION,
 } from '@/lib/finance/quick-review-contract';
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
@@ -31,6 +37,7 @@ interface SessionTarget {
   localTransactionId: string | null;
   transaction: MonarchTransaction;
   item: FinanceReviewItem;
+  ruleSuggestion: TyrionQuickReviewRuleResponse | null;
 }
 
 interface ServerSession {
@@ -369,6 +376,7 @@ export async function startQuickReviewSession(
       stateToken,
       localTransactionId: local?.id ?? null,
       transaction,
+      ruleSuggestion: null,
       item: {
         reviewRef,
         stateToken,
@@ -571,5 +579,128 @@ export function getQuickReviewResearchContext(input: {
     coarseLocation: target.item.research.coarseLocation,
     amount: target.item.amount,
     occurredOn: target.item.date,
+  };
+}
+
+function requireCurrentTarget(input: {
+  sessionRef: string;
+  resumeToken: string;
+  reviewRef: string;
+  stateToken: string;
+}): { session: ServerSession; target: SessionTarget } {
+  const session = requireSession(input);
+  const target = session.targets[session.cursor];
+  if (
+    !target
+    || target.reviewRef !== input.reviewRef
+    || target.stateToken !== input.stateToken
+  ) {
+    throw new QuickReviewSessionError('review_state_conflict', 'Review item changed', 409);
+  }
+  return { session, target };
+}
+
+export async function previewQuickReviewMerchantRule(
+  request: FinanceQuickReviewRuleSuggestionRequest,
+  signal?: AbortSignal,
+): Promise<TyrionQuickReviewRuleResponse> {
+  const { target } = requireCurrentTarget(request);
+  if (!target.item.corrections.kids.some((kid) => kid.id === request.kidId)) {
+    throw new QuickReviewSessionError(
+      'invalid_rule_kid',
+      'The selected kid is not available for this review item',
+      400,
+    );
+  }
+  const suggestion = await new TyrionFinanceReviewClient().suggestRule({
+    contractVersion: FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
+    merchantName: request.merchantName,
+    kidId: request.kidId,
+    suggestReusableRule: true,
+  }, signal);
+  target.ruleSuggestion = suggestion;
+  return suggestion;
+}
+
+export async function createQuickReviewMerchantRule(
+  request: FinanceMerchantRuleCreateRequest,
+  signal?: AbortSignal,
+): Promise<FinanceMerchantRuleCreateResponse> {
+  const { target } = requireCurrentTarget(request);
+  const preview = target.ruleSuggestion;
+  if (!preview?.suggestion) {
+    throw new QuickReviewSessionError(
+      'merchant_rule_preview_required',
+      'Preview the reusable rule before confirming it',
+      409,
+    );
+  }
+  if (request.rule.pattern !== preview.suggestion.merchantPattern) {
+    throw new QuickReviewSessionError(
+      'merchant_rule_preview_changed',
+      'The merchant rule no longer matches the preview',
+      409,
+    );
+  }
+  if (
+    request.rule.outcome === 'kid'
+    && (
+      request.rule.kidId !== preview.suggestion.kidId
+      || !target.item.corrections.kids.some((kid) => kid.id === request.rule.kidId)
+    )
+  ) {
+    throw new QuickReviewSessionError(
+      'invalid_rule_kid',
+      'The selected kid is not available for this review item',
+      400,
+    );
+  }
+  const confirmedAt = Date.parse(request.confirmation.confirmedAt);
+  const confirmationAge = Date.now() - confirmedAt;
+  if (!Number.isFinite(confirmedAt) || confirmationAge > 5 * 60_000 || confirmationAge < -60_000) {
+    throw new QuickReviewSessionError(
+      'merchant_rule_confirmation_expired',
+      'Rule confirmation expired; review and confirm the rule again',
+      422,
+    );
+  }
+  const result = await new TyrionFinanceReviewClient().createMerchantRule(
+    buildQuickReviewMerchantRuleRequest(request, preview, target.transaction.account.id),
+    signal,
+  );
+  return {
+    contractVersion: result.contractVersion,
+    outcome: result.outcome,
+    policyVersion: result.policyVersion,
+    rule: {
+      id: result.rule.id,
+      outcome: result.rule.outcome,
+      kidId: result.rule.kidId,
+      pattern: result.rule.pattern,
+      businessEntityPattern: result.rule.businessEntityPattern,
+      scope: result.rule.scope,
+      confidence: result.rule.confidence,
+      enabled: result.rule.enabled,
+    },
+  };
+}
+
+export function buildQuickReviewMerchantRuleRequest(
+  request: FinanceMerchantRuleCreateRequest,
+  preview: TyrionQuickReviewRuleResponse,
+  currentAccountRef: string,
+): TyrionMerchantRuleCreateRequest {
+  return {
+    contractVersion: TYRION_MERCHANT_RULE_CONTRACT_VERSION,
+    expectedPolicyVersion: preview.policyVersion,
+    idempotencyKey: request.idempotencyKey,
+    confirmation: {
+      confirmed: true,
+      confirmedAt: request.confirmation.confirmedAt,
+    },
+    rule: {
+      ...request.rule,
+      accountRefs: request.rule.scope === 'global' ? [] : [currentAccountRef],
+    },
   };
 }

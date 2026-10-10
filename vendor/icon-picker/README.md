@@ -4,8 +4,8 @@ A framework-neutral React icon picker with a portable string storage contract.
 Choose and render emoji, Lucide, Material Design Icons, Phosphor, Dashboard
 Icons, and Simple Icons without storing provider-specific objects.
 
-> The first proposed release is `0.1.0-rc.0`. The package is not published
-> until this repository's release setup and API have been reviewed.
+> The package is published as a prerelease on npm. Prerelease versions use the
+> `next` distribution tag while the API is being validated.
 
 ## Live demo
 
@@ -157,6 +157,8 @@ Important props:
 | `pickerColor` | `string` | `color` |
 | `onColorChange` | `(color: string) => void` | — |
 | `label` | `string` | `'Pick an icon'` |
+| `theme` | `'auto' \| 'light' \| 'dark'` | `'auto'` |
+| `style` | `IconPickerStyle` | — |
 | `portalTarget` | `Element \| null` | `document.body` |
 | `pickerProps` | picker presentation props | — |
 
@@ -169,6 +171,7 @@ states, provider error notices, retries, keyboard activation, and an
 requests, including aliases, then rendered as CSS masks so uncolored icons
 inherit the consumer's current text color. Set `modal` only when embedding it
 in your own modal surface; `IconPickerButton` does this automatically.
+It accepts the same `theme` and typed `style` theming props as the button.
 
 ### `IconRenderer`
 
@@ -185,21 +188,56 @@ a network image error. Pass `label=""` for a decorative icon.
 ## Styling and theming
 
 Import `@rsocko/icon-picker/styles.css`. The stylesheet is package-owned and
-does not require Tailwind or Mission Control tokens. Override its variables in
-your application:
+does not require Tailwind or Mission Control tokens.
+
+The default `theme="auto"` inherits the nearest host `color-scheme`, recognizes
+the conventional `.dark` class and `data-theme="light|dark"` attributes, and
+falls back to `prefers-color-scheme` when the host does not declare a theme.
+Set `theme="light"` or `theme="dark"` to force a picker theme.
+`IconPickerButton` copies the resolved theme and semantic variables from its
+trigger into the portal, so the default `document.body` portal does not lose
+scoped host styles.
+
+Override the public variables on any ancestor, on the component `style` prop,
+or in a class passed through `className`:
 
 ```css
-:root {
-  --rs-icon-picker-bg: #111827;
-  --rs-icon-picker-surface: #0f172a;
-  --rs-icon-picker-surface-hover: #1e293b;
-  --rs-icon-picker-border: #334155;
-  --rs-icon-picker-text: #f8fafc;
-  --rs-icon-picker-muted: #94a3b8;
-  --rs-icon-picker-accent: #60a5fa;
-  --rs-icon-picker-shadow: 0 20px 50px rgb(0 0 0 / 0.35);
+.project-icon-field {
+  --rs-icon-picker-bg: var(--app-panel);
+  --rs-icon-picker-surface: var(--app-subtle);
+  --rs-icon-picker-surface-hover: var(--app-hover);
+  --rs-icon-picker-border: var(--app-border);
+  --rs-icon-picker-text: var(--app-text);
+  --rs-icon-picker-muted: var(--app-muted);
+  --rs-icon-picker-accent: var(--app-accent);
 }
 ```
+
+```tsx
+<IconPickerButton
+  value={icon}
+  onChange={setIcon}
+  theme="auto"
+  style={{ '--rs-icon-picker-accent': '#8b5cf6' }}
+/>
+```
+
+| Custom property | Semantic role |
+| --- | --- |
+| `--rs-icon-picker-bg` | Picker and trigger background |
+| `--rs-icon-picker-surface` | Search and filter surfaces |
+| `--rs-icon-picker-surface-hover` | Hovered and selected icon surface |
+| `--rs-icon-picker-border` | Dividers, controls, and panel border |
+| `--rs-icon-picker-text` | Primary text and uncolored icon masks |
+| `--rs-icon-picker-muted` | Secondary text and placeholder content |
+| `--rs-icon-picker-accent` | Focus, selection, and interactive emphasis |
+| `--rs-icon-picker-shadow` | Picker elevation shadow |
+| `--rs-icon-picker-notice-bg` | Provider warning background |
+| `--rs-icon-picker-notice-text` | Provider warning text |
+
+The `IconPickerStyle` type includes these namespaced properties for typed inline
+configuration. Custom properties still cascade normally; the button snapshots
+their computed values when opening its portal.
 
 ## SSR and React Server Components
 
@@ -306,10 +344,9 @@ to `main` then deploy automatically, and `workflow_dispatch` supports a manual
 retry. Deployment is independent of npm publication.
 
 CI runs source, package, and static-demo checks and verifies the npm file
-manifest. The release
-workflow publishes only from a published GitHub release using npm trusted
-publishing and provenance. Before enabling a release, configure
-`@rsocko/icon-picker` on npm with:
+manifest. The release workflow publishes only from a published GitHub release
+using npm trusted publishing and provenance. The `@rsocko/icon-picker` trusted
+publisher is configured with:
 
 - GitHub organization/user: `rsocko`
 - Repository: `icon-picker`
@@ -317,7 +354,7 @@ publishing and provenance. Before enabling a release, configure
 - Environment: `npm`
 
 Then merge the reviewed release commit, tag the exact package version (for
-example `v0.1.0-rc.0`), and publish the matching GitHub release. No npm token is
+example `v0.1.0-rc.1`), and publish the matching GitHub release. No npm token is
 stored in this repository, and this branch does not publish anything.
 Prereleases are published under npm's `next` distribution tag; only stable
 versions receive `latest`.

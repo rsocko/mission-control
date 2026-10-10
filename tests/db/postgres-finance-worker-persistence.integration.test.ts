@@ -185,6 +185,16 @@ async function createHarness(): Promise<FinanceWorkerContractHarness> {
       );
       return result.rows[0] ?? null;
     },
+    async attributionSubject(kidId) {
+      const result = await pool.query<{ name: string; policyVersion: number }>(
+        `SELECT profiles.name, subjects.policy_version AS "policyVersion"
+         FROM finance_attribution_subjects subjects
+         INNER JOIN kid_profiles profiles ON profiles.id = subjects.kid_id
+         WHERE subjects.connector_id = $1 AND subjects.kid_id = $2`,
+        [CONNECTOR_ID, kidId],
+      );
+      return result.rows[0] ?? null;
+    },
     async referenceAccount() {
       const result = await pool.query<{
         id: string;

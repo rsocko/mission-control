@@ -50,6 +50,10 @@ export interface FinanceWorkerContractHarness {
     reviewState: string;
     resolution: string | null;
   } | null>;
+  attributionSubject(kidId: string): Promise<{
+    name: string;
+    policyVersion: number;
+  } | null>;
   referenceAccount(): Promise<{
     id: string;
     isActive: boolean;
@@ -651,6 +655,7 @@ export function describeFinanceWorkerPersistenceContract(
         status: 'unavailable',
         policyVersion: null,
         engineVersion: '2.0.0',
+        subjects: [],
       })).resolves.toEqual({ recorded: true });
 
       await harness.repositories.snapshots.start(startInput(
@@ -667,7 +672,20 @@ export function describeFinanceWorkerPersistenceContract(
         status: 'healthy',
         policyVersion: 7,
         engineVersion: '2.0.0',
+        subjects: [{ kidId: 'kid-one', name: 'Alex' }],
       })).resolves.toEqual({ recorded: true });
+      await expect(harness.attributionSubject('kid-one')).resolves.toEqual({
+        name: 'Alex',
+        policyVersion: 7,
+      });
+      await expect(harness.repositories.attribution.listExceptions({
+        connectorId: CONNECTOR_ID,
+        status: 'current',
+        limit: 50,
+        cursor: null,
+      })).resolves.toMatchObject({
+        subjects: [{ kidId: 'kid-one', name: 'Alex' }],
+      });
       await expect(harness.repositories.attribution.finish({
         connectorId: CONNECTOR_ID,
         generationId: 'superseded-attribution',
@@ -677,7 +695,9 @@ export function describeFinanceWorkerPersistenceContract(
         status: 'healthy',
         policyVersion: 7,
         engineVersion: '2.0.0',
+        subjects: [{ kidId: 'kid-two', name: 'Blair' }],
       })).resolves.toEqual({ recorded: false });
+      await expect(harness.attributionSubject('kid-two')).resolves.toBeNull();
     });
 
     it('fences backfill attribution against the transaction row generation', async () => {
@@ -732,6 +752,7 @@ export function describeFinanceWorkerPersistenceContract(
         status: 'unavailable',
         policyVersion: null,
         engineVersion: '2.0.0',
+        subjects: [],
       })).resolves.toEqual({ recorded: true });
     });
 
@@ -847,6 +868,7 @@ export function describeFinanceWorkerPersistenceContract(
           status: 'healthy',
           policyVersion: 7,
           engineVersion: '2.0.0',
+          subjects: [],
         })).resolves.toEqual({ recorded: true });
         const page = await harness.repositories.attribution.listExceptions({
           connectorId: CONNECTOR_ID,

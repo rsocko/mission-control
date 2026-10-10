@@ -75,6 +75,7 @@ export const financeReviewItemSchema = z.object({
   currency: z.string().regex(/^[A-Z]{3}$/),
   accountName: boundedLabelSchema,
   payee: boundedLabelSchema,
+  businessContext: boundedLabelSchema.nullable().optional(),
   category: correctionOptionSchema.nullable(),
   kid: correctionOptionSchema.nullable(),
   monarchReview: z.object({

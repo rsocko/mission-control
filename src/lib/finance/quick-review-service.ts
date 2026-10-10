@@ -386,6 +386,7 @@ export async function startQuickReviewSession(
         currency,
         accountName: transaction.account.displayName,
         payee: merchantNameForRank(transaction.merchant.name),
+        businessContext: transaction.businessContext ?? null,
         category: transaction.category
           ? { id: transaction.category.id, label: transaction.category.name }
           : null,

@@ -17,6 +17,7 @@ const item = {
   currency: 'USD',
   accountName: 'Household card',
   payee: 'Invented Market',
+  businessContext: 'Invented Neighborhood Foods',
   category: { id: 'category-groceries', label: 'Groceries' },
   kid: null,
   monarchReview: { status: 'needs-review', assignedTo: 'Parent' },
@@ -78,6 +79,8 @@ describe('FinanceQuickReview', () => {
     render(<FinanceQuickReview />);
 
     expect(await screen.findByRole('heading', { name: 'Invented Market' })).toBeInTheDocument();
+    expect(screen.getByText('Business context').parentElement)
+      .toHaveTextContent('Business context · Invented Neighborhood Foods');
     expect(screen.getByText('$184.62')).toBeInTheDocument();
     expect(screen.getByText('Needs review · Assigned to Parent')).toBeInTheDocument();
     expect(screen.getByText('High amount with low Kids attribution confidence.')).toBeInTheDocument();
@@ -94,6 +97,18 @@ describe('FinanceQuickReview', () => {
       stateToken: item.stateToken,
     });
     expect(action.idempotencyKey).toEqual(expect.any(String));
+  });
+
+  it('does not repeat business context when it duplicates the payee', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({
+      ...session,
+      current: { ...item, businessContext: '  invented   market ' },
+    })));
+
+    render(<FinanceQuickReview />);
+
+    expect(await screen.findByRole('heading', { name: 'Invented Market' })).toBeInTheDocument();
+    expect(screen.queryByText('Business context')).not.toBeInTheDocument();
   });
 
   it('submits corrections before Monarch is marked reviewed', async () => {

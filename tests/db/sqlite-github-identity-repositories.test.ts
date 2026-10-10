@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { afterAll, vi } from 'vitest';
 import {
   describeGitHubIdentityRepositoriesContract,
@@ -226,6 +227,36 @@ describeGitHubIdentityRepositoriesContract('SQLite', async (): Promise<GitHubIde
         proofType: 'stage1_inaccessible',
         createdAt: now,
       }).run();
+    },
+    seedTask: async (id, now) => {
+      db.insert(schema.tasks).values({
+        id,
+        connectorType: 'github-issues',
+        connectorInstanceId,
+        sourceId: `${sourceId}:replacement`,
+        sourceListId,
+        title: 'Replacement',
+        status: 'todo',
+        priority: 'normal',
+        metadata: {},
+        syncStatus: 'synced',
+        createdAt: now,
+        updatedAt: now,
+        lastSyncedAt: now,
+      }).run();
+    },
+    softDeleteTask: async (id, now) => {
+      db.update(schema.tasks).set({ deletedAt: now, updatedAt: now })
+        .where(eq(schema.tasks.id, id))
+        .run();
+    },
+    openCollisionCount: async (id) => {
+      const row = sqlite.prepare(`
+        SELECT COUNT(*) AS value
+        FROM github_identity_collisions
+        WHERE connector_instance_id = ? AND state = 'open'
+      `).get(id) as { value: number };
+      return row.value;
     },
     leaseState: async (leaseId) => {
       const row = sqlite.prepare(`

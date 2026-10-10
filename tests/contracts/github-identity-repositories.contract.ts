@@ -36,6 +36,9 @@ export interface GitHubIdentityHarness {
   seedBaseline(now: string): Promise<void>;
   /** Records an accepted terminal-inaccessible exception for the seeded task. */
   seedTerminalException(now: string): Promise<void>;
+  seedTask(taskId: string, now: string): Promise<void>;
+  softDeleteTask(taskId: string, now: string): Promise<void>;
+  openCollisionCount(connectorInstanceId: string): Promise<number>;
   leaseState(
     leaseId: string,
   ): Promise<{ state: string; modeRevision: number; dispatchedAt: string | null } | null>;
@@ -151,6 +154,106 @@ export function describeGitHubIdentityRepositoriesContract(
           rows: [],
         });
         expect(rows).toEqual([]);
+      });
+
+      it('recovers a stable binding from a soft-deleted task owner', async () => {
+        await harness.seedBaseline(NOW);
+        const replacementTaskId = 'task-1-replacement';
+        await harness.seedTask(replacementTaskId, NOW);
+        const { identity } = harness.repositories;
+        const modeSnapshot = await identity.getModeSnapshot(
+          GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+          NOW,
+        );
+        const write = {
+          target: {
+            connectorInstanceId: GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+            bindingType: 'task' as const,
+            localId: replacementTaskId,
+            legacyIdentity: GITHUB_IDENTITY_CONTRACT.sourceId,
+          },
+          evidence: {
+            entity: {
+              identity: {
+                provider: 'github',
+                hostKey: 'github.com',
+                entityType: 'issue' as const,
+                stableId: GITHUB_IDENTITY_CONTRACT.issueStableId,
+              },
+              locator: { owner: 'owner', repository: 'repo', issueNumber: 7 },
+              observationSource: 'rest' as const,
+              observedAt: LATER,
+            },
+            repository: {
+              identity: {
+                provider: 'github',
+                hostKey: 'github.com',
+                entityType: 'repository' as const,
+                stableId: GITHUB_IDENTITY_CONTRACT.repositoryStableId,
+              },
+              locator: { owner: 'owner', repository: 'repo' },
+              observationSource: 'rest' as const,
+              observedAt: LATER,
+            },
+          },
+        };
+
+        await expect(identity.persistExternalIdentityBatch({
+          connectorInstanceId: GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+          modeSnapshot,
+          writes: [write],
+        })).resolves.toEqual([
+          expect.objectContaining({
+            state: 'collision',
+            collisionCategory: 'multiple_local_one_stable',
+          }),
+        ]);
+        await harness.softDeleteTask(GITHUB_IDENTITY_CONTRACT.taskId, LATER);
+        const rows = await identity.lookupStableIdentityBatch({
+          connectorInstanceId: GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+          namespace: {
+            provider: 'github',
+            hostKey: 'github.com',
+            entityType: 'issue',
+            bindingType: 'task',
+          },
+          rows: [{
+            candidateKey: GITHUB_IDENTITY_CONTRACT.sourceId,
+            stableId: GITHUB_IDENTITY_CONTRACT.issueStableId,
+            ownerKey: 'owner',
+            repositoryKey: 'repo',
+            issueNumber: 7,
+          }],
+        });
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          bindingLocalId: null,
+          localId: null,
+          bindingState: null,
+        });
+
+        await expect(identity.persistExternalIdentityBatch({
+          connectorInstanceId: GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+          modeSnapshot,
+          writes: [write],
+        })).resolves.toEqual([expect.objectContaining({ state: 'bound' })]);
+        await expect(harness.primaryBinding({
+          connectorInstanceId: GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+          bindingType: 'task',
+          localId: GITHUB_IDENTITY_CONTRACT.taskId,
+        })).resolves.toBeNull();
+        await expect(harness.primaryBinding({
+          connectorInstanceId: GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+          bindingType: 'task',
+          localId: replacementTaskId,
+        })).resolves.toMatchObject({
+          stableId: GITHUB_IDENTITY_CONTRACT.issueStableId,
+          state: 'active',
+          verifiedAt: LATER,
+        });
+        await expect(harness.openCollisionCount(
+          GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+        )).resolves.toBe(0);
       });
     });
 

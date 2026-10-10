@@ -914,6 +914,36 @@ async function persistPrimaryIdentityWrite(
   );
   const localBinding = localBindingResult.rows[0];
   const entityBinding = entityBindingResult.rows[0];
+  const staleTaskOwnerResult = entityBinding
+    && entityBinding.bindingType === 'task'
+    && target.bindingType === 'task'
+    && entityBinding.localId !== target.localId
+    ? await query<{ deletedAt: string | null }>(
+        client,
+        `SELECT deleted_at AS "deletedAt"
+         FROM tasks
+         WHERE id = $1 AND connector_instance_id = $2
+         LIMIT 1
+         FOR UPDATE`,
+        [entityBinding.localId, target.connectorInstanceId],
+      )
+    : null;
+  const replacementTaskResult = staleTaskOwnerResult?.rows[0]?.deletedAt
+    ? await query<{ deletedAt: string | null }>(
+        client,
+        `SELECT deleted_at AS "deletedAt"
+         FROM tasks
+         WHERE id = $1 AND connector_instance_id = $2
+         LIMIT 1
+         FOR UPDATE`,
+        [target.localId, target.connectorInstanceId],
+      )
+    : null;
+  const canTakeOverDeletedTaskBinding = Boolean(
+    staleTaskOwnerResult?.rows[0]?.deletedAt
+    && replacementTaskResult?.rows[0]
+    && replacementTaskResult.rows[0].deletedAt === null,
+  );
   if (localBinding && localBinding.externalEntityId !== entity.id) {
     return recordPrimaryIdentityCollision(
       client,
@@ -929,6 +959,7 @@ async function persistPrimaryIdentityWrite(
       entityBinding.bindingType !== target.bindingType
       || entityBinding.localId !== target.localId
     )
+    && !canTakeOverDeletedTaskBinding
   ) {
     return recordPrimaryIdentityCollision(
       client,
@@ -971,11 +1002,56 @@ async function persistPrimaryIdentityWrite(
       client,
       `
         UPDATE external_entity_bindings
-        SET verified_at = $2, updated_at = $2
+        SET local_id = CASE WHEN $3 THEN $4 ELSE local_id END,
+            state = CASE WHEN $3 THEN $5 ELSE state END,
+            verified_at = $2,
+            updated_at = $2
         WHERE id = $1
       `,
-      [existingBinding.id, evidence.entity.observedAt],
+      [
+        existingBinding.id,
+        evidence.entity.observedAt,
+        canTakeOverDeletedTaskBinding,
+        target.localId,
+        'active',
+      ],
     );
+    if (canTakeOverDeletedTaskBinding && entityBinding) {
+      const localIds = boundedPrimaryIdentityCollisionIds([
+        entityBinding.localId,
+        target.localId,
+      ]);
+      const externalEntityIds = [entity.id];
+      const fingerprint = digestExternalIdentifier(JSON.stringify({
+        category: 'multiple_local_one_stable',
+        bindingType: 'task',
+        localIds,
+        externalEntityIds,
+      }));
+      await query(
+        client,
+        `UPDATE github_identity_collisions
+         SET state = 'resolved',
+             resolution = $4::jsonb,
+             resolved_at = $5,
+             resolved_by = 'system:stable-identity-recovery'
+         WHERE connector_instance_id = $1
+           AND category = 'multiple_local_one_stable'
+           AND fingerprint = $2
+           AND state = $3`,
+        [
+          target.connectorInstanceId,
+          fingerprint,
+          'open',
+          JSON.stringify({
+            localId: target.localId,
+            externalEntityId: entity.id,
+            rationale: 'Reassigned stable identity from a soft-deleted task owner',
+          }),
+          evidence.entity.observedAt,
+        ],
+      );
+    }
   } else {
     await query(
       client,
@@ -2549,6 +2625,16 @@ export function createPostgresGitHubIdentityRepositories(
             AND binding.connector_instance_id = $9
             AND binding.binding_type = $10
             AND binding.state != 'retired'
+            AND (
+              binding.binding_type != 'task'
+              OR EXISTS (
+                SELECT 1
+                FROM tasks AS binding_task
+                WHERE binding_task.id = binding.local_id
+                  AND binding_task.connector_instance_id = binding.connector_instance_id
+                  AND binding_task.deleted_at IS NULL
+              )
+            )
           LEFT JOIN tasks AS local_task
             ON binding.binding_type = 'task'
             AND local_task.id = binding.local_id

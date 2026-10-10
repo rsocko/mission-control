@@ -385,6 +385,52 @@ export const financeNotificationProvider: NotificationSourceProvider = {
       present: weeklySummaryPresentation,
     },
     {
+      key: 'finance-receipt-reconciliation',
+      matches: notification => (
+        notification.metadata.notificationType === 'financeReceiptReconciliation'
+      ),
+      present(notification) {
+        const attention = record(notification.metadata.financeAttention);
+        const details = record(attention.details);
+        const reviewId = text(details.reviewId);
+        const caseKind = text(details.caseKind);
+        const target = reviewId
+          ? `/finance/review?filter=receipt-reconciliation&review=${encodeURIComponent(reviewId)}`
+          : '/finance/review?filter=receipt-reconciliation';
+        return {
+          title: notification.title,
+          body: notification.body ?? null,
+          category: 'finance',
+          templateKey: 'finance-receipt-reconciliation',
+          isActionable: notification.isActionable,
+          metadata: notification.metadata,
+          presentation: {
+            sourceName: 'OWL',
+            providerSignature: 'finance-receipt-reconciliation',
+            metadataChips: caseKind
+              ? [{ label: 'Exception', value: caseKind.replaceAll('_', ' ') }]
+              : [],
+            richContent: {
+              primaryText: caseKind === 'unmatched'
+                ? 'No payment match after the grace period'
+                : 'Receipt evidence needs review',
+              secondaryText: 'Review privacy-scoped evidence in Finance.',
+              footerText: 'OWL remains the source of truth for documents and reconciliation state.',
+            },
+          },
+          actions: [{
+            actionType: 'navigate',
+            label: 'Review receipt exception',
+            icon: 'search',
+            variant: 'primary',
+            isPrimary: true,
+            payload: { target },
+            createdBy: 'connector',
+          }],
+        };
+      },
+    },
+    {
       key: 'finance-attribution-review',
       matches: notification => notification.metadata.notificationType === 'financeAttributionReview',
       present(notification) {

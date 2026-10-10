@@ -165,12 +165,13 @@ describe('Layer 5C finance persistence boundary', () => {
     const backfill = source(
       'src/lib/connectors/monarch-money/transaction-backfill.ts',
     );
+    const history = connector.indexOf('new FinanceInsightHistorySynchronizer');
     const publication = connector.indexOf(
       'const publication = await captureFinanceInsightPublication',
     );
 
-    expect(connector).not.toContain('FinanceInsightHistorySynchronizer');
-    expect(publication).toBeGreaterThan(0);
+    expect(history).toBeGreaterThan(0);
+    expect(publication).toBeGreaterThan(history);
     expect(connector).not.toContain("resolveDatabaseBackend() === 'postgres'");
     expect(support).toContain('normalizeFinanceProviderAlias(connector.type)');
     expect(support).toContain(

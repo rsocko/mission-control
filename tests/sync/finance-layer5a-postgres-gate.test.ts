@@ -106,7 +106,7 @@ vi.mock('@/lib/connectors/monarch-money/attribution-service', () => ({
 }));
 
 describe('Layer 5C PostgreSQL finance activation', () => {
-  it('runs current finance sync without evaluating SQLite or invoking history', async () => {
+  it('runs the complete portable finance flow without evaluating SQLite', async () => {
     const { FinanceManagerConnector } = await import(
       '@/lib/connectors/monarch-money'
     );
@@ -142,7 +142,7 @@ describe('Layer 5C PostgreSQL finance activation', () => {
     });
     expect(mocks.snapshotSync).toHaveBeenCalledOnce();
     expect(mocks.datasetSync).toHaveBeenCalledOnce();
-    expect(mocks.historySync).not.toHaveBeenCalled();
+    expect(mocks.historySync).toHaveBeenCalledOnce();
     expect(mocks.publication).toHaveBeenCalledOnce();
     expect(mocks.ingestion).toHaveBeenCalledOnce();
     expect(mocks.prune).toHaveBeenCalledOnce();

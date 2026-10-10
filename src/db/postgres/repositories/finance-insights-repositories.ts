@@ -223,7 +223,7 @@ function createProjectionPersistence(pool: Pool): FinanceInsightProjectionPersis
         `SELECT source_ref AS "sourceRef", occurred_on AS "occurredOn", payload
          FROM finance_insight_transaction_projection_facts
          WHERE connector_id = $1 AND generation_id = $2
-         ORDER BY source_ref`,
+         ORDER BY source_ref COLLATE "C"`,
         [connectorId, attemptId],
       );
       return rows;
@@ -249,7 +249,7 @@ function createProjectionPersistence(pool: Pool): FinanceInsightProjectionPersis
           `SELECT payload
            FROM finance_insight_transaction_projection_facts
            WHERE connector_id = $1 AND generation_id = $2
-           ORDER BY source_ref`,
+           ORDER BY source_ref COLLATE "C"`,
           [command.connectorId, command.attemptId],
         );
         const verifiedFacts = stagedFacts.map((row) => transactionSourceFactSchema.parse(row.payload));
@@ -391,7 +391,7 @@ function createProjectionPersistence(pool: Pool): FinanceInsightProjectionPersis
         `SELECT payload
          FROM finance_insight_transaction_projection_facts
          WHERE connector_id = $1 AND generation_id = $2
-         ORDER BY source_ref`,
+         ORDER BY source_ref COLLATE "C"`,
         [connectorId, generationId],
       );
       return rows.map((row) => row.payload);
@@ -1002,7 +1002,7 @@ function createBackfillPersistence(pool: Pool): FinanceInsightBackfillPersistenc
              client,
              `SELECT payload FROM finance_insight_transaction_projection_facts
               WHERE connector_id = $1 AND generation_id = $2
-              ORDER BY source_ref`,
+              ORDER BY source_ref COLLATE "C"`,
              [command.connectorId, command.generationId],
            );
            const storedWindows = await query<FinanceInsightWindowProof>(

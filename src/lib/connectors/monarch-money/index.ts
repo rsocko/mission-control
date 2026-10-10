@@ -20,6 +20,7 @@ import {
 } from './attribution-client';
 import { FinanceSnapshotSynchronizer } from './snapshot-synchronizer';
 import { FinanceDatasetSynchronizer } from './dataset-synchronizer';
+import { FinanceInsightHistorySynchronizer } from './finance-insight-history-sync';
 import { captureFinanceInsightPublication } from '@/lib/finance-insights/publication';
 import { pruneFinanceInsightOccurrenceCache } from '@/lib/finance-insights/occurrence-cache';
 import logger from '@/lib/logger';
@@ -133,6 +134,13 @@ export class FinanceManagerConnector implements IConnector {
         status: transactionError ? 'partial' : datasets.status,
         datasetErrors,
       };
+      if (result.status === 'fresh' && Object.keys(datasetErrors).length === 0) {
+        try {
+          await new FinanceInsightHistorySynchronizer(config).sync(context);
+        } catch (error) {
+          if (context.signal?.aborted) throw error;
+        }
+      }
       const publication = await captureFinanceInsightPublication(config, result);
       let insightNotificationsAdded = 0;
       try {

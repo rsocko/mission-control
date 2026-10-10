@@ -1,9 +1,10 @@
 # Icon picker package integration
 
 Mission Control consumes a generated package snapshot of
-`@rsocko/icon-picker@0.1.0-rc.2`. The canonical source is
-`https://github.com/rsocko/icon-picker` at merged `main` commit
-`87079346141c7d91c9e65830dcd83b9f3860abc6`, tagged `v0.1.0-rc.2`.
+`@rsocko/icon-picker`. The canonical source is
+`https://github.com/rsocko/icon-picker`. The reviewed package version, exact
+merged `main` commit, npm toolchain, and artifact integrity values are recorded
+in `scripts/icon-picker-vendor-pin.json`.
 
 The standalone repository is the only editable source of truth. Files under
 `vendor/icon-picker/` are generated package output and must not be hand-edited.
@@ -44,21 +45,38 @@ The aggregate command verifies every vendored integration:
 npm run vendor:verify
 ```
 
-## Synchronize from upstream
+## Automated synchronization
 
-Synchronization is an explicit operator action. It is never run during
-installation, application startup, tests, or production builds.
+The **Sync icon picker vendor** GitHub Actions workflow checks upstream every
+day at 09:17 UTC. When the latest merged `main` commit changes the deterministic
+snapshot, it creates or updates the single
+`automation/icon-picker-vendor-sync` review branch and pull request. It does
+not auto-merge, publish, tag, or release anything. Repeated runs replace that
+branch from current Mission Control `main`, so they do not create duplicate
+pull requests.
+
+To run it on demand, open **Actions**, select **Sync icon picker vendor**, and
+choose **Run workflow**. Leave `commit` empty to use the latest upstream
+`main`, or enter a full lowercase 40-character commit SHA already merged into
+upstream `main`. A commit outside that history is rejected.
+
+Synchronization is never run during installation, application startup, tests,
+or production builds. For local troubleshooting, use the reviewed commit from
+the pin:
 
 ```powershell
-npm run vendor:icon-picker:sync -- --commit 87079346141c7d91c9e65830dcd83b9f3860abc6
+$commit = (Get-Content scripts/icon-picker-vendor-pin.json | ConvertFrom-Json).sourceCommit
+npm run vendor:icon-picker:sync -- --commit $commit
 ```
 
 The command:
 
 1. Clones the canonical upstream repository into a temporary directory and
    checks out the exact immutable commit.
-2. Refuses a commit that differs from Mission Control's reviewed pin.
-3. Requires `https://packagefeedproxy.microsoft.io/npm/` as the npm registry.
+2. Refuses a commit that differs from Mission Control's reviewed pin unless
+   the automation explicitly requests a reviewable pin update.
+3. Requires the corporate npm registry locally and the public npm registry in
+   GitHub Actions.
 4. Uses the upstream-pinned npm version from the approved registry and restores
    the locked upstream dependencies with the approved-registry policy.
 5. Runs upstream `package:artifact` from the clean exact commit using that npm
@@ -68,10 +86,10 @@ The command:
 7. Records and verifies per-file hashes from the validated extracted artifact.
 8. Replaces `vendor/icon-picker/` atomically only after all checks pass.
 
-To advance upstream, review and update the pin and expected artifact constants
-in `scripts/icon-picker-vendor.mjs`, run the synchronization command with that
-same exact commit, update the lockfile if package metadata changed, and commit
-the complete generated diff.
+To advance upstream without the workflow, run the synchronization command with
+`--update-pin true`, refresh `package-lock.json`, and submit the complete
+generated diff for review. The automation is preferred because it performs
+those steps consistently.
 
 ## Mission Control boundary
 

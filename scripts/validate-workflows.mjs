@@ -191,6 +191,45 @@ for (const file of workflowFiles) {
     }
   }
 
+  if (file === 'sync-icon-picker-vendor.yml') {
+    const sync = workflow.jobs?.sync;
+    assert.deepEqual(
+      workflow.on.schedule,
+      [{ cron: '17 9 * * *' }],
+      'icon picker synchronization must retain its low-noise daily cadence',
+    );
+    assert.equal(
+      workflow.on.workflow_dispatch?.inputs?.commit?.required,
+      false,
+      'manual icon picker synchronization must keep the exact commit optional',
+    );
+    assert.deepEqual(
+      workflow.concurrency,
+      { group: 'sync-icon-picker-vendor', 'cancel-in-progress': false },
+      'icon picker synchronization must serialize updates without cancelling an in-flight build',
+    );
+    assert.ok(sync, 'icon picker synchronization must define its update job');
+    assert.deepEqual(
+      sync.permissions,
+      { contents: 'write', 'pull-requests': 'write' },
+      'icon picker synchronization must use only the permissions needed to maintain its PR',
+    );
+    for (const invariant of [
+      'gh api repos/rsocko/icon-picker/commits/main --jq .sha',
+      'repos/rsocko/icon-picker/compare/${target_commit}...${latest_commit}',
+      'echo "needed=false" >> "$GITHUB_OUTPUT"',
+      'npm run vendor:icon-picker:sync -- --commit "${TARGET_COMMIT}" --update-pin true',
+      'npm run vendor:icon-picker:verify',
+      'node --test scripts/icon-picker-vendor.test.mjs',
+      'automation/icon-picker-vendor-sync',
+      '--force-with-lease="refs/heads/${BRANCH}:${REMOTE_SHA}"',
+      'gh pr list --state open --base main --head "${BRANCH}"',
+      'gh pr create --base main --head "${BRANCH}"',
+    ]) {
+      assert.ok(source.includes(invariant), `icon picker synchronization must enforce ${invariant}`);
+    }
+  }
+
   if (file === 'ci.yml') {
     assert.ok(
       'workflow_dispatch' in workflow.on,
@@ -250,7 +289,7 @@ for (const file of workflowFiles) {
       'docs/*|README.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|DESIGN.md|PRODUCT.md|SECURITY.md|SUPPORT.md',
       '.github/agents/*|.github/hooks/impeccable.json|.github/skills/impeccable/*|.github/workflows/ci.yml|.impeccable/live/config.json|scripts/validate-impeccable.mjs|src/app/layout.tsx',
       'public/*|src/app/*.css|src/app/*/components/*|src/app/*/error.tsx|src/app/*/layout.tsx|src/app/*/loading.tsx|src/app/*/not-found.tsx|src/app/*/page.tsx|src/components/*|src/lib/hooks/*|tests/components/*|tests/lib/constants/connector-icons.test.ts',
-      '.gitattributes|vendor/generic-graph-workbench/*|vendor/icon-picker/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/icon-picker-vendor.mjs|scripts/icon-picker-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json',
+      '.gitattributes|vendor/generic-graph-workbench/*|vendor/icon-picker/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/icon-picker-vendor.mjs|scripts/icon-picker-vendor-pin.json|scripts/icon-picker-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json',
       '.github/workflows/*|.impeccable/live/config.json|package.json|package-lock.json|scripts/validate-workflows.mjs',
       'echo "impeccable_changed=${impeccable_changed}" >> "$GITHUB_OUTPUT"',
       'postgres_matrix=\'{"include":[{"shard":1,"count":1}]}\'',
@@ -710,7 +749,11 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     assert.equal(control.environment, 'demo', `${file} control job must use the demo environment`);
   }
 
-  if (hasWritePermissions && !controlsDemoEnvironment) {
+  if (
+    hasWritePermissions
+    && !controlsDemoEnvironment
+    && file !== 'sync-icon-picker-vendor.yml'
+  ) {
     assert.ok(!('push' in workflow.on), `${file} must not publish directly from a push event`);
     assert.ok(!('pull_request' in workflow.on), `${file} must not publish from pull requests`);
     assert.deepEqual(

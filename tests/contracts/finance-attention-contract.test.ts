@@ -78,14 +78,13 @@ describe('finance attention contract — pure decision helpers', () => {
     expect(ordered).toEqual([writeBackFresh, escalated, fresh]);
   });
 
-  it('allowlists only the documented human-reviewable attribution reasons', () => {
+  it('allowlists only reasons that create individual review notifications', () => {
     for (const reason of [
       'attribution_ambiguous',
       'historical-attribution-tie',
       'low-confidence',
       'manual_decision_conflict',
       'merchant-rule-conflict',
-      'no-match',
       'review-required',
     ]) {
       expect(isHumanReviewableAttributionReason(reason), reason).toBe(true);
@@ -95,6 +94,7 @@ describe('finance attention contract — pure decision helpers', () => {
       'attribution_service_unavailable',
       'policy-version-mismatch',
       'engine-unavailable',
+      'no-match',
     ]) {
       expect(isHumanReviewableAttributionReason(reason), reason).toBe(false);
     }

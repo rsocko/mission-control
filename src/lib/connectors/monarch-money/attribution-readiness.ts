@@ -8,6 +8,12 @@ import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runti
 import { resolveFinanceExternalLinks } from '@/lib/finance/external-links';
 import { isFinanceConnectorType } from './config';
 import {
+  ATTRIBUTION_ATTENTION_POLICY_SETTING,
+  AttributionAttentionPolicyError,
+  parseAttributionAttentionPolicy,
+  type AttributionAttentionPolicy,
+} from '@/lib/finance/attribution-attention-policy';
+import {
   getTyrionAttributionPolicySelection,
   TYRION_ATTRIBUTION_POLICY_SETTING,
 } from './config';
@@ -45,10 +51,25 @@ async function financeConnector(connectorId: string) {
   return { connector, repositories };
 }
 
+function settingsRecord(settings: unknown): Record<string, unknown> {
+  if (typeof settings === 'string') {
+    const parsed = JSON.parse(settings) as unknown;
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  }
+  return settings !== null && typeof settings === 'object' && !Array.isArray(settings)
+    ? settings as Record<string, unknown>
+    : {};
+}
+
 function mapError(error: unknown): FinanceAttributionReadinessError {
   if (error instanceof FinanceAttributionReadinessError) return error;
   if (error instanceof FinanceOperatorPersistenceError) {
     return new FinanceAttributionReadinessError(error.code, error.status);
+  }
+  if (error instanceof AttributionAttentionPolicyError) {
+    return new FinanceAttributionReadinessError(error.code, 400);
   }
   if (error instanceof TyrionAttributionError) {
     return new FinanceAttributionReadinessError(
@@ -71,6 +92,12 @@ export async function getFinanceAttributionPolicyReadiness(connectorId: string) 
       repositories.finance.insights.backfill.readLatestPlan(connectorId),
     ]);
     const policySelection = getTyrionAttributionPolicySelection(connector.settings);
+    const settings = settingsRecord(connector.settings);
+    const householdCurrency = String(settings.householdCurrency ?? 'USD');
+    const attentionPolicy = parseAttributionAttentionPolicy(
+      connector.settings,
+      householdCurrency,
+    );
     let activePolicyVersion: number | null = null;
     let policyUpdatedAt: string | null = null;
     let policyDiscoveryError: string | null = null;
@@ -90,6 +117,8 @@ export async function getFinanceAttributionPolicyReadiness(connectorId: string) 
         configurationUrl: resolveFinanceExternalLinks().tyrionConfiguration,
       },
       policySelection,
+      householdCurrency,
+      attentionPolicy,
       activePolicyVersion,
       policyUpdatedAt,
       policyDiscoveryError,
@@ -123,6 +152,36 @@ export async function getFinanceAttributionPolicyReadiness(connectorId: string) 
           }
         : null,
     };
+  } catch (error) {
+    throw mapError(error);
+  }
+}
+
+export async function updateFinanceAttributionAttentionPolicy(
+  connectorId: string,
+  attentionPolicy: AttributionAttentionPolicy,
+) {
+  try {
+    if (
+      attentionPolicy === null
+      || typeof attentionPolicy !== 'object'
+      || Array.isArray(attentionPolicy)
+    ) {
+      throw new AttributionAttentionPolicyError();
+    }
+    const { connector, repositories } = await financeConnector(connectorId);
+    const settings = settingsRecord(connector.settings);
+    const householdCurrency = String(settings.householdCurrency ?? 'USD');
+    const validated = parseAttributionAttentionPolicy({
+      ...settings,
+      [ATTRIBUTION_ATTENTION_POLICY_SETTING]: attentionPolicy,
+    }, householdCurrency);
+    await repositories.connectors.patchSettingsState(
+      connectorId,
+      ATTRIBUTION_ATTENTION_POLICY_SETTING,
+      validated,
+    );
+    return getFinanceAttributionPolicyReadiness(connectorId);
   } catch (error) {
     throw mapError(error);
   }
@@ -178,6 +237,8 @@ export async function previewFinanceAttributionPolicy(connectorId: string) {
     let evaluatedPolicyVersion: number | null = null;
     let engineVersion: string | null = null;
     let evaluated = 0;
+    let acceptedRuleBasedReviewBacklog = 0;
+    let blockingReviewRequired = 0;
     for (const request of requests) {
       const response = await client.attribute(request);
       evaluatedPolicyVersion = response.policyVersion;
@@ -190,12 +251,21 @@ export async function previewFinanceAttributionPolicy(connectorId: string) {
           (counts.confidence[result.confidence] ?? 0) + 1;
         counts.reviewStatus[result.reviewStatus] =
           (counts.reviewStatus[result.reviewStatus] ?? 0) + 1;
+        if (result.reviewStatus === 'pending') {
+          if (
+            result.reasons.includes('no-match')
+            && !result.reasons.some((reason) => reason !== 'no-match')
+          ) {
+            acceptedRuleBasedReviewBacklog += 1;
+          } else {
+            blockingReviewRequired += 1;
+          }
+        }
         for (const reason of result.reasons) {
           counts.reason[reason] = (counts.reason[reason] ?? 0) + 1;
         }
       }
     }
-    const reviewRequired = counts.reviewStatus.pending ?? 0;
     return {
       generatedAt: new Date().toISOString(),
       policyVersion: evaluatedPolicyVersion,
@@ -207,7 +277,9 @@ export async function previewFinanceAttributionPolicy(connectorId: string) {
       ready: projection.total > 0
         && !projection.truncated
         && evaluated === projection.total
-        && reviewRequired === 0,
+        && blockingReviewRequired === 0,
+      acceptedRuleBasedReviewBacklog,
+      blockingReviewRequired,
       counts,
     };
   } catch (error) {

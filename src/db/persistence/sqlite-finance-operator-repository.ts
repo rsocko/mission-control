@@ -16,6 +16,7 @@ import {
   financeConnectorScopedReference,
   financeIdentityNamespaceFromCredentials,
 } from '@/lib/connectors/monarch-money/identity';
+import { attributionAttentionAccountRef } from '@/lib/finance/attribution-attention-policy';
 import type {
   FinanceInsightNotificationIngestItem,
   FinanceInsightNotificationReconcileItem,
@@ -397,9 +398,9 @@ export function createSqliteFinanceOperatorPersistence(
     },
 
     async readAttributionAccountSummary(connectorId): Promise<FinanceOperatorAttributionAccountSummary> {
-      return handles.sqlite.prepare(`
-        SELECT COUNT(*) AS total,
-               COALESCE(SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END), 0) AS active
+      const rows = handles.sqlite.prepare(`
+        SELECT upstream_account_id AS accountId, display_name AS displayName,
+               is_active AS active
         FROM finance_accounts
         WHERE connector_id = ?
           AND (
@@ -412,7 +413,21 @@ export function createSqliteFinanceOperatorPersistence(
                 AND transactions.lifecycle_status = 'active'
             )
           )
-      `).get(connectorId) as FinanceOperatorAttributionAccountSummary;
+        ORDER BY display_name, upstream_account_id
+      `).all(connectorId) as Array<{
+        accountId: string;
+        displayName: string;
+        active: number;
+      }>;
+      return {
+        total: rows.length,
+        active: rows.filter((row) => row.active === 1).length,
+        accounts: rows.map((row) => ({
+          accountRef: attributionAttentionAccountRef(connectorId, row.accountId),
+          displayName: row.displayName,
+          active: row.active === 1,
+        })),
+      };
     },
 
     async readAttributionPreview({ connectorId, limit }): Promise<FinanceOperatorAttributionPreviewProjection> {

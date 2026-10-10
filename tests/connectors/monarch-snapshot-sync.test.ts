@@ -183,7 +183,8 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       transaction(`transaction-${index}`, index === 0
         ? {
             isPending: true,
-            tags: ['Reviewed'],
+          businessContext: 'Invented Neighborhood Foods',
+          tags: ['Reviewed'],
             tagReferences: [{ id: 'stable-tag-one', name: 'Reviewed' }],
           }
         : {}));
@@ -201,10 +202,14 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       WHERE connector_instance_id = ?
     `).get(connectorConfig.id)).toEqual({ count: 501 });
     expect(sqlite.prepare(`
-      SELECT confirmed_category AS confirmedCategory
+      SELECT confirmed_category AS confirmedCategory,
+             business_context AS businessContext
       FROM finance_transactions
       WHERE upstream_transaction_id = 'transaction-0'
-    `).get()).toEqual({ confirmedCategory: null });
+    `).get()).toEqual({
+      confirmedCategory: null,
+      businessContext: 'Invented Neighborhood Foods',
+    });
     expect(sqlite.prepare(`
       SELECT tag_references AS tagReferences
       FROM finance_transactions
@@ -234,13 +239,41 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       WHERE connector_instance_id = ? AND upstream_transaction_id = 'transaction-0'
     `).get(connectorConfig.id)).toEqual({ fetchedAt: '2026-08-10T11:00:00.000Z' });
 
+    const fingerprintBeforeContextChange = sqlite.prepare(`
+      SELECT source_fingerprint AS fingerprint
+      FROM finance_transactions
+      WHERE upstream_transaction_id = 'transaction-0'
+    `).get();
+    const contextFixtures = fixtures.map((item, index) => index === 0
+      ? transaction('transaction-0', {
+          isPending: true,
+          businessContext: 'Invented Community Grocer',
+          tags: ['Reviewed'],
+          tagReferences: [{ id: 'stable-tag-one', name: 'Reviewed' }],
+        })
+      : item);
+    mockPages([contextFixtures.slice(0, 500), contextFixtures.slice(500)]);
+    expect(await synchronizer.sync({ full: false })).toEqual({
+      itemsAdded: 0,
+      itemsUpdated: 0,
+      itemsRemoved: 0,
+    });
+    expect(sqlite.prepare(`
+      SELECT business_context AS businessContext, source_fingerprint AS fingerprint
+      FROM finance_transactions
+      WHERE upstream_transaction_id = 'transaction-0'
+    `).get()).toEqual({
+      businessContext: 'Invented Community Grocer',
+      ...(fingerprintBeforeContextChange as { fingerprint: string }),
+    });
+
     sqlite.prepare(`
       UPDATE finance_transactions
       SET assigned_kid_id = 'kid-local', kid_assignment_method = 'manual',
           triage_status = 'confirmed', confirmed_category = 'local-category'
       WHERE upstream_transaction_id = 'transaction-0'
     `).run();
-    mockPages([fixtures.slice(0, 500), fixtures.slice(500)]);
+    mockPages([contextFixtures.slice(0, 500), contextFixtures.slice(500)]);
     expect(await synchronizer.sync({ full: false })).toEqual({
       itemsAdded: 0,
       itemsUpdated: 0,
@@ -257,8 +290,14 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       confirmedCategory: 'local-category',
     });
 
-    const updatedFixtures = fixtures.map((item, index) =>
-      index === 0 ? transaction('transaction-0', { amount: -22, isPending: false }) : item);
+    const updatedFixtures = contextFixtures.map((item, index) =>
+      index === 0
+        ? transaction('transaction-0', {
+            amount: -22,
+            isPending: false,
+            businessContext: 'Invented Community Grocer',
+          })
+        : item);
     mockPages([updatedFixtures.slice(0, 500), updatedFixtures.slice(500)]);
     expect(await synchronizer.sync({ full: false })).toMatchObject({
       itemsAdded: 0,

@@ -62,6 +62,10 @@ const transactionSchema = z.object({
   id: z.string().min(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   amount: z.number().finite(),
+  businessContext: z.string().trim().min(1).max(120)
+    .transform((value) => value.replace(/\s+/g, ' '))
+    .nullable()
+    .optional(),
   merchant: z.object({
     name: z.string(),
     logoUrl: z.string().url().nullable(),

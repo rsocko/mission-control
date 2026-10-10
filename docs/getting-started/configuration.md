@@ -194,6 +194,7 @@ SQLite values take precedence over environment defaults.
 | `TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED` | `false` | Enables server-only staged publication, evaluation retry, and bounded occurrence shadow ingestion; notification delivery still requires the per-connector cutover fence |
 | `TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED` | `false` | Enables immediate notifications for eligible fresh large transactions and recurring amount increases |
 | `TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED` | `false` | Enables the grouped high-confidence monthly movers digest after 09:00 on day 2 in the configured household timezone |
+| `TYRION_FINANCE_INSIGHTS_WEEKLY_SUMMARY_NOTIFICATIONS_ENABLED` | `false` | Enables the bounded prior-week household decision summary after 09:00 Monday in the configured household timezone; immediate-alert members are not duplicated |
 | `TYRION_ATTRIBUTION_TIMEOUT_MS` | `10000` | Bounded Tyrion attribution request timeout, capped at 30 seconds |
 | `MONARCH_WEB_URL` | `https://app.monarchmoney.com` | Public Monarch origin used for comprehensive finance workflow links |
 | `TYRION_OPERATIONS_URL` | `https://tyrion.example` | Allowlisted public Tyrion operations root used for configuration and the server-constructed `?source=mission-control` reconnect action |

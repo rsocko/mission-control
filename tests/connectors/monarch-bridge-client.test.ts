@@ -100,6 +100,39 @@ describe('MonarchBridgeClient', () => {
     );
   });
 
+  it('accepts normalized optional business context without requiring it from old payloads', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      contractVersion: '1.0',
+      provenance: { provider: 'live', fetchedAt: '2026-10-09T12:00:00.000Z' },
+      transactions: [{
+        id: 'tx-context',
+        date: '2026-10-09',
+        amount: -18.25,
+        businessContext: '  Invented   Neighborhood Foods  ',
+        merchant: { name: 'INVENTED POS 1842', logoUrl: null },
+        category: null,
+        account: { id: 'acct-context', displayName: 'Invented Card', mask: null },
+        isPending: false,
+        isRecurring: false,
+        notes: null,
+        tags: [],
+        tagReferences: [],
+        reviewStatus: 'reviewed',
+      }],
+      total: 1,
+      page: { limit: 25, nextCursor: null },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new MonarchBridgeClient(config).getTransactionsPage({
+      startDate: '2026-10-09',
+      endDate: '2026-10-09',
+      limit: 25,
+    });
+
+    expect(result.transactions[0]?.businessContext).toBe('Invented Neighborhood Foods');
+  });
+
   it('filters native Monarch review state and validates exact merchant/review mutations', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({

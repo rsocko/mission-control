@@ -21,6 +21,7 @@ export interface FinanceWebTransaction {
   date: string;
   amount: number;
   merchantName: string | null;
+  businessContext: string | null;
   merchantLogoUrl: string | null;
   categoryId: string | null;
   originalCategory: string | null;

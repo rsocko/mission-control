@@ -36,6 +36,7 @@ const PROVIDER_PLACEHOLDERS = FINANCE_PROVIDER_ALIASES.map(() => '?').join(', ')
 const TRANSACTION_COLUMNS = `
   t.id, t.connector_instance_id AS connectorId,
   t.date, t.amount, t.merchant_name AS merchant,
+  t.business_context AS businessContext,
   COALESCE(categories.name, t.confirmed_category, t.original_category) AS category,
   t.confirmed_category AS confirmedCategory,
   t.is_pending AS pending, t.is_recurring AS recurring,
@@ -199,7 +200,9 @@ export function createSqliteFinanceAssistantPersistence(
         query.endDate,
       ];
       if (query.merchantQuery) {
-        conditions.push(`lower(COALESCE(t.merchant_name, '')) LIKE ? ESCAPE '\\'`);
+        conditions.push(
+          `lower(COALESCE(t.merchant_name, '') || ' ' || COALESCE(t.business_context, '')) LIKE ? ESCAPE '\\'`,
+        );
         parameters.push(`%${escapeLikePattern(query.merchantQuery.toLowerCase())}%`);
       }
       if (query.categoryName) {

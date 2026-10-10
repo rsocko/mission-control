@@ -37,6 +37,7 @@ const PROVIDER_ALIASES = [...FINANCE_PROVIDER_ALIASES];
 const TRANSACTION_COLUMNS = `
   t.id, t.connector_instance_id AS "connectorId",
   t.date, t.amount, t.merchant_name AS merchant,
+  t.business_context AS "businessContext",
   COALESCE(categories.name, t.confirmed_category, t.original_category) AS category,
   t.confirmed_category AS "confirmedCategory",
   t.is_pending AS pending, t.is_recurring AS recurring,
@@ -231,7 +232,9 @@ export function createPostgresFinanceAssistantPersistence(
       const parameters: unknown[] = [input.connectorId, input.startDate, input.endDate];
       const next = () => `$${parameters.length + 1}`;
       if (input.merchantQuery) {
-        conditions.push(`lower(COALESCE(t.merchant_name, '')) LIKE ${next()} ESCAPE '\\'`);
+        conditions.push(
+          `lower(COALESCE(t.merchant_name, '') || ' ' || COALESCE(t.business_context, '')) LIKE ${next()} ESCAPE '\\'`,
+        );
         parameters.push(`%${escapeLikePattern(input.merchantQuery.toLowerCase())}%`);
       }
       if (input.categoryName) {

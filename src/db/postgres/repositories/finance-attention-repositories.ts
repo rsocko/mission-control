@@ -15,6 +15,7 @@ import {
   financeAttentionDeliveryDigest,
   FINANCE_ATTENTION_MAX_REPAIR_SCOPE,
   financeAttentionMetadata,
+  financeAttentionTaskCopy,
   financeAttentionMyDayCandidateRank,
   FINANCE_ATTENTION_REPAIR_CUTOVER,
   FINANCE_ATTENTION_REPAIR_REASON,
@@ -608,6 +609,7 @@ async function createOrUpdateTask(
   }
   const metadata = financeAttentionMetadata(signal, 'task', decisionAt);
   financeAttentionRecord(metadata.financeAttention).promotedAt = now;
+  const copy = financeAttentionTaskCopy(signal);
   const id = financeAttentionTaskId(signal);
   const inserted = await query(client, `
     INSERT INTO tasks (
@@ -625,21 +627,9 @@ async function createOrUpdateTask(
     sourceId,
     FINANCE_ATTENTION_TASK_CONNECTOR_TYPE,
     FINANCE_ATTENTION_TASK_CONNECTOR_INSTANCE_ID,
-    signal.signalKind === 'writeBackFailed'
-      ? 'Resolve a failed finance write-back'
-      : signal.signalKind === 'duplicateTransactionCandidate'
-        ? 'Review a possible duplicate transaction'
-        : signal.signalKind === 'connectorDegraded'
-          ? 'Restore the Monarch connection'
-          : 'Review a finance attribution exception',
-    signal.signalKind === 'writeBackFailed'
-      ? 'A confirmed Finance change could not be verified. Review it in Finance.'
-      : signal.signalKind === 'duplicateTransactionCandidate'
-        ? 'A high-confidence duplicate candidate remains unresolved. Review it in Finance.'
-        : signal.signalKind === 'connectorDegraded'
-          ? 'The Tyrion connector remains unavailable or stale. Restore and verify a healthy sync.'
-          : 'An unresolved attribution decision requires review in Finance.',
-    signal.signalKind === 'attributionReviewRequired' ? 'medium' : 'high',
+    copy.title,
+    copy.description,
+    copy.priority,
     now,
     now,
     now,

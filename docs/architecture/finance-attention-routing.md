@@ -16,7 +16,7 @@ rejected; producers provide typed descriptors rather than URLs.
 | Finance insights | Existing insight publication remains notification-only. Large transaction, recurring increase, variance mover, and monthly digest policy rows are deterministic and cannot become tasks or My Day candidates. |
 | Thresholds | The generic evaluator covers approaching, exceeded, 24-hour promotion, freshness, and My Day rules. Tyrion does not yet publish the routing envelope to this service. |
 | Duplicate candidates | Tyrion's protected `create`/`update`/`settle` delivery snapshots are consumed through the generic evaluator, including notification-to-task promotion and action authorization. |
-| Reconciliation | The generic evaluator covers early, due-soon, overdue/mismatch, settlement, and due-date My Day rules. No reconciliation envelope producer is currently connected. |
+| Reconciliation | The generic evaluator covers early, due-soon, overdue/mismatch, settlement, and due-date My Day rules. OWL receipt reconciliation feeds bounded unmatched/review/durable signals through the same backend-neutral transaction; only durable work or exhausted repair becomes a task. |
 | Connector health | Tyrion's protected delivery snapshots drive suppression, 15-minute degradation, 4-hour promotion, authentication precedence, freshness, and authoritative recovery settlement. |
 | Weekly summary | The generic evaluator keeps the row informational and non-task. Summary/job-family production belongs to rsocko/tyrion#17. |
 

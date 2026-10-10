@@ -216,6 +216,26 @@ export class FinanceManagerConnector implements IConnector {
       await pruneFinanceInsightOccurrenceCache();
       const { reconcileFinanceAttention } = await import('@/lib/finance/attention-routing');
       const attention = await reconcileFinanceAttention({ connectorId: config.id });
+      let receiptAttentionNotificationsAdded = 0;
+      try {
+        const { reconcileReceiptReconciliationAttention } = await import(
+          '@/lib/receipt-reconciliation/attention'
+        );
+        const receiptAttention = await reconcileReceiptReconciliationAttention({
+          connectorId: config.id,
+        });
+        receiptAttentionNotificationsAdded = receiptAttention?.notificationsCreated ?? 0;
+      } catch (error) {
+        if (context.signal?.aborted) throw error;
+        logger.warn(
+          {
+            code: error instanceof Error && 'code' in error
+              ? String((error as { code: unknown }).code)
+              : 'receipt_reconciliation_attention_failed',
+          },
+          'Receipt reconciliation attention failed and will retry on the next schedule',
+        );
+      }
       logger.info(
         {
           evaluated: attention.evaluated,
@@ -231,7 +251,9 @@ export class FinanceManagerConnector implements IConnector {
       return {
         ...result,
         notificationsAdded:
-          insightNotificationsAdded + attention.notificationsCreated,
+          insightNotificationsAdded
+          + attention.notificationsCreated
+          + receiptAttentionNotificationsAdded,
       };
     } finally {
       activeProjectionSyncs.delete(config.id);

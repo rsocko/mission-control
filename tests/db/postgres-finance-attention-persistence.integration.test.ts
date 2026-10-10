@@ -67,6 +67,8 @@ async function createHarness(): Promise<FinanceAttentionContractHarness> {
         'finance_attention_repair_audit',
         'finance_mutation_audit',
         'finance_attribution_exceptions',
+        'finance_transactions',
+        'finance_accounts',
         'connector_configs',
       ]) {
         await pool.query(`DELETE FROM ${table}`);
@@ -133,17 +135,119 @@ async function createHarness(): Promise<FinanceAttentionContractHarness> {
         ],
       );
     },
+    async appendNoMatchTransactions(input) {
+      await pool.query(
+        `INSERT INTO finance_accounts (
+           id, connector_id, upstream_account_id, display_name, type,
+           first_seen_at, last_seen_at
+         ) VALUES ($1, $2, $3, $4, 'checking', $5, $5)
+         ON CONFLICT (connector_id, upstream_account_id) DO UPDATE
+         SET display_name = excluded.display_name, last_seen_at = excluded.last_seen_at`,
+        [
+          `finance-account-${input.accountId}`,
+          CONNECTOR_ID,
+          input.accountId,
+          input.displayName,
+          BASE_TIME,
+        ],
+      );
+      const countResult = await pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM finance_transactions
+         WHERE connector_instance_id = $1 AND account_id = $2`,
+        [CONNECTOR_ID, input.accountId],
+      );
+      const start = Number(countResult.rows[0]!.count);
+      for (const [offset, amount] of input.amounts.entries()) {
+        const index = start + offset;
+        const suffix = String(index).padStart(3, '0');
+        const transactionId = `transaction-${input.accountId}-${suffix}`;
+        const exceptionId = `exception-${input.accountId}-${suffix}`;
+        const observedAt = new Date(Date.parse(BASE_TIME) + index * 1_000).toISOString();
+        await pool.query(
+          `INSERT INTO finance_transactions (
+             id, connector_instance_id, upstream_transaction_id, date, amount,
+             merchant_name, account_id, account_name, tags, lifecycle_status,
+             source_fingerprint, first_seen_at, last_seen_at, synced_at
+           ) VALUES (
+             $1, $2, $3, '2026-08-11', $4, $5, $6, $7,
+             '[]'::jsonb, 'active', $8, $9, $9, $9
+           )`,
+          [
+            transactionId,
+            CONNECTOR_ID,
+            `upstream-${input.accountId}-${suffix}`,
+            amount,
+            index === start + input.amounts.length - 1
+              ? 'Invented high-value merchant'
+              : 'Invented merchant',
+            input.accountId,
+            input.displayName,
+            `fingerprint-${input.accountId}-${suffix}`,
+            observedAt,
+          ],
+        );
+        await pool.query(
+          `INSERT INTO finance_attribution_exceptions (
+             id, connector_id, transaction_id, source_ref, status, reason_code,
+             retryable, review_state, source_fingerprint, policy_version,
+             occurrence_count, created_at, first_observed_at, last_observed_at, updated_at
+           ) VALUES (
+             $1, $2, $3, $4, 'open', 'no-match', false, 'pending',
+             $5, 1, 1, $6, $6, $6, $6
+           )`,
+          [
+            exceptionId,
+            CONNECTOR_ID,
+            transactionId,
+            `source-${input.accountId}-${suffix}`,
+            `fingerprint-${input.accountId}-${suffix}`,
+            observedAt,
+          ],
+        );
+      }
+    },
+    async resolveNoMatchTransactions(accountId, count) {
+      await pool.query(
+        `WITH targets AS (
+           SELECT exceptions.id
+           FROM finance_attribution_exceptions exceptions
+           JOIN finance_transactions transactions ON transactions.id = exceptions.transaction_id
+           WHERE exceptions.connector_id = $1
+             AND transactions.account_id = $2
+             AND exceptions.status IN ('open', 'retry_requested')
+           ORDER BY ABS(transactions.amount) DESC, exceptions.id
+           LIMIT $3
+         )
+         UPDATE finance_attribution_exceptions exceptions
+         SET status = 'resolved', review_state = 'resolved',
+             resolution = 'reattributed', resolved_at = $4, updated_at = $4
+         FROM targets WHERE exceptions.id = targets.id`,
+        [CONNECTOR_ID, accountId, count, BASE_TIME],
+      );
+    },
+    async markNotificationRead(sourceId) {
+      await pool.query(
+        `UPDATE notifications SET state = 'read', read_state = 'read', read_at = $1
+         WHERE source_id = $2`,
+        [BASE_TIME, sourceId],
+      );
+    },
     async notificationBySourceId(sourceId) {
       const result = await pool.query<{
         id: string;
+        title: string;
+        body: string | null;
+        level: string;
         state: string;
+        readState: string;
         sourceState: string;
         isActionable: boolean;
         primaryActionId: string | null;
         autoResolveReason: string | null;
         relatedTaskId: string | null;
       }>(
-        `SELECT id, state, source_state AS "sourceState", is_actionable AS "isActionable",
+        `SELECT id, title, body, level, state, read_state AS "readState",
+                source_state AS "sourceState", is_actionable AS "isActionable",
                 primary_action_id AS "primaryActionId", auto_resolve_reason AS "autoResolveReason",
                 related_task_id AS "relatedTaskId"
          FROM notifications WHERE source_id = $1`,
@@ -176,6 +280,18 @@ async function createHarness(): Promise<FinanceAttentionContractHarness> {
         `SELECT id, status, local_disposition AS "localDisposition", status_reason AS "statusReason"
          FROM tasks WHERE source_id = $1`,
         [sourceId],
+      );
+      return result.rows[0] ?? null;
+    },
+    async attributionExceptionById(id) {
+      const result = await pool.query<{
+        status: string;
+        reviewState: string;
+        reasonCode: string;
+      }>(
+        `SELECT status, review_state AS "reviewState", reason_code AS "reasonCode"
+         FROM finance_attribution_exceptions WHERE id = $1`,
+        [id],
       );
       return result.rows[0] ?? null;
     },

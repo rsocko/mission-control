@@ -297,4 +297,26 @@ describe.sequential('finance projection concurrency fence', () => {
     controls.ingestionResult = { status: 'disabled' };
     controls.attentionNotificationsCreated = 0;
   });
+
+  it('keeps the canary notification delta at zero for in-place attention updates', async () => {
+    const { FinanceManagerConnector } = await import('@/lib/connectors/monarch-money');
+    const connector = new FinanceManagerConnector();
+    await connector.initialize({ ...config, id: 'notification-update-finance' });
+    controls.publicationReady = true;
+    controls.ingestionResult = {
+      status: 'completed',
+      itemCount: 4,
+      notificationsProcessed: 0,
+      notificationsAdded: 0,
+    };
+    controls.attentionNotificationsCreated = 0;
+
+    await expect(connector.syncDomainData({ full: true })).resolves.toMatchObject({
+      status: 'fresh',
+      notificationsAdded: 0,
+    });
+
+    controls.publicationReady = false;
+    controls.ingestionResult = { status: 'disabled' };
+  });
 });

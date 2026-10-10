@@ -68,6 +68,16 @@ operation. A configured pin bypasses discovery and retains strict mismatch
 failure. The attribution `contractVersion: "2.0"` and mutable policy version
 remain independent.
 
+In **Account review notifications**, confirm the connector defaults. A summary
+qualifies when an account has at least 10 pending unmatched transactions or
+one unmatched transaction whose absolute amount is at least 250 in the
+configured household currency. Either default may be changed to a nonnegative
+value; `0` disables that trigger. Optional account overrides inherit each blank
+value from the connector default. Mission Control retains every unmatched item
+in the manual review queue, but maintains at most one actionable notification
+per qualifying account. That notification may include the highest qualifying
+amount and merchant to make review actionable.
+
 Deploy Tyrion's protected `GET /api/internal/v2/attribution/policy` discovery
 endpoint before deploying this Mission Control version.
 
@@ -103,6 +113,17 @@ decisions remain attached to each request and must be returned as manual
 results. Do not enable the connector, release quarantine, or mutate live policy
 as part of this compatibility transition.
 
+The account-summary routing change also requires no schema migration. During
+the normal Finance attention reconciliation cycle it archives or cancels old
+per-transaction `no-match` notification/task projections, including the prior
+backlog, without deleting or resolving pending attribution exceptions. It then
+creates or updates one stable account summary only when an effective threshold
+is met. Replays do not duplicate it; worsening activity marks it unread,
+improvements update it without unread churn, and clearing both conditions
+settles it. True conflicts and operational/degraded alerts remain independently
+routable. Verify this reconciliation in the disabled/quarantined deployment;
+do not edit projection tables directly.
+
 After saving the Tyrion policy, run **Run no-write preview** in Settings, or
 invoke the trusted endpoint below. Follow-current mode accepts the newly active
 policy on the next operation without changing environment state or redeploying
@@ -120,11 +141,14 @@ The preview reads at most 5,000 current local transactions, sends bounded
 method, confidence, and review-state counts only. Preview requests include the
 same existing manual decisions as normal attribution, while preview responses
 never expose transaction rows, direct account IDs, merchant names, or manual
-decision payloads. It must report
-`complete=true`, `truncated=false`, `ready=true`, and zero pending review before
-another canary is authorized. A truncated or empty projection is never ready.
-Any intentionally accepted residual review outcome requires a separate
-documented release decision; do not infer acceptance from nonzero rule counts.
+decision payloads. It must report `complete=true`, `truncated=false`, and
+`ready=true` before another canary is authorized. A truncated or empty
+projection is never ready. Pending outcomes other than an explicitly accepted
+Rule-based `no-match` backlog remain blocking. An accepted Rule-based backlog
+may remain pending in Mission Control's manual attribution review queue and is
+not a configuration defect; it does not create a notification or task per
+transaction. Record that acceptance in the release decision rather than
+inferring it from nonzero rule counts.
 
 ## 3. Metadata-only readiness
 
@@ -259,7 +283,11 @@ return `sync_canary_already_invoked`.
 
 Poll metadata readiness until the canary is terminal. Require:
 
-1. `canary.status=succeeded` and `notificationsAdded=0`.
+1. `canary.status=succeeded` and `notificationsAdded=0`. This remains mandatory
+   even when an explicitly accepted Rule-based review backlog remains pending.
+   Updates to an existing account summary do not increment this delta, but a
+   newly created qualifying account summary does; investigate any nonzero
+   value instead of treating the accepted backlog as an exemption.
 2. Finance health reports healthy attribution.
 3. All six Finance projections are fresh with expected bounded item counts.
 4. Pre/post notification counts and delivery counts have no delta.

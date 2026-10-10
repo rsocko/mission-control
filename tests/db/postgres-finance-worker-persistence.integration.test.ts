@@ -171,8 +171,14 @@ async function createHarness(): Promise<FinanceWorkerContractHarness> {
       return result.rows[0] ?? null;
     },
     async attributionException(upstreamId) {
-      const result = await pool.query<{ occurrenceCount: number; status: string }>(
-        `SELECT occurrence_count AS "occurrenceCount", status
+      const result = await pool.query<{
+        occurrenceCount: number;
+        status: string;
+        reviewState: string;
+        resolution: string | null;
+      }>(
+        `SELECT occurrence_count AS "occurrenceCount", status,
+                review_state AS "reviewState", resolution
          FROM finance_attribution_exceptions
          WHERE connector_id = $1 AND transaction_id = $2`,
         [CONNECTOR_ID, `finance:${CONNECTOR_ID}:${upstreamId}`],

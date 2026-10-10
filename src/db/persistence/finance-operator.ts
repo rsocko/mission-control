@@ -100,6 +100,11 @@ export const FINANCE_ATTRIBUTION_PREVIEW_MAX = 5_000;
 export interface FinanceOperatorAttributionAccountSummary {
   total: number;
   active: number;
+  accounts: readonly {
+    accountRef: string;
+    displayName: string;
+    active: boolean;
+  }[];
 }
 
 export interface FinanceOperatorAttributionPreviewItem {

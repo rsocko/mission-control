@@ -12,6 +12,7 @@ import {
   financeAttentionAccountMateriallyWorsened,
   financeAttentionAccountSignal,
   financeAttentionAttributionSignal,
+  financeAttentionDeliveryDigest,
   FINANCE_ATTENTION_MAX_REPAIR_SCOPE,
   financeAttentionMetadata,
   financeAttentionMyDayCandidateRank,
@@ -25,6 +26,7 @@ import {
   FINANCE_ATTENTION_SOURCE_BATCH_SIZE,
   FINANCE_ATTENTION_SOURCE_LOOKBACK_MS,
   financeAttentionSourceId,
+  financeAttentionSettlementTaskStatus,
   financeAttentionTaskId,
   FINANCE_ATTENTION_TASK_CONNECTOR_INSTANCE_ID,
   FINANCE_ATTENTION_TASK_CONNECTOR_TYPE,
@@ -35,6 +37,7 @@ import {
   FINANCE_MY_DAY_DAILY_CAP,
   FINANCE_TASK_PROMOTION_DAILY_CAP,
   FinanceAttentionRepairError,
+  FinanceAttentionRoutingError,
   resolveFinanceAttentionNotificationPresentation,
   selectFinanceAttentionRoute,
   type FinanceAttentionAttributionExceptionRow,
@@ -421,9 +424,10 @@ async function settleTask(
   decisionAt: Date,
 ): Promise<boolean> {
   if (!task) return false;
-  const superseded = signal.sourceLifecycle === 'superseded';
+  const status = financeAttentionSettlementTaskStatus(signal);
   const now = decisionAt.toISOString();
   const metadata = financeAttentionMetadata(signal, 'settled', decisionAt, task.metadata);
+  delete metadata.verificationPending;
   await query(client, `
     UPDATE tasks
     SET status = $1, status_reason = $2,
@@ -431,8 +435,8 @@ async function settleTask(
         last_synced_at = $5, metadata = $6::jsonb
     WHERE id = $7
   `, [
-    superseded ? 'cancelled' : 'done',
-    superseded ? 'not_planned' : 'completed',
+    status,
+    status === 'done' ? 'completed' : 'not_planned',
     now,
     now,
     now,
@@ -903,8 +907,50 @@ export function createPostgresFinanceAttentionRoutingPersistence(
           settled: 0,
           stalePreserved: 0,
           statusOnly: 0,
+          deliveriesReceived: input.deliveries?.length ?? 0,
+          deliveriesApplied: 0,
+          deliveriesReplayed: 0,
+          deliveriesOutOfOrder: 0,
         };
         const signals: FinanceAttentionSignal[] = [...(input.sourceSignals ?? [])];
+        const acceptedDeliveries = [];
+        for (const delivery of input.deliveries ?? []) {
+          if (delivery.signal.connectorId !== input.connectorId) {
+            throw new FinanceAttentionRoutingError('finance_attention_delivery_scope_mismatch');
+          }
+          const digest = financeAttentionDeliveryDigest(delivery);
+          const existing = (await query<{
+            connectorId: string;
+            version: number;
+            action: string;
+            payloadDigest: string;
+          }>(client, `
+            SELECT connector_id AS "connectorId", version, action,
+                   payload_digest AS "payloadDigest"
+            FROM finance_attention_delivery_receipts
+            WHERE delivery_key = $1
+          `, [delivery.deliveryKey]))[0];
+          if (existing) {
+            if (delivery.version < existing.version) {
+              result.deliveriesOutOfOrder++;
+              continue;
+            }
+            if (delivery.version === existing.version) {
+              if (
+                existing.payloadDigest !== digest
+                || existing.action !== delivery.action
+                || existing.connectorId !== input.connectorId
+              ) {
+                throw new FinanceAttentionRoutingError('finance_attention_delivery_conflict');
+              }
+              result.deliveriesReplayed++;
+              continue;
+            }
+          }
+          acceptedDeliveries.push({ delivery, digest });
+          signals.push(delivery.signal);
+          result.deliveriesApplied++;
+        }
         result.evaluated += signals.length;
         const since = new Date(
           decisionAt.getTime() - FINANCE_ATTENTION_SOURCE_LOOKBACK_MS,
@@ -1006,6 +1052,26 @@ export function createPostgresFinanceAttentionRoutingPersistence(
         const myDay = await rebuildFinanceMyDay(client, decisionAt);
         result.autoIncluded = myDay.autoIncluded;
         result.deferred += myDay.deferred;
+        for (const { delivery, digest } of acceptedDeliveries) {
+          await query(client, `
+            INSERT INTO finance_attention_delivery_receipts (
+              delivery_key, connector_id, version, action, payload_digest, applied_at
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (delivery_key) DO UPDATE SET
+              connector_id = EXCLUDED.connector_id,
+              version = EXCLUDED.version,
+              action = EXCLUDED.action,
+              payload_digest = EXCLUDED.payload_digest,
+              applied_at = EXCLUDED.applied_at
+          `, [
+            delivery.deliveryKey,
+            input.connectorId,
+            delivery.version,
+            delivery.action,
+            digest,
+            decisionAt.toISOString(),
+          ]);
+        }
         return result;
       });
       return { summary, hasPendingDelivery };

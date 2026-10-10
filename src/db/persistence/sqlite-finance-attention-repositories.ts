@@ -9,6 +9,7 @@ import * as schema from '@/db/schema';
 import {
   myDayExclusions,
   myDayItems,
+  financeAttentionDeliveryReceipts,
   notificationActions,
   notificationDeliveryEvents,
   notifications,
@@ -26,6 +27,7 @@ import {
   financeAttentionAccountMateriallyWorsened,
   financeAttentionAccountSignal,
   financeAttentionAttributionSignal,
+  financeAttentionDeliveryDigest,
   FINANCE_ATTENTION_MAX_REPAIR_SCOPE,
   financeAttentionMetadata,
   financeAttentionMyDayCandidateRank,
@@ -39,6 +41,7 @@ import {
   FINANCE_ATTENTION_SOURCE_BATCH_SIZE,
   FINANCE_ATTENTION_SOURCE_LOOKBACK_MS,
   financeAttentionSourceId,
+  financeAttentionSettlementTaskStatus,
   financeAttentionTaskId,
   FINANCE_ATTENTION_TASK_CONNECTOR_INSTANCE_ID,
   FINANCE_ATTENTION_TASK_CONNECTOR_TYPE,
@@ -49,6 +52,7 @@ import {
   FINANCE_MY_DAY_DAILY_CAP,
   FINANCE_TASK_PROMOTION_DAILY_CAP,
   FinanceAttentionRepairError,
+  FinanceAttentionRoutingError,
   resolveFinanceAttentionNotificationPresentation,
   selectFinanceAttentionRoute,
   type FinanceAttentionAttributionExceptionRow,
@@ -286,14 +290,16 @@ function settleTask(
   decisionAt: Date,
 ): boolean {
   if (!task) return false;
-  const superseded = signal.sourceLifecycle === 'superseded';
+  const status = financeAttentionSettlementTaskStatus(signal);
+  const metadata = financeAttentionMetadata(signal, 'settled', decisionAt, task.metadata);
+  delete metadata.verificationPending;
   transaction.update(tasks).set({
-    status: superseded ? 'cancelled' : 'done',
-    statusReason: superseded ? 'not_planned' : 'completed',
+    status,
+    statusReason: status === 'done' ? 'completed' : 'not_planned',
     completedAt: task.completedAt ?? decisionAt.toISOString(),
     updatedAt: decisionAt.toISOString(),
     lastSyncedAt: decisionAt.toISOString(),
-    metadata: financeAttentionMetadata(signal, 'settled', decisionAt, task.metadata),
+    metadata,
   }).where(eq(tasks.id, task.id)).run();
   transaction.delete(myDayItems).where(eq(myDayItems.taskId, task.id)).run();
   return true;
@@ -644,8 +650,42 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           settled: 0,
           stalePreserved: 0,
           statusOnly: 0,
+          deliveriesReceived: input.deliveries?.length ?? 0,
+          deliveriesApplied: 0,
+          deliveriesReplayed: 0,
+          deliveriesOutOfOrder: 0,
         };
+        const acceptedDeliveries = [];
         const signals: FinanceAttentionSignal[] = [...(input.sourceSignals ?? [])];
+        for (const delivery of input.deliveries ?? []) {
+          if (delivery.signal.connectorId !== input.connectorId) {
+            throw new FinanceAttentionRoutingError('finance_attention_delivery_scope_mismatch');
+          }
+          const digest = financeAttentionDeliveryDigest(delivery);
+          const existing = transaction.select().from(financeAttentionDeliveryReceipts)
+            .where(eq(financeAttentionDeliveryReceipts.deliveryKey, delivery.deliveryKey))
+            .get();
+          if (existing) {
+            if (delivery.version < existing.version) {
+              result.deliveriesOutOfOrder++;
+              continue;
+            }
+            if (delivery.version === existing.version) {
+              if (
+                existing.payloadDigest !== digest
+                || existing.action !== delivery.action
+                || existing.connectorId !== input.connectorId
+              ) {
+                throw new FinanceAttentionRoutingError('finance_attention_delivery_conflict');
+              }
+              result.deliveriesReplayed++;
+              continue;
+            }
+          }
+          acceptedDeliveries.push({ delivery, digest });
+          signals.push(delivery.signal);
+          result.deliveriesApplied++;
+        }
         const pendingNotifications: Array<{
           signal: FinanceAttentionSignal;
           existing: typeof notifications.$inferSelect | undefined;
@@ -791,6 +831,25 @@ export function createSqliteFinanceAttentionRoutingPersistence(
         const myDay = rebuildFinanceMyDay(transaction, decisionAt);
         result.autoIncluded = myDay.autoIncluded;
         result.deferred += myDay.deferred;
+        for (const { delivery, digest } of acceptedDeliveries) {
+          transaction.insert(financeAttentionDeliveryReceipts).values({
+            deliveryKey: delivery.deliveryKey,
+            connectorId: input.connectorId,
+            version: delivery.version,
+            action: delivery.action,
+            payloadDigest: digest,
+            appliedAt: decisionAt.toISOString(),
+          }).onConflictDoUpdate({
+            target: financeAttentionDeliveryReceipts.deliveryKey,
+            set: {
+              connectorId: input.connectorId,
+              version: delivery.version,
+              action: delivery.action,
+              payloadDigest: digest,
+              appliedAt: decisionAt.toISOString(),
+            },
+          }).run();
+        }
         return result;
       }, { behavior: 'immediate' });
       return { summary, hasPendingDelivery };

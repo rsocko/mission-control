@@ -21,6 +21,7 @@ import {
 } from './navigation';
 import {
   FINANCE_MONTHLY_DIGEST_GATE,
+  FINANCE_WEEKLY_SUMMARY_GATE,
   gateEnabled,
   isFinanceInsightAlertEligible,
   isOccurrenceNotificationEligible,
@@ -33,6 +34,7 @@ import { FINANCE_PROVIDER_ALIASES } from './provider';
 export {
   FINANCE_IMMEDIATE_NOTIFICATION_GATE,
   FINANCE_MONTHLY_DIGEST_GATE,
+  FINANCE_WEEKLY_SUMMARY_GATE,
   isFinanceInsightAlertEligible,
   isImmediateLargeTransactionEligible,
   isImmediateRecurringIncreaseEligible,
@@ -40,8 +42,15 @@ export {
 } from './notification-shared';
 
 const MAX_DIGEST_MOVERS = 10;
+const MAX_WEEKLY_DECISIONS = 8;
 
 export interface FinanceMonthlyDigestSchedule {
+  period: { start: string; end: string };
+  scheduledAt: Date;
+  ready: boolean;
+}
+
+export interface FinanceWeeklySummarySchedule {
   period: { start: string; end: string };
   scheduledAt: Date;
   ready: boolean;
@@ -100,6 +109,46 @@ export function getFinanceMonthlyDigestSchedule(
   }
 }
 
+export function getFinanceWeeklySummarySchedule(
+  now: Date,
+  timezone: string,
+): FinanceWeeklySummarySchedule | null {
+  try {
+    const localDate = formatInTimeZone(now, timezone, 'yyyy-MM-dd');
+    const isoWeekday = Number(formatInTimeZone(now, timezone, 'i'));
+    if (!Number.isSafeInteger(isoWeekday) || isoWeekday < 1 || isoWeekday > 7) return null;
+    const currentDate = new Date(`${localDate}T00:00:00.000Z`);
+    const currentMonday = new Date(
+      currentDate.getTime() - (isoWeekday - 1) * 24 * 60 * 60 * 1_000,
+    );
+    const periodEnd = new Date(currentMonday.getTime() - 24 * 60 * 60 * 1_000);
+    const periodStart = new Date(periodEnd.getTime() - 6 * 24 * 60 * 60 * 1_000);
+    const scheduledAt = fromZonedTime(
+      `${dateOnly(currentMonday)}T09:00:00`,
+      timezone,
+    );
+    const deliveryWindowEnd = fromZonedTime(
+      `${dateOnly(new Date(currentMonday.getTime() + 24 * 60 * 60 * 1_000))}T00:00:00`,
+      timezone,
+    );
+    return {
+      period: {
+        start: dateOnly(periodStart),
+        end: dateOnly(periodEnd),
+      },
+      scheduledAt,
+      ready: now.getTime() >= scheduledAt.getTime()
+        && now.getTime() < deliveryWindowEnd.getTime(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function dateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
 export function financeInsightNotificationSourceId(
   connectorId: string,
   occurrenceId: string,
@@ -112,6 +161,10 @@ export function financeInsightDigestSourceId(
   period: { start: string; end: string },
 ): string {
   return `finance-insight-digest:${connectorId}:${period.start.slice(0, 7)}`;
+}
+
+export function financeInsightWeeklySummarySourceId(connectorId: string): string {
+  return `finance-insight-weekly-summary:${connectorId}`;
 }
 
 function notificationLevel(
@@ -194,6 +247,135 @@ function digestTitle(periodStart: string): string {
     timeZone: 'UTC',
   }).format(new Date(`${periodStart}T00:00:00.000Z`));
   return `${label} spending movers`;
+}
+
+function weeklySummaryTitle(period: { start: string; end: string }): string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+  return `Weekly household decisions · ${formatter.format(new Date(`${period.start}T00:00:00.000Z`))}–${formatter.format(new Date(`${period.end}T00:00:00.000Z`))}`;
+}
+
+function localCalendarDate(value: string, timezone: string): string | null {
+  try {
+    return formatInTimeZone(new Date(value), timezone, 'yyyy-MM-dd');
+  } catch {
+    return null;
+  }
+}
+
+function inWeeklyPeriod(
+  item: InsightOccurrenceSummaryV1,
+  period: { start: string; end: string },
+  timezone: string,
+): boolean {
+  const activityDate = localCalendarDate(item.updatedAt, timezone);
+  return activityDate !== null
+    && activityDate >= period.start
+    && activityDate <= period.end;
+}
+
+export function buildFinanceWeeklySummaryInput(input: {
+  connectorId: string;
+  items: readonly InsightOccurrenceSummaryV1[];
+  now: Date;
+  timezone: string;
+  environment?: FinanceNotificationEnvironment;
+}): CreateNotificationInput | null {
+  const environment = input.environment ?? process.env;
+  if (!gateEnabled(FINANCE_WEEKLY_SUMMARY_GATE, environment)) return null;
+  const schedule = getFinanceWeeklySummarySchedule(input.now, input.timezone);
+  if (!schedule?.ready) return null;
+
+  const current = input.items
+    .filter((item) => (
+      isFinanceInsightAlertEligible(item, input.now)
+      && inWeeklyPeriod(item, schedule.period, input.timezone)
+    ))
+    .sort((left, right) => (
+      moverRank(right) - moverRank(left)
+      || left.occurrenceId.localeCompare(right.occurrenceId)
+    ));
+  if (current.length === 0) return null;
+
+  const decisions = current.filter((item) => (
+    !isOccurrenceNotificationEligible(item, input.now, environment)
+  ));
+  const bounded = decisions.slice(0, MAX_WEEKLY_DECISIONS);
+  const members = bounded.map((item) => ({
+    occurrenceId: item.occurrenceId,
+    deliveryRevision: item.deliveryRevision,
+    kind: item.kind,
+    headline: item.headline,
+    severity: item.severity,
+    confidence: item.confidence,
+    navigationTarget: financeInsightDetailTarget(item.occurrenceId),
+  }));
+  const revision = digestRevision(current, schedule.period);
+  const sourceId = financeInsightWeeklySummarySourceId(input.connectorId);
+  const periodKey = schedule.period.start;
+  const sourceActivityAt = current.reduce(
+    (latest, item) => item.updatedAt > latest ? item.updatedAt : latest,
+    current[0]!.updatedAt,
+  );
+  const evaluationCompletedAt = current.reduce(
+    (latest, item) => (
+      item.provenance.evaluationCompletedAt > latest
+        ? item.provenance.evaluationCompletedAt
+        : latest
+    ),
+    current[0]!.provenance.evaluationCompletedAt,
+  );
+  const sourceAsOf = [...current]
+    .sort((left, right) => (
+      left.provenance.sourceAsOf.localeCompare(right.provenance.sourceAsOf)
+    ))[0]!.provenance.sourceAsOf;
+  const isActionable = decisions.length > 0;
+
+  return {
+    sourceId,
+    connectorType: 'finance-manager',
+    connectorInstanceId: input.connectorId,
+    title: weeklySummaryTitle(schedule.period),
+    body: isActionable
+      ? `${decisions.length} new finance ${decisions.length === 1 ? 'decision is' : 'decisions are'} ready for review.`
+      : 'No new finance decisions need review; individually delivered alerts are summarized in Finance.',
+    level: 'digest',
+    category: 'finance',
+    templateKey: 'weekly_summary',
+    readState: 'unread',
+    sourceState: 'active',
+    sourceActivityAt,
+    sourceActivityKey: `${periodKey}:${revision}`,
+    reopenPolicy: 'handled_and_dismissed',
+    receivedAt: schedule.scheduledAt.toISOString(),
+    sortAt: schedule.scheduledAt.toISOString(),
+    groupKey: sourceId,
+    dedupeKey: sourceId,
+    relatedEntityType: 'finance-insight-period',
+    relatedEntityId: `${schedule.period.start}:${schedule.period.end}`,
+    navigationTarget: financeInsightPeriodTarget(schedule.period),
+    isActionable,
+    occurrenceKey: `${periodKey}:${revision}`,
+    metadata: {
+      notificationType: 'weekly_summary',
+      deliveryRevision: revision,
+      summaryPeriod: schedule.period,
+      decisionCount: decisions.length,
+      memberCount: current.length,
+      duplicateMemberCount: current.length - decisions.length,
+      members,
+      membersTruncated: decisions.length > bounded.length,
+      freshnessState: 'fresh',
+      sourceAsOf,
+      evaluationCompletedAt,
+      sourceGeneration: current[0]!.provenance.sourceGeneration,
+      detectorSetVersion: current[0]!.provenance.detectorSetVersion,
+      policyVersion: Math.max(...current.map((item) => item.provenance.policyVersion)),
+    },
+  };
 }
 
 export function buildFinanceMonthlyDigestInput(input: {
@@ -302,7 +484,18 @@ export function selectFinanceInsightNotificationInputs(
     timezone: options.timezone ?? getTimezone(),
     environment,
   });
-  return digest ? [...occurrenceInputs, digest] : occurrenceInputs;
+  const weeklySummary = buildFinanceWeeklySummaryInput({
+    connectorId,
+    items,
+    now,
+    timezone: options.timezone ?? getTimezone(),
+    environment,
+  });
+  return [
+    ...occurrenceInputs,
+    ...(digest ? [digest] : []),
+    ...(weeklySummary ? [weeklySummary] : []),
+  ];
 }
 
 /**

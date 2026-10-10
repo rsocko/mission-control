@@ -5,6 +5,7 @@ export type PhaseStatus = 'pending' | 'in_progress' | 'completed';
 export interface PhaseTaskStatusSummary {
   totalCount: number;
   doneCount: number;
+  resolvedCount: number;
   inProgressCount: number;
   remainingCount: number;
   derivedStatus: PhaseStatus | null;
@@ -18,6 +19,7 @@ export function getPhaseTaskStatusSummary(
   const totalCount = taskStatuses.length;
   const doneCount = taskStatuses.filter((status) => status === 'done').length;
   const cancelledCount = taskStatuses.filter((status) => status === 'cancelled').length;
+  const resolvedCount = doneCount + cancelledCount;
   const inProgressCount = taskStatuses.filter((status) => status === 'in_progress').length;
   const relevantCount = totalCount - cancelledCount;
   const remainingCount = relevantCount - doneCount;
@@ -53,6 +55,7 @@ export function getPhaseTaskStatusSummary(
   return {
     totalCount,
     doneCount,
+    resolvedCount,
     inProgressCount,
     remainingCount,
     derivedStatus,

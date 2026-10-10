@@ -113,7 +113,7 @@ describe('PlanTaskRow', () => {
 
     expect(row).toHaveAttribute('data-task-row-variant', 'card');
     expect(screen.getByText('Shared Plan task')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'github-issues' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'GitHub Issues' })).toBeInTheDocument();
     expect(screen.getByText('Mission Control')).toBeInTheDocument();
     expect(screen.getByTitle('1 of 2 subtasks complete')).toBeInTheDocument();
     expect(screen.getByTestId('task-row-actions')).toHaveAttribute('data-effort', '3');

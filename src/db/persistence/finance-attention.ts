@@ -91,6 +91,13 @@ export interface FinanceAttentionSignal {
   accountSummary?: FinanceAttentionAccountSummary;
 }
 
+export interface FinanceAttentionDelivery {
+  deliveryKey: string;
+  version: number;
+  action: 'create' | 'update' | 'settle';
+  signal: FinanceAttentionSignal;
+}
+
 export interface FinanceAttentionAccountSummary {
   accountRef: string;
   accountDisplayName: string;
@@ -127,11 +134,38 @@ export interface FinanceAttentionRoutingResult {
   settled: number;
   stalePreserved: number;
   statusOnly: number;
+  deliveriesReceived: number;
+  deliveriesApplied: number;
+  deliveriesReplayed: number;
+  deliveriesOutOfOrder: number;
 }
 
 export interface FinanceAttentionRoutingOutcome {
   summary: FinanceAttentionRoutingResult;
   hasPendingDelivery: boolean;
+}
+
+export function financeAttentionDeliveryDigest(
+  delivery: FinanceAttentionDelivery,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify({
+      deliveryKey: delivery.deliveryKey,
+      version: delivery.version,
+      action: delivery.action,
+      signal: delivery.signal,
+    }))
+    .digest('hex');
+}
+
+export function financeAttentionSettlementTaskStatus(
+  signal: Pick<FinanceAttentionSignal, 'sourceLifecycle' | 'settlementReason'>,
+): 'done' | 'cancelled' {
+  if (signal.sourceLifecycle === 'superseded') return 'cancelled';
+  return signal.settlementReason === 'authoritative_state_verified'
+    || signal.settlementReason === 'connector_recovered'
+    ? 'done'
+    : 'cancelled';
 }
 
 export interface FinanceAttentionAttributionExceptionRow {
@@ -791,6 +825,7 @@ export interface FinanceAttentionRoutingPersistence {
     decisionAt: Date;
     currency?: string;
     sourceSignals?: readonly FinanceAttentionSignal[];
+    deliveries?: readonly FinanceAttentionDelivery[];
   }): Promise<FinanceAttentionRoutingOutcome>;
 }
 

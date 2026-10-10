@@ -201,7 +201,11 @@ export class FinanceManagerConnector implements IConnector {
           logger.info(
             {
               jobsRun: automation.jobsRun,
+              deliveriesReceived: automation.deliveriesReceived,
               deliveriesApplied: automation.deliveriesApplied,
+              deliveriesReplayed: automation.deliveriesReplayed,
+              deliveriesOutOfOrder: automation.deliveriesOutOfOrder,
+              deliveriesAcknowledged: automation.deliveriesAcknowledged,
             },
             'Finance automation delivery completed',
           );

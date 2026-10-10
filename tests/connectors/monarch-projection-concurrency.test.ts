@@ -116,8 +116,16 @@ vi.mock('@/lib/finance/attention-routing', () => ({
       tasksCreated: 0,
       tasksUpdated: 0,
       tasksSettled: 0,
+      taskPromoted: 0,
+      autoIncluded: 0,
+      deferred: 0,
+      settled: 0,
       stalePreserved: 0,
       statusOnly: 0,
+      deliveriesReceived: 0,
+      deliveriesApplied: 0,
+      deliveriesReplayed: 0,
+      deliveriesOutOfOrder: 0,
     };
   }),
 }));

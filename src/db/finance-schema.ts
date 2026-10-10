@@ -512,6 +512,22 @@ export const financeAttentionRepairAudit = sqliteTable('finance_attention_repair
     .on(table.connectorId, table.createdAt),
 ]);
 
+export const financeAttentionDeliveryReceipts = sqliteTable(
+  'finance_attention_delivery_receipts',
+  {
+    deliveryKey: text('delivery_key').primaryKey(),
+    connectorId: text('connector_id').notNull(),
+    version: integer('version').notNull(),
+    action: text('action').$type<'create' | 'update' | 'settle'>().notNull(),
+    payloadDigest: text('payload_digest').notNull(),
+    appliedAt: text('applied_at').notNull(),
+  },
+  (table) => [
+    index('idx_finance_attention_delivery_connector')
+      .on(table.connectorId, table.appliedAt),
+  ],
+);
+
 // ─── KID PROFILES ───────────────────────────────────────────────────────────
 
 export const kidProfiles = sqliteTable('kid_profiles', {

@@ -167,6 +167,7 @@ function clearDatabase(): void {
     'tasks',
     'finance_mutation_audit',
     'finance_attribution_exceptions',
+    'finance_attention_delivery_receipts',
     'finance_transactions',
     'connector_configs',
   ]) {
@@ -645,6 +646,8 @@ describe.sequential('finance attention routing', () => {
           last_observed_at = ?, updated_at = ?
     `).run(now.toISOString(), now.toISOString(), now.toISOString());
     await reconcileFinanceAttention({ connectorId, now });
+    const settled = sqlite.prepare(`SELECT metadata FROM tasks`).get() as { metadata: string };
+    expect(JSON.parse(settled.metadata).verificationPending).toBeUndefined();
     sqlite.prepare(`
       UPDATE finance_attribution_exceptions
       SET status = 'open', review_state = 'pending', resolved_at = NULL,
@@ -654,6 +657,223 @@ describe.sequential('finance attention routing', () => {
     await reconcileFinanceAttention({ connectorId, now });
     expect(sqlite.prepare(`SELECT status FROM tasks`).get()).toEqual({ status: 'todo' });
     expect(count('my_day_items')).toBe(0);
+  });
+
+  it('applies versioned deliveries idempotently and rejects older snapshots', async () => {
+    const signal = {
+      connectorId,
+      signalKind: 'duplicateTransactionCandidate' as const,
+      sourceRef: 'signal-v1-delivery',
+      sourceLifecycle: 'open' as const,
+      conditionSince: iso(25),
+      sourceAsOf: iso(1),
+      activityKey: 'finance-automation:signal-v1-delivery:1',
+      actionable: true,
+      attention: 'actionable' as const,
+      freshness: 'fresh' as const,
+      settlementReason: null,
+    };
+    const first = await reconcileFinanceAttention({
+      connectorId,
+      now,
+      deliveries: [{
+        deliveryKey: 'finance-automation:signal-v1-delivery',
+        version: 1,
+        action: 'create',
+        signal,
+      }],
+    });
+    expect(first).toMatchObject({
+      deliveriesReceived: 1,
+      deliveriesApplied: 1,
+      deliveriesReplayed: 0,
+      tasksCreated: 1,
+    });
+
+    const replay = await reconcileFinanceAttention({
+      connectorId,
+      now,
+      deliveries: [{
+        deliveryKey: 'finance-automation:signal-v1-delivery',
+        version: 1,
+        action: 'create',
+        signal,
+      }],
+    });
+    expect(replay).toMatchObject({
+      deliveriesApplied: 0,
+      deliveriesReplayed: 1,
+    });
+    expect(count('tasks')).toBe(1);
+
+    const updatedSignal = {
+      ...signal,
+      activityKey: 'finance-automation:signal-v1-delivery:2',
+    };
+    const update = await reconcileFinanceAttention({
+      connectorId,
+      now,
+      deliveries: [{
+        deliveryKey: 'finance-automation:signal-v1-delivery',
+        version: 2,
+        action: 'update',
+        signal: updatedSignal,
+      }],
+    });
+    expect(update).toMatchObject({
+      deliveriesApplied: 1,
+      deliveriesReplayed: 0,
+      tasksUpdated: 1,
+    });
+
+    const older = await reconcileFinanceAttention({
+      connectorId,
+      now,
+      deliveries: [{
+        deliveryKey: 'finance-automation:signal-v1-delivery',
+        version: 1,
+        action: 'create',
+        signal,
+      }],
+    });
+    expect(older).toMatchObject({
+      deliveriesApplied: 0,
+      deliveriesOutOfOrder: 1,
+    });
+    expect(sqlite.prepare(`
+      SELECT version, action FROM finance_attention_delivery_receipts
+    `).get()).toEqual({ version: 2, action: 'update' });
+  });
+
+  it('settles user-completed delivery tasks only from a verified authoritative snapshot', async () => {
+    const openSignal = {
+      connectorId,
+      signalKind: 'connectorDegraded' as const,
+      sourceRef: 'signal-v1-health',
+      sourceLifecycle: 'open' as const,
+      conditionSince: iso(5),
+      sourceAsOf: iso(0),
+      activityKey: 'finance-automation:signal-v1-health:1',
+      actionable: true,
+      attention: 'actionable' as const,
+      freshness: 'fresh' as const,
+      settlementReason: null,
+    };
+    await reconcileFinanceAttention({
+      connectorId,
+      now,
+      deliveries: [{
+        deliveryKey: 'finance-automation:signal-v1-health',
+        version: 1,
+        action: 'create',
+        signal: openSignal,
+      }],
+    });
+    sqlite.prepare(`UPDATE tasks SET status = 'done', completed_at = ?`).run(now.toISOString());
+    await reconcileFinanceAttention({
+      connectorId,
+      now,
+      deliveries: [{
+        deliveryKey: 'finance-automation:signal-v1-health',
+        version: 2,
+        action: 'update',
+        signal: { ...openSignal, activityKey: 'finance-automation:signal-v1-health:2' },
+      }],
+    });
+    let task = sqlite.prepare(`SELECT status, metadata FROM tasks`).get() as {
+      status: string;
+      metadata: string;
+    };
+    expect(task.status).toBe('done');
+    expect(JSON.parse(task.metadata).verificationPending).toBe(true);
+
+    await reconcileFinanceAttention({
+      connectorId,
+      now,
+      deliveries: [{
+        deliveryKey: 'finance-automation:signal-v1-health',
+        version: 3,
+        action: 'settle',
+        signal: {
+          ...openSignal,
+          sourceLifecycle: 'resolved',
+          activityKey: 'finance-automation:signal-v1-health:3',
+          settlementReason: 'connector_recovered',
+        },
+      }],
+    });
+    task = sqlite.prepare(`SELECT status, metadata FROM tasks`).get() as {
+      status: string;
+      metadata: string;
+    };
+    expect(task.status).toBe('done');
+    expect(JSON.parse(task.metadata).verificationPending).toBeUndefined();
+    expect(count('my_day_items')).toBe(0);
+  });
+
+  it('cancels superseded tasks and keeps notifications mutually exclusive with tasks', async () => {
+    const signal = {
+      connectorId,
+      signalKind: 'duplicateTransactionCandidate' as const,
+      sourceRef: 'signal-v1-superseded',
+      sourceLifecycle: 'open' as const,
+      conditionSince: iso(1),
+      sourceAsOf: iso(0),
+      activityKey: 'finance-automation:signal-v1-superseded:1',
+      actionable: false,
+      attention: 'informational' as const,
+      freshness: 'fresh' as const,
+      settlementReason: null,
+    };
+    await reconcileFinanceAttention({
+      connectorId,
+      now,
+      deliveries: [{
+        deliveryKey: 'finance-automation:signal-v1-superseded',
+        version: 1,
+        action: 'create',
+        signal,
+      }],
+    });
+    expect(count('notifications')).toBe(1);
+    expect(count('tasks')).toBe(0);
+
+    await reconcileFinanceAttention({
+      connectorId,
+      now,
+      deliveries: [{
+        deliveryKey: 'finance-automation:signal-v1-superseded',
+        version: 2,
+        action: 'update',
+        signal: {
+          ...signal,
+          conditionSince: iso(25),
+          activityKey: 'finance-automation:signal-v1-superseded:2',
+          actionable: true,
+          attention: 'actionable',
+        },
+      }],
+    });
+    expect(count('tasks')).toBe(1);
+    expect(sqlite.prepare(`SELECT source_state AS sourceState FROM notifications`).get())
+      .toEqual({ sourceState: 'resolved' });
+
+    await reconcileFinanceAttention({
+      connectorId,
+      now,
+      deliveries: [{
+        deliveryKey: 'finance-automation:signal-v1-superseded',
+        version: 3,
+        action: 'settle',
+        signal: {
+          ...signal,
+          sourceLifecycle: 'superseded',
+          activityKey: 'finance-automation:signal-v1-superseded:3',
+          settlementReason: 'source_superseded',
+        },
+      }],
+    });
+    expect(sqlite.prepare(`SELECT status FROM tasks`).get()).toEqual({ status: 'cancelled' });
   });
 
   it('does not create or reopen attention from stale source state', async () => {

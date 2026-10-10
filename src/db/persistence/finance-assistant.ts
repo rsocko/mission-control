@@ -100,6 +100,7 @@ export interface FinanceAssistantTransaction {
   date: string;
   amount: number;
   merchant: string | null;
+  businessContext: string | null;
   category: string | null;
   confirmedCategory: string | null;
   pending: boolean;
@@ -118,7 +119,7 @@ export interface FinanceAssistantTransactionQuery {
   connectorId: string;
   startDate: string;
   endDate: string;
-  /** Case-insensitive merchant substring; escaped by the adapter. */
+  /** Case-insensitive merchant or supporting business-context substring. */
   merchantQuery?: string;
   categoryName?: string;
   kidId?: string;

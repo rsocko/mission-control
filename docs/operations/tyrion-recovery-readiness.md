@@ -40,13 +40,15 @@ or notification content into a request, log, or incident note.
    `0028_finance_clean_bootstrap`) applied
    through normal startup. Migration `0117` invalidates cached Finance Insight
    publications and identity-dependent projection/backfill proofs so no legacy
-   raw source identity can be replayed. A fresh disabled/quarantined sync must
-   regenerate them before canary authorization. It also resets non-manual v1
+   raw source identity can be replayed. A fresh disabled/quarantined sync
+   regenerates only current operational projections and attribution before
+   canary authorization. Historical projection is a separate, explicit
+   post-activation operator action. Migration `0117` also resets non-manual v1
    attribution, current exceptions, derived subjects, and occurrence summaries
    for re-evaluation under v2 while preserving authoritative manual decisions
    and audit history. Existing Finance Insight delivery cutover is rolled back
-   fail closed and must be explicitly re-authorized against a regenerated v2
-   publication.
+   fail closed and must be explicitly re-authorized only after a later
+   historical generation is captured.
 5. Keep the connector disabled. Do not run a sync yet.
 
 Stop on a migration error, digest mismatch, unexpected worker revision, or
@@ -197,13 +199,18 @@ curl --fail-with-body \
 Before repair, record the returned stable blockers and metadata counts. Do not
 continue if the response contains private finance content or key material.
 
-Also inspect `insights.projection` in the connector health response. A usable
-Finance Insight history projection reports `status=succeeded`,
-`windowCount=37`, current `sourceAsOf`, non-null coverage and item count, and no
-`lastErrorCode`. When capture reports `transaction_projection_unavailable`,
-use the projection's stable `lastErrorCode` to repair the separate 37-month
-history sync before canary authorization; a fresh 90-day operational sync does
-not prove this projection succeeded.
+`insights.projection` is not a current-window activation gate. After clean
+bootstrap it may be absent, and a prior explicit history attempt may remain
+failed with a stable `lastErrorCode`. Normal sync and canary must not invoke the
+37-month history synchronizer or create history state, windows, facts, plans,
+or proofs. `transaction_projection_unavailable` is therefore expected for
+Finance Insight capture until an operator explicitly starts a later bounded
+historical backfill; it does not block current operational attribution or
+account-summary readiness or make an otherwise healthy connector degraded.
+Insight capture/evaluation errors affect overall connector health once cutover
+delivery is enabled or an explicit backfill plan exists. Any explicit history
+operation remains fail closed and must satisfy its own count, digest, fence,
+and safety checks.
 
 The readiness, health, recovery, attribution-review, manual KID, and cutover
 web paths use the same backend-selected Finance persistence composition as the
@@ -349,10 +356,13 @@ undo. Rollback means stop all operators, restore the verified pre-apply
 database backup with the matching prior artifact, and re-run inventory before
 any further mutation. Do not attempt table-level reconstruction from the audit.
 
-After the current-window canary succeeds, a later historical backfill must use
-a new idempotency key and generation, fetch again from Monarch, and evaluate
-through the current Tyrion contract. It must not reuse old plan/proof IDs or
-resurrect any retired legacy attention notification/task identity.
+After activation is complete, a later historical backfill may be run only as
+an explicit operator action through the trusted Finance sync endpoint with an
+`insightBackfill` request. It must use a new idempotency key and generation,
+fetch again from Monarch, and evaluate through the current Tyrion contract. It
+must not reuse old plan/proof IDs or resurrect any retired legacy attention
+notification/task identity. Do not make this action part of a canary,
+scheduler release, or recurring sync.
 
 ## 7. Run exactly one controlled canary
 
@@ -384,9 +394,12 @@ Poll metadata readiness until the canary is terminal. Require:
 3. All six Finance projections are fresh with expected bounded item counts.
 4. Pre/post notification counts and delivery counts have no delta.
 5. No queue, retry, presentation, action, or delivery work was produced.
+6. History state remains unchanged from the clean bootstrap baseline; the
+   canary created no history state, windows, facts, backfill plans, or proofs.
 
 Readiness and verification must not call Monarch. Only the explicitly
-authorized canary performs provider sync.
+authorized canary performs current-window provider sync; it must not request
+the 37-month history projection.
 
 ## 8. Canary rollback or scheduler release
 

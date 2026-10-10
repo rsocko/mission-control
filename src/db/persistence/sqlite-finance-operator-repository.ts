@@ -896,6 +896,20 @@ export function createSqliteFinanceOperatorPersistence(
             retryable: number | null;
           }
         | undefined;
+      const insightActivation = handles.sqlite.prepare(`
+        SELECT
+          EXISTS (
+            SELECT 1 FROM finance_insight_cutovers
+            WHERE connector_id = ? AND delivery_enabled = 1
+          ) AS deliveryEnabled,
+          EXISTS (
+            SELECT 1 FROM finance_insight_transaction_backfill_plans
+            WHERE connector_id = ?
+          ) AS historyOperationExpected
+      `).get(connectorId, connectorId) as {
+        deliveryEnabled: number;
+        historyOperationExpected: number;
+      };
       return {
         sync: state
           ? {
@@ -930,6 +944,10 @@ export function createSqliteFinanceOperatorPersistence(
               retryable: evaluation.retryable === 1,
             }
           : null,
+        insightActivation: {
+          deliveryEnabled: insightActivation.deliveryEnabled === 1,
+          historyOperationExpected: insightActivation.historyOperationExpected === 1,
+        },
       };
     },
 

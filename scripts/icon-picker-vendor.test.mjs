@@ -70,24 +70,39 @@ test('rejects missing, extra, and tampered package files', async (context) => {
     try {
       const path = join(copy.snapshot, 'dist', 'core.js');
       await writeFile(path, `${await readFile(path, 'utf8')}\n`);
-      await assert.rejects(() => verifySnapshot(copy.snapshot), /deterministic artifact/i);
+      await assert.rejects(() => verifySnapshot(copy.snapshot), /SHA-256 mismatch/i);
     } finally {
       await copy.cleanup();
     }
   });
 });
 
-test('rejects rewritten provenance', async () => {
-  const copy = await fixture();
-  try {
-    const path = join(copy.snapshot, 'UPSTREAM.json');
-    const manifest = JSON.parse(await readFile(path, 'utf8'));
-    manifest.source.commit = '0000000000000000000000000000000000000000';
-    await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
-    await assert.rejects(() => verifySnapshot(copy.snapshot), /pinned upstream identity/i);
-  } finally {
-    await copy.cleanup();
-  }
+test('rejects rewritten provenance', async (context) => {
+  await context.test('upstream manifest', async () => {
+    const copy = await fixture();
+    try {
+      const path = join(copy.snapshot, 'UPSTREAM.json');
+      const manifest = JSON.parse(await readFile(path, 'utf8'));
+      manifest.source.commit = '0000000000000000000000000000000000000000';
+      await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
+      await assert.rejects(() => verifySnapshot(copy.snapshot), /pinned upstream identity/i);
+    } finally {
+      await copy.cleanup();
+    }
+  });
+
+  await context.test('snapshot manifest', async () => {
+    const copy = await fixture();
+    try {
+      const path = join(copy.snapshot, 'icon-picker.snapshot.json');
+      const manifest = JSON.parse(await readFile(path, 'utf8'));
+      manifest.artifactSha256 = '0'.repeat(64);
+      await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
+      await assert.rejects(() => verifySnapshot(copy.snapshot), /pinned package provenance/i);
+    } finally {
+      await copy.cleanup();
+    }
+  });
 });
 
 test('refuses synchronization without the reviewed exact commit', () => {

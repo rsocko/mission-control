@@ -6,18 +6,18 @@
   },
   "source": {
     "repository": "git+https://github.com/rsocko/icon-picker.git",
-    "commit": "9f038831690938d0ba07203d9c35e69b603697aa",
+    "commit": "7206bbe8dc22d43d95b2e2c3c0020215efb8a2b9",
     "tag": null
   },
   "artifact": {
     "filename": "rsocko-icon-picker-0.1.0-rc.0.tgz",
-    "size": 39766,
-    "unpackedSize": 129715,
+    "size": 39695,
+    "unpackedSize": 126787,
     "entryCount": 36,
-    "integrity": "sha512-q7L5JT1VyfOO91qu99i+PU0n1c1q28NGYR5Ph+Y7kKBIJqxbObNDiygcfj3e/iAejxfytcueYXMV++s3AQIK0Q==",
-    "shasum": "210b611c26c2bbcf497c261245732e517df8d55c",
-    "sha256": "7c942b4a63e7c9a5c3d60d375aa13d513092c829e0ad0754af1a7b74b0b08dce",
-    "sha512": "abb2f9253d55c9f38ef75aaef7d8be3d4d27d5cd6adbc346611e4f87e63b90a04826ac5b39b3438b281c7e3ddefe201e8f17f2b5cb9e617315fbeb3701020ad1",
+    "integrity": "sha512-SVLC5q+B6vuWVabZgm2V6ugfiec8kLEhIBgl/+lZDZrsLWtUn6HucMNm2iBRx+l8GgEwXf8gAmklfrHOddtV8w==",
+    "shasum": "0b2db4385f35f5636b324285bd219b5c3310c8fe",
+    "sha256": "822dfdf28a4f8419c778d1e56b00d9628bcbe93918b672a9921c1eeb0ab921be",
+    "sha512": "4952c2e6af81eafb9655a6d9826d95eae81f89e73c90b121201825ffe9590d9aec2d6b549fa1ee70c366da2051c7e97c1a01305dff200269257eb1ce75db55f3",
     "files": [
       "LICENSE",
       "README.md",
@@ -57,5 +57,9 @@
       "package.json"
     ]
   },
-  "acquisition": "npm-pack-from-source"
+  "acquisition": "canonical-npm-pack-from-source",
+  "canonicalization": {
+    "lineEndings": "lf",
+    "artifactContract": "package-artifact.json"
+  }
 }

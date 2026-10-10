@@ -280,14 +280,18 @@ Run the demo locally with `npm run demo:dev`; Vite serves it at `/icon-picker/`
 to match the production Pages subpath. `demo-dist/` is generated and ignored.
 The npm package uses an explicit file allowlist, and package verification rejects
 demo or workflow files if that boundary changes. Package verification performs
-two real `npm pack` runs and requires byte-identical tarballs.
+two real `npm pack` runs and requires byte-identical tarballs. Publishable text
+is packed from an LF-normalized staging tree, TypeScript declaration output is
+fixed to LF, and Ubuntu/Windows CI must reproduce the exact checksums in
+[`package-artifact.json`](./package-artifact.json).
 
 `npm run package:artifact` is intended for exact-commit downstream
 synchronization. From a clean checkout it writes the tarball plus a
 machine-readable `artifacts/UPSTREAM.json` containing the exact commit, optional
 matching tag, package identity, complete file manifest, npm integrity, and
-SHA-256/SHA-512 hashes. See [`docs/RELEASING.md`](./docs/RELEASING.md) for the
-vendored-consumer and optional npm release procedures.
+SHA-256/SHA-512 hashes plus the canonicalization contract. See
+[`docs/RELEASING.md`](./docs/RELEASING.md) for the vendored-consumer and
+optional npm release procedures.
 
 ### GitHub Pages deployment
 

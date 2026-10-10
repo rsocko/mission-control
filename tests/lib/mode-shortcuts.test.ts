@@ -32,24 +32,23 @@ describe('legacy taskbar shortcut migration', () => {
     });
   });
 
-  it('preserves Icon Finder and the first three prioritized shortcuts within the limit', () => {
+  it('preserves the first four prioritized shortcuts within the limit', () => {
     const shortcuts = getShortcuts();
 
     expect(shortcuts.map(shortcut => [shortcut.url, shortcut.enabled])).toEqual([
-      ['/icons', true],
       ['/today', true],
       ['/triage', true],
       ['/projects', true],
-      ['/', false],
+      ['/', true],
     ]);
-    expect(shortcuts[1]).toMatchObject({
+    expect(shortcuts[0]).toMatchObject({
       name: 'My Day',
       icon: 'shortcut-today.svg',
       description: 'View today\'s tasks',
     });
 
     const persisted = JSON.parse(fsState.writes[0]);
-    expect(persisted.shortcutConfigVersion).toBe(2);
+    expect(persisted.shortcutConfigVersion).toBe(3);
     expect(persisted.shortcuts).toEqual(shortcuts);
   });
 });

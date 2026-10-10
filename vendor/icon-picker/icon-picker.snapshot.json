@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "package": {
+    "name": "@rsocko/icon-picker",
+    "version": "0.1.0-rc.0"
+  },
+  "source": {
+    "repository": "git+https://github.com/rsocko/icon-picker.git",
+    "commit": "7206bbe8dc22d43d95b2e2c3c0020215efb8a2b9",
+    "tag": null
+  },
+  "artifactSha256": "822dfdf28a4f8419c778d1e56b00d9628bcbe93918b672a9921c1eeb0ab921be",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "1cea88d7050218219de065ca0eb27737fc73dc2954dd4486fd4461fe62a3fcb5"
+    },
+    {
+      "path": "README.md",
+      "sha256": "c9db48fbd5d342dc29af8b238926126aaeee9b1920a9e6c985c2f42c1a6c5cdf"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "sha256": "f267f54dc2c8317cf888150ccf1640a06377c57ff1a273af29e515dbc4f222a4"
+    },
+    {
+      "path": "dist/IconPicker.d.ts",
+      "sha256": "6218a3de25f3f85bc0cf08fe3028a755a68966f4720297f7719c15d201b2c857"
+    },
+    {
+      "path": "dist/IconPicker.d.ts.map",
+      "sha256": "81de09d3ee7794a189af97ccdc3d512e78e10c0f8fb2497b184cb843194ff823"
+    },
+    {
+      "path": "dist/IconPickerButton.d.ts",
+      "sha256": "e30d974ea32c851ca0e3dd74832611ba079a94e9386349f8ec44885351c5698b"
+    },
+    {
+      "path": "dist/IconPickerButton.d.ts.map",
+      "sha256": "b34dc2934decd397a17ff385e945ec130ae22d837017e20658469f5af643816a"
+    },
+    {
+      "path": "dist/IconRenderer.d.ts",
+      "sha256": "4d5c795e86e1bab16ff74af031c05f861d377d851175e37225d1b6b12ecb1e2d"
+    },
+    {
+      "path": "dist/IconRenderer.d.ts.map",
+      "sha256": "28992ba46855ab09cff7bf4cb6a348369d6054c03b9d8796936f0156322ebdf3"
+    },
+    {
+      "path": "dist/chunks/IconPickerButton-BCeJJAHh.js",
+      "sha256": "983452bafd6eb4e9457427ea71e4337a9fdd0c51ac9b08ddc90271b9da192fcd"
+    },
+    {
+      "path": "dist/chunks/IconPickerButton-BCeJJAHh.js.map",
+      "sha256": "668e92b283c52f8bc7b956847eaed79b2c6ad0e454eb1df115f7be0b61bd2ee8"
+    },
+    {
+      "path": "dist/chunks/IconRenderer-86b851bX.js",
+      "sha256": "788818471eaa18637134eadfa42a01621fab094db5a4db5bebeff566d59492b0"
+    },
+    {
+      "path": "dist/chunks/IconRenderer-86b851bX.js.map",
+      "sha256": "b8e8ab4ba279728e4e293bb150b2804002d1a03a82ad9263c24680bf46cfaa83"
+    },
+    {
+      "path": "dist/classnames.d.ts",
+      "sha256": "74d24636b987e3e8f693dcd29c140001d7f926a3d200ab0fcf22fc0000e753bd"
+    },
+    {
+      "path": "dist/classnames.d.ts.map",
+      "sha256": "6cc7da6d831b11b00378e41246da8888d66109943db96bf0e091173efe8e605e"
+    },
+    {
+      "path": "dist/core.d.ts",
+      "sha256": "add3dc59465950828d2ab5cfb52590b59130a0346247e68aeb4d260cd987916d"
+    },
+    {
+      "path": "dist/core.d.ts.map",
+      "sha256": "cd8e10fa2035b84ab8ffb19bbfb3510bdde6fc6df23aa4699219853811030736"
+    },
+    {
+      "path": "dist/core.js",
+      "sha256": "f835540e2141ececd83ffaed5c65e417239542de17cd940534b5e7fb8c69fc77"
+    },
+    {
+      "path": "dist/core.js.map",
+      "sha256": "094af045e6a0a35cb7ca918e355286971b02dc08af862cf5497ac5959cdff259"
+    },
+    {
+      "path": "dist/data.d.ts",
+      "sha256": "ed9b3213e109f9a0952db1334e3ab4c27b1864c345b59497e1e7d944467898ad"
+    },
+    {
+      "path": "dist/data.d.ts.map",
+      "sha256": "1e69026cf4b0045594c27ef04491796c2a1a4dc0c7978a8266db4c47befd7093"
+    },
+    {
+      "path": "dist/iconify.d.ts",
+      "sha256": "62842398aa0b9e476b022632ee619f636a61ac614f2a79259a89e34825898b97"
+    },
+    {
+      "path": "dist/iconify.d.ts.map",
+      "sha256": "826bb962e46a76b38cf77e16124de83db985b83c5faec2d6d882455107ca5a98"
+    },
+    {
+      "path": "dist/index.d.ts",
+      "sha256": "3b6fd65a528ac313e61287edb549c0ef921aade4d907d25a64cfc87accb04920"
+    },
+    {
+      "path": "dist/index.d.ts.map",
+      "sha256": "392850efc090e8bd36a98532629670e0b7ac565feb544a09a834aa4457229f11"
+    },
+    {
+      "path": "dist/index.js",
+      "sha256": "6f149938a4e681e1071a400da4158b09c1789d772e139ed52408d483b9942abe"
+    },
+    {
+      "path": "dist/picker.d.ts",
+      "sha256": "f4ce75dff707856334186041074a7194aaaa12cab9e4ae3949eab4a5f3385638"
+    },
+    {
+      "path": "dist/picker.d.ts.map",
+      "sha256": "117aed9bd9a1589a2961ea87bcd3da668f11c156b820e0d5b164e49ad2c9d401"
+    },
+    {
+      "path": "dist/picker.js",
+      "sha256": "96283642f762ab51c5e22cbcc11747b8c31056c62f38f374cc9772f99376a080"
+    },
+    {
+      "path": "dist/renderer.d.ts",
+      "sha256": "bea148415aed178971a19744679b13b45c44f853e3e9c69c80ff1e9371305ab6"
+    },
+    {
+      "path": "dist/renderer.d.ts.map",
+      "sha256": "538f5a2ff6033443cdb68fb583106da2da81eb569a9f135399f9c5a7d6651dea"
+    },
+    {
+      "path": "dist/renderer.js",
+      "sha256": "73f91bf2a46bc7d65f682676da3045909c4fcc4de78908684828da7b82eb86c1"
+    },
+    {
+      "path": "dist/styles.css",
+      "sha256": "140429173e8738afbb4be53f14331deb5fb01a8601155e202829643fd9745f1f"
+    },
+    {
+      "path": "dist/types.d.ts",
+      "sha256": "bf5ed3069384d1de25a7555643b08d06b6614c9a4d330f83d6fbc6b679fe854a"
+    },
+    {
+      "path": "dist/types.d.ts.map",
+      "sha256": "2c915ea45a0c852bc9d6d0223c31ed8e9403bba69446e827c03b9660e5da06a4"
+    },
+    {
+      "path": "package.json",
+      "sha256": "cb097bbcf895570765da433719187824a69a892fa2b1c9504271e250b59e321c"
+    }
+  ]
+}

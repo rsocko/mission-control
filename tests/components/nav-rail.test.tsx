@@ -179,12 +179,6 @@ describe('NavRail', () => {
     }
   });
 
-  it('does not show Icon Finder in the desktop navigation', () => {
-    renderNavRail();
-
-    expect(screen.queryByRole('link', { name: 'Icon Finder' })).not.toBeInTheDocument();
-  });
-
   it('links the desktop navigation to the all tasks workspace', () => {
     renderNavRail();
 

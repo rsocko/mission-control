@@ -41,14 +41,6 @@ describe('PWA manifest branding', () => {
   it('only includes configured shortcuts and uses their navigation-matched icons', async () => {
     manifestState.shortcuts = [
       {
-        id: 'icon-finder',
-        name: 'Icon Finder',
-        url: '/icons',
-        description: 'Search and copy icons',
-        icon: 'shortcut-icon-finder.svg',
-        enabled: true,
-      },
-      {
         id: 'today',
         name: 'My Day',
         url: '/today',
@@ -63,11 +55,6 @@ describe('PWA manifest branding', () => {
 
     expect(manifest.shortcuts).toEqual([
       expect.objectContaining({
-        name: 'Icon Finder',
-        url: '/icons',
-        icons: [{ src: '/icons/shortcut-icon-finder.svg?v=2', sizes: '96x96', type: 'image/svg+xml' }],
-      }),
-      expect.objectContaining({
         name: 'My Day',
         url: '/today',
         icons: [{ src: '/icons/shortcut-today.svg?v=2', sizes: '96x96', type: 'image/svg+xml' }],
@@ -75,7 +62,7 @@ describe('PWA manifest branding', () => {
     ]);
   });
 
-  it('does not force Icon Finder into an empty configured menu', async () => {
+  it('keeps an empty configured shortcut menu empty', async () => {
     const response = await GET();
     const manifest = await response.json();
 

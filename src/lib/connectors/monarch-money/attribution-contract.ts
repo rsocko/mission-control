@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { z } from 'zod';
+import { currencySchema } from '@/lib/finance/currency';
 
 export const TYRION_ATTRIBUTION_CONTRACT_VERSION = '2.0';
 export const TYRION_ATTRIBUTION_ENGINE_VERSION = '2.0.0';
@@ -140,6 +141,7 @@ export const attributionPolicyResponseSchema = z.object({
   engineVersion: z.literal(TYRION_ATTRIBUTION_ENGINE_VERSION),
   policyVersion: z.number().int().positive(),
   policyUpdatedAt: timestampSchema,
+  householdCurrency: currencySchema,
 }).strict();
 
 export const attributionErrorResponseSchema = z.object({

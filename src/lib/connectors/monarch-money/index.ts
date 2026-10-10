@@ -13,6 +13,11 @@ import {
   MonarchBridgeClient,
   MonarchBridgeError,
 } from './client';
+import {
+  resolveTyrionPolicyConfig,
+  TyrionAttributionClient,
+  TyrionAttributionError,
+} from './attribution-client';
 import { FinanceSnapshotSynchronizer } from './snapshot-synchronizer';
 import { FinanceDatasetSynchronizer } from './dataset-synchronizer';
 import { FinanceInsightHistorySynchronizer } from './finance-insight-history-sync';
@@ -66,7 +71,11 @@ export class FinanceManagerConnector implements IConnector {
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      const health = await new MonarchBridgeClient(this.requireConfig()).getHealth();
+      const config = this.requireConfig();
+      const [health] = await Promise.all([
+        new MonarchBridgeClient(config).getHealth(),
+        new TyrionAttributionClient(resolveTyrionPolicyConfig(config)).readCurrentPolicy(),
+      ]);
       return {
         success: health.authenticated,
         message: health.authenticated
@@ -74,7 +83,9 @@ export class FinanceManagerConnector implements IConnector {
           : `Tyrion requires attention (${health.authState})`,
       };
     } catch (error) {
-      const code = error instanceof MonarchBridgeError ? error.code : 'bridge_unavailable';
+      const code = error instanceof MonarchBridgeError || error instanceof TyrionAttributionError
+        ? error.code
+        : 'bridge_unavailable';
       return { success: false, message: `Tyrion connection failed (${code})` };
     }
   }

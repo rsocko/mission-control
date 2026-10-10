@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FinanceInsightBackfillWindowProof } from '@/db/persistence/finance-insights';
 import { financeInsightDigestV1 } from '@/lib/finance-insights/canonical';
 import type { ConnectorConfig } from '@/types';
@@ -18,6 +18,9 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
 }));
 
 vi.mock('@/lib/connectors/monarch-money/client', () => ({
+  getPersistedFinanceManagerServiceToken: (
+    config: Pick<ConnectorConfig, 'credentials'>,
+  ) => String(config.credentials?.serviceToken ?? ''),
   MonarchBridgeError: class MonarchBridgeError extends Error {
     constructor(
       readonly code: string,
@@ -55,7 +58,6 @@ const config: ConnectorConfig = {
   credentials: { serviceToken: 'private-service-token' },
   settings: {
     bridgeUrl: 'http://localhost:8100',
-    householdCurrency: 'USD',
     maxRetries: 0,
   },
   syncedLists: [],
@@ -138,7 +140,18 @@ function request() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+    contractVersion: '2.0',
+    engineVersion: '2.0.0',
+    policyVersion: 1,
+    policyUpdatedAt: '2024-02-29T12:00:00.000Z',
+    householdCurrency: 'USD',
+  })));
   mocks.bridgePage.mockRejectedValue(new Error('raw provider diagnostic detail'));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('Finance insight backfill diagnostics', () => {

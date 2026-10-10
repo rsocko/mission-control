@@ -19,7 +19,6 @@ import {
   FINANCE_INSIGHTS_CONTRACT_VERSION,
   accountSourceFactSchema,
   categorySourceFactSchema,
-  currencySchema,
   recurringSourceFactSchema,
   sourceFactBatchSchema,
   sourceGenerationCommitRequestSchema,
@@ -38,6 +37,10 @@ import {
 } from './contract';
 import { normalizeFinanceProviderAlias } from './provider';
 import { validateFinanceConnectorScopedReference } from '@/lib/connectors/monarch-money/identity';
+import {
+  resolveTyrionHouseholdCurrency,
+  TyrionAttributionError,
+} from '@/lib/connectors/monarch-money/attribution-client';
 
 export const FINANCE_INSIGHT_PUBLICATION_CACHE_COUNT = 3;
 export const FINANCE_INSIGHT_PUBLICATION_FALLBACK_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -195,11 +198,14 @@ async function preparePublication(
   if (syncResult.status !== 'fresh' || Object.keys(syncResult.datasetErrors ?? {}).length > 0) {
     return { code: 'partial_projection' };
   }
-  const currency = currencySchema.safeParse(
-    (config.settings as Record<string, unknown> | undefined)?.householdCurrency,
-  );
-  if (!currency.success) {
-    return { code: 'household_currency_unavailable' };
+  let currency: string;
+  try {
+    currency = await resolveTyrionHouseholdCurrency(config);
+  } catch (error) {
+    if (error instanceof TyrionAttributionError) {
+      return { code: error.code };
+    }
+    throw error;
   }
   const { finance } = await getWorkerPersistenceRepositories();
   await finance.identity.ensureNamespace({
@@ -406,7 +412,7 @@ async function preparePublication(
     sourceAsOf,
     coverageStart,
     coverageEnd,
-    currency: currency.data,
+    currency,
     bridgeContractVersion: transactionState.bridgeContractVersion,
     capturedConstituents,
     manifest,

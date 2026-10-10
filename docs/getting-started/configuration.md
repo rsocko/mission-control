@@ -233,9 +233,11 @@ Assistant opening device class (`door`, `garage_door`, `opening`, or `window`)
 so entities whose names merely contain `door`, such as doorbell diagnostics,
 are not misclassified.
 
-Finance Insight publication also requires an exact ISO 4217
-`householdCurrency` in the persisted Finance Manager connector settings. There
-is no currency environment fallback or inferred/default currency.
+Tyrion is the sole owner of the household currency. Mission Control reads the
+exact ISO 4217 value from Tyrion's protected attribution-policy response when it
+needs to publish Finance Insights, build a review session, or run an operator
+readiness check. Mission Control does not persist, infer, or expose a second
+currency setting.
 
 Each Tyrion connector stores a canonical, non-secret Bridge API base URL entered
 in setup. Production defaults to the protected backend-only gateway at

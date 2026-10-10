@@ -10,6 +10,7 @@ vi.unmock('crypto');
 const directory = mkdtempSync(join(tmpdir(), 'mc-finance-cutover-'));
 process.env.MC_DB_PATH = join(directory, 'cutover.db');
 process.env.MC_API_KEY = 'invented-operator-api-key';
+process.env.FINANCE_MANAGER_API_TOKEN = 'invented-service-token';
 process.env.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED = 'true';
 delete process.env.TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED;
 delete process.env.TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED;
@@ -34,7 +35,7 @@ function seedConnector(overrides: { id?: string; enabled?: number; settings?: ob
   `).run(
     overrides.id ?? connectorId,
     overrides.enabled ?? 1,
-    JSON.stringify(overrides.settings ?? { householdCurrency: 'USD' }),
+    JSON.stringify(overrides.settings ?? {}),
     now,
     now,
   );
@@ -91,6 +92,13 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({
+    contractVersion: '2.0',
+    engineVersion: '2.0.0',
+    policyVersion: 1,
+    policyUpdatedAt: now,
+    householdCurrency: 'USD',
+  })));
   delete process.env.TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED;
   delete process.env.TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED;
   sqlite.exec(`
@@ -115,20 +123,23 @@ afterAll(() => {
   rmSync(directory, { recursive: true, force: true });
   delete process.env.MC_DB_PATH;
   delete process.env.MC_API_KEY;
+  delete process.env.FINANCE_MANAGER_API_TOKEN;
   delete process.env.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED;
+  vi.unstubAllGlobals();
 });
 
 describe.sequential('Finance Insight cutover operator', () => {
-  it('reports local metadata readiness without contacting Monarch', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
+  it('reports readiness with authoritative Tyrion configuration', async () => {
     expect(await cutover.getFinanceInsightCutoverReadiness(connectorId, generation))
       .toMatchObject({
         connector: {
           id: connectorId,
           enabled: true,
-          configurationState: { status: 'configured' },
+          configurationState: {
+            status: 'configured',
+            source: 'tyrion',
+            householdCurrency: 'USD',
+          },
         },
         publication: {
           sourceGeneration: generation,
@@ -142,14 +153,19 @@ describe.sequential('Finance Insight cutover operator', () => {
         },
         readiness: { ready: true, blockers: [] },
       });
-    expect(fetchMock).not.toHaveBeenCalled();
-    vi.unstubAllGlobals();
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
-  it('fails closed on disabled, unconfigured, ambiguous, gated, and stale states', async () => {
+  it('fails closed on disabled, unavailable Tyrion configuration, ambiguous, gated, and stale states', async () => {
     sqlite.prepare(`UPDATE connector_configs SET enabled = 0, settings = '{}' WHERE id = ?`)
       .run(connectorId);
     process.env.TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED = 'true';
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({
+      error: {
+        code: 'policy_unavailable',
+        message: 'Household attribution policy is unavailable',
+      },
+    }, { status: 503 })));
     expect((await cutover.getFinanceInsightCutoverReadiness(connectorId, 'stale-generation'))
       .readiness)
       .toEqual({
@@ -157,7 +173,7 @@ describe.sequential('Finance Insight cutover operator', () => {
         blockers: [
           'finance_insight_connector_unavailable',
           'finance_connector_disabled',
-          'household_currency_unavailable',
+          'tyrion_configuration_unavailable',
           'finance_notification_gate_enabled',
           'finance_insight_cutover_generation_stale',
         ],
@@ -165,6 +181,13 @@ describe.sequential('Finance Insight cutover operator', () => {
 
     sqlite.prepare(`UPDATE connector_configs SET enabled = 1 WHERE id = ?`).run(connectorId);
     seedConnector({ id: 'finance-second' });
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({
+      contractVersion: '2.0',
+      engineVersion: '2.0.0',
+      policyVersion: 1,
+      policyUpdatedAt: now,
+      householdCurrency: 'USD',
+    })));
     expect((await cutover.getFinanceInsightCutoverReadiness(connectorId, generation))
       .readiness.blockers)
       .toContain('finance_insight_connector_unavailable');

@@ -17,6 +17,7 @@ import {
 } from '../helpers/process-runtime-registries';
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   resetProcessRuntimeRegistries();
   resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
 });
@@ -266,7 +267,24 @@ describe('process-wide runtime registries', () => {
     const control = {} as SyncControlStateRepository;
     const maintenance = {} as ConnectorMaintenanceLockRepository;
     const getStatus = vi.fn(async () => ({ marker: 'operator' }));
-    const operator = { getStatus } as unknown as SyncOperatorControlRepository;
+    const getConnectorConfig = vi.fn(async () => ({
+      credentials: { serviceToken: 'test-service-token' },
+      settings: {},
+    }));
+    const operator = {
+      getStatus,
+      getConnectorConfig,
+    } as unknown as SyncOperatorControlRepository;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      contractVersion: '2.0',
+      engineVersion: '2.0.0',
+      policyVersion: 1,
+      policyUpdatedAt: '2026-10-10T00:00:00.000Z',
+      householdCurrency: 'USD',
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })));
     firstJobs.registerSyncJobRepository(staleJobs);
     firstJobs.clearSyncJobRepository(staleJobs);
     firstJobs.registerSyncJobRepository(jobs);
@@ -289,5 +307,6 @@ describe('process-wide runtime registries', () => {
     expect(await secondMaintenance.getConnectorMaintenanceLockRepository()).toBe(maintenance);
     await secondOperator.getFinanceSyncControlStatus('connector-1');
     expect(getStatus).toHaveBeenCalledWith('connector-1');
+    expect(getConnectorConfig).toHaveBeenCalledWith('connector-1');
   });
 });

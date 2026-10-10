@@ -43,6 +43,7 @@ const stableServiceErrorCodes = new Set([
   'attribution_rate_limited',
   'attribution_operation_failed',
   'attribution_auth_not_configured',
+  'household_currency_unavailable',
   'policy_unavailable',
   'attribution_service_unavailable',
 ]);
@@ -53,6 +54,8 @@ export interface TyrionAttributionConfig {
   expectedPolicyVersion: number | null;
   timeoutMs: number;
 }
+
+export type TyrionPolicyConfig = Omit<TyrionAttributionConfig, 'identityNamespace'>;
 
 export class TyrionAttributionError extends Error {
   constructor(
@@ -79,13 +82,33 @@ export function resolveTyrionAttributionConfig(
   },
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): TyrionAttributionConfig {
-  const serviceToken = getPersistedFinanceManagerServiceToken(financeConfig)
-    || environment.FINANCE_MANAGER_API_TOKEN?.trim()
-    || '';
+  const policyConfig = resolveTyrionPolicyConfig(financeConfig, environment);
   const identityNamespace = financeIdentityNamespaceFromCredentials(
     financeConfig.credentials,
   );
-  if (!serviceToken || !identityNamespace) {
+  if (!identityNamespace) {
+    throw new TyrionAttributionError(
+      'attribution_not_configured',
+      'Tyrion attribution service configuration is unavailable',
+      false,
+    );
+  }
+  return {
+    ...policyConfig,
+    identityNamespace,
+  };
+}
+
+export function resolveTyrionPolicyConfig(
+  financeConfig: Pick<ConnectorConfig, 'credentials'> & Partial<Pick<ConnectorConfig, 'settings'>> = {
+    credentials: {},
+  },
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): TyrionPolicyConfig {
+  const serviceToken = getPersistedFinanceManagerServiceToken(financeConfig)
+    || environment.FINANCE_MANAGER_API_TOKEN?.trim()
+    || '';
+  if (!serviceToken) {
     throw new TyrionAttributionError(
       'attribution_not_configured',
       'Tyrion attribution service configuration is unavailable',
@@ -94,7 +117,6 @@ export function resolveTyrionAttributionConfig(
   }
   return {
     serviceToken,
-    identityNamespace,
     expectedPolicyVersion: getTyrionAttributionPolicySelection(
       financeConfig.settings ?? {},
     ).pinnedPolicyVersion,
@@ -181,7 +203,7 @@ function sanitizedServiceCode(status: number, parsedCode?: string): string {
 
 export class TyrionAttributionClient {
   constructor(
-    readonly config = resolveTyrionAttributionConfig(),
+    readonly config: TyrionPolicyConfig = resolveTyrionPolicyConfig(),
     private readonly fetchImplementation: typeof fetch = fetch,
   ) {}
 
@@ -332,6 +354,16 @@ export class TyrionAttributionClient {
     }
     return responseBody;
   }
+}
+
+export async function resolveTyrionHouseholdCurrency(
+  financeConfig: Pick<ConnectorConfig, 'credentials'> & Partial<Pick<ConnectorConfig, 'settings'>>,
+  signal?: AbortSignal,
+): Promise<string> {
+  const policy = await new TyrionAttributionClient(
+    resolveTyrionPolicyConfig(financeConfig),
+  ).readCurrentPolicy(signal);
+  return policy.householdCurrency;
 }
 
 export function createAttributionRequests(

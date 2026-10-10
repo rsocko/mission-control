@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import logger from '@/lib/logger';
 import {
-  getFinanceConnectorConfigurationState,
   isFinanceConnectorType,
 } from '@/lib/connectors/monarch-money/config';
 import { getPersistedFinanceManagerServiceToken } from '@/lib/connectors/monarch-money/client';
@@ -227,7 +226,6 @@ implements SyncOperatorControlRepository {
     const deliveryEnabled = cutover?.deliveryEnabled === true;
     const queued = Number(jobs?.queued ?? 0);
     const running = Number(jobs?.running ?? 0);
-    const configurationState = getFinanceConnectorConfigurationState(connector.settings ?? {});
     const tokenConfigured = Boolean(
       getPersistedFinanceManagerServiceToken({
         credentials: connector.credentials ?? {},
@@ -237,7 +235,6 @@ implements SyncOperatorControlRepository {
     const blockers: SyncOperatorErrorCode[] = [];
     if (control?.schedulerState !== 'quarantined') blockers.push('sync_quarantine_required');
     if (queued + running > 0) blockers.push('sync_job_active');
-    if (configurationState.status !== 'configured') blockers.push('household_currency_unavailable');
     if (!tokenConfigured) blockers.push('finance_service_token_unavailable');
     if (!isFinanceInsightShadowIngestEnabled()) {
       blockers.push('finance_insight_shadow_ingest_disabled');
@@ -251,7 +248,12 @@ implements SyncOperatorControlRepository {
       connector: {
         id: connector.id,
         enabled: connector.enabled,
-        configurationState,
+        configurationState: {
+          status: 'unchecked',
+          source: 'tyrion',
+          householdCurrency: null,
+          code: null,
+        },
       },
       scheduler: {
         state: control?.schedulerState ?? 'scheduled',
@@ -279,6 +281,14 @@ implements SyncOperatorControlRepository {
 
   getStatus(connectorId: string): Promise<FinanceSyncControlStatus> {
     return this.getStatusWithClient(this.pool, connectorId);
+  }
+
+  async getConnectorConfig(connectorId: string) {
+    const connector = await this.connectorRow(this.pool, connectorId);
+    return {
+      credentials: connector.credentials ?? {},
+      settings: connector.settings ?? {},
+    };
   }
 
   async quarantine(

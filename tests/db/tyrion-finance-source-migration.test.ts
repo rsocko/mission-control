@@ -4,11 +4,11 @@ import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 const sqliteMigration = readFileSync(
-  resolve(process.cwd(), 'drizzle/0147_tyrion_finance_source_identity.sql'),
+  resolve(process.cwd(), 'drizzle/0148_tyrion_finance_source_identity.sql'),
   'utf8',
 );
 const postgresMigration = readFileSync(
-  resolve(process.cwd(), 'drizzle/postgres/0025_tyrion_finance_source_identity.sql'),
+  resolve(process.cwd(), 'drizzle/postgres/0026_tyrion_finance_source_identity.sql'),
   'utf8',
 );
 

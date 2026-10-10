@@ -241,6 +241,7 @@ async function loadAttributionAccountSignals(
   client: PoolClient,
   connectorId: string,
   decisionAt: Date,
+  currency: string,
 ): Promise<FinanceAttentionSignal[]> {
   const [connector] = await query<{ settings: unknown }>(client, `
     SELECT settings FROM connector_configs WHERE id = $1 AND deleted_at IS NULL
@@ -251,7 +252,6 @@ async function loadAttributionAccountSignals(
     && typeof connector.settings === 'object'
     && !Array.isArray(connector.settings)
   ) ? connector.settings as Record<string, unknown> : {};
-  const currency = String(settings.householdCurrency ?? 'USD');
   const policy = parseAttributionAttentionPolicy(settings, currency);
   const rows = await query<FinanceAttentionAccountSummaryRow>(client, `
     SELECT accounts.upstream_account_id AS "accountId",
@@ -937,6 +937,7 @@ export function createPostgresFinanceAttentionRoutingPersistence(
           client,
           input.connectorId,
           decisionAt,
+          input.currency ?? 'USD',
         );
         result.evaluated += accountSignals.length;
         signals.push(...accountSignals);

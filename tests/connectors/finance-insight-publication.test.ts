@@ -20,6 +20,7 @@ import {
 const tempDirectory = mkdtempSync(join(tmpdir(), 'mc-finance-insight-publication-'));
 const databasePath = join(tempDirectory, 'publication.db');
 const baseNow = new Date('2026-08-10T12:00:00.000Z');
+let policyCurrency = 'USD';
 let sqlite: Database.Database;
 let captureFinanceInsightPublication:
   typeof import('@/lib/finance-insights/publication')['captureFinanceInsightPublication'];
@@ -60,8 +61,8 @@ function connector(id: string, type = 'finance-manager'): ConnectorConfig {
       tagWriteBack: false,
       notificationOnly: true,
     },
-    credentials: {},
-    settings: { householdCurrency: 'USD' },
+    credentials: { serviceToken: 'invented-service-token' },
+    settings: {},
     syncedLists: [],
   };
 }
@@ -470,9 +471,20 @@ beforeAll(async () => {
   ));
 });
 
-beforeEach(clearProjection);
+beforeEach(() => {
+  clearProjection();
+  policyCurrency = 'USD';
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => Response.json({
+    contractVersion: '2.0',
+    engineVersion: '2.0.0',
+    policyVersion: 1,
+    policyUpdatedAt: '2026-08-10T11:00:00.000Z',
+    householdCurrency: policyCurrency,
+  })));
+});
 
 afterAll(() => {
+  vi.unstubAllGlobals();
   delete process.env.MC_DB_PATH;
   sqlite.close();
   rmSync(tempDirectory, { recursive: true, force: true });
@@ -625,8 +637,8 @@ describe.sequential('finance insight composite publication', () => {
       completeResult,
       () => baseNow,
     );
+    policyCurrency = 'EUR';
     const euroConfig = connector('finance-a');
-    euroConfig.settings = { ...euroConfig.settings, householdCurrency: 'EUR' };
     const second = await captureFinanceInsightPublication(
       euroConfig,
       completeResult,
@@ -652,36 +664,19 @@ describe.sequential('finance insight composite publication', () => {
       .not.toBe(firstPublication?.commitRequest.idempotencyKey);
   });
 
-  it('requires an exact persisted ISO 4217 household currency without environment fallback', async () => {
+  it('fails closed when Tyrion does not return an authoritative household currency', async () => {
     await seedProjection('finance-a');
-    process.env.FINANCE_INSIGHTS_CURRENCY = 'EUR';
-    try {
-      const missing = connector('finance-a');
-      missing.settings = {};
-      await expect(captureFinanceInsightPublication(
-        missing,
-        completeResult,
-        () => baseNow,
-      )).resolves.toEqual({ status: 'refused', code: 'household_currency_unavailable' });
-
-      const malformed = connector('finance-a');
-      malformed.settings = { householdCurrency: 'usd' };
-      await expect(captureFinanceInsightPublication(
-        malformed,
-        completeResult,
-        () => baseNow,
-      )).resolves.toEqual({ status: 'refused', code: 'household_currency_unavailable' });
-
-      const unknown = connector('finance-a');
-      unknown.settings = { householdCurrency: 'ZZZ' };
-      await expect(captureFinanceInsightPublication(
-        unknown,
-        completeResult,
-        () => baseNow,
-      )).resolves.toEqual({ status: 'refused', code: 'household_currency_unavailable' });
-    } finally {
-      delete process.env.FINANCE_INSIGHTS_CURRENCY;
-    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
+      error: {
+        code: 'policy_unavailable',
+        message: 'Household attribution policy is unavailable',
+      },
+    }, { status: 503 })));
+    await expect(captureFinanceInsightPublication(
+      connector('finance-a'),
+      completeResult,
+      () => baseNow,
+    )).resolves.toEqual({ status: 'refused', code: 'policy_unavailable' });
   });
 
   it('uses Bridge provenance, not local completion time, for transaction freshness', async () => {

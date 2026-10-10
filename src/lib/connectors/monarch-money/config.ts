@@ -7,7 +7,6 @@ import {
   TyrionBridgeUrlValidationError,
 } from './bridge-url';
 import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
-import { currencySchema } from '@/lib/finance/currency';
 import {
   AttributionAttentionPolicyError,
   parseAttributionAttentionPolicy,
@@ -36,15 +35,9 @@ type ConnectorConfigLike = {
   settings?: unknown;
 };
 
-export type FinanceConnectorConfigurationState =
-  | { status: 'configured'; code: null }
-  | { status: 'needs-configuration'; code: 'household_currency_unavailable' };
-
 export class FinanceConnectorConfigurationError extends Error {
   constructor(
     readonly code:
-      | 'household_currency_required'
-      | 'household_currency_invalid'
       | 'attribution_policy_pin_invalid'
       | 'attribution_attention_policy_invalid',
   ) {
@@ -93,6 +86,7 @@ export function sanitizeFinanceConnectorWrite<T extends ConnectorConfigLike>(con
   for (const key of ['serviceToken', 'bridgeToken', 'apiToken']) {
     delete safeSettings[key];
   }
+  delete safeSettings.householdCurrency;
   delete safeSettings.cardRuleFingerprintParityProven;
   delete safeSettings.cardRuleFingerprintParityProvenAt;
   if (safeSettings.bridgeUrl !== undefined) {
@@ -129,35 +123,17 @@ export function preserveFinanceConnectorIdentityCredentials(
 
 export function validateFinanceConnectorSettings(
   settings: unknown,
-  options: { requireHouseholdCurrency: boolean },
 ): Record<string, unknown> {
   const parsed = parseObject(settings);
   getTyrionAttributionPolicySelection(parsed);
-  const hasCurrency = Object.prototype.hasOwnProperty.call(parsed, 'householdCurrency');
-  if (!hasCurrency) {
-    if (options.requireHouseholdCurrency) {
-      throw new FinanceConnectorConfigurationError('household_currency_required');
-    }
-    return parsed;
-  }
-  if (!currencySchema.safeParse(parsed.householdCurrency).success) {
-    throw new FinanceConnectorConfigurationError('household_currency_invalid');
-  }
+  delete parsed.householdCurrency;
   try {
-    parseAttributionAttentionPolicy(parsed, String(parsed.householdCurrency));
+    parseAttributionAttentionPolicy(parsed, 'USD');
   } catch (error) {
     if (!(error instanceof AttributionAttentionPolicyError)) throw error;
     throw new FinanceConnectorConfigurationError('attribution_attention_policy_invalid');
   }
   return parsed;
-}
-
-export function getFinanceConnectorConfigurationState(
-  settings: unknown,
-): FinanceConnectorConfigurationState {
-  return currencySchema.safeParse(parseObject(settings).householdCurrency).success
-    ? { status: 'configured', code: null }
-    : { status: 'needs-configuration', code: 'household_currency_unavailable' };
 }
 
 export function redactFinanceConnector<T extends ConnectorConfigLike>(config: T): T {
@@ -166,6 +142,7 @@ export function redactFinanceConnector<T extends ConnectorConfigLike>(config: T)
   for (const key of ['serviceToken', 'bridgeToken', 'apiToken']) {
     delete safeSettings[key];
   }
+  delete safeSettings.householdCurrency;
   if (safeSettings.bridgeUrl !== undefined) {
     try {
       safeSettings.bridgeUrl = normalizeTyrionBridgeUrl(safeSettings.bridgeUrl);
@@ -239,4 +216,15 @@ export async function getPersistedFinanceConnectorConfig(
     throw new Error('connectorId is required when multiple finance connectors are enabled');
   }
   return configs[0];
+}
+
+export async function getPersistedFinanceConnectorConfigById(
+  connectorId: string,
+): Promise<ConnectorConfig> {
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const config = await repositories.connectors.get(connectorId);
+  if (!config || !isFinanceConnectorType(config.type)) {
+    throw new Error('Finance connector is not configured');
+  }
+  return config;
 }

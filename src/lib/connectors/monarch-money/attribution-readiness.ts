@@ -21,6 +21,7 @@ import {
   createAttributionRequests,
   normalizeAttributionMerchant,
   resolveTyrionAttributionConfig,
+  resolveTyrionHouseholdCurrency,
   TyrionAttributionClient,
   TyrionAttributionError,
 } from './attribution-client';
@@ -86,31 +87,20 @@ function mapError(error: unknown): FinanceAttributionReadinessError {
 export async function getFinanceAttributionPolicyReadiness(connectorId: string) {
   try {
     const { connector, repositories } = await financeConnector(connectorId);
+    const policy = await new TyrionAttributionClient(
+      resolveTyrionAttributionConfig(connector),
+    ).readCurrentPolicy();
+    const householdCurrency = policy.householdCurrency;
     const [accountSummary, projection, latestBackfillPlan] = await Promise.all([
       repositories.finance.operator.readAttributionAccountSummary(connectorId),
       repositories.finance.insights.projection.readState(connectorId),
       repositories.finance.insights.backfill.readLatestPlan(connectorId),
     ]);
     const policySelection = getTyrionAttributionPolicySelection(connector.settings);
-    const settings = settingsRecord(connector.settings);
-    const householdCurrency = String(settings.householdCurrency ?? 'USD');
     const attentionPolicy = parseAttributionAttentionPolicy(
       connector.settings,
       householdCurrency,
     );
-    let activePolicyVersion: number | null = null;
-    let policyUpdatedAt: string | null = null;
-    let policyDiscoveryError: string | null = null;
-    try {
-      const policy = await new TyrionAttributionClient(
-        resolveTyrionAttributionConfig(connector),
-      ).readCurrentPolicy();
-      activePolicyVersion = policy.policyVersion;
-      policyUpdatedAt = policy.policyUpdatedAt;
-    } catch (error) {
-      if (!(error instanceof TyrionAttributionError)) throw error;
-      policyDiscoveryError = error.code;
-    }
     return {
       connector: {
         enabled: connector.enabled,
@@ -119,9 +109,9 @@ export async function getFinanceAttributionPolicyReadiness(connectorId: string) 
       policySelection,
       householdCurrency,
       attentionPolicy,
-      activePolicyVersion,
-      policyUpdatedAt,
-      policyDiscoveryError,
+      activePolicyVersion: policy.policyVersion,
+      policyUpdatedAt: policy.policyUpdatedAt,
+      policyDiscoveryError: null,
       accountSummary,
       historyBackfill: latestBackfillPlan
         ? {
@@ -171,7 +161,7 @@ export async function updateFinanceAttributionAttentionPolicy(
     }
     const { connector, repositories } = await financeConnector(connectorId);
     const settings = settingsRecord(connector.settings);
-    const householdCurrency = String(settings.householdCurrency ?? 'USD');
+    const householdCurrency = await resolveTyrionHouseholdCurrency(connector);
     const validated = parseAttributionAttentionPolicy({
       ...settings,
       [ATTRIBUTION_ATTENTION_POLICY_SETTING]: attentionPolicy,

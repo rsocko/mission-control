@@ -1,5 +1,9 @@
 import type { FinanceActorType } from '@/lib/connectors/monarch-money/finance-request';
-import type { FinanceConnectorConfigurationState } from '@/lib/connectors/monarch-money/config';
+import {
+  resolveTyrionHouseholdCurrency,
+  TyrionAttributionError,
+} from '@/lib/connectors/monarch-money/attribution-client';
+import type { ConnectorConfig } from '@/types';
 import type { SyncJob, SyncJobStatus } from './job-repository';
 import {
   assertPersistenceCompositionAccessAllowed,
@@ -18,6 +22,7 @@ export type SyncOperatorErrorCode =
   | 'sync_canary_not_successful'
   | 'sync_job_active'
   | 'household_currency_unavailable'
+  | 'tyrion_configuration_unavailable'
   | 'finance_service_token_unavailable'
   | 'finance_insight_shadow_ingest_disabled'
   | 'finance_delivery_gate_enabled'
@@ -57,7 +62,25 @@ export interface FinanceSyncControlStatus {
   connector: {
     id: string;
     enabled: boolean;
-    configurationState: FinanceConnectorConfigurationState;
+    configurationState:
+      | {
+          status: 'unchecked';
+          source: 'tyrion';
+          householdCurrency: null;
+          code: null;
+        }
+      | {
+          status: 'configured';
+          source: 'tyrion';
+          householdCurrency: string;
+          code: null;
+        }
+      | {
+          status: 'unavailable';
+          source: 'tyrion';
+          householdCurrency: null;
+          code: string;
+        };
   };
   scheduler: {
     state: 'scheduled' | 'quarantined';
@@ -118,6 +141,9 @@ export interface RollbackFinanceOperatorCanaryResult {
 }
 
 export interface SqliteSyncOperatorCapability {
+  getFinanceSyncConnectorConfig(
+    connectorId: string,
+  ): Pick<ConnectorConfig, 'credentials' | 'settings'>;
   getFinanceSyncControlStatus(connectorId: string): FinanceSyncControlStatus;
   quarantineFinanceConnectorSync(
     input: SyncOperatorInput,
@@ -153,6 +179,9 @@ function requireCapability(): SqliteSyncOperatorCapability {
 }
 
 export interface SyncOperatorControlRepository {
+  getConnectorConfig(
+    connectorId: string,
+  ): Promise<Pick<ConnectorConfig, 'credentials' | 'settings'>>;
   getStatus(connectorId: string): Promise<FinanceSyncControlStatus>;
   quarantine(input: SyncOperatorInput): Promise<QuarantineFinanceConnectorSyncResult>;
   enqueueCanary(input: SyncOperatorInput): Promise<EnqueueFinanceOperatorCanaryResult>;
@@ -161,6 +190,8 @@ export interface SyncOperatorControlRepository {
 }
 
 export const sqliteSyncOperatorControlRepository: SyncOperatorControlRepository = {
+  getConnectorConfig: async (connectorId) =>
+    requireCapability().getFinanceSyncConnectorConfig(connectorId),
   getStatus: async (connectorId) =>
     requireCapability().getFinanceSyncControlStatus(connectorId),
   quarantine: async (input) =>
@@ -218,7 +249,50 @@ Promise<SyncOperatorControlRepository> {
 export async function getFinanceSyncControlStatus(
   connectorId: string,
 ): Promise<FinanceSyncControlStatus> {
-  return (await getSyncOperatorControlRepository()).getStatus(connectorId);
+  const status = await (await getSyncOperatorControlRepository()).getStatus(connectorId);
+  try {
+    const config = await (
+      await getSyncOperatorControlRepository()
+    ).getConnectorConfig(connectorId);
+    const householdCurrency = await resolveTyrionHouseholdCurrency(config);
+    return {
+      ...status,
+      connector: {
+        ...status.connector,
+        configurationState: {
+          status: 'configured',
+          source: 'tyrion',
+          householdCurrency,
+          code: null,
+        },
+      },
+    };
+  } catch (error) {
+    const code = error instanceof TyrionAttributionError
+      ? error.code
+      : 'tyrion_configuration_unavailable';
+    return {
+      ...status,
+      connector: {
+        ...status.connector,
+        configurationState: {
+          status: 'unavailable',
+          source: 'tyrion',
+          householdCurrency: null,
+          code,
+        },
+      },
+      readiness: {
+        ready: false,
+        blockers: [
+          ...status.readiness.blockers,
+          code === 'household_currency_unavailable'
+            ? 'household_currency_unavailable'
+            : 'tyrion_configuration_unavailable',
+        ],
+      },
+    };
+  }
 }
 
 export async function quarantineFinanceConnectorSync(
@@ -230,6 +304,14 @@ export async function quarantineFinanceConnectorSync(
 export async function enqueueFinanceOperatorCanary(
   input: SyncOperatorInput,
 ): Promise<EnqueueFinanceOperatorCanaryResult> {
+  const status = await getFinanceSyncControlStatus(input.connectorId);
+  if (status.connector.configurationState.status !== 'configured') {
+    throw new SyncOperatorError(
+      status.connector.configurationState.code === 'household_currency_unavailable'
+        ? 'household_currency_unavailable'
+        : 'tyrion_configuration_unavailable',
+    );
+  }
   return (await getSyncOperatorControlRepository()).enqueueCanary(input);
 }
 

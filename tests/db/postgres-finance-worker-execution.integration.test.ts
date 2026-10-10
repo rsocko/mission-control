@@ -149,6 +149,18 @@ function installSyntheticFinanceProvider(): void {
   ) => {
     const url = new URL(String(input));
     if (url.origin === 'http://tyrion-operations-ui:3000') {
+      if (
+        url.pathname === '/api/internal/v2/attribution/policy'
+        && init?.method === 'GET'
+      ) {
+        return jsonResponse({
+          contractVersion: '2.0',
+          engineVersion: '2.0.0',
+          policyVersion: 7,
+          policyUpdatedAt: fetchedAt,
+          householdCurrency: 'USD',
+        });
+      }
       if (url.pathname.startsWith('/api/internal/v1/finance/insights/')) {
         if (
           url.pathname === '/api/internal/v1/finance/insights/source-generations'
@@ -394,7 +406,6 @@ async function seedConnector(connectorId: string): Promise<void> {
       JSON.stringify({
         bridgeUrl: 'https://synthetic-finance-provider.test',
         maxRetries: 0,
-        householdCurrency: 'USD',
         tyrionAttributionPolicy: { pinnedPolicyVersion: 7 },
       }),
       now,

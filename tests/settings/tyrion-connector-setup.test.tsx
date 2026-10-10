@@ -29,8 +29,7 @@ it('submits the configurable Tyrion Bridge API URL and setup token', async () =>
   fireEvent.change(screen.getByLabelText('Service token'), {
     target: { value: 'invented-setup-token' },
   });
-  fireEvent.click(screen.getByRole('combobox', { name: 'Household currency' }));
-  fireEvent.click(screen.getByRole('option', { name: 'USD' }));
+  expect(screen.queryByRole('combobox', { name: 'Household currency' })).not.toBeInTheDocument();
   expect(document.body).toHaveTextContent('https://tyrion.example/api/connector/v1');
 
   fireEvent.click(screen.getByRole('button', { name: 'Test Connection' }));
@@ -42,7 +41,6 @@ it('submits the configurable Tyrion Bridge API URL and setup token', async () =>
     credentials: { serviceToken: 'invented-setup-token' },
     settings: {
       bridgeUrl: 'https://bridge.example.test/connector/v1',
-      householdCurrency: 'USD',
     },
   });
 });
@@ -60,7 +58,6 @@ it('edits the persisted Tyrion Bridge API URL without round-tripping credentials
     hasCredentials: true,
     settings: {
       bridgeUrl: 'http://old-bridge:8100',
-      householdCurrency: 'USD',
     },
     syncedLists: [],
     createdAt: '2026-08-01T00:00:00.000Z',
@@ -90,14 +87,13 @@ it('edits the persisted Tyrion Bridge API URL without round-tripping credentials
     expect.objectContaining({
       settings: {
         bridgeUrl: 'http://new-bridge:8100',
-        householdCurrency: 'USD',
       },
     }),
   ));
   expect(JSON.stringify(onUpdate.mock.calls)).not.toContain('serviceToken');
 });
 
-it('preserves a legacy needs-configuration state on unrelated edits', async () => {
+it('edits a legacy connector without exposing a duplicate currency control', async () => {
   const connector: ConnectorConfig = {
     id: 'finance-legacy',
     type: 'finance-manager',
@@ -109,10 +105,6 @@ it('preserves a legacy needs-configuration state on unrelated edits', async () =
     credentials: {},
     hasCredentials: true,
     settings: { bridgeUrl: 'http://legacy-bridge:8100' },
-    configurationState: {
-      status: 'needs-configuration',
-      code: 'household_currency_unavailable',
-    },
     syncedLists: [],
     createdAt: '2026-08-01T00:00:00.000Z',
     updatedAt: '2026-08-01T00:00:00.000Z',
@@ -129,6 +121,7 @@ it('preserves a legacy needs-configuration state on unrelated edits', async () =
     setConfirmDelete={() => undefined}
     onHealthRefresh={() => undefined}
   />);
+  expect(screen.queryByRole('combobox', { name: 'Household currency' })).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText('Display Name'), {
     target: { value: 'Legacy Tyrion renamed' },

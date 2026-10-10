@@ -180,8 +180,15 @@
     {
       "idx": 25,
       "version": "7",
+      "when": 1791591600000,
+      "tag": "0025_remove_duplicate_tyrion_currency",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
       "when": 1791599000000,
-      "tag": "0025_tyrion_finance_source_identity",
+      "tag": "0026_tyrion_finance_source_identity",
       "breakpoints": true
     }
   ]

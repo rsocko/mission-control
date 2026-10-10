@@ -171,6 +171,7 @@ beforeEach(() => {
     engineVersion: '2.0.0',
     policyVersion: 2,
     policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+    householdCurrency: 'USD',
   })));
 });
 
@@ -222,7 +223,7 @@ describe('Tyrion attribution policy readiness', () => {
     expect(setup.readAttributionPreview).not.toHaveBeenCalled();
   });
 
-  it('keeps settings available while reporting policy discovery failures', async () => {
+  it('fails closed when Tyrion policy discovery is unavailable', async () => {
     const setup = runtime();
     mocks.runtime.mockResolvedValue(setup.repositories);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(
@@ -236,11 +237,9 @@ describe('Tyrion attribution policy readiness', () => {
     )));
 
     await expect(getFinanceAttributionPolicyReadiness('finance-connector'))
-      .resolves.toMatchObject({
-        policySelection: { mode: 'follow-current', pinnedPolicyVersion: null },
-        activePolicyVersion: null,
-        policyUpdatedAt: null,
-        policyDiscoveryError: 'policy_unavailable',
+      .rejects.toMatchObject({
+        code: 'policy_unavailable',
+        status: 503,
       });
   });
 
@@ -254,6 +253,7 @@ describe('Tyrion attribution policy readiness', () => {
           engineVersion: '2.0.0',
           policyVersion: 2,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+          householdCurrency: 'USD',
         });
       }
       const request = JSON.parse(String(init?.body)) as {
@@ -327,6 +327,7 @@ describe('Tyrion attribution policy readiness', () => {
           engineVersion: '2.0.0',
           policyVersion: 2,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+          householdCurrency: 'USD',
         });
       }
       const request = JSON.parse(String(init?.body)) as {
@@ -362,6 +363,7 @@ describe('Tyrion attribution policy readiness', () => {
           engineVersion: '2.0.0',
           policyVersion: 2,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+          householdCurrency: 'USD',
         });
       }
       const request = JSON.parse(String(init?.body)) as {
@@ -403,6 +405,7 @@ describe('Tyrion attribution policy readiness', () => {
           engineVersion: '2.0.0',
           policyVersion: 3,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+          householdCurrency: 'USD',
         });
       }
       const request = JSON.parse(String(init?.body)) as {
@@ -443,6 +446,7 @@ describe('Tyrion attribution policy readiness', () => {
           engineVersion: '2.0.0',
           policyVersion: 3,
           policyUpdatedAt: '2026-10-09T12:00:00.000Z',
+          householdCurrency: 'USD',
         });
       }
       batch += 1;

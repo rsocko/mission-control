@@ -56,19 +56,8 @@ afterAll(() => {
   delete process.env.MC_SYNC_EXECUTION_MODE;
 });
 
-describe.sequential('Finance connector household currency', () => {
-  it.each([
-    [{}, 'household_currency_required'],
-    [{ householdCurrency: 'usd' }, 'household_currency_invalid'],
-    [{ householdCurrency: 'ZZZ' }, 'household_currency_invalid'],
-    [{ householdCurrency: 'US' }, 'household_currency_invalid'],
-  ])('rejects unsupported create state without normalization', async (settings, code) => {
-    const response = await route.POST(request('POST', createBody(settings)));
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: code, code });
-  });
-
-  it('stores an exact ISO-4217 currency and preserves it on unrelated edits', async () => {
+describe.sequential('Tyrion-owned household currency', () => {
+  it('creates a finance connector without duplicating Tyrion currency state', async () => {
     const created = await route.POST(request('POST', createBody({
       bridgeUrl: 'https://tyrion.example/api/connector/v1',
       householdCurrency: 'USD',
@@ -90,11 +79,10 @@ describe.sequential('Finance connector household currency', () => {
     expect(row.name).toBe('Tyrion renamed');
     expect(JSON.parse(row.settings)).toEqual({
       bridgeUrl: 'https://bridge.example.test/connector/v1',
-      householdCurrency: 'USD',
     });
   });
 
-  it('preserves legacy unconfigured state on unrelated edits and exposes it explicitly', async () => {
+  it('does not expose a local currency configuration state', async () => {
     const timestamp = '2026-08-22T12:00:00.000Z';
     sqlite.prepare(`
       INSERT INTO connector_configs (
@@ -115,32 +103,30 @@ describe.sequential('Finance connector household currency', () => {
     const row = sqlite.prepare(`
       SELECT * FROM connector_configs WHERE id = 'legacy-finance'
     `).get() as Record<string, unknown>;
-    expect(serializeConnectorForBrowser({
+    const serialized = serializeConnectorForBrowser({
       ...row,
       type: 'finance-manager',
       credentials: {},
       settings: JSON.parse(String(row.settings)),
-    })).toMatchObject({
-      configurationState: {
-        status: 'needs-configuration',
-        code: 'household_currency_unavailable',
-      },
     });
+    expect(serialized).not.toHaveProperty('configurationState');
     expect(JSON.parse(String(row.settings))).toEqual({
       bridgeUrl: 'https://tyrion.example/api/connector/v1',
     });
   });
 
-  it('rejects an invalid currency edit without overwriting the existing value', async () => {
-    await route.POST(request('POST', createBody({ householdCurrency: 'USD' })));
+  it('strips attempted currency edits instead of persisting a second source of truth', async () => {
+    await route.POST(request('POST', createBody({
+      bridgeUrl: 'https://tyrion.example/api/connector/v1',
+    })));
     const response = await route.PATCH(request('PATCH', {
       id: 'finance-currency-test',
       settings: { householdCurrency: 'usd' },
     }));
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
     expect(JSON.parse((sqlite.prepare(`
       SELECT settings FROM connector_configs WHERE id = ?
     `).get('finance-currency-test') as { settings: string }).settings))
-      .toEqual({ householdCurrency: 'USD' });
+      .toEqual({ bridgeUrl: 'https://tyrion.example/api/connector/v1' });
   });
 });

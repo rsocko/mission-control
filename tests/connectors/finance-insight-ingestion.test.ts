@@ -50,8 +50,12 @@ let buildFinanceInsightNotificationInput:
   typeof import('@/lib/finance-insights/notification-ingestion')['buildFinanceInsightNotificationInput'];
 let buildFinanceMonthlyDigestInput:
   typeof import('@/lib/finance-insights/notification-ingestion')['buildFinanceMonthlyDigestInput'];
+let buildFinanceWeeklySummaryInput:
+  typeof import('@/lib/finance-insights/notification-ingestion')['buildFinanceWeeklySummaryInput'];
 let getFinanceMonthlyDigestSchedule:
   typeof import('@/lib/finance-insights/notification-ingestion')['getFinanceMonthlyDigestSchedule'];
+let getFinanceWeeklySummarySchedule:
+  typeof import('@/lib/finance-insights/notification-ingestion')['getFinanceWeeklySummarySchedule'];
 let isMaterialRecurringIncrease:
   typeof import('@/lib/finance-insights/notification-ingestion')['isMaterialRecurringIncrease'];
 let selectFinanceInsightNotificationInputs:
@@ -403,7 +407,9 @@ beforeAll(async () => {
   } = await import('@/lib/finance-insights/cutover'));
   ({
     buildFinanceMonthlyDigestInput,
+    buildFinanceWeeklySummaryInput,
     getFinanceMonthlyDigestSchedule,
+    getFinanceWeeklySummarySchedule,
     isMaterialRecurringIncrease,
     selectFinanceInsightNotificationInputs,
   } = await import('@/lib/finance-insights/notification-ingestion'));
@@ -793,6 +799,142 @@ describe.sequential('finance insight deterministic ingestion', () => {
       },
     });
     expect(policyRevised?.occurrenceKey).not.toBe(digest?.occurrenceKey);
+  });
+
+  it('materializes one bounded weekly decision summary without duplicating immediate alerts', () => {
+    const before = getFinanceWeeklySummarySchedule(
+      new Date('2026-11-09T13:59:59.000Z'),
+      'America/New_York',
+    );
+    const atSchedule = getFinanceWeeklySummarySchedule(
+      new Date('2026-11-09T14:00:00.000Z'),
+      'America/New_York',
+    );
+    expect(before).toMatchObject({
+      period: { start: '2026-11-02', end: '2026-11-08' },
+      ready: false,
+    });
+    expect(atSchedule).toMatchObject({
+      period: { start: '2026-11-02', end: '2026-11-08' },
+      ready: true,
+    });
+    expect(atSchedule?.scheduledAt.toISOString()).toBe('2026-11-09T14:00:00.000Z');
+
+    const summaryNow = new Date('2026-08-10T13:00:00.000Z');
+    const weeklyItems = Array.from({ length: 10 }, (_, index) => occurrence({
+      occurrenceId: `occurrence-weekly-${String(index).padStart(2, '0')}`,
+      deliveryRevision: index + 1,
+      kind: 'categoryVariance',
+      entity: {
+        kind: 'category',
+        sourceRef: `category-weekly-${index}`,
+        displayName: `Invented weekly category ${index}`,
+        identityQuality: 'stableSource',
+      },
+      absoluteDelta: { currency: 'USD', amountMinor: (index + 1) * 1_000 },
+      targets: [{ system: 'monarch', targetKind: 'safeRoot', root: 'reports' }],
+      freshness: {
+        state: 'fresh',
+        sourceAsOf: '2026-08-09T20:00:00.000Z',
+        maxAgeHours: 48,
+        warningReason: null,
+      },
+      provenance: {
+        ...occurrence().provenance,
+        sourceAsOf: '2026-08-09T20:00:00.000Z',
+        evaluationStartedAt: '2026-08-10T12:55:00.000Z',
+        evaluationCompletedAt: '2026-08-10T12:56:00.000Z',
+      },
+      createdAt: '2026-08-09T20:01:00.000Z',
+      updatedAt: '2026-08-09T20:01:00.000Z',
+    }));
+    const immediate = occurrence({
+      occurrenceId: 'occurrence-weekly-immediate',
+      freshness: {
+        state: 'fresh',
+        sourceAsOf: '2026-08-09T20:00:00.000Z',
+        maxAgeHours: 48,
+        warningReason: null,
+      },
+      provenance: {
+        ...occurrence().provenance,
+        sourceAsOf: '2026-08-09T20:00:00.000Z',
+        evaluationStartedAt: '2026-08-10T12:57:00.000Z',
+        evaluationCompletedAt: '2026-08-10T12:58:00.000Z',
+      },
+      createdAt: '2026-08-09T20:02:00.000Z',
+      updatedAt: '2026-08-09T20:02:00.000Z',
+    });
+    const environment = {
+      TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED: 'true',
+      TYRION_FINANCE_INSIGHTS_WEEKLY_SUMMARY_NOTIFICATIONS_ENABLED: 'true',
+    };
+    const summary = buildFinanceWeeklySummaryInput({
+      connectorId,
+      items: [...weeklyItems, immediate],
+      now: summaryNow,
+      timezone: 'America/New_York',
+      environment,
+    });
+    expect(summary).toMatchObject({
+      sourceId: `finance-insight-weekly-summary:${connectorId}`,
+      dedupeKey: `finance-insight-weekly-summary:${connectorId}`,
+      groupKey: `finance-insight-weekly-summary:${connectorId}`,
+      templateKey: 'weekly_summary',
+      level: 'digest',
+      isActionable: true,
+      navigationTarget: '/finance?insightPeriod=2026-08-03%3A2026-08-09',
+      metadata: {
+        notificationType: 'weekly_summary',
+        summaryPeriod: { start: '2026-08-03', end: '2026-08-09' },
+        decisionCount: 10,
+        memberCount: 11,
+        duplicateMemberCount: 1,
+        membersTruncated: true,
+        freshnessState: 'fresh',
+        sourceAsOf: '2026-08-09T20:00:00.000Z',
+      },
+    });
+    expect(summary?.occurrenceKey).toMatch(/^2026-08-03:sha256:[a-f0-9]{64}$/);
+    expect(summary?.sourceActivityAt).toBe('2026-08-09T20:02:00.000Z');
+    expect(summary?.metadata?.evaluationCompletedAt).toBe('2026-08-10T12:58:00.000Z');
+    expect(summary?.metadata?.members).toHaveLength(8);
+    expect(JSON.stringify(summary?.metadata?.members)).not.toContain(
+      immediate.occurrenceId,
+    );
+
+    const informational = buildFinanceWeeklySummaryInput({
+      connectorId,
+      items: [immediate],
+      now: summaryNow,
+      timezone: 'America/New_York',
+      environment,
+    });
+    expect(informational).toMatchObject({
+      sourceId: summary?.sourceId,
+      isActionable: false,
+      metadata: {
+        decisionCount: 0,
+        memberCount: 1,
+        duplicateMemberCount: 1,
+        members: [],
+      },
+    });
+    expect(buildFinanceWeeklySummaryInput({
+      connectorId,
+      items: [occurrence({
+        ...immediate,
+        freshness: {
+          state: 'stale',
+          sourceAsOf: '2026-08-09T20:00:00.000Z',
+          maxAgeHours: 48,
+          warningReason: 'source_stale',
+        },
+      })],
+      now: summaryNow,
+      timezone: 'America/New_York',
+      environment,
+    })).toBeNull();
   });
 
   it('selects exactly one enabled non-deleted Finance alias', async () => {

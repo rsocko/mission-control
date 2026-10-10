@@ -140,6 +140,18 @@ export function createPostgresFinanceWebPersistence(pool: Pool): FinanceWebPersi
          AND transactions.connector_instance_id = $1
          AND transactions.lifecycle_status = 'active'
          AND transactions.date >= $2
+        WHERE EXISTS (
+          SELECT 1
+          FROM finance_attribution_subjects subjects
+          WHERE subjects.connector_id = $1
+            AND subjects.kid_id = kids.id
+        ) OR EXISTS (
+          SELECT 1
+          FROM finance_transactions connector_transactions
+          WHERE connector_transactions.connector_instance_id = $1
+            AND connector_transactions.assigned_kid_id = kids.id
+            AND connector_transactions.lifecycle_status = 'active'
+        )
         GROUP BY kids.id, kids.name, kids.color, kids.avatar,
                  kids.daily_limit, kids.weekly_limit, kids.monthly_limit
         ORDER BY kids.id
@@ -211,6 +223,18 @@ export function createPostgresFinanceWebPersistence(pool: Pool): FinanceWebPersi
            AND transactions.connector_instance_id = $1
            AND transactions.lifecycle_status = 'active'
            AND transactions.date >= $2 AND transactions.date <= $3
+          WHERE EXISTS (
+            SELECT 1
+            FROM finance_attribution_subjects subjects
+            WHERE subjects.connector_id = $1
+              AND subjects.kid_id = kids.id
+          ) OR EXISTS (
+            SELECT 1
+            FROM finance_transactions connector_transactions
+            WHERE connector_transactions.connector_instance_id = $1
+              AND connector_transactions.assigned_kid_id = kids.id
+              AND connector_transactions.lifecycle_status = 'active'
+          )
           GROUP BY kids.id, kids.name
           ORDER BY kids.id
         `, params),

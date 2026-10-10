@@ -82,7 +82,12 @@ async function createHarness(): Promise<FinanceWebContractHarness> {
         [FINANCE_WEB_CONNECTOR_ID],
       );
       await database.query(
-        `DELETE FROM kid_profiles WHERE id IN ('finance-web-kid', 'finance-web-kid-empty')`,
+        `DELETE FROM kid_profiles
+         WHERE id IN (
+           'finance-web-kid',
+           'finance-web-kid-empty',
+           'finance-web-unrelated-kid'
+         )`,
       );
     },
     async seed() {
@@ -96,7 +101,8 @@ async function createHarness(): Promise<FinanceWebContractHarness> {
       await database.query(`
         INSERT INTO kid_profiles (id, name, color)
         VALUES ('finance-web-kid', 'Alex', '#111111'),
-               ('finance-web-kid-empty', 'Blair', '#222222')
+               ('finance-web-kid-empty', 'Blair', '#222222'),
+               ('finance-web-unrelated-kid', 'Casey', '#333333')
       `);
       await database.query(`
         INSERT INTO finance_sync_state (

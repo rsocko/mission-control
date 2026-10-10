@@ -47,7 +47,8 @@ async function createHarness(): Promise<FinanceWebContractHarness> {
       sqlite.exec(`
         INSERT INTO kid_profiles (id, name, color)
         VALUES ('finance-web-kid', 'Alex', '#111111'),
-               ('finance-web-kid-empty', 'Blair', '#222222');
+               ('finance-web-kid-empty', 'Blair', '#222222'),
+               ('finance-web-unrelated-kid', 'Casey', '#333333');
       `);
       sqlite.prepare(`
         INSERT INTO finance_sync_state (

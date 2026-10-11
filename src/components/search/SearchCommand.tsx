@@ -98,6 +98,8 @@ interface ActiveFilters {
 
 const RECENT_SEARCHES_KEY = 'mc:recent-searches';
 const MAX_RECENT_SEARCHES = 5;
+const INITIAL_SEARCH_LIMIT = 30;
+const MAX_SEARCH_LIMIT = 50;
 
 const NAVIGATION_ICONS: Record<NavigationIconKey, LucideIcon> = {
   activity: Activity,
@@ -270,6 +272,7 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
   const [projectsLoadState, setProjectsLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [quickAddPreferences, setQuickAddPreferencesState] = useState<QuickAddPreferences>(DEFAULT_QUICK_ADD_PREFERENCES);
   const [creatingTask, setCreatingTask] = useState(false);
+  const [searchLimit, setSearchLimit] = useState(INITIAL_SEARCH_LIMIT);
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const parsedCreateTask = useMemo(
     () => parseTaskInput(query, { ...quickAddPreferences, projects }),
@@ -284,11 +287,12 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
     semanticEnabled,
     semanticAvailable,
     facets,
+    hasMore,
   } = useProgressiveSearch({
     query: debouncedQuery,
     enabled: open,
     type: filters.type,
-    limit: 30,
+    limit: searchLimit,
     source: filters.source,
     status: filters.status,
     excludeDone: filters.excludeDone,
@@ -350,6 +354,7 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
 
   const handleQueryChange = useCallback((value: string) => {
     setQuery(value);
+    setSearchLimit(INITIAL_SEARCH_LIMIT);
     setActiveIndex(-1);
   }, []);
 
@@ -781,7 +786,7 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
                       {/* Result count and timing */}
                       {!loading && debouncedQuery && flatResults.length > 0 && durationMs !== null && (
                         <span className="ml-auto text-[11px] text-[var(--text-tertiary)]">
-                          {flatResults.length} result{flatResults.length !== 1 ? 's' : ''} · {durationMs}ms
+                          {flatResults.length}{hasMore ? '+' : ''} result{flatResults.length !== 1 ? 's' : ''} · {durationMs}ms
                         </span>
                       )}
                     </div>
@@ -908,7 +913,7 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
                   >
                     <p className="sr-only" role="status" aria-live="polite">
                       {query.trim()
-                        ? `${flatResults.length} matching results`
+                        ? `${hasMore ? 'At least ' : ''}${flatResults.length} matching results`
                         : `${flatResults.length} recent and suggested destinations`}
                     </p>
                     {query.trim()
@@ -1216,6 +1221,27 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
                             </div>
                           </section>
                         )}
+                        {hasMore ? (
+                          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-1)]/60 px-3 py-2.5">
+                            <p className="text-xs text-[var(--text-secondary)]">
+                              More matches are available.
+                            </p>
+                            {searchLimit < MAX_SEARCH_LIMIT ? (
+                              <button
+                                type="button"
+                                onClick={() => setSearchLimit(MAX_SEARCH_LIMIT)}
+                                disabled={loading}
+                                className="shrink-0 rounded-md px-2.5 py-1 text-xs font-medium text-[var(--accent-300)] transition-colors hover:bg-[var(--accent-900)]/30 disabled:opacity-50"
+                              >
+                                Show more results
+                              </button>
+                            ) : (
+                              <span className="text-xs text-[var(--text-tertiary)]">
+                                Refine your search to narrow the list.
+                              </span>
+                            )}
+                          </div>
+                        ) : null}
                         {parsedCreateTask.title ? (
                           <button
                             type="button"

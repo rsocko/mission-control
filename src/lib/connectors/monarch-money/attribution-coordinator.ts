@@ -169,6 +169,8 @@ export class FinanceAttributionCoordinator {
   private config: TyrionAttributionConfig | null = null;
   private client: TyrionAttributionClient | null = null;
   private policyFence: number | null = null;
+  private policySubjects: Array<{ kidId: string; name: string }> = [];
+  private policyResolved = false;
   private terminalFailure: AttributionFailure | null = null;
   private attempted = false;
   private succeeded = false;
@@ -184,6 +186,7 @@ export class FinanceAttributionCoordinator {
     if (dependencies.config) {
       this.config = dependencies.config;
       this.policyFence = dependencies.config.expectedPolicyVersion;
+      this.policyResolved = this.policyFence !== null;
     }
     if (dependencies.client) {
       this.client = dependencies.client;
@@ -202,6 +205,7 @@ export class FinanceAttributionCoordinator {
         identityNamespace,
       };
       this.policyFence = dependencies.client.config.expectedPolicyVersion;
+      this.policyResolved = this.policyFence !== null;
     }
   }
 
@@ -210,6 +214,39 @@ export class FinanceAttributionCoordinator {
     observedAt: string,
     signal?: AbortSignal,
   ): Promise<void> {
+    if (!this.policyResolved && !this.terminalFailure) {
+      try {
+        if (!this.config) {
+          const identityNamespace = await this.dependencies.persistence.identity.ensureNamespace({
+            connectorId: this.connectorId,
+            candidate: createFinanceIdentityNamespace(),
+            updatedAt: new Date().toISOString(),
+          });
+          this.config = resolveTyrionAttributionConfig({
+            credentials: {
+              ...(this.financeConfig.credentials ?? {}),
+              identityNamespace,
+            },
+            settings: this.financeConfig.settings,
+          });
+        }
+        if (!this.client) this.client = new TyrionAttributionClient(this.config);
+        if (this.client.config.expectedPolicyVersion !== null) {
+          this.policyFence = this.client.config.expectedPolicyVersion;
+          this.policyResolved = true;
+        } else {
+          const policy = await this.client.readCurrentPolicy(signal);
+          this.attempted = true;
+          this.succeeded = true;
+          this.policyFence = policy.policyVersion;
+          this.policySubjects = policy.subjects;
+          this.policyResolved = true;
+        }
+      } catch (error) {
+        this.attempted = true;
+        this.terminalFailure = sanitizedFailure(error);
+      }
+    }
     if (transactions.length === 0) return;
     const rows = await this.dependencies.persistence.attribution.readRows(
       this.connectorId,
@@ -236,23 +273,12 @@ export class FinanceAttributionCoordinator {
 
     let prepared: PreparedAttributionItem[];
     try {
-      if (!this.config) {
-        const identityNamespace = await this.dependencies.persistence.identity.ensureNamespace({
-          connectorId: this.connectorId,
-          candidate: createFinanceIdentityNamespace(),
-          updatedAt: new Date().toISOString(),
-        });
-        this.config = resolveTyrionAttributionConfig({
-          credentials: {
-            ...(this.financeConfig.credentials ?? {}),
-            identityNamespace,
-          },
-          settings: this.financeConfig.settings,
-        });
-      }
-      if (!this.client) this.client = new TyrionAttributionClient(this.config);
-      if (this.policyFence === null) {
-        this.policyFence = await this.client.resolvePolicyVersion(signal);
+      if (!this.config || !this.client || this.policyFence === null) {
+        throw new TyrionAttributionError(
+          'policy_unavailable',
+          'Tyrion attribution policy is unavailable',
+          false,
+        );
       }
       prepared = prepareItems(
         this.config,
@@ -389,6 +415,7 @@ export class FinanceAttributionCoordinator {
       status,
       policyVersion: this.policyFence,
       engineVersion: TYRION_ATTRIBUTION_ENGINE_VERSION,
+      subjects: this.policySubjects,
     });
   }
 }

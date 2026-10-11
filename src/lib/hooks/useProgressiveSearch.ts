@@ -8,6 +8,7 @@ type SearchScope = 'tasks' | 'notifications' | 'all';
 type SearchDate = '7d' | '30d' | 'overdue';
 
 interface SearchResponse {
+  hasMore?: boolean;
   note?: string | null;
   semanticAvailable?: boolean;
   semanticEnabled?: boolean;
@@ -64,6 +65,8 @@ export function useProgressiveSearch({
   const requestRevisionRef = useRef(0);
   const [keywordResults, setKeywordResults] = useState<SearchResult[]>([]);
   const [semanticResults, setSemanticResults] = useState<SearchResult[]>([]);
+  const [keywordHasMore, setKeywordHasMore] = useState(false);
+  const [semanticHasMore, setSemanticHasMore] = useState(false);
   const [keywordLoading, setKeywordLoading] = useState(false);
   const [semanticLoading, setSemanticLoading] = useState(false);
   const [keywordDurationMs, setKeywordDurationMs] = useState<number | null>(null);
@@ -104,6 +107,8 @@ export function useProgressiveSearch({
       requestRevisionRef.current += 1;
       setKeywordResults([]);
       setSemanticResults([]);
+      setKeywordHasMore(false);
+      setSemanticHasMore(false);
       setKeywordLoading(false);
       setSemanticLoading(false);
       setKeywordDurationMs(null);
@@ -131,6 +136,8 @@ export function useProgressiveSearch({
     setKeywordLoading(true);
     setSemanticLoading(false);
     setSemanticResults([]);
+    setKeywordHasMore(false);
+    setSemanticHasMore(false);
     setSemanticDurationMs(null);
     setNote(null);
 
@@ -139,6 +146,7 @@ export function useProgressiveSearch({
       .then((payload) => {
         if (requestRevisionRef.current !== revision) return;
         setKeywordResults(payload.results);
+        setKeywordHasMore(payload.hasMore ?? false);
         setKeywordDurationMs(payload.durationMs ?? null);
         setNote(payload.note ?? null);
         setFacets(payload.facets ?? { sources: [], statuses: [] });
@@ -147,6 +155,7 @@ export function useProgressiveSearch({
       .catch((error: unknown) => {
         if (controller.signal.aborted || requestRevisionRef.current !== revision) return;
         setKeywordResults([]);
+        setKeywordHasMore(false);
         setKeywordDurationMs(null);
         setNote(error instanceof Error ? error.message : 'Search failed.');
         setFacets({ sources: [], statuses: [] });
@@ -204,6 +213,7 @@ export function useProgressiveSearch({
       .then((payload) => {
         if (requestRevisionRef.current !== revision) return;
         setSemanticResults(payload.results);
+        setSemanticHasMore(payload.hasMore ?? false);
         setSemanticDurationMs(payload.durationMs ?? null);
         setNote(payload.note ?? null);
       })
@@ -254,5 +264,6 @@ export function useProgressiveSearch({
     semanticEnabled,
     semanticAvailable,
     facets,
+    hasMore: keywordHasMore || semanticHasMore,
   };
 }

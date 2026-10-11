@@ -169,6 +169,16 @@ async function createHarness(): Promise<FinanceWorkerContractHarness> {
         ReturnType<FinanceWorkerContractHarness['attributionException']>
       >;
     },
+    async attributionSubject(kidId) {
+      return (database.prepare(`
+        SELECT profiles.name, subjects.policy_version AS policyVersion
+        FROM finance_attribution_subjects subjects
+        INNER JOIN kid_profiles profiles ON profiles.id = subjects.kid_id
+        WHERE subjects.connector_id = ? AND subjects.kid_id = ?
+      `).get(CONNECTOR_ID, kidId) ?? null) as Awaited<
+        ReturnType<FinanceWorkerContractHarness['attributionSubject']>
+      >;
+    },
     async referenceAccount() {
       const row = database.prepare(`
         SELECT id, is_active AS isActive, source_is_active AS sourceIsActive,

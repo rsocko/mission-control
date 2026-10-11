@@ -1861,38 +1861,69 @@ function createAttributionPersistence(
     },
 
     async finish(command) {
-      const fenceClause = command.fenceMode === 'row-generation'
-        ? ''
-        : `AND (
-             current_generation_id = $9
-             OR (current_generation_id IS NULL AND last_successful_generation_id = $9)
-           )`;
-      const result = await pool.query(
-        `UPDATE finance_sync_state
-         SET attribution_status = $1,
-             attribution_last_attempt_at = $2,
-             attribution_last_successful_at = CASE WHEN $3 THEN $2
-               ELSE attribution_last_successful_at END,
-             attribution_last_error_code = $4,
-             attribution_policy_version = COALESCE($5, attribution_policy_version),
-             attribution_engine_version = CASE WHEN $6 THEN $7
-               ELSE attribution_engine_version END,
-             updated_at = $2
-         WHERE connector_id = $8
-           ${fenceClause}`,
-        [
-          command.status,
-          command.attemptedAt,
-          command.succeeded && !command.terminalFailureCode,
-          command.terminalFailureCode,
-          command.policyVersion,
-          command.succeeded,
-          command.engineVersion,
-          command.connectorId,
-          ...(command.fenceMode === 'row-generation' ? [] : [command.generationId]),
-        ],
-      );
-      return { recorded: result.rowCount === 1 };
+      return transaction(pool, async (client) => {
+        const fenceClause = command.fenceMode === 'row-generation'
+          ? ''
+          : `AND (
+               current_generation_id = $9
+               OR (current_generation_id IS NULL AND last_successful_generation_id = $9)
+             )`;
+        const result = await client.query(
+          `UPDATE finance_sync_state
+           SET attribution_status = $1,
+               attribution_last_attempt_at = $2,
+               attribution_last_successful_at = CASE WHEN $3 THEN $2
+                 ELSE attribution_last_successful_at END,
+               attribution_last_error_code = $4,
+               attribution_policy_version = COALESCE($5, attribution_policy_version),
+               attribution_engine_version = CASE WHEN $6 THEN $7
+                 ELSE attribution_engine_version END,
+               updated_at = $2
+           WHERE connector_id = $8
+             ${fenceClause}`,
+          [
+            command.status,
+            command.attemptedAt,
+            command.succeeded && !command.terminalFailureCode,
+            command.terminalFailureCode,
+            command.policyVersion,
+            command.succeeded,
+            command.engineVersion,
+            command.connectorId,
+            ...(command.fenceMode === 'row-generation' ? [] : [command.generationId]),
+          ],
+        );
+        if (result.rowCount !== 1 || command.policyVersion === null) {
+          return { recorded: result.rowCount === 1 };
+        }
+        for (const subject of command.subjects) {
+          await client.query(
+            `INSERT INTO kid_profiles (id, name)
+             VALUES ($1, $2)
+             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
+            [subject.kidId, subject.name],
+          );
+          await client.query(
+            `INSERT INTO finance_attribution_subjects (
+               id, connector_id, kid_id, policy_version, engine_version,
+               first_seen_at, last_seen_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $6)
+             ON CONFLICT (connector_id, kid_id) DO UPDATE SET
+               policy_version = EXCLUDED.policy_version,
+               engine_version = EXCLUDED.engine_version,
+               last_seen_at = EXCLUDED.last_seen_at`,
+            [
+              idFactory(),
+              command.connectorId,
+              subject.kidId,
+              command.policyVersion,
+              command.engineVersion,
+              command.attemptedAt,
+            ],
+          );
+        }
+        return { recorded: true };
+      });
     },
 
     async listExceptions(request) {

@@ -80,6 +80,7 @@ export interface FinanceAttributionFinishCommand {
   status: 'healthy' | 'degraded' | 'unavailable';
   policyVersion: number | null;
   engineVersion: string;
+  subjects: readonly FinanceAttributionSubjectView[];
 }
 
 export type FinanceAttributionFenceMode = 'snapshot' | 'row-generation';

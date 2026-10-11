@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -28,7 +28,10 @@ const MobileSettings = dynamic(
   },
 );
 import { ListGroupsSection } from '../components/ListGroupsSection';
-import { ConnectorsSection } from '../components/ConnectorsSection';
+import {
+  ConnectorsSection,
+  type ConnectorSettingsTab,
+} from '../components/ConnectorsSection';
 import { SyncHistorySection } from '../components/SyncHistorySection';
 import { TagReviewPanel } from '../components/TagReviewPanel';
 import { IntegrationsSection } from '../components/IntegrationsSection';
@@ -54,6 +57,10 @@ import {
   DesktopSettingsSubsections,
   MobileSettingsSubsectionJump,
 } from '../components/SettingsSubsectionNavigation';
+import {
+  buildConnectorSettingsHref,
+  readConnectorSettingsState,
+} from '../connector-settings-navigation';
 
 type ActiveSection = SettingsSection;
 
@@ -150,6 +157,46 @@ export default function SettingsPage() {
     deleteListGroup, assignSourceListToGroup,
     updateSourceListAppearance,
   } = useSettingsAdministration();
+  const [selectedConnectorTab, setSelectedConnectorTab] = useState<ConnectorSettingsTab>(
+    () => typeof window === 'undefined'
+      ? 'general'
+      : readConnectorSettingsState(window.location.search).tab,
+  );
+
+  const updateConnectorRoute = useCallback((
+    connectorId: string | null,
+    tab: ConnectorSettingsTab,
+    replace = false,
+  ) => {
+    if (typeof window === 'undefined') return;
+    const href = buildConnectorSettingsHref(window.location.href, connectorId, tab);
+    if (replace) {
+      router.replace(href, { scroll: false });
+    } else {
+      router.push(href, { scroll: false });
+    }
+  }, [router]);
+
+  const selectConnector = useCallback((connectorId: string | null) => {
+    setSelectedConnector(connectorId);
+    setSelectedConnectorTab('general');
+    updateConnectorRoute(connectorId, 'general');
+  }, [setSelectedConnector, updateConnectorRoute]);
+
+  const selectConnectorTab = useCallback((tab: ConnectorSettingsTab) => {
+    setSelectedConnectorTab(tab);
+    updateConnectorRoute(selectedConnector, tab, true);
+  }, [selectedConnector, updateConnectorRoute]);
+
+  useEffect(() => {
+    const syncFromHistory = () => {
+      const state = readConnectorSettingsState(window.location.search);
+      setSelectedConnector(state.connectorId);
+      setSelectedConnectorTab(state.tab);
+    };
+    window.addEventListener('popstate', syncFromHistory);
+    return () => window.removeEventListener('popstate', syncFromHistory);
+  }, [setSelectedConnector]);
 
   const navigateToSearchResult = useCallback((section: SettingsSection, target: string) => {
     router.push(`/settings/${SECTION_TO_SLUG[section]}?setting=${encodeURIComponent(target)}`);
@@ -360,13 +407,19 @@ export default function SettingsPage() {
                   syncing={syncing}
                   onToggle={toggleConnector}
                   onSync={triggerSync}
-                  onDelete={deleteConnector}
+                  onDelete={(id) => {
+                    deleteConnector(id);
+                    setSelectedConnector(null);
+                    updateConnectorRoute(null, 'general', true);
+                  }}
                   onUpdate={updateConnector}
                   onTested={fetchData}
                   onPurgeSourceList={purgeRetainedSourceList}
                   onAdd={openAddConnector}
                   selectedConnector={selectedConnector}
-                  onSelect={setSelectedConnector}
+                  onSelect={selectConnector}
+                  selectedTab={selectedConnectorTab}
+                  onTabChange={selectConnectorTab}
                   deletedConnectors={connectors.filter(c => c.deletedAt)}
                   onRestore={restoreConnector}
                   onPermanentDelete={permanentlyDeleteConnector}

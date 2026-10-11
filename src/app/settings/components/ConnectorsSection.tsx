@@ -2,12 +2,13 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
+import * as Dialog from '@radix-ui/react-dialog';
 import {
-  Plug, RefreshCw, ChevronRight, Trash2, Loader2, Shield, Circle,
+  Plug, RefreshCw, Trash2, Loader2, Shield, Circle,
   Plus, AlertTriangle, FolderOpen, Zap, Save, Activity,
   Clock, Check, CheckCircle2, X, XCircle, RotateCcw,
-  Eye, EyeOff, History, Bot, Copy, Power,
+  Eye, EyeOff, History, Bot, Copy, Power, Settings2, BellRing, Wrench,
 } from 'lucide-react';
 import {
   Select,
@@ -53,6 +54,10 @@ import {
   ConnectorDataHandlingEditor,
 } from './ConnectorDataClassification';
 import { connectorBaselineClassification } from '@/lib/connectors/data-classification';
+import {
+  ConnectorActionFooter,
+  ConnectorModalFooterContext,
+} from './ConnectorModalFooter';
 
 const SYNC_MODE_OPTIONS = [
   { value: 'poll', label: 'Polling' },
@@ -80,6 +85,62 @@ const SCOUT_SOURCE_LABELS: Record<ScoutSourceType, string> = {
   'cross-source': 'Cross-source',
 };
 
+export type ConnectorSettingsTab = 'general' | 'sources' | 'notifications' | 'access' | 'advanced';
+
+type ConnectorTabDefinition = {
+  id: ConnectorSettingsTab;
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+};
+
+const CONNECTOR_TABS: Record<ConnectorSettingsTab, ConnectorTabDefinition> = {
+  general: { id: 'general', label: 'General', icon: Settings2 },
+  sources: { id: 'sources', label: 'Sources', icon: FolderOpen },
+  notifications: { id: 'notifications', label: 'Alerts & rules', icon: BellRing },
+  access: { id: 'access', label: 'Access & data', icon: Shield },
+  advanced: { id: 'advanced', label: 'Advanced', icon: Wrench },
+};
+
+const CONNECTOR_TYPES_WITH_SOURCE_TABS = new Set([
+  'github-issues',
+  'home-assistant',
+]);
+
+const CONNECTOR_TYPES_WITH_NOTIFICATION_TABS = new Set([
+  'github-issues',
+  'home-assistant',
+]);
+
+function usesDefaultConnectorPanel(type: string) {
+  return type !== 'scout'
+    && type !== 'microsoft-todo-work'
+    && type !== 'home-assistant'
+    && type !== 'rymessage';
+}
+
+function getConnectorTabs(
+  connector: ConnectorConfig,
+  sourceLists: SourceList[],
+): ConnectorTabDefinition[] {
+  const tabs: ConnectorSettingsTab[] = ['general'];
+  if (
+    CONNECTOR_TYPES_WITH_SOURCE_TABS.has(connector.type)
+    || (usesDefaultConnectorPanel(connector.type) && sourceLists.length > 0)
+  ) {
+    tabs.push('sources');
+  }
+  if (CONNECTOR_TYPES_WITH_NOTIFICATION_TABS.has(connector.type)) {
+    tabs.push('notifications');
+  }
+  tabs.push('access');
+  if (
+    usesDefaultConnectorPanel(connector.type)
+  ) {
+    tabs.push('advanced');
+  }
+  return tabs.map(tab => CONNECTOR_TABS[tab]);
+}
+
 function asSettingsRecord(settings: unknown): Record<string, unknown> {
   if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
     return settings as Record<string, unknown>;
@@ -101,7 +162,7 @@ function asSettingsRecord(settings: unknown): Record<string, unknown> {
 
 function ConnectorsSection({
   connectors, sourceLists, loading, syncing, onToggle, onSync, onDelete, onUpdate, onPurgeSourceList, onAdd, selectedConnector, onSelect,
-  deletedConnectors, onRestore, onPermanentDelete, onTested,
+  selectedTab = 'general', onTabChange, deletedConnectors, onRestore, onPermanentDelete, onTested,
 }: {
   connectors: ConnectorConfig[];
   sourceLists: SourceList[];
@@ -115,6 +176,8 @@ function ConnectorsSection({
   onAdd: () => void;
   selectedConnector: string | null;
   onSelect: (id: string | null) => void;
+  selectedTab?: ConnectorSettingsTab;
+  onTabChange?: (tab: ConnectorSettingsTab) => void;
   deletedConnectors: ConnectorConfig[];
   onRestore: (id: string) => void;
   onPermanentDelete: (id: string) => void;
@@ -123,8 +186,31 @@ function ConnectorsSection({
   onTested?: () => void | Promise<void>;
 }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [footerTarget, setFooterTarget] = useState<HTMLDivElement | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; title: string; message: string; confirmLabel: string; variant: 'danger' | 'warning'; onConfirm: () => void }>({ open: false, title: '', message: '', confirmLabel: '', variant: 'danger', onConfirm: () => {} });
   const { getHealthState, refreshHealth } = useConnectorHealth(connectors);
+  const selected = selectedConnector
+    ? connectors.find(connector => connector.id === selectedConnector) ?? null
+    : null;
+  const selectedSourceLists = selected
+    ? sourceLists.filter(sourceList => sourceList.connectorInstanceId === selected.id)
+    : [];
+  const selectedTabs = selected ? getConnectorTabs(selected, selectedSourceLists) : [];
+  const activeTab = selectedTabs.some(tab => tab.id === selectedTab)
+    ? selectedTab
+    : selectedTabs[0]?.id ?? 'general';
+
+  useEffect(() => {
+    if (selected && activeTab !== selectedTab) {
+      onTabChange?.(activeTab);
+    }
+  }, [activeTab, onTabChange, selected, selectedTab]);
+
+  useEffect(() => {
+    if (!loading && selectedConnector && !selected) {
+      onSelect(null);
+    }
+  }, [loading, onSelect, selected, selectedConnector]);
 
   return (
     <>
@@ -161,7 +247,6 @@ function ConnectorsSection({
       ) : (
         <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-3">
           {connectors.map(conn => {
-           const isExpanded = selectedConnector === conn.id;
            const isSyncing = syncing === conn.id;
            const connSourceLists = sourceLists.filter(sl => sl.connectorInstanceId === conn.id);
            const healthState = getHealthState(conn);
@@ -173,11 +258,11 @@ function ConnectorsSection({
                layout
                className={`bg-[var(--surface-1)] border rounded-xl overflow-hidden transition-colors ${
                  !conn.enabled ? 'opacity-60 border-[var(--border)]' :
-                 isExpanded ? 'border-blue-500/40 ring-1 ring-blue-500/20' : 'border-[var(--border)] hover:border-[var(--border-strong)]'
+                 selectedConnector === conn.id ? 'border-blue-500/40 ring-1 ring-blue-500/20' : 'border-[var(--border)] hover:border-[var(--border-strong)]'
                }`}
              >
                {/* Header */}
-               <div className="px-4 py-3 flex items-center gap-3 cursor-pointer" onClick={() => onSelect(isExpanded ? null : conn.id)}>
+               <div className="px-4 py-3 flex items-center gap-3">
                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
                    conn.enabled ? 'bg-[var(--surface-2)]' : 'bg-[var(--surface-2)] opacity-50'
                  }`}>
@@ -214,9 +299,16 @@ function ConnectorsSection({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onSelect(conn.id)}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      <Settings2 size={13} />
+                      Configure
+                    </button>
                     <Link
                       href={`/settings/sync-history?source=${encodeURIComponent(conn.id)}`}
-                      onClick={event => event.stopPropagation()}
                       className="rounded-md border border-[var(--border)] p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                       title={`View ${getConnectorDisplayName(conn)} sync history`}
                       aria-label={`View ${getConnectorDisplayName(conn)} sync history`}
@@ -224,52 +316,20 @@ function ConnectorsSection({
                       <History size={12} />
                     </Link>
                     {conn.enabled && conn.type !== 'scout' && (
-                      <button onClick={(e) => { e.stopPropagation(); onSync(conn.id); }}
+                      <button onClick={() => onSync(conn.id)}
                         disabled={!!isSyncing}
                         className="p-1.5 border border-[var(--border)] rounded-md hover:bg-[var(--surface-2)] disabled:opacity-50 transition-colors"
                         title="Sync now">
                         <RefreshCw size={12} className={isSyncing ? 'animate-spin text-blue-400' : 'text-[var(--text-muted)]'} />
                       </button>
                     )}
-                    <label className="relative inline-flex items-center cursor-pointer" onClick={e => e.stopPropagation()}>
+                    <label className="relative inline-flex items-center cursor-pointer">
                       <input type="checkbox" checked={conn.enabled} onChange={e => onToggle(conn.id, e.target.checked)}
                         className="sr-only peer" />
                       <div className="w-9 h-5 bg-[var(--surface-3)] rounded-full peer peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-transform peer-checked:after:translate-x-full"></div>
                     </label>
-                    <motion.div
-                      animate={{ rotate: isExpanded ? 90 : 0 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <ChevronRight size={14} className="text-[var(--text-muted)]" />
-                    </motion.div>
                   </div>
                 </div>
-
-                {/* Expanded Editable Config */}
-                <AnimatePresence>
-                  {isExpanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.25, ease: 'easeInOut' }}
-                      className="overflow-hidden"
-                    >
-                      <ConnectorEditPanel
-                        connector={conn}
-                        sourceLists={connSourceLists}
-                        onUpdate={onUpdate}
-                        onPurgeSourceList={onPurgeSourceList}
-                        onDelete={onDelete}
-                        confirmDelete={confirmDelete}
-                        setConfirmDelete={setConfirmDelete}
-                        healthState={healthState}
-                        onHealthRefresh={refreshHealth}
-                        onTested={onTested}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </motion.div>
             );
           })}
@@ -356,6 +416,157 @@ function ConnectorsSection({
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog((d) => ({ ...d, open: false }))}
       />
+
+      <Dialog.Root
+        open={Boolean(selected)}
+        onOpenChange={open => {
+          if (!open) {
+            setConfirmDelete(null);
+            onSelect(null);
+          }
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+          {selected && (
+            <Dialog.Content className="fixed left-1/2 top-1/2 z-50 grid h-[94dvh] w-[96vw] max-w-[1480px] -translate-x-1/2 -translate-y-1/2 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--surface-0)] shadow-2xl focus:outline-none sm:h-[90dvh] sm:w-[94vw]">
+              <header className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-4 py-4 sm:px-6">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-2)]">
+                    <ConnectorBrandIcon type={selected.type} size={24} />
+                  </span>
+                  <div className="min-w-0">
+                    <Dialog.Title className="truncate text-lg font-semibold text-[var(--text-primary)]">
+                      {getConnectorDisplayName(selected)}
+                    </Dialog.Title>
+                    <Dialog.Description className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+                      <ConnectionStatus
+                        connector={selected}
+                        healthState={getHealthState(selected)}
+                      />
+                      <span>{selected.type}</span>
+                      <span aria-hidden="true">·</span>
+                      <span>{selected.enabled ? 'Enabled' : 'Paused'}</span>
+                    </Dialog.Description>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {selected.enabled && selected.type !== 'scout' && (
+                    <button
+                      type="button"
+                      onClick={() => onSync(selected.id)}
+                      disabled={syncing === selected.id}
+                      className="hidden h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50 sm:inline-flex"
+                    >
+                      <RefreshCw size={13} className={syncing === selected.id ? 'animate-spin' : ''} />
+                      Sync now
+                    </button>
+                  )}
+                  <label className="relative inline-flex cursor-pointer items-center gap-2 text-xs text-[var(--text-secondary)]">
+                    <span className="hidden sm:inline">{selected.enabled ? 'Enabled' : 'Paused'}</span>
+                    <input
+                      type="checkbox"
+                      checked={selected.enabled}
+                      onChange={event => onToggle(selected.id, event.target.checked)}
+                      className="peer sr-only"
+                    />
+                    <span className="relative h-5 w-9 rounded-full bg-[var(--surface-3)] after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-transform peer-checked:bg-blue-600 peer-checked:after:translate-x-full" />
+                  </label>
+                  <Dialog.Close asChild>
+                    <button
+                      type="button"
+                      aria-label="Close connector settings"
+                      className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      <X size={18} />
+                    </button>
+                  </Dialog.Close>
+                </div>
+              </header>
+
+              <div
+                role="tablist"
+                aria-label={`${getConnectorDisplayName(selected)} settings`}
+                className="flex min-w-0 gap-1 overflow-x-auto border-b border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 sm:px-6"
+              >
+                {selectedTabs.map(tab => {
+                  const Icon = tab.icon;
+                  const current = tab.id === activeTab;
+                  const tabIndex = selectedTabs.findIndex(candidate => candidate.id === tab.id);
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={current}
+                      aria-controls={`connector-tab-${tab.id}`}
+                      id={`connector-tab-trigger-${tab.id}`}
+                      onClick={() => onTabChange?.(tab.id)}
+                      onKeyDown={event => {
+                        const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+                        if (!keys.includes(event.key)) return;
+                        event.preventDefault();
+                        const nextIndex = event.key === 'Home'
+                          ? 0
+                          : event.key === 'End'
+                            ? selectedTabs.length - 1
+                            : (tabIndex + (event.key === 'ArrowRight' ? 1 : -1) + selectedTabs.length)
+                              % selectedTabs.length;
+                        const nextTab = selectedTabs[nextIndex];
+                        onTabChange?.(nextTab.id);
+                        document.getElementById(`connector-tab-trigger-${nextTab.id}`)?.focus();
+                      }}
+                      className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                        current
+                          ? 'bg-blue-500/15 text-blue-300'
+                          : 'text-[var(--text-tertiary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]'
+                      }`}
+                    >
+                      <Icon size={14} />
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div
+                id={`connector-tab-${activeTab}`}
+                role="tabpanel"
+                aria-labelledby={`connector-tab-trigger-${activeTab}`}
+                className="min-h-0 overflow-y-auto overscroll-contain"
+              >
+                <ConnectorModalFooterContext.Provider value={footerTarget}>
+                  <ConnectorEditPanel
+                    connector={selected}
+                    sourceLists={selectedSourceLists}
+                    onUpdate={onUpdate}
+                    onPurgeSourceList={onPurgeSourceList}
+                    onDelete={onDelete}
+                    confirmDelete={confirmDelete}
+                    setConfirmDelete={setConfirmDelete}
+                    healthState={getHealthState(selected)}
+                    onHealthRefresh={refreshHealth}
+                    onTested={onTested}
+                    activeTab={activeTab}
+                  />
+                </ConnectorModalFooterContext.Provider>
+              </div>
+
+              <footer className="flex min-h-16 items-center gap-3 border-t border-[var(--border)] bg-[var(--surface-1)] px-4 py-3 sm:px-6">
+                <div ref={setFooterTarget} className="min-w-0 flex-1" />
+                <Dialog.Close asChild>
+                  <button
+                    type="button"
+                    className="ml-auto h-9 rounded-lg border border-[var(--border)] px-4 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                  >
+                    Cancel
+                  </button>
+                </Dialog.Close>
+              </footer>
+            </Dialog.Content>
+          )}
+        </Dialog.Portal>
+      </Dialog.Root>
     </>
   );
 }
@@ -981,7 +1192,7 @@ function ScoutEditPanel({
       </section>
 
       {/* Footer */}
-      <div className="mt-4 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between">
+      <ConnectorActionFooter>
         <div>
           <p className="text-xs text-[var(--text-muted)]">
             Disable the toggle above to reject future Scout pushes.
@@ -1017,7 +1228,7 @@ function ScoutEditPanel({
             </button>
           )}
         </div>
-      </div>
+      </ConnectorActionFooter>
     </div>
   );
 }
@@ -1033,6 +1244,7 @@ type ConnectorEditPanelProps = {
   healthState?: ConnectorHealthState;
   onHealthRefresh: (id: string) => void;
   onTested?: () => void | Promise<void>;
+  activeTab?: ConnectorSettingsTab;
 };
 
 function GitHubConnectorEditPanel(props: ConnectorEditPanelProps) {
@@ -1224,7 +1436,7 @@ function RyMessageConnectorEditPanel({
         <p className="mt-3 text-xs text-amber-300">Test the updated connection before saving.</p>
       )}
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+      <ConnectorActionFooter>
         <div>
           {confirmDelete === connector.id ? (
             <div className="flex items-center gap-2">
@@ -1247,7 +1459,7 @@ function RyMessageConnectorEditPanel({
             Save changes
           </button>
         </div>
-      </div>
+      </ConnectorActionFooter>
     </div>
   );
 }
@@ -1260,6 +1472,7 @@ function HomeAssistantConnectorEditPanel({
   confirmDelete,
   setConfirmDelete,
   onTested,
+  activeTab,
 }: ConnectorEditPanelProps) {
   const initial = asSettingsRecord(connector.settings);
   const initialSources = asSettingsRecord(initial.sources);
@@ -1375,6 +1588,9 @@ function HomeAssistantConnectorEditPanel({
   });
   const connectionTestCurrent = !connectionChanged
     || (testResult?.success === true && testedConnectionFingerprint === connectionFingerprint);
+  const showGeneral = !activeTab || activeTab === 'general';
+  const showSources = !activeTab || activeTab === 'sources';
+  const showNotifications = !activeTab || activeTab === 'notifications';
 
   async function save() {
     if (!name.trim() || !connectionTestCurrent) return;
@@ -1447,7 +1663,7 @@ function HomeAssistantConnectorEditPanel({
 
   return (
     <div className="border-t border-[var(--border)] bg-[var(--surface-0)]/50 px-4 py-5">
-      <div className="grid gap-4 lg:grid-cols-2">
+      {showGeneral && <div className="grid gap-4 lg:grid-cols-2">
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Instance name
           <input value={name} onChange={event => { setName(event.target.value); markDirty(); }}
@@ -1487,9 +1703,9 @@ function HomeAssistantConnectorEditPanel({
             </button>
           </span>
         </label>
-      </div>
+      </div>}
 
-      <fieldset className="mt-5">
+      {showSources && <fieldset className="mt-5">
         <legend className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Notification sources</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           {([
@@ -1560,9 +1776,9 @@ function HomeAssistantConnectorEditPanel({
               );
             })}
         </div>
-      </fieldset>
+      </fieldset>}
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+      {showNotifications && <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Routine update push
           <Select value={updatePush} onValueChange={value => { setUpdatePush(value as typeof updatePush); markDirty(); }}>
@@ -1595,9 +1811,9 @@ function HomeAssistantConnectorEditPanel({
             placeholder="security_*, water_leak"
             className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
         </label>
-      </div>
+      </div>}
 
-      <fieldset className="mt-5">
+      {showNotifications && <fieldset className="mt-5">
         <legend className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Immediate push overrides</legend>
         <div className="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2">
           {([
@@ -1614,16 +1830,16 @@ function HomeAssistantConnectorEditPanel({
             </label>
           ))}
         </div>
-      </fieldset>
+      </fieldset>}
 
-      <label className="mt-5 flex gap-3 rounded-xl border border-amber-700/30 bg-amber-900/10 p-3">
+      {showGeneral && <label className="mt-5 flex gap-3 rounded-xl border border-amber-700/30 bg-amber-900/10 p-3">
         <input type="checkbox" checked={actionsEnabled} onChange={event => { setActionsEnabled(event.target.checked); markDirty(); }}
           className="mt-0.5 h-4 w-4 accent-amber-500" />
         <span>
           <span className="block text-sm font-medium text-[var(--text-primary)]">Allow source actions</span>
           <span className="block text-xs text-[var(--text-muted)]">Install, skip, dismiss, and ignore actions require confirmation.</span>
         </span>
-      </label>
+      </label>}
 
       {(saveError || testResult) && (
         <div role="status" className={`mt-4 rounded-lg border p-3 text-sm ${
@@ -1635,7 +1851,7 @@ function HomeAssistantConnectorEditPanel({
         </div>
       )}
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
+      <ConnectorActionFooter>
         <button onClick={() => confirmDelete === connector.id ? onDelete(connector.id) : setConfirmDelete(connector.id)}
           className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300">
           <Trash2 size={13} /> {confirmDelete === connector.id ? 'Confirm remove' : 'Remove connector'}
@@ -1650,7 +1866,7 @@ function HomeAssistantConnectorEditPanel({
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
           </button>
         </div>
-      </div>
+      </ConnectorActionFooter>
       {connectionChanged && !connectionTestCurrent && !testing && (
         <p className="mt-2 text-end text-xs text-[var(--text-muted)]" role="status">
           Test the changed connection or source selection successfully before saving.
@@ -1661,6 +1877,7 @@ function HomeAssistantConnectorEditPanel({
 }
 
 function ConnectorEditPanel(props: ConnectorEditPanelProps) {
+  const footerTarget = React.useContext(ConnectorModalFooterContext);
   let panel: React.ReactNode;
   if (props.connector.type === 'scout') {
     panel = (
@@ -1696,22 +1913,46 @@ function ConnectorEditPanel(props: ConnectorEditPanelProps) {
     panel = <DefaultConnectorEditPanel {...props} />;
   }
 
+  const activeTab = props.activeTab;
+  const defaultPanel = usesDefaultConnectorPanel(props.connector.type);
+  const showPanel = !activeTab
+    || activeTab === 'general'
+    || (activeTab === 'sources' && (defaultPanel || props.connector.type === 'home-assistant'))
+    || (activeTab === 'notifications' && (
+      props.connector.type === 'github-issues'
+      || props.connector.type === 'home-assistant'
+    ))
+    || (activeTab === 'access' && (defaultPanel || props.connector.type === 'home-assistant'))
+    || (activeTab === 'advanced' && defaultPanel);
+
   return (
-    <>
-      {panel}
-      <ConnectorDataHandlingEditor
-        connector={props.connector}
-        onUpdate={props.onUpdate}
-      />
-      <div className="border-t border-[var(--border)] px-4 pb-4">
+    <div className="mx-auto max-w-6xl">
+      <ConnectorModalFooterContext.Provider value={showPanel ? footerTarget : null}>
+        <div className={showPanel ? '' : 'hidden'} aria-hidden={!showPanel}>
+          {panel}
+        </div>
+      </ConnectorModalFooterContext.Provider>
+      <div
+        className={!activeTab || activeTab === 'access' ? 'px-4 py-5 sm:px-6' : 'hidden'}
+        aria-hidden={Boolean(activeTab && activeTab !== 'access')}
+      >
+        <ConnectorDataHandlingEditor
+          connector={props.connector}
+          onUpdate={props.onUpdate}
+        />
+      </div>
+      <div
+        className={!activeTab || activeTab === 'notifications' ? 'px-4 pb-5 sm:px-6' : 'hidden'}
+        aria-hidden={Boolean(activeTab && activeTab !== 'notifications')}
+      >
         <ConnectorPushRules connectorInstanceId={props.connector.id} />
       </div>
-    </>
+    </div>
   );
 }
 
 function DefaultConnectorEditPanel({
-  connector, sourceLists, onUpdate, onPurgeSourceList, onDelete, confirmDelete, setConfirmDelete, healthState, onHealthRefresh, onTested, variant,
+  connector, sourceLists, onUpdate, onPurgeSourceList, onDelete, confirmDelete, setConfirmDelete, healthState, onHealthRefresh, onTested, variant, activeTab,
 }: {
   connector: ConnectorConfig;
   sourceLists: SourceList[];
@@ -1724,6 +1965,7 @@ function DefaultConnectorEditPanel({
   onHealthRefresh: (id: string) => void;
   onTested?: () => void | Promise<void>;
   variant?: 'default' | 'github' | 'finance' | 'document-intelligence';
+  activeTab?: ConnectorSettingsTab;
 }) {
   const [editSyncMode, setEditSyncMode] = useState(connector.syncMode);
   const [confirmPurgeSourceList, setConfirmPurgeSourceList] = useState<string | null>(null);
@@ -1781,6 +2023,11 @@ function DefaultConnectorEditPanel({
   const isDiConnector = resolvedVariant === 'document-intelligence';
   const diHealth = healthState?.data || null;
   const diHealthLoading = isDiConnector && !healthState;
+  const showGeneral = !activeTab || activeTab === 'general';
+  const showSources = !activeTab || activeTab === 'sources';
+  const showNotifications = !activeTab || activeTab === 'notifications';
+  const showAccess = !activeTab || activeTab === 'access';
+  const showAdvanced = !activeTab || activeTab === 'advanced';
 
   useEffect(() => {
     if (!isGitHubConnector) return;
@@ -1923,11 +2170,11 @@ function DefaultConnectorEditPanel({
 
   return (
     <div className="border-t border-[var(--border-subtle)] px-4 py-4 bg-[var(--surface-0)]">
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Left Column: Config */}
-        <div className="space-y-4">
+        <div className={`space-y-4 ${showGeneral || showSources || showNotifications ? '' : 'hidden'}`}>
           {/* Display Name */}
-          <div>
+          {showGeneral && <div>
             <label
               htmlFor={`connector-display-name-${connector.id}`}
               className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block"
@@ -1941,9 +2188,9 @@ function DefaultConnectorEditPanel({
               onChange={e => { setEditName(e.target.value); setEditNameChanged(true); markDirty(); }}
               className="w-full px-3 py-1.5 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none"
             />
-          </div>
+          </div>}
 
-          {isFinanceConnector && (
+          {isFinanceConnector && showGeneral && (
             <>
             <div>
               <label htmlFor={`tyrion-bridge-url-${connector.id}`} className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">
@@ -1970,7 +2217,7 @@ function DefaultConnectorEditPanel({
           )}
 
           {/* Connector Feature Summary */}
-          <div>
+          {showGeneral && <div>
            <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">Feeds</label>
            <div className="flex flex-wrap gap-1.5">
              <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border ${editCaps.read ? 'bg-green-900/30 text-green-400 border-green-800/40' : 'bg-zinc-800/50 text-white/70 border-zinc-700/40'}`}>
@@ -1991,9 +2238,9 @@ function DefaultConnectorEditPanel({
                Read-only — this connector surfaces alerts but cannot create or modify tasks.
              </p>
            )}
-          </div>
+          </div>}
 
-          {isGitHubConnector && (
+          {isGitHubConnector && showNotifications && (
             <div>
               <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">
                 Alerts
@@ -2015,7 +2262,7 @@ function DefaultConnectorEditPanel({
             </div>
           )}
 
-          {supportsMicroStatusSync && (
+          {supportsMicroStatusSync && showGeneral && (
             <div>
               <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">
                 Status reasons
@@ -2037,7 +2284,7 @@ function DefaultConnectorEditPanel({
             </div>
           )}
 
-          {isGitHubConnector && (
+          {isGitHubConnector && showSources && (
             <div>
               <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">
                 Repositories
@@ -2094,7 +2341,7 @@ function DefaultConnectorEditPanel({
           )}
 
           {/* Sync Mode */}
-          <div>
+          {showGeneral && <div>
             <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">Sync Mode</label>
             <Select value={editSyncMode} onValueChange={(v) => { setEditSyncMode(v); markDirty(); }}>
               <SelectTrigger className="w-full px-3 py-1.5 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)]">
@@ -2106,10 +2353,10 @@ function DefaultConnectorEditPanel({
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </div>}
 
           {/* Poll Interval (only shown for poll mode) */}
-          {editSyncMode === 'poll' && (
+          {showGeneral && editSyncMode === 'poll' && (
             <div>
               <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">Poll Interval</label>
               <Select value={String(editInterval)} onValueChange={(v) => { setEditInterval(Number(v)); markDirty(); }}>
@@ -2126,7 +2373,7 @@ function DefaultConnectorEditPanel({
           )}
 
           {/* Capabilities */}
-          <div>
+          {showGeneral && <div>
             <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 flex items-center gap-1.5">
               <Shield size={10} /> Capabilities
             </label>
@@ -2153,13 +2400,13 @@ function DefaultConnectorEditPanel({
                 </label>
               ))}
             </div>
-          </div>
+          </div>}
         </div>
 
         {/* Right Column: Sources & Info */}
-        <div className="space-y-4">
+        <div className={`space-y-4 ${showSources || showAccess || showAdvanced ? '' : 'hidden'}`}>
           {/* Synced Sources */}
-          <div>
+          {showSources && <div>
             <h4 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2 flex items-center gap-1.5">
               <Zap size={10} /> Synced Sources
             </h4>
@@ -2242,10 +2489,10 @@ function DefaultConnectorEditPanel({
                 <p className="text-xs text-[var(--text-muted)] italic">Sources show up after your first sync</p>
               )}
             </div>
-          </div>
+          </div>}
 
           {/* Authentication Status */}
-          <div>
+          {showAccess && <div>
             <h4 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2 flex items-center gap-1.5">
               <Shield size={10} /> Authentication
             </h4>
@@ -2290,10 +2537,10 @@ function DefaultConnectorEditPanel({
                 <AlertTriangle size={10} /> No credentials configured
               </span>
             )}
-          </div>
+          </div>}
 
           {/* GitHub Token Permissions */}
-          {isGitHubConnector && (
+          {isGitHubConnector && showAccess && (
             <div>
               <h4 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2 flex items-center gap-1.5">
                 <Shield size={10} /> Token Permissions
@@ -2357,12 +2604,12 @@ function DefaultConnectorEditPanel({
           )}
 
           {/* GitHub Label Health */}
-          {isGitHubConnector && connector.enabled && (
+          {showAdvanced && isGitHubConnector && connector.enabled && (
             <LabelHealthPanel connectorId={connector.id} />
           )}
 
           {/* OWL module health */}
-          {isDiConnector && connector.enabled && (
+          {showAdvanced && isDiConnector && connector.enabled && (
             <div>
               <h4 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2 flex items-center gap-1.5">
                 <Activity size={10} /> OWL Health
@@ -2419,16 +2666,16 @@ function DefaultConnectorEditPanel({
           )}
 
           {/* Connector metadata */}
-          <div className="pt-2 border-t border-[var(--border-subtle)] text-xs text-[var(--text-muted)] space-y-1">
+          {showAdvanced && <div className="pt-2 border-t border-[var(--border-subtle)] text-xs text-[var(--text-muted)] space-y-1">
             <div>Created: {new Date(connector.createdAt).toLocaleDateString()}</div>
             <div>Updated: {new Date(connector.updatedAt).toLocaleDateString()}</div>
             <div>ID: <code className="bg-[var(--surface-2)] px-1 py-0.5 rounded">{connector.id.slice(0, 12)}</code></div>
-          </div>
+          </div>}
         </div>
       </div>
 
       {/* Action Footer */}
-      <div className="mt-4 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between">
+      <ConnectorActionFooter>
         <div>
           <div className="flex items-center gap-2">
           <motion.button
@@ -2492,7 +2739,7 @@ function DefaultConnectorEditPanel({
             </button>
           )}
         </div>
-      </div>
+      </ConnectorActionFooter>
     </div>
   );
 }

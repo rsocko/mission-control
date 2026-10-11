@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ConnectorEditPanel,
@@ -42,6 +43,11 @@ describe('GitHub connector settings', () => {
       if (url.endsWith('/validate-repo')) {
         return new Response(JSON.stringify({ valid: true }), { status: 200 });
       }
+      if (url.endsWith('/api/sync/health')) {
+        return new Response(JSON.stringify({
+          graphApiEmojiIssue: { affected: false, affectedLists: [] },
+        }), { status: 200 });
+      }
       return new Response(JSON.stringify({}), { status: 200 });
     }));
   });
@@ -69,6 +75,111 @@ describe('GitHub connector settings', () => {
 
     expect(screen.getByRole('link', { name: 'View GitHub sync history' }))
       .toHaveAttribute('href', '/settings/sync-history?source=github-1');
+  });
+
+  it('opens connector configuration in a tabbed modal without empty tabs', async () => {
+    const todoConnector: ConnectorConfig = {
+      ...connector,
+      id: 'todo-1',
+      type: 'microsoft-todo',
+      name: 'Work tasks',
+      settings: {},
+      syncedLists: [],
+    };
+
+    function ConnectorHarness() {
+      const [selectedConnector, setSelectedConnector] = useState<string | null>(null);
+      const [selectedTab, setSelectedTab] = useState<'general' | 'sources' | 'notifications' | 'access' | 'advanced'>('general');
+      return (
+        <ConnectorsSection
+          connectors={[connector, todoConnector]}
+          sourceLists={[]}
+          loading={false}
+          syncing={null}
+          onToggle={vi.fn()}
+          onSync={vi.fn()}
+          onDelete={vi.fn()}
+          onUpdate={vi.fn()}
+          onPurgeSourceList={vi.fn()}
+          onAdd={vi.fn()}
+          selectedConnector={selectedConnector}
+          onSelect={setSelectedConnector}
+          selectedTab={selectedTab}
+          onTabChange={setSelectedTab}
+          deletedConnectors={[]}
+          onRestore={vi.fn()}
+          onPermanentDelete={vi.fn()}
+        />
+      );
+    }
+
+    render(<ConnectorHarness />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Configure' })[0]);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'GitHub' })).toBeInTheDocument();
+    expect(within(dialog).getAllByRole('tab').map(tab => tab.textContent)).toEqual([
+      'General',
+      'Sources',
+      'Alerts & rules',
+      'Access & data',
+      'Advanced',
+    ]);
+    expect(within(dialog).getByRole('button', { name: 'Save Changes' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Display Name' }), {
+      target: { value: 'GitHub draft name' },
+    });
+
+    fireEvent.keyDown(within(dialog).getByRole('tab', { name: 'General' }), {
+      key: 'ArrowRight',
+    });
+    expect(within(dialog).getByRole('tab', { name: 'Sources' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(dialog).getByRole('tab', { name: 'Sources' })).toHaveFocus();
+    fireEvent.click(within(dialog).getByRole('tab', { name: 'General' }));
+    expect(within(dialog).getByRole('textbox', { name: 'Display Name' }))
+      .toHaveValue('GitHub draft name');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Configure' })[1]);
+    const todoDialog = await screen.findByRole('dialog');
+    expect(within(todoDialog).getAllByRole('tab').map(tab => tab.textContent)).toEqual([
+      'General',
+      'Access & data',
+      'Advanced',
+    ]);
+  });
+
+  it('opens directly to a selected connector tab', async () => {
+    const onTabChange = vi.fn();
+    render(
+      <ConnectorsSection
+        connectors={[connector]}
+        sourceLists={[]}
+        loading={false}
+        syncing={null}
+        onToggle={vi.fn()}
+        onSync={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        onPurgeSourceList={vi.fn()}
+        onAdd={vi.fn()}
+        selectedConnector={connector.id}
+        onSelect={vi.fn()}
+        selectedTab="sources"
+        onTabChange={onTabChange}
+        deletedConnectors={[]}
+        onRestore={vi.fn()}
+        onPermanentDelete={vi.fn()}
+      />,
+    );
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('tab', { name: 'Sources' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(dialog).getByText('Repositories')).toBeInTheDocument();
+    expect(onTabChange).not.toHaveBeenCalled();
   });
 
   it('dispatches GitHub connectors to their type-specific editor', () => {

@@ -259,7 +259,20 @@ describe('Layer 5A finance orchestration selection', () => {
     );
     const result = await new FinanceSnapshotSynchronizer(config).sync({ full: true });
 
-    expect(result).toEqual({ itemsAdded: 1, itemsUpdated: 0, itemsRemoved: 2 });
+    expect(result).toMatchObject({
+      itemsAdded: 1,
+      itemsUpdated: 0,
+      itemsRemoved: 2,
+      activity: {
+        version: 1,
+        groups: expect.arrayContaining([
+          expect.objectContaining({
+            key: 'attribution',
+            metrics: [expect.objectContaining({ value: 0 })],
+          }),
+        ]),
+      },
+    });
     expect(mocks.snapshots.start).toHaveBeenCalledOnce();
     expect(mocks.snapshots.upsertPage).toHaveBeenCalledWith(expect.objectContaining({
       connectorId: config.id,

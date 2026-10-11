@@ -1077,13 +1077,13 @@ export function createPostgresConnectorManagementRepository(
           if (result === 'errors') {
             return `(success = FALSE OR jsonb_array_length(errors) > 0)`;
           }
-          const hasDomainActivity = `(
+          const hasDomainActivity = `COALESCE((
             activity @> '{"version":1}'::jsonb
             AND jsonb_path_exists(
               activity,
               '$.groups[*].metrics[*] ? (@.value > 0 && @.kind != "snapshot")'
             )
-          )`;
+          ), FALSE)`;
           const hasChanges = `(
             tasks_added > 0 OR tasks_updated > 0 OR tasks_removed > 0
             OR tasks_pushed > 0 OR local_only_protected > 0 OR alerts_added > 0

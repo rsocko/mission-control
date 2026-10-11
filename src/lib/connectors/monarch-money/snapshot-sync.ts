@@ -239,7 +239,7 @@ export class FinanceSnapshotSynchronizer {
             metrics: [{
               key: 'attribution-evaluated',
               label: 'evaluated for attribution',
-              value: attributionActivity.evaluated,
+              value: attributionActivity?.evaluated ?? 0,
               kind: 'processed',
             }],
           }],

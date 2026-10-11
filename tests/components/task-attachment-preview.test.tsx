@@ -14,6 +14,7 @@ vi.mock('@/components/ui/Modal', () => ({
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('task attachment previews', () => {
@@ -93,6 +94,26 @@ describe('task attachment previews', () => {
     await waitFor(() => expect(createObjectURL).toHaveBeenCalledOnce());
     unmount();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+  });
+
+  it('fits PDF previews to the iframe width', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(['%PDF-1.7'], { type: 'application/pdf' }),
+    }));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+
+    render(
+      <TaskAttachmentPreview
+        taskId="task-1"
+        attachment={{ id: 'attachment-1', name: 'report.pdf', contentType: 'application/pdf' }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByTitle('report.pdf'))
+      .toHaveAttribute('src', 'blob:preview#zoom=page-width');
   });
 
   it('shows a download fallback when loading fails', async () => {

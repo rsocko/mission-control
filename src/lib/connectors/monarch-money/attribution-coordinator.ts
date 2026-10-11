@@ -42,6 +42,11 @@ interface AttributionFailure {
   retryable: boolean;
 }
 
+export interface FinanceAttributionActivity {
+  evaluated: number;
+  status: 'not-run' | 'healthy' | 'degraded' | 'unavailable';
+}
+
 interface CoordinatorDependencies {
   config?: TyrionAttributionConfig;
   client?: TyrionAttributionClient;
@@ -174,6 +179,7 @@ export class FinanceAttributionCoordinator {
   private terminalFailure: AttributionFailure | null = null;
   private attempted = false;
   private succeeded = false;
+  private evaluated = 0;
   private readonly financeConfig: Pick<ConnectorConfig, 'credentials' | 'settings'>;
   private readonly fenceMode: FinanceAttributionFenceMode;
 
@@ -340,6 +346,7 @@ export class FinanceAttributionCoordinator {
             result: response.results[index],
           })),
         });
+        this.evaluated += response.results.length;
         this.succeeded = true;
         offset += request.items.length;
       } catch (error) {
@@ -389,8 +396,8 @@ export class FinanceAttributionCoordinator {
     }
   }
 
-  async finish(now: string): Promise<void> {
-    if (!this.attempted) return;
+  async finish(now: string): Promise<FinanceAttributionActivity> {
+    if (!this.attempted) return { evaluated: 0, status: 'not-run' };
     const unavailableCodes = new Set([
       'attribution_not_configured',
       'attribution_auth_not_configured',
@@ -417,5 +424,6 @@ export class FinanceAttributionCoordinator {
       engineVersion: TYRION_ATTRIBUTION_ENGINE_VERSION,
       subjects: this.policySubjects,
     });
+    return { evaluated: this.evaluated, status };
   }
 }

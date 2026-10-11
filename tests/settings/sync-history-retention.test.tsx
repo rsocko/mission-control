@@ -122,7 +122,202 @@ describe('Sync History retained items', () => {
       deletedAt: null,
     }]} />);
 
-    expect(await screen.findByText('3 notifications')).toBeInTheDocument();
+    expect(await screen.findByText('3 new notifications')).toBeInTheDocument();
+    expect(screen.queryByText('No changes')).not.toBeInTheDocument();
+  });
+
+  it('renders connector-supplied domain activity with zero task and notification deltas', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      history: [{
+        id: 'log-domain-activity',
+        connectorId: 'finance-1',
+        success: true,
+        tasksAdded: 0,
+        tasksUpdated: 0,
+        tasksRemoved: 0,
+        tasksPushed: 0,
+        localOnlyProtected: 0,
+        notificationsAdded: 0,
+        errors: [],
+        details: [],
+        activity: {
+          version: 1,
+          groups: [{
+            key: 'transactions',
+            label: 'Data synchronized',
+            category: 'data',
+            metrics: [{
+              key: 'transactions-processed',
+              label: 'transactions synchronized',
+              value: 10,
+              kind: 'processed',
+            }],
+          }, {
+            key: 'attribution',
+            label: 'Review activity',
+            category: 'attention',
+            metrics: [{
+              key: 'attribution-evaluated',
+              label: 'evaluated for attribution',
+              value: 10,
+              kind: 'processed',
+            }],
+          }],
+        },
+        syncedAt: '2026-10-11T12:00:00.000Z',
+        durationMs: 120,
+      }],
+      hasMore: false,
+    }), { status: 200 }));
+
+    render(<SyncHistorySection connectors={[{
+      id: 'finance-1',
+      type: 'finance-manager',
+      name: 'Tyrion',
+      enabled: true,
+      syncMode: 'poll',
+      pollIntervalMinutes: 5,
+      capabilities: { read: true, sync: true, notificationOnly: true },
+      credentials: {},
+      settings: {},
+      syncedLists: [],
+      createdAt: '',
+      updatedAt: '',
+      deletedAt: null,
+    }]} />);
+
+    expect(await screen.findByText('10 transactions synchronized')).toBeInTheDocument();
+    expect(screen.getByText('10 evaluated for attribution')).toBeInTheDocument();
+    expect(screen.getByText('0 Tasks · 0 new notifications')).toBeInTheDocument();
+    expect(screen.queryByText('No changes')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Tyrion/i }));
+    expect(await screen.findByRole('region', { name: 'Connector activity' })).toBeInTheDocument();
+    expect(screen.getByText('Data synchronized')).toBeInTheDocument();
+    expect(screen.getByText('Review activity')).toBeInTheDocument();
+  });
+
+  it('keeps historical rows and snapshot-only totals in the true no-activity state', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      history: [{
+        id: 'log-old',
+        connectorId: 'finance-1',
+        success: true,
+        tasksAdded: 0,
+        tasksUpdated: 0,
+        tasksRemoved: 0,
+        tasksPushed: 0,
+        localOnlyProtected: 0,
+        notificationsAdded: 0,
+        errors: [],
+        details: [],
+        syncedAt: '2026-10-11T11:00:00.000Z',
+        durationMs: 120,
+      }, {
+        id: 'log-snapshot',
+        connectorId: 'finance-1',
+        success: true,
+        tasksAdded: 0,
+        tasksUpdated: 0,
+        tasksRemoved: 0,
+        tasksPushed: 0,
+        localOnlyProtected: 0,
+        notificationsAdded: 0,
+        errors: [],
+        details: [],
+        activity: {
+          version: 1,
+          groups: [{
+            key: 'snapshot',
+            label: 'Snapshot',
+            category: 'data',
+            metrics: [{
+              key: 'total',
+              label: 'transactions in snapshot',
+              value: 42,
+              kind: 'snapshot',
+            }],
+          }],
+        },
+        syncedAt: '2026-10-11T12:00:00.000Z',
+        durationMs: 120,
+      }],
+      hasMore: false,
+    }), { status: 200 }));
+
+    render(<SyncHistorySection connectors={[{
+      id: 'finance-1',
+      type: 'finance-manager',
+      name: 'Tyrion',
+      enabled: true,
+      syncMode: 'poll',
+      pollIntervalMinutes: 5,
+      capabilities: { read: true, sync: true },
+      credentials: {},
+      settings: {},
+      syncedLists: [],
+      createdAt: '',
+      updatedAt: '',
+      deletedAt: null,
+    }]} />);
+
+    expect(await screen.findAllByText('No changes')).toHaveLength(2);
+  });
+
+  it('keeps partial connector activity visible alongside a run error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      history: [{
+        id: 'log-partial',
+        connectorId: 'finance-1',
+        success: false,
+        tasksAdded: 0,
+        tasksUpdated: 0,
+        tasksRemoved: 0,
+        tasksPushed: 0,
+        localOnlyProtected: 0,
+        notificationsAdded: 0,
+        errors: ['Reference data unavailable'],
+        details: [],
+        activity: {
+          version: 1,
+          status: 'partial',
+          groups: [{
+            key: 'transactions',
+            label: 'Data synchronized',
+            category: 'data',
+            metrics: [{
+              key: 'transactions-processed',
+              label: 'transactions synchronized',
+              value: 4,
+              kind: 'processed',
+            }],
+          }],
+        },
+        syncedAt: '2026-10-11T12:00:00.000Z',
+        durationMs: 120,
+      }],
+      hasMore: false,
+    }), { status: 200 }));
+
+    render(<SyncHistorySection connectors={[{
+      id: 'finance-1',
+      type: 'finance-manager',
+      name: 'Tyrion',
+      enabled: true,
+      syncMode: 'poll',
+      pollIntervalMinutes: 5,
+      capabilities: { read: true, sync: true },
+      credentials: {},
+      settings: {},
+      syncedLists: [],
+      createdAt: '',
+      updatedAt: '',
+      deletedAt: null,
+    }]} />);
+
+    expect(await screen.findByText('Partial activity')).toBeInTheDocument();
+    expect(screen.getByText('4 transactions synchronized')).toBeInTheDocument();
+    expect(screen.getByText('Reference data unavailable')).toBeInTheDocument();
     expect(screen.queryByText('No changes')).not.toBeInTheDocument();
   });
 

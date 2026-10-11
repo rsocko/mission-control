@@ -1,5 +1,6 @@
 import type { SourceListRecord } from './connector-execution';
 import type { ContextAppearance } from '@/types';
+import type { SyncActivityPayload } from '@/lib/sync/activity';
 
 export interface ManagedConnectorRecord {
   id: string;
@@ -234,6 +235,7 @@ export interface SyncHistoryRecord {
   notificationsAdded: number;
   errors: unknown[];
   details: unknown[];
+  activity: SyncActivityPayload | null;
   syncedAt: string;
   durationMs: number | null;
   jobId: string | null;

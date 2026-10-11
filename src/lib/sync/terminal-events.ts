@@ -28,6 +28,7 @@ export function buildSyncCompletedEvent(job: SyncJob, result: SyncResult): SyncT
       tasksUpdated: result.tasksUpdated,
       tasksRemoved: result.tasksRemoved,
       notificationsAdded: result.notificationsAdded,
+      ...(result.activity ? { activity: result.activity } : {}),
       errors: result.errors,
     },
   };

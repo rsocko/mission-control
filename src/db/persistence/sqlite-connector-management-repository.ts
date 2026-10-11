@@ -16,6 +16,7 @@ import type { SourceListRecord } from './connector-execution';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from './value-codecs';
 import { normalizeContextAppearance } from '@/lib/context-appearance';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
+import { normalizeSyncActivity } from '@/lib/sync/activity';
 
 type SqliteDatabase = Database.Database;
 type SqliteDrizzle = BetterSQLite3Database<typeof schema>;
@@ -38,11 +39,12 @@ interface SqliteSourceListRow extends Omit<SourceListRecord, 'hidden' | 'appeara
 
 interface SqliteSyncHistoryRow extends Omit<
   SyncHistoryRecord,
-  'success' | 'errors' | 'details'
+  'success' | 'errors' | 'details' | 'activity'
 > {
   success: number;
   errors: unknown;
   details: unknown;
+  activity: unknown;
 }
 
 interface SqliteSourceListRepairRow extends Omit<
@@ -107,6 +109,7 @@ const SYNC_HISTORY_COLUMNS = `
   alerts_added AS notificationsAdded,
   errors,
   details,
+  activity,
   synced_at AS syncedAt,
   duration_ms AS durationMs,
   job_id AS jobId,
@@ -149,6 +152,11 @@ function mapSyncHistory(row: SqliteSyncHistoryRow): SyncHistoryRecord {
     success: row.success !== 0,
     errors: decodeLenientJsonArray(row.errors),
     details: decodeLenientJsonArray(row.details),
+    activity: normalizeSyncActivity(
+      typeof row.activity === 'string'
+        ? decodeLenientJsonObject(row.activity)
+        : row.activity,
+    ),
   };
 }
 
@@ -937,9 +945,24 @@ export function createSqliteConnectorManagementRepository(
           if (result === 'errors') {
             return `(success = 0 OR COALESCE(errors, '[]') <> '[]')`;
           }
+          const safeActivity = `COALESCE(
+            CASE WHEN json_valid(sync_log.activity) THEN sync_log.activity END,
+            '{"version":1,"groups":[]}'
+          )`;
+          const hasDomainActivity = `(
+            json_extract(${safeActivity}, '$.version') = 1
+            AND EXISTS (
+              SELECT 1
+              FROM json_each(${safeActivity}, '$.groups') AS activity_group
+              JOIN json_each(activity_group.value, '$.metrics') AS activity_metric
+              WHERE COALESCE(json_extract(activity_metric.value, '$.value'), 0) > 0
+                AND COALESCE(json_extract(activity_metric.value, '$.kind'), '') <> 'snapshot'
+            )
+          )`;
           const hasChanges = `(
             tasks_added > 0 OR tasks_updated > 0 OR tasks_removed > 0
             OR tasks_pushed > 0 OR local_only_protected > 0 OR alerts_added > 0
+            OR ${hasDomainActivity}
           )`;
           if (result === 'changes') return hasChanges;
           return `(

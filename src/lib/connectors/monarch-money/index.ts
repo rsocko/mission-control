@@ -14,6 +14,13 @@ import {
   MonarchBridgeError,
 } from './client';
 import {
+  mergeSyncActivity,
+} from '@/lib/sync/activity';
+import {
+  financeAttentionSyncActivity,
+  financeReferenceSyncActivity,
+} from './sync-activity';
+import {
   resolveTyrionPolicyConfig,
   TyrionAttributionClient,
   TyrionAttributionError,
@@ -132,7 +139,16 @@ export class FinanceManagerConnector implements IConnector {
         itemsRemoved: transactions.itemsRemoved + datasets.itemsRemoved,
         status: transactionError ? 'partial' : datasets.status,
         datasetErrors,
+        activity: mergeSyncActivity(
+          transactions.activity,
+          financeReferenceSyncActivity(datasets),
+        ),
       };
+      if (result.activity) {
+        result.activity.status = result.status && result.status !== 'fresh'
+          ? 'partial'
+          : 'complete';
+      }
       const publication = await captureFinanceInsightPublication(config, result);
       let insightNotificationsAdded = 0;
       try {
@@ -216,6 +232,10 @@ export class FinanceManagerConnector implements IConnector {
       await pruneFinanceInsightOccurrenceCache();
       const { reconcileFinanceAttention } = await import('@/lib/finance/attention-routing');
       const attention = await reconcileFinanceAttention({ connectorId: config.id });
+      const attentionActivity = financeAttentionSyncActivity(
+        attention,
+        result.status && result.status !== 'fresh' ? 'partial' : 'complete',
+      );
       let receiptAttentionNotificationsAdded = 0;
       try {
         const { reconcileReceiptReconciliationAttention } = await import(
@@ -250,6 +270,7 @@ export class FinanceManagerConnector implements IConnector {
       );
       return {
         ...result,
+        activity: mergeSyncActivity(result.activity, attentionActivity),
         notificationsAdded:
           insightNotificationsAdded
           + attention.notificationsCreated

@@ -87,6 +87,7 @@ function history(
     notificationsAdded: 6,
     errors: [],
     details: [{ id }],
+    activity: null,
     syncedAt,
     durationMs: 10,
     jobId: null,
@@ -598,6 +599,52 @@ export function runConnectorManagementRepositoryContract(
           localOnlyProtected: 0,
           notificationsAdded: 0,
         }),
+        history(`${PREFIX}-filter-domain-activity`, '2099-09-05T02:30:00.000Z', {
+          connectorId: connectorB,
+          tasksAdded: 0,
+          tasksUpdated: 0,
+          tasksRemoved: 0,
+          tasksPushed: 0,
+          localOnlyProtected: 0,
+          notificationsAdded: 0,
+          activity: {
+            version: 1,
+            groups: [{
+              key: 'data',
+              label: 'Data synchronized',
+              category: 'data',
+              metrics: [{
+                key: 'processed',
+                label: 'records synchronized',
+                value: 10,
+                kind: 'processed',
+              }],
+            }],
+          },
+        }),
+        history(`${PREFIX}-filter-snapshot-total`, '2099-09-05T02:45:00.000Z', {
+          connectorId: connectorB,
+          tasksAdded: 0,
+          tasksUpdated: 0,
+          tasksRemoved: 0,
+          tasksPushed: 0,
+          localOnlyProtected: 0,
+          notificationsAdded: 0,
+          activity: {
+            version: 1,
+            groups: [{
+              key: 'snapshot',
+              label: 'Snapshot',
+              category: 'data',
+              metrics: [{
+                key: 'total',
+                label: 'records in snapshot',
+                value: 10,
+                kind: 'snapshot',
+              }],
+            }],
+          },
+        }),
         history(`${PREFIX}-filter-error`, '2099-09-05T03:00:00.000Z', {
           connectorId: connectorA,
           success: false,
@@ -622,8 +669,26 @@ export function runConnectorManagementRepositoryContract(
         connectorIds: [connectorB],
       });
       expect(noChanges.history.map(({ id }) => id)).toEqual([
+        `${PREFIX}-filter-snapshot-total`,
         `${PREFIX}-filter-empty`,
       ]);
+
+      const domainChanges = await repository.listSyncHistory({
+        limit: 10,
+        before: null,
+        results: ['changes'],
+        connectorIds: [connectorB],
+      });
+      expect(domainChanges.history.map(({ id }) => id)).toEqual([
+        `${PREFIX}-filter-domain-activity`,
+      ]);
+      expect(domainChanges.history[0].activity).toMatchObject({
+        version: 1,
+        groups: [{
+          key: 'data',
+          metrics: [{ key: 'processed', value: 10 }],
+        }],
+      });
 
       const changedOrErrored = await repository.listSyncHistory({
         limit: 1,

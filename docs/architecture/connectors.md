@@ -210,7 +210,8 @@ follows [`octo-org/tyrion#175`](https://github.com/octo-org/tyrion/pull/175):
 |---|---|
 | Large transaction or material recurring increase insight | Notification only |
 | Category or merchant variance | High-confidence members in one bounded monthly digest; medium confidence remains status only |
-| Open human-reviewable attribution exception (`no-match`, confidence ambiguity, rule conflict, historical tie, or manual-decision conflict) | Actionable notification while unresolved for less than 24 hours; one `mc-owned` task and My Day item at 24 hours when the latest authoritative observation is no more than 24 hours old |
+| Ordinary Rule-based `no-match` attribution | Aggregate into one stable account-level Finance review notification when configured count or amount thresholds are met; never create one notification or Task per transaction |
+| Explicit human-reviewable attribution conflict (confidence ambiguity, rule conflict, historical tie, manual-decision conflict, or another review-required outcome) | Actionable notification while unresolved for less than 24 hours; one `mc-owned` task and My Day item at 24 hours when the latest authoritative observation is no more than 24 hours old |
 | Attribution configuration, authentication, service, policy, timeout, contract, or system failure | Connector/Finance status only; settle any prior actionable projection |
 | Failed `finance_mutation_audit` write-back | Status only while retries remain; one `mc-owned` task and My Day item after at least three failed attempts while the authoritative failure is no more than 60 minutes old |
 | Resolved or superseded exception | Complete or cancel the projected task and settle the notification |

@@ -10,6 +10,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import type { ContextAppearance } from '@/types';
+import type { SyncActivityPayload } from '@/lib/sync/activity';
 import type { tasks } from './tasks';
 
 // ─── CONNECTOR CONFIGS ──────────────────────────────────────────────────────
@@ -229,6 +230,7 @@ export const syncLog = pgTable('sync_log', {
   errors: jsonb('errors').notNull().default([]),
   /** Detailed audit trail: individual task-level actions taken during this sync */
   details: jsonb('details').notNull().default([]),
+  activity: jsonb('activity').$type<SyncActivityPayload>(),
   syncedAt: text('synced_at').notNull(),
   durationMs: integer('duration_ms'),
   jobId: text('job_id'),

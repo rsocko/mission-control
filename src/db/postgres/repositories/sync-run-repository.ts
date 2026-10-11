@@ -55,6 +55,7 @@ export class PostgresSyncRunRepository implements SyncRunRepository {
       notificationsAdded: record.notificationsAdded,
       errors: [...record.errors],
       details: [...record.details],
+      activity: record.activity,
       syncedAt: record.syncedAt,
       durationMs: record.durationMs,
       jobId: record.jobId,

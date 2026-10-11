@@ -9,6 +9,7 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import type { ContextAppearance } from '@/types';
+import type { SyncActivityPayload } from '@/lib/sync/activity';
 import type { tasks } from './tasks';
 
 // ─── CONNECTOR CONFIGS ──────────────────────────────────────────────────────
@@ -228,6 +229,7 @@ export const syncLog = sqliteTable('sync_log', {
   errors: text('errors', { mode: 'json' }).notNull().default('[]'),
   /** Detailed audit trail: individual task-level actions taken during this sync */
   details: text('details', { mode: 'json' }).notNull().default('[]'),
+  activity: text('activity', { mode: 'json' }).$type<SyncActivityPayload>(),
   syncedAt: text('synced_at').notNull(),
   durationMs: integer('duration_ms'),
   jobId: text('job_id'),

@@ -34,6 +34,7 @@ export async function logWriteThrough(params: WriteThroughLogParams): Promise<vo
       notificationsAdded: 0,
       errors: [],
       details,
+      activity: null,
       syncedAt: now,
       durationMs: 0,
       jobId: null,

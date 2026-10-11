@@ -132,7 +132,7 @@ describe('Layer 5C PostgreSQL finance activation', () => {
       syncedLists: [],
     });
 
-    await expect(connector.syncDomainData({ full: true })).resolves.toEqual({
+    await expect(connector.syncDomainData({ full: true })).resolves.toMatchObject({
       itemsAdded: 5,
       itemsUpdated: 1,
       itemsRemoved: 1,

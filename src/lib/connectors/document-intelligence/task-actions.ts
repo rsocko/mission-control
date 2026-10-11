@@ -193,6 +193,18 @@ function localMetadataAfter(
   };
 }
 
+function mergeCorrectionMetadata(
+  current: Record<string, unknown>,
+  refreshed: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...current,
+    ...Object.fromEntries(
+      Object.entries(refreshed).filter(([, value]) => value !== undefined),
+    ),
+  };
+}
+
 async function performOwlTaskActionNow(
   taskId: string,
   input: OwlTaskActionInput,
@@ -272,9 +284,12 @@ async function performOwlTaskActionNow(
       409,
     );
   }
+  const currentMetadata = parseTaskMetadataCompat(latestTask.metadata).metadata;
+  const metadataBeforeAction = input.action === 'correct' && refreshedTask
+    ? mergeCorrectionMetadata(currentMetadata, refreshedTask.metadata)
+    : refreshedTask?.metadata ?? currentMetadata;
   const metadata = localMetadataAfter(
-    refreshedTask?.metadata
-      ?? parseTaskMetadataCompat(latestTask.metadata).metadata,
+    metadataBeforeAction,
     input,
     now,
   );

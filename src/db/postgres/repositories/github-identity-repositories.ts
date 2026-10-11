@@ -914,6 +914,36 @@ async function persistPrimaryIdentityWrite(
   );
   const localBinding = localBindingResult.rows[0];
   const entityBinding = entityBindingResult.rows[0];
+  const staleTaskOwnerResult = entityBinding
+    && entityBinding.bindingType === 'task'
+    && target.bindingType === 'task'
+    && entityBinding.localId !== target.localId
+    ? await query<{ deletedAt: string | null }>(
+        client,
+        `SELECT deleted_at AS "deletedAt"
+         FROM tasks
+         WHERE id = $1 AND connector_instance_id = $2
+         LIMIT 1
+         FOR UPDATE`,
+        [entityBinding.localId, target.connectorInstanceId],
+      )
+    : null;
+  const replacementTaskResult = staleTaskOwnerResult?.rows[0]?.deletedAt
+    ? await query<{ deletedAt: string | null }>(
+        client,
+        `SELECT deleted_at AS "deletedAt"
+         FROM tasks
+         WHERE id = $1 AND connector_instance_id = $2
+         LIMIT 1
+         FOR UPDATE`,
+        [target.localId, target.connectorInstanceId],
+      )
+    : null;
+  const canTakeOverDeletedTaskBinding = Boolean(
+    staleTaskOwnerResult?.rows[0]?.deletedAt
+    && replacementTaskResult?.rows[0]
+    && replacementTaskResult.rows[0].deletedAt === null,
+  );
   if (localBinding && localBinding.externalEntityId !== entity.id) {
     return recordPrimaryIdentityCollision(
       client,
@@ -929,6 +959,7 @@ async function persistPrimaryIdentityWrite(
       entityBinding.bindingType !== target.bindingType
       || entityBinding.localId !== target.localId
     )
+    && !canTakeOverDeletedTaskBinding
   ) {
     return recordPrimaryIdentityCollision(
       client,
@@ -971,11 +1002,56 @@ async function persistPrimaryIdentityWrite(
       client,
       `
         UPDATE external_entity_bindings
-        SET verified_at = $2, updated_at = $2
+        SET local_id = CASE WHEN $3 THEN $4 ELSE local_id END,
+            state = CASE WHEN $3 THEN $5 ELSE state END,
+            verified_at = $2,
+            updated_at = $2
         WHERE id = $1
       `,
-      [existingBinding.id, evidence.entity.observedAt],
+      [
+        existingBinding.id,
+        evidence.entity.observedAt,
+        canTakeOverDeletedTaskBinding,
+        target.localId,
+        'active',
+      ],
     );
+    if (canTakeOverDeletedTaskBinding && entityBinding) {
+      const localIds = boundedPrimaryIdentityCollisionIds([
+        entityBinding.localId,
+        target.localId,
+      ]);
+      const externalEntityIds = [entity.id];
+      const fingerprint = digestExternalIdentifier(JSON.stringify({
+        category: 'multiple_local_one_stable',
+        bindingType: 'task',
+        localIds,
+        externalEntityIds,
+      }));
+      await query(
+        client,
+        `UPDATE github_identity_collisions
+         SET state = 'resolved',
+             resolution = $4::jsonb,
+             resolved_at = $5,
+             resolved_by = 'system:stable-identity-recovery'
+         WHERE connector_instance_id = $1
+           AND category = 'multiple_local_one_stable'
+           AND fingerprint = $2
+           AND state = $3`,
+        [
+          target.connectorInstanceId,
+          fingerprint,
+          'open',
+          JSON.stringify({
+            localId: target.localId,
+            externalEntityId: entity.id,
+            rationale: 'Reassigned stable identity from a soft-deleted task owner',
+          }),
+          evidence.entity.observedAt,
+        ],
+      );
+    }
   } else {
     await query(
       client,
@@ -1396,6 +1472,7 @@ async function applyPrimaryIdentityBindingsBatch(
   bindings: readonly {
     existing: PrimaryIdentityBindingRow | null;
     entityId: string;
+    replacedLocalId: string | null;
     write: ExternalIdentityWrite;
   }[],
 ): Promise<void> {
@@ -1404,12 +1481,14 @@ async function applyPrimaryIdentityBindingsBatch(
     await query(
       client,
       `
-        WITH incoming(id, observed_at) AS (
+        WITH incoming(id, observed_at, local_id) AS (
           SELECT *
-          FROM unnest($1::text[], $2::text[])
+          FROM unnest($1::text[], $2::text[], $3::text[])
         )
         UPDATE external_entity_bindings binding
         SET
+          local_id = COALESCE(incoming.local_id, binding.local_id),
+          state = CASE WHEN incoming.local_id IS NOT NULL THEN 'active' ELSE binding.state END,
           verified_at = incoming.observed_at,
           updated_at = incoming.observed_at
         FROM incoming
@@ -1418,6 +1497,9 @@ async function applyPrimaryIdentityBindingsBatch(
       [
         existing.map((binding) => binding.existing!.id),
         existing.map((binding) => binding.write.evidence.entity.observedAt),
+        existing.map((binding) => (
+          binding.replacedLocalId === null ? null : binding.write.target.localId
+        )),
       ],
     );
   }
@@ -1590,11 +1672,40 @@ async function persistPrimaryIdentityFastBatch(
   const bindingsToApply: Array<{
     existing: PrimaryIdentityBindingRow | null;
     entityId: string;
+    replacedLocalId: string | null;
     write: ExternalIdentityWrite;
   }> = [];
   const collisions: Array<PrimaryIdentityCollision & {
     index: number;
   }> = [];
+  const taskIds = new Set<string>();
+  for (const index of bindingIndexes) {
+    const write = writes[index];
+    const entity = entities.get(primaryIdentityKey(write.evidence.entity))!;
+    const entityBinding = bindings.byEntity.get(entity.id);
+    if (
+      entityBinding?.bindingType === 'task'
+      && write.target.bindingType === 'task'
+      && entityBinding.localId !== write.target.localId
+    ) {
+      taskIds.add(entityBinding.localId);
+      taskIds.add(write.target.localId);
+    }
+  }
+  const taskDeletionRows = taskIds.size > 0
+    ? await query<{ id: string; deletedAt: string | null }>(
+        client,
+        `SELECT id, deleted_at AS "deletedAt"
+         FROM tasks
+         WHERE connector_instance_id = $1
+           AND id = ANY($2::text[])
+         FOR UPDATE`,
+        [connectorInstanceId, [...taskIds]],
+      )
+    : { rows: [] };
+  const taskDeletionById = new Map(
+    taskDeletionRows.rows.map((row) => [row.id, row.deletedAt]),
+  );
 
   for (const index of indexes) {
     const write = writes[index];
@@ -1620,6 +1731,14 @@ async function persistPrimaryIdentityFastBatch(
     const entity = entities.get(entityKey)!;
     const localBinding = bindings.byTarget.get(primaryIdentityTargetKey(write));
     const entityBinding = bindings.byEntity.get(entity.id);
+    const canTakeOverDeletedTaskBinding = Boolean(
+      entityBinding?.bindingType === 'task'
+      && write.target.bindingType === 'task'
+      && entityBinding.localId !== write.target.localId
+      && taskDeletionById.get(entityBinding.localId)
+      && taskDeletionById.has(write.target.localId)
+      && taskDeletionById.get(write.target.localId) === null,
+    );
     if (localBinding && localBinding.externalEntityId !== entity.id) {
       if (repositoryKey) locatorPlansToApply.set(repositoryKey, repositoryPlan!);
       collisions.push({
@@ -1637,6 +1756,7 @@ async function persistPrimaryIdentityFastBatch(
         entityBinding.bindingType !== write.target.bindingType
         || entityBinding.localId !== write.target.localId
       )
+      && !canTakeOverDeletedTaskBinding
     ) {
       if (repositoryKey) locatorPlansToApply.set(repositoryKey, repositoryPlan!);
       collisions.push({
@@ -1679,6 +1799,7 @@ async function persistPrimaryIdentityFastBatch(
     bindingsToApply.push({
       existing: localBinding ?? entityBinding ?? null,
       entityId: entity.id,
+      replacedLocalId: canTakeOverDeletedTaskBinding ? entityBinding!.localId : null,
       write,
     });
     results[index] = {
@@ -1694,6 +1815,42 @@ async function persistPrimaryIdentityFastBatch(
     entities,
   );
   await applyPrimaryIdentityBindingsBatch(client, connectorInstanceId, bindingsToApply);
+  for (const binding of bindingsToApply) {
+    if (binding.replacedLocalId === null) continue;
+    const localIds = boundedPrimaryIdentityCollisionIds([
+      binding.replacedLocalId,
+      binding.write.target.localId,
+    ]);
+    const fingerprint = digestExternalIdentifier(JSON.stringify({
+      category: 'multiple_local_one_stable',
+      bindingType: 'task',
+      localIds,
+      externalEntityIds: [binding.entityId],
+    }));
+    await query(
+      client,
+      `UPDATE github_identity_collisions
+       SET state = 'resolved',
+           resolution = $4::jsonb,
+           resolved_at = $5,
+           resolved_by = 'system:stable-identity-recovery'
+       WHERE connector_instance_id = $1
+         AND category = 'multiple_local_one_stable'
+         AND fingerprint = $2
+         AND state = $3`,
+      [
+        connectorInstanceId,
+        fingerprint,
+        'open',
+        JSON.stringify({
+          localId: binding.write.target.localId,
+          externalEntityId: binding.entityId,
+          rationale: 'Reassigned stable identity from a soft-deleted task owner',
+        }),
+        binding.write.evidence.entity.observedAt,
+      ],
+    );
+  }
   const collisionResults = await recordPrimaryIdentityCollisionsBatch(client, collisions);
   for (const [collisionIndex, collision] of collisions.entries()) {
     results[collision.index] = collisionResults[collisionIndex];
@@ -2549,6 +2706,16 @@ export function createPostgresGitHubIdentityRepositories(
             AND binding.connector_instance_id = $9
             AND binding.binding_type = $10
             AND binding.state != 'retired'
+            AND (
+              binding.binding_type != 'task'
+              OR EXISTS (
+                SELECT 1
+                FROM tasks AS binding_task
+                WHERE binding_task.id = binding.local_id
+                  AND binding_task.connector_instance_id = binding.connector_instance_id
+                  AND binding_task.deleted_at IS NULL
+              )
+            )
           LEFT JOIN tasks AS local_task
             ON binding.binding_type = 'task'
             AND local_task.id = binding.local_id

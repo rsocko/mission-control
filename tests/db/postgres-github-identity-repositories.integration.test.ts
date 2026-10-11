@@ -231,6 +231,34 @@ if (connectionString) {
             [connectorInstanceId, taskId, `exception:${taskId}:accept`, now],
           );
         },
+        seedTask: async (id, now) => {
+          await pool.query(
+            `INSERT INTO tasks (
+               id, source_id, connector_type, connector_instance_id, title, status,
+               priority, sync_status, source_list_id, metadata, created_at, updated_at,
+               last_synced_at
+             ) VALUES (
+               $1, $2, 'github-issues', $3, 'Replacement', 'todo', 'normal',
+               'synced', $4, '{}'::jsonb, $5, $5, $5
+             )`,
+            [id, `${sourceId}:replacement`, connectorInstanceId, sourceListId, now],
+          );
+        },
+        softDeleteTask: async (id, now) => {
+          await pool.query(
+            `UPDATE tasks SET deleted_at = $2, updated_at = $2 WHERE id = $1`,
+            [id, now],
+          );
+        },
+        openCollisionCount: async (id) => {
+          const result = await pool.query<{ value: number }>(
+            `SELECT COUNT(*)::integer AS value
+             FROM github_identity_collisions
+             WHERE connector_instance_id = $1 AND state = 'open'`,
+            [id],
+          );
+          return result.rows[0]?.value ?? 0;
+        },
         leaseState: async (leaseId) => {
           const result = await pool.query<{
             state: string;

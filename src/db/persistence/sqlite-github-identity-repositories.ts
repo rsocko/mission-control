@@ -477,6 +477,16 @@ export function createSqliteGitHubIdentityRepositories(
             AND binding.connector_instance_id = ?
             AND binding.binding_type = ?
             AND binding.state != 'retired'
+            AND (
+              binding.binding_type != 'task'
+              OR EXISTS (
+                SELECT 1
+                FROM tasks AS binding_task
+                WHERE binding_task.id = binding.local_id
+                  AND binding_task.connector_instance_id = binding.connector_instance_id
+                  AND binding_task.deleted_at IS NULL
+              )
+            )
           LEFT JOIN tasks AS local_task
             ON binding.binding_type = 'task'
             AND local_task.id = binding.local_id

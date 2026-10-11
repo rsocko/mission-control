@@ -12,6 +12,7 @@ import {
   externalEntityLocators,
   githubIdentityCollisions,
   githubIdentityMigrations,
+  tasks,
   type ExternalBindingState,
   type GitHubCollisionCategory,
   type GitHubIdentityPhase,
@@ -1043,6 +1044,32 @@ function persistExternalIdentity(
     ))
     .limit(1)
     .get();
+  const staleTaskOwner = entityBinding
+    && entityBinding.bindingType === 'task'
+    && target.bindingType === 'task'
+    && entityBinding.localId !== target.localId
+    ? tx.select({ deletedAt: tasks.deletedAt })
+      .from(tasks)
+      .where(and(
+        eq(tasks.id, entityBinding.localId),
+        eq(tasks.connectorInstanceId, target.connectorInstanceId),
+      ))
+      .limit(1)
+      .get()
+    : undefined;
+  const replacementTask = staleTaskOwner?.deletedAt
+    ? tx.select({ deletedAt: tasks.deletedAt })
+      .from(tasks)
+      .where(and(
+        eq(tasks.id, target.localId),
+        eq(tasks.connectorInstanceId, target.connectorInstanceId),
+      ))
+      .limit(1)
+      .get()
+    : undefined;
+  const canTakeOverDeletedTaskBinding = Boolean(
+    staleTaskOwner?.deletedAt && replacementTask && replacementTask.deletedAt === null,
+  );
 
   if (localBinding && localBinding.externalEntityId !== entity.id) {
     return recordWriteCollision(
@@ -1058,7 +1085,7 @@ function persistExternalIdentity(
   if (entityBinding && (
     entityBinding.bindingType !== target.bindingType
     || entityBinding.localId !== target.localId
-  )) {
+  ) && !canTakeOverDeletedTaskBinding) {
     return recordWriteCollision(
       tx,
       target,
@@ -1097,9 +1124,37 @@ function persistExternalIdentity(
   const existingBinding = localBinding ?? entityBinding;
   if (existingBinding) {
     tx.update(externalEntityBindings).set({
+      ...(canTakeOverDeletedTaskBinding
+        ? { localId: target.localId, state: bindingState }
+        : {}),
       verifiedAt: evidence.entity.observedAt,
       updatedAt: evidence.entity.observedAt,
     }).where(eq(externalEntityBindings.id, existingBinding.id)).run();
+    if (canTakeOverDeletedTaskBinding && entityBinding) {
+      const localIds = boundedSorted([entityBinding.localId, target.localId]);
+      const externalEntityIds = [entity.id];
+      const fingerprint = digestExternalIdentifier(JSON.stringify({
+        category: 'multiple_local_one_stable',
+        bindingType: 'task',
+        localIds,
+        externalEntityIds,
+      }));
+      tx.update(githubIdentityCollisions).set({
+        state: 'resolved',
+        resolution: {
+          localId: target.localId,
+          externalEntityId: entity.id,
+          rationale: 'Reassigned stable identity from a soft-deleted task owner',
+        },
+        resolvedAt: evidence.entity.observedAt,
+        resolvedBy: 'system:stable-identity-recovery',
+      }).where(and(
+        eq(githubIdentityCollisions.connectorInstanceId, target.connectorInstanceId),
+        eq(githubIdentityCollisions.category, 'multiple_local_one_stable'),
+        eq(githubIdentityCollisions.fingerprint, fingerprint),
+        eq(githubIdentityCollisions.state, 'open'),
+      )).run();
+    }
   } else {
     tx.insert(externalEntityBindings).values({
       id: randomUUID(),

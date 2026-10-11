@@ -383,7 +383,7 @@ function ScoutDestinationCard() {
           </p>
         </div>
         <Button asChild type="button" variant="outline" size="sm">
-          <Link href="/settings/connectors?setting=Scout">
+          <Link href="/settings/connectors?add=scout&return=ai">
             <Plus size={14} />
             Add Microsoft Scout
           </Link>
@@ -552,6 +552,9 @@ export function ExecutionDestinationsSection() {
       && destination.id !== form.id
       && destination.providerConfig.paperclip?.companyId === form.companyId)
     : [];
+  const hasCopilotCloud = destinations.some(
+    (destination) => destination.type === 'copilot-cloud',
+  );
 
   function updateForm(patch: Partial<DestinationForm>) {
     setForm((current) => current ? { ...current, ...patch } : current);
@@ -565,6 +568,28 @@ export function ExecutionDestinationsSection() {
     setPaperclipCheckError(null);
     setCheckingPaperclip(false);
     setShowCredential(false);
+  }
+
+  function openNewDestination(type: DestinationType) {
+    const next = emptyForm(type);
+    if (type !== 'paperclip' || paperclipConnectors.length === 0) {
+      openForm(next);
+      return;
+    }
+    const connector = paperclipConnectors[0]!;
+    const configuredCompanyIds = Array.isArray(connector.settings.companyIds)
+      ? connector.settings.companyIds.filter(
+        (companyId): companyId is string => typeof companyId === 'string',
+      )
+      : [];
+    openForm({
+      ...next,
+      credentialSource: 'paperclip-connector',
+      connectorId: connector.id,
+      endpoint: connector.settings.apiOrigin ?? '',
+      companyId: connector.settings.companyId ?? configuredCompanyIds[0] ?? '',
+      companyName: connector.settings.companyName ?? '',
+    });
   }
 
   function updatePaperclipConnection(patch: Partial<DestinationForm>) {
@@ -821,24 +846,32 @@ export function ExecutionDestinationsSection() {
           </p>
         </div>
         {!form && (
-          <div className="flex flex-wrap gap-2">
+          <div
+            className="flex flex-wrap items-center gap-2"
+            aria-label="Add execution destination"
+          >
+            <span className="text-xs font-medium text-[var(--text-muted)]">
+              Add destination
+            </span>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => openForm(emptyForm('paperclip'))}
+              onClick={() => openNewDestination('paperclip')}
             >
               <ExecutionDestinationIcon type="paperclip" size={14} />
               Paperclip route
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => openForm(emptyForm('copilot-cloud'))}
-            >
-              <ExecutionDestinationIcon type="copilot-cloud" size={14} />
-              GitHub Copilot Cloud
-            </Button>
+            {!hasCopilotCloud && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => openNewDestination('copilot-cloud')}
+              >
+                <ExecutionDestinationIcon type="copilot-cloud" size={14} />
+                GitHub Copilot Cloud
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -989,18 +1022,26 @@ export function ExecutionDestinationsSection() {
               <Bot size={18} className="mt-0.5 shrink-0 text-[var(--accent-300)]" />
               <div>
                 <p className="text-sm font-medium text-[var(--text-primary)]">
-                  Use one integration agent per Paperclip company
+                  Reuse your Board-approved Paperclip connection
                 </p>
                 <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-                  Recommended: create a dedicated <strong>Mission Control Dispatcher</strong>{' '}
-                  agent with standard trust, then use its API key here. It needs company roster
-                  visibility and task assignment access. A CEO key works, but is not required.
+                  The Paperclip connector stores the approved Board credential server-side. A
+                  route reuses it to discover companies, projects, and eligible agents without
+                  copying an API key.
                 </p>
                 <p className="mt-1 text-[11px] leading-5 text-[var(--text-muted)]">
-                  In Paperclip: Agents → select the integration agent → Governance → API Keys.
-                  One registered route can discover and delegate to eligible agents across that
-                  company.
+                  Use one route per company by default. Add another route only when it needs a
+                  different Paperclip connection, capability policy, data policy, or permanent
+                  instructions. Agent API keys and deployment secrets remain advanced fallbacks.
                 </p>
+                {paperclipConnectors.length === 0 && (
+                  <Link
+                    href="/settings/connectors?add=paperclip&return=ai"
+                    className="mt-2 inline-flex text-xs font-medium text-[var(--accent)] underline-offset-4 hover:underline"
+                  >
+                    Connect Paperclip with Board approval
+                  </Link>
+                )}
               </div>
             </div>
           )}
@@ -1037,19 +1078,19 @@ export function ExecutionDestinationsSection() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="mission-control">
-                    {form.type === 'copilot-cloud'
-                      ? 'Fine-grained personal access token'
-                      : 'Agent API key'}
-                  </SelectItem>
-                  <SelectItem value="deployment-secret">
-                    Deployment secret reference
-                  </SelectItem>
                   {form.type === 'paperclip' && (
                     <SelectItem value="paperclip-connector">
                       Existing Paperclip connector
                     </SelectItem>
                   )}
+                  <SelectItem value="mission-control">
+                    {form.type === 'copilot-cloud'
+                      ? 'Fine-grained personal access token'
+                      : 'Agent API key (advanced)'}
+                  </SelectItem>
+                  <SelectItem value="deployment-secret">
+                    Deployment secret reference{form.type === 'paperclip' ? ' (advanced)' : ''}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </Field>

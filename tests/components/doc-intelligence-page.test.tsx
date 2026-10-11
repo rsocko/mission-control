@@ -167,4 +167,106 @@ describe('Document Actions task detail lifecycle', () => {
     });
     expect(screen.getByText('101–101 of 101')).toBeInTheDocument();
   });
+
+  it('syncs every enabled OWL connector before reloading actions and review alerts', async () => {
+    let taskRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/connectors') {
+        return new Response(JSON.stringify({
+          connectors: [
+            { id: 'owl-1', type: 'document-intelligence', enabled: true },
+            { id: 'owl-disabled', type: 'document-intelligence', enabled: false },
+          ],
+          sourceLists: [],
+          classificationDefaults: {},
+        }), { status: 200 });
+      }
+      if (url === '/api/sync') {
+        expect(JSON.parse(String(init?.body))).toEqual({ connectorId: 'owl-1' });
+        return new Response(JSON.stringify({ results: [{ connectorId: 'owl-1', success: true }] }), { status: 200 });
+      }
+      if (url.startsWith('/api/notifications')) {
+        return new Response(JSON.stringify({ notifications: [], hasMore: false }), { status: 200 });
+      }
+      taskRequestCount += 1;
+      return new Response(JSON.stringify({
+        tasks: taskRequestCount === 1 ? [tasks[0]] : [tasks[1]],
+        hasMore: false,
+      }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<DocIntelligencePage />);
+    expect(await screen.findByRole('button', { name: /Pay first invoice/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync OWL document actions' }));
+
+    expect(await screen.findByRole('button', { name: /Sign second document/ })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/sync', expect.objectContaining({
+      method: 'POST',
+    }));
+    expect(screen.queryByRole('button', { name: /Pay first invoice/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps existing actions visible and explains a failed OWL sync', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/connectors') {
+        return new Response(JSON.stringify({
+          connectors: [{ id: 'owl-1', type: 'document-intelligence', enabled: true }],
+          sourceLists: [],
+          classificationDefaults: {},
+        }), { status: 200 });
+      }
+      if (url === '/api/sync') {
+        return new Response(JSON.stringify({
+          results: [{ connectorId: 'owl-1', success: false, errors: ['OWL is unavailable'] }],
+        }), { status: 200 });
+      }
+      if (url.startsWith('/api/notifications')) {
+        return new Response(JSON.stringify({ notifications: [], hasMore: false }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ tasks: [tasks[0]], hasMore: false }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<DocIntelligencePage />);
+    expect(await screen.findByRole('button', { name: /Pay first invoice/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync OWL document actions' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'OWL sync failed: OWL is unavailable. Displayed document actions were not reloaded.',
+    );
+    expect(screen.getByRole('button', { name: /Pay first invoice/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sync OWL document actions' })).toBeEnabled();
+  });
+
+  it('does not render tasks explicitly marked as non-ready', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith('/api/notifications')) {
+        return new Response(JSON.stringify({ notifications: [], hasMore: false }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        tasks: [
+          tasks[0],
+          {
+            ...tasks[1],
+            metadata: {
+              actionType: 'sign',
+              urgency: 'medium',
+              actionReady: false,
+            },
+          },
+        ],
+        hasMore: false,
+      }), { status: 200 });
+    }));
+
+    render(<DocIntelligencePage />);
+
+    expect(await screen.findByRole('button', { name: /Pay first invoice/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Sign second document/ })).not.toBeInTheDocument();
+  });
 });

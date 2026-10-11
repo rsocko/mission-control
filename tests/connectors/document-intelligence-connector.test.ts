@@ -313,7 +313,8 @@ describe('DocumentIntelligenceConnector', () => {
       const tasks = (await Array.fromAsync(connector.fetchTasks())).flat();
 
       expect(tasks.map((task) => task.sourceId)).toEqual(['ready', 'legacy']);
-      expect(String(fetchMock.mock.calls[0][0])).not.toContain('include_not_ready');
+      expect(connector.getDeletedTaskSourceIds()).toEqual(['review']);
+      expect(String(fetchMock.mock.calls[0][0])).toContain('include_not_ready=true');
     });
 
     it('paginates the flat OWL response by offset and uses updated_at freshness', async () => {
@@ -472,7 +473,7 @@ describe('DocumentIntelligenceConnector', () => {
   });
 
   describe('fetchNotifications', () => {
-    it('maps not-ready action candidates to exact OWL review notifications', async () => {
+    it('backfills active review candidates during incremental syncs with canonical OWL links', async () => {
       fetchMock
         .mockResolvedValueOnce(new Response(JSON.stringify([{
           id: 'review-1',
@@ -484,6 +485,7 @@ describe('DocumentIntelligenceConnector', () => {
           status: 'pending',
           action_ready: false,
           review_state: 'needs_review',
+          action_url: '#/actions/review-1',
           needs_review_url: 'https://owl.example/needs-review/review-1',
           created_at: '2026-08-20T12:00:00Z',
         }]), { status: 200 }))
@@ -491,13 +493,40 @@ describe('DocumentIntelligenceConnector', () => {
         .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
       const connector = await createConnector();
 
-      const notifications = await connector.fetchNotifications();
+      const notifications = await connector.fetchNotifications(
+        new Date('2026-09-01T00:00:00Z'),
+      );
 
       expect(String(fetchMock.mock.calls[0][0])).toContain('include_not_ready=true');
       expect(notifications).toContainEqual(expect.objectContaining({
         templateKey: 'owl_needs_review',
-        actionUrl: 'https://owl.example/needs-review/review-1',
+        actionUrl: 'http://document-intelligence.example:8200/#/actions/review-1',
       }));
+    });
+
+    it('returns a complete active review snapshot for lifecycle reconciliation', async () => {
+      const baseAction = {
+        document_id: 42,
+        document_title: 'Uncertain invoice',
+        action_type: 'pay',
+        urgency: 'medium',
+        summary: 'Confirm whether this is payable',
+        status: 'pending',
+        action_ready: false,
+        created_at: '2026-08-20T12:00:00Z',
+      };
+      fetchMock
+        .mockResolvedValueOnce(new Response(JSON.stringify([
+          { ...baseAction, id: 'active-review', review_state: 'needs_review' },
+          { ...baseAction, id: 'resolved-review', review_state: 'resolved_no_action' },
+        ]), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
+      const connector = await createConnector();
+
+      await expect(connector.getActiveAlertSourceIds()).resolves.toEqual([
+        'docintel-review-active-review',
+      ]);
     });
 
     it('maps missing statements to notifications with preview metadata', async () => {

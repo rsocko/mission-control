@@ -53,6 +53,7 @@ export interface TriageImportSummary {
   skipped: number;
   errors: string[];
   nextCursor?: string | null;
+  pagesProcessed?: number;
 }
 
 export interface FullSyncResult {

@@ -130,7 +130,7 @@ export async function importDocumentIntelligenceActions(
           category: action.category,
           actionReady: isActionReady(action),
           reviewState: action.review_state,
-          reviewUrl: resolveReviewUrl(action, null),
+          reviewUrl: resolveReviewUrl(action, null, settings.baseUrl),
           primaryActionId: primaryAction?.id,
           primaryActionLabel: primaryAction?.label,
           primaryActionUrl: primaryAction?.url,

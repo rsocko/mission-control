@@ -111,6 +111,7 @@ export class DocumentIntelligenceConnector implements IConnector {
     modules: DEFAULT_MODULES,
   };
   private client: DocClient | null = null;
+  private deletedTaskSourceIds = new Set<string>();
 
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
@@ -167,12 +168,21 @@ export class DocumentIntelligenceConnector implements IConnector {
   }
 
   async *fetchTasks(since?: Date): AsyncGenerator<TaskItem[], void, unknown> {
+    this.deletedTaskSourceIds.clear();
     if (!this.settings.modules.actionQueue) {
       yield [];
       return;
     }
 
-    const actions = await this.client!.fetchAllActions<DocAction>();
+    const actions = await this.client!.fetchAllActions<DocAction>(
+      'all',
+      { includeNotReady: true },
+    );
+    for (const action of actions) {
+      if (isTaskAction(action) && !isActionReady(action)) {
+        this.deletedTaskSourceIds.add(action.id);
+      }
+    }
 
     yield actions
       .filter((action) => isTaskAction(action))
@@ -181,6 +191,10 @@ export class DocumentIntelligenceConnector implements IConnector {
       // so a later completion or dismissal cannot remain stale in Mission Control.
       .filter((action) => !action.updated_at || isSinceMatch(action.updated_at, since))
       .map((action) => mapActionToTask(action, this.type, this.id, this.settings.baseUrl));
+  }
+
+  getDeletedTaskSourceIds(): readonly string[] {
+    return [...this.deletedTaskSourceIds];
   }
 
   async fetchNotifications(since?: Date): Promise<InboundNotification[]> {
@@ -192,10 +206,7 @@ export class DocumentIntelligenceConnector implements IConnector {
         { includeNotReady: true },
       );
       for (const action of actions) {
-        if (
-          isActionAwaitingReview(action)
-          && isSinceMatch(action.updated_at || action.created_at, since)
-        ) {
+        if (isActionAwaitingReview(action)) {
           notifications.push(
             mapActionToReviewNotification(action, this.type, this.id, this.settings.baseUrl),
           );
@@ -428,9 +439,9 @@ export class DocumentIntelligenceConnector implements IConnector {
    * If a document has been matched/uploaded since last sync, it won't appear
    * and the corresponding notification gets auto-resolved.
    */
-  async getActiveAlertSourceIds(since?: Date): Promise<string[] | null> {
+  async getActiveAlertSourceIds(): Promise<string[] | null> {
     try {
-      const notifications = await this.fetchNotifications(since);
+      const notifications = await this.fetchNotifications();
       return notifications.map((notification) => notification.id);
     } catch {
       return null; // Fail-open

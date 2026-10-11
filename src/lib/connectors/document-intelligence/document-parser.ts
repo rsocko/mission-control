@@ -28,6 +28,7 @@ export interface DocAction {
   extracted_data?: Record<string, unknown> | null;
   action_ready?: boolean;
   review_state?: 'ready' | 'needs_review' | 'resolved_no_action' | string | null;
+  action_url?: string | null;
   needs_review_url?: string | null;
   /** Transitional alias accepted from prerelease OWL builds. */
   review_url?: string | null;
@@ -123,7 +124,7 @@ export function mapActionToTask(
     : { actionUrl: null, documentUrl: null };
   const preview = resolveActionPreview(action);
   const primaryAction = resolveActionCta(action);
-  const reviewUrl = resolveReviewUrl(action, hubLinks.actionUrl);
+  const reviewUrl = resolveReviewUrl(action, hubLinks.actionUrl, docHubBaseUrl);
 
   return {
     id: `docintel-${action.id}`,
@@ -214,7 +215,7 @@ export function mapActionToReviewNotification(
   const hubLinks = docHubBaseUrl
     ? buildDocHubTaskLinks(docHubBaseUrl, action.id, action.document_id)
     : { actionUrl: null, documentUrl: null };
-  const reviewUrl = resolveReviewUrl(action, hubLinks.actionUrl);
+  const reviewUrl = resolveReviewUrl(action, hubLinks.actionUrl, docHubBaseUrl);
   const preview = resolveActionPreview(action);
 
   return {
@@ -277,8 +278,23 @@ function inferPreviewType(url: string): NonNullable<DocAction['preview_type']> {
   return 'iframe';
 }
 
-function safeUrl(value: unknown): URL | null {
+function safeUrl(value: unknown, baseUrl?: string): URL | null {
   if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const absoluteUrl = safeAbsoluteUrl(value);
+    if (absoluteUrl) return absoluteUrl;
+    if (!baseUrl) return null;
+
+    const base = safeAbsoluteUrl(baseUrl);
+    if (!base) return null;
+    const resolved = new URL(value, base);
+    return resolved.origin === base.origin ? resolved : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeAbsoluteUrl(value: string): URL | null {
   try {
     const url = new URL(value);
     return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
@@ -287,10 +303,31 @@ function safeUrl(value: unknown): URL | null {
   }
 }
 
-export function resolveReviewUrl(action: DocAction, fallback: string | null): string | null {
-  return safeUrl(action.needs_review_url)?.toString()
-    || safeUrl(action.review_url)?.toString()
-    || safeUrl(fallback)?.toString()
+function safeOwlUrl(value: unknown, baseUrl?: string): URL | null {
+  if (!baseUrl) return safeUrl(value);
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const base = safeAbsoluteUrl(baseUrl);
+  if (!base) return null;
+  try {
+    const resolved = new URL(value, base);
+    return (
+      (resolved.protocol === 'http:' || resolved.protocol === 'https:')
+      && resolved.origin === base.origin
+    ) ? resolved : null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveReviewUrl(
+  action: DocAction,
+  fallback: string | null,
+  baseUrl?: string,
+): string | null {
+  return safeOwlUrl(action.action_url, baseUrl)?.toString()
+    || safeUrl(action.needs_review_url, baseUrl)?.toString()
+    || safeUrl(action.review_url, baseUrl)?.toString()
+    || safeUrl(fallback, baseUrl)?.toString()
     || null;
 }
 
@@ -515,7 +552,7 @@ export function mapActionToTriageItem(
       dueDate: action.due_date,
       actionReady: isActionReady(action),
       reviewState: action.review_state,
-      reviewUrl: resolveReviewUrl(action, hubLinks.actionUrl),
+      reviewUrl: resolveReviewUrl(action, hubLinks.actionUrl, docHubBaseUrl),
       primaryActionId: primaryActionCta?.id,
       primaryActionLabel: primaryActionCta?.label,
       primaryActionUrl: primaryActionCta?.url,

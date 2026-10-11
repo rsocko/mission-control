@@ -1,7 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState, type RefObject } from 'react';
-import { ChevronDown } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { SettingsSection } from '../settings-search';
 
 export interface SettingsSubsection {
@@ -207,25 +213,23 @@ export function MobileSettingsSubsectionJump({
   if (subsections.length === 0) return null;
 
   return (
-    <div className="relative mb-4 sm:hidden">
+    <div className="mb-4 sm:hidden">
       <label htmlFor={`settings-jump-${section}`} className="sr-only">Jump to a section</label>
-      <select
-        id={`settings-jump-${section}`}
-        value={activeId}
-        onChange={event => navigate(event.target.value)}
-        className="h-10 w-full appearance-none rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 pr-9 text-sm font-medium text-[var(--text-secondary)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50"
-      >
-        {subsections.map(subsection => (
-          <option key={subsection.id} value={subsection.id}>
-            Jump to: {subsection.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown
-        size={14}
-        aria-hidden="true"
-        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-      />
+      <Select value={activeId} onValueChange={navigate}>
+        <SelectTrigger
+          id={`settings-jump-${section}`}
+          className="h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 text-sm font-medium text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-blue-500/50"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {subsections.map(subsection => (
+            <SelectItem key={subsection.id} value={subsection.id}>
+              Jump to: {subsection.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

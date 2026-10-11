@@ -26,6 +26,7 @@ import {
   canRemoveTask,
   canSetTaskLocalDisposition,
   TASK_DISPOSITION_OPTIONS,
+  taskFieldAllowedValues,
   taskFieldBlockedReason,
   taskRemovalLabel,
 } from '@/lib/tasks/client-edit-policy';
@@ -133,6 +134,7 @@ export function TaskContextMenu({
   const canEdit = (field: TaskField) => canEditTaskField(task.editPolicy, field);
   const blockedReason = (field: TaskField) => taskFieldBlockedReason(task.editPolicy, field);
   const canDelete = canRemoveTask(task.editPolicy);
+  const allowedPriorities = taskFieldAllowedValues(task.editPolicy, 'priority');
   const canMoveWithinSource = task.editPolicy.sourceMoveSupported;
   const dispositionOptions = TASK_DISPOSITION_OPTIONS.filter((option) => (
     option.value !== task.localDisposition
@@ -273,7 +275,9 @@ export function TaskContextMenu({
               <ContextMenu.SubContent
                 className={`min-w-[140px] ${SUB_CONTENT_CLASS}`}
               >
-                {PRIORITY_OPTIONS.map((opt) => (
+                {PRIORITY_OPTIONS
+                  .filter((option) => !allowedPriorities || allowedPriorities.includes(option.value))
+                  .map((opt) => (
                   <ContextMenu.Item
                     key={opt.value}
                     className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer outline-none data-[highlighted]:bg-[var(--surface-2)] transition-colors duration-75 mx-1 rounded-[var(--radius-sm)] ${opt.color} ${task.priority === opt.value ? 'font-semibold' : ''}`}

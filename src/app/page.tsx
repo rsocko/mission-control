@@ -32,6 +32,7 @@ import { AddTaskModal, SaveTemplateModal } from '@/components/add-task';
 import { CONNECTOR_ICONS, PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
 import { getTagPillStyle } from '@/lib/constants/colors';
 import {
+  selectedTaskFieldAllowedValues,
   selectedTaskFieldBlockedReason,
   selectedTaskRemovalBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
@@ -890,6 +891,7 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
   const policies = selectedTasks.map((task) => task.editPolicy);
   const statusBlockedReason = selectedTaskFieldBlockedReason(policies, 'status');
   const priorityBlockedReason = selectedTaskFieldBlockedReason(policies, 'priority');
+  const allowedPriorities = selectedTaskFieldAllowedValues(policies, 'priority');
   const dueDateBlockedReason = selectedTaskFieldBlockedReason(policies, 'dueDate');
   const tagsBlockedReason = selectedTaskFieldBlockedReason(policies, 'tags');
   const moveBlockedReason = selectedTasks.find((task) => !task.editPolicy.sourceMoveSupported)?.editPolicy.sourceMoveReason;
@@ -1108,6 +1110,7 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
         }}
       />
       <BulkPriorityDropdown
+        allowedValues={allowedPriorities}
         disabled={Boolean(priorityBlockedReason)}
         disabledReason={priorityBlockedReason}
         onSetPriority={async (priority) => {

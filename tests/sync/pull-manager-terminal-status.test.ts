@@ -423,6 +423,42 @@ describe('pull-manager terminal status sync', () => {
     }));
   });
 
+  it('preserves Mission Control notes when the connector marks description as local', async () => {
+    mockExistingTasks.push(makeExistingTask({
+      description: 'Call the billing office before paying.',
+      status: 'todo',
+    }));
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: true,
+      tags: true,
+      tagWriteBack: false,
+      taskFieldProfile: {
+        description: { authority: 'local', writeBack: 'none' },
+      },
+    };
+
+    await upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask({
+        description: undefined,
+        status: 'todo',
+        updatedAt: '2026-07-25T14:00:00Z',
+      })],
+      false,
+      [],
+    );
+
+    expect(mockUpdateSets).toContainEqual(expect.objectContaining({
+      description: 'Call the billing office before paying.',
+    }));
+  });
+
   it('forces remote "cancelled" when local is in_progress', async () => {
     mockExistingTasks.push(makeExistingTask({
       status: 'in_progress',

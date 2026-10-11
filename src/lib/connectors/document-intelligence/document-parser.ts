@@ -9,6 +9,7 @@ export interface DocAction {
   id: string;
   document_id: number;
   document_title: string;
+  title?: string | null;
   action_type: 'pay' | 'respond' | 'file' | 'archive' | 'review' | 'sign' | 'schedule';
   category?: string | null;
   urgency: 'critical' | 'high' | 'medium' | 'low';
@@ -130,7 +131,7 @@ export function mapActionToTask(
     connectorType,
     connectorInstanceId,
     title: buildTaskTitle(action),
-    description: action.summary,
+    description: undefined,
     status: mapActionStatus(action.status),
     statusReason: mapActionStatusReason(action.status),
     priority: mapUrgency(action.urgency),
@@ -152,6 +153,8 @@ export function mapActionToTask(
     tags: buildTaskTags(action, connectorType),
     metadata: {
       actionType: action.action_type,
+      actionTitle: action.title,
+      actionSummary: action.summary,
       category: action.category,
       amount: action.amount,
       confidence: normalizeOwlConfidence(action.confidence),
@@ -568,6 +571,7 @@ function mapUrgencyToScore(urgency: DocAction['urgency']): number {
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 function buildTaskTitle(action: DocAction): string {
+  if (action.title?.trim()) return action.title.trim();
   switch (action.action_type) {
     case 'pay':
       if (action.correspondent && typeof action.amount === 'number') {

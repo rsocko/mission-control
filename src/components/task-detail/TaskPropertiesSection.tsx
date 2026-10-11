@@ -351,6 +351,7 @@ export function TaskStatusField({
 
 export interface TaskPriorityFieldProps {
   priority: string;
+  allowedPriorities?: readonly string[];
   planningHorizon: PlanningHorizon | null;
   canEditPriority: boolean;
   canEditPlanningHorizon: boolean;
@@ -365,6 +366,7 @@ export interface TaskPriorityFieldProps {
 /** Priority and broad planning intent. */
 export function TaskPriorityField({
   priority,
+  allowedPriorities,
   planningHorizon,
   canEditPriority,
   canEditPlanningHorizon,
@@ -388,7 +390,9 @@ export function TaskPriorityField({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {Object.entries(TASK_PRIORITY_VISUALS).map(([value, visual]) => (
+          {Object.entries(TASK_PRIORITY_VISUALS)
+            .filter(([value]) => !allowedPriorities || allowedPriorities.includes(value))
+            .map(([value, visual]) => (
             <SelectItem key={value} value={value} className={visual.textClass}>{visual.label}</SelectItem>
           ))}
         </SelectContent>

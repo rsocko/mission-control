@@ -7,13 +7,19 @@ interface BulkPriorityDropdownProps {
   onSetPriority: (priority: string) => Promise<void>;
   disabled?: boolean;
   disabledReason?: string;
+  allowedValues?: readonly string[];
 }
 
 const PRIORITIES = [
   ...Object.entries(TASK_PRIORITY_VISUALS).map(([value, visual]) => ({ value, label: visual.label, color: visual.textClass })),
 ];
 
-export function BulkPriorityDropdown({ onSetPriority, disabled = false, disabledReason }: BulkPriorityDropdownProps) {
+export function BulkPriorityDropdown({
+  onSetPriority,
+  disabled = false,
+  disabledReason,
+  allowedValues,
+}: BulkPriorityDropdownProps) {
   const [open, setOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -47,7 +53,9 @@ export function BulkPriorityDropdown({ onSetPriority, disabled = false, disabled
       </button>
       {open && (
         <div role="listbox" aria-label="Set priority" className="absolute top-full left-0 mt-1 z-50 bg-[var(--surface-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] shadow-lg py-1 min-w-36">
-          {PRIORITIES.map((p) => (
+          {PRIORITIES
+            .filter((priority) => !allowedValues || allowedValues.includes(priority.value))
+            .map((p) => (
             <button
               key={p.value}
               onClick={() => handleSelect(p.value)}

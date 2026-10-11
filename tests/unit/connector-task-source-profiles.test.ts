@@ -52,14 +52,27 @@ describe('connector task source profiles', () => {
     },
   );
 
-  it('models Document Intelligence as status-only write-through', () => {
+  it('writes supported Document Intelligence fields through', () => {
     expect(DOCUMENT_INTELLIGENCE_FIELD_PROFILE.status).toEqual({
       authority: 'source',
       writeBack: 'direct',
     });
     expect(DOCUMENT_INTELLIGENCE_FIELD_PROFILE.title).toEqual({
       authority: 'source',
+      writeBack: 'direct',
+    });
+    expect(DOCUMENT_INTELLIGENCE_FIELD_PROFILE.description).toEqual({
+      authority: 'local',
       writeBack: 'none',
+    });
+    expect(DOCUMENT_INTELLIGENCE_FIELD_PROFILE.dueDate).toEqual({
+      authority: 'source',
+      writeBack: 'direct',
+    });
+    expect(DOCUMENT_INTELLIGENCE_FIELD_PROFILE.priority).toEqual({
+      authority: 'source',
+      writeBack: 'direct',
+      allowedValues: ['critical', 'high', 'medium', 'low'],
     });
     expect(DOCUMENT_INTELLIGENCE_FIELD_PROFILE.effort).toEqual({
       authority: 'local',

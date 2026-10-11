@@ -41,7 +41,14 @@ export interface DocActionPage<T> {
 export interface DocClient {
   fetchJson<T>(path: string, params?: Record<string, string | undefined>): Promise<T>;
   fetchAllActions<T>(status?: string, options?: { includeNotReady?: boolean }): Promise<T[]>;
-  patchActionStatus(sourceId: string, status: DocActionStatus): Promise<void>;
+  patchAction(
+    sourceId: string,
+    updates: {
+      status?: DocActionStatus;
+      due_date?: string | null;
+      title?: string;
+    },
+  ): Promise<void>;
   snoozeAction(sourceId: string, until: string): Promise<void>;
   submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<unknown | null>;
   executeSourceAction(path: string): Promise<unknown | null>;
@@ -176,13 +183,20 @@ export function createDocumentClient(options: DocClientOptions): DocClient {
       return all;
     },
 
-    async patchActionStatus(sourceId: string, status: DocActionStatus): Promise<void> {
+    async patchAction(
+      sourceId: string,
+      updates: {
+        status?: DocActionStatus;
+        due_date?: string | null;
+        title?: string;
+      },
+    ): Promise<void> {
       await request(`/api/action-queue/actions/${encodeURIComponent(sourceId)}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(updates),
       });
     },
 

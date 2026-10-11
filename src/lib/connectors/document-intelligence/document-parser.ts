@@ -154,7 +154,7 @@ export function mapActionToTask(
       actionType: action.action_type,
       category: action.category,
       amount: action.amount,
-      confidence: action.confidence,
+      confidence: normalizeOwlConfidence(action.confidence),
       correspondent: action.correspondent,
       documentId: action.document_id,
       documentTitle: action.document_title,
@@ -195,6 +195,13 @@ function normalizeDocumentCreatedAt(value: string | null | undefined): string | 
   return Number.isFinite(Date.parse(value)) ? value : undefined;
 }
 
+function normalizeOwlConfidence(value: number | null | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+    return undefined;
+  }
+  return value > 1 ? value / 100 : value;
+}
+
 export function mapActionToReviewNotification(
   action: DocAction,
   connectorType: string,
@@ -229,7 +236,7 @@ export function mapActionToReviewNotification(
       actionId: action.id,
       actionType: action.action_type,
       category: action.category,
-      confidence: action.confidence,
+      confidence: normalizeOwlConfidence(action.confidence),
       documentId: action.document_id,
       documentTitle: action.document_title,
       previewUrl: preview.url,

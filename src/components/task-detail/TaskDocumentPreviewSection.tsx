@@ -17,6 +17,7 @@ export interface TaskDocumentPreviewSectionProps {
   dueDate?: string | null;
   className?: string;
   fillAvailableSpace?: boolean;
+  documentFocusedLayout?: boolean;
   sourceActions?: ReactNode;
 }
 
@@ -107,6 +108,7 @@ export function TaskDocumentPreviewSection({
   dueDate,
   className,
   fillAvailableSpace = false,
+  documentFocusedLayout = false,
   sourceActions,
 }: TaskDocumentPreviewSectionProps) {
   const [expanded, setExpanded] = useState(false);
@@ -141,8 +143,9 @@ export function TaskDocumentPreviewSection({
       mode === 'dialog' && 'col-start-2 row-start-6',
       mode === 'workspace' && 'col-start-2 row-start-6',
       fillAvailableSpace && 'border-t-0 pt-0',
+      documentFocusedLayout && 'border-t-0 pt-0',
       className,
-    )}>
+    )} data-document-preview>
       <div className="mb-2 flex items-center gap-2">
         <FileText size={13} className="text-[var(--text-muted)]" />
         <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Document</span>
@@ -150,119 +153,145 @@ export function TaskDocumentPreviewSection({
 
       {isDocumentIntelligence ? (
         <>
-          <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)]">
-            <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5">
-              <div className="flex h-10 w-8 shrink-0 items-center justify-center rounded bg-[var(--surface-3)]">
-                <FileText size={14} className="text-indigo-300" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium text-[var(--text-primary)]">{title}</p>
-                <p className="text-xs text-[var(--text-muted)]">
-                  {metadata.documentType || 'Paperless-ngx document'}
-                </p>
-              </div>
-              {canEmbed && (
-                <button
-                  type="button"
-                  onClick={() => setExpanded(true)}
-                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-2 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-                  aria-label="Expand document preview"
-                >
-                  <Maximize2 size={12} />
-                  <span className="hidden xl:inline">Expand</span>
-                </button>
-              )}
-            </div>
-
-            <div className="relative overflow-hidden border-b border-[var(--border-subtle)] bg-[var(--surface-0)]">
-              {canEmbed ? (
-                <>
-                  <DocumentPreview
-                    url={previewUrl}
-                    title={title}
-                    type={previewType}
-                    trustedPdf={shouldProxyPdf}
-                    fillAvailableSpace={fillAvailableSpace}
-                  />
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/20 to-transparent" />
-                </>
-              ) : (
-                <DocumentPreviewPlaceholder title={title} fillAvailableSpace={fillAvailableSpace} />
-              )}
-            </div>
-
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 px-3 py-3">
-              {metadata.correspondent && (
-                <MetadataItem label="Correspondent" value={metadata.correspondent} />
-              )}
-              {typeof metadata.amount === 'number' && (
-                <MetadataItem label="Amount" value={`$${metadata.amount.toFixed(2)}`} accent />
-              )}
-              {metadata.actionType && (
-                <MetadataItem label="Action" value={metadata.actionType} capitalize />
-              )}
-              {metadata.urgency && (
-                <MetadataItem
-                  label="Priority"
-                  value={{
-                    critical: 'P0 · Critical',
-                    high: 'P1 · High',
-                    medium: 'P2 · Medium',
-                    low: 'P3 · Low',
-                  }[metadata.urgency] || metadata.urgency}
-                />
-              )}
-              {typeof metadata.confidence === 'number' && (
-                <MetadataItem label="OWL confidence" value={`${Math.round(metadata.confidence * 100)}%`} />
-              )}
-              {metadata.reviewState && (
-                <MetadataItem label="Review state" value={metadata.reviewState.replace(/_/g, ' ')} capitalize />
-              )}
-              {formattedDueDate && (
-                <MetadataItem label="Due date" value={formattedDueDate} />
-              )}
-              {metadata.documentId != null && (
-                <MetadataItem label="Document ID" value={String(metadata.documentId)} />
-              )}
-            </dl>
-          </div>
-
           <div className={cn(
-            'mt-2.5 grid gap-2',
-            owlUrl || canEmbed ? 'grid-cols-2' : 'grid-cols-1',
+            documentFocusedLayout
+              && 'grid gap-3 @[860px]:grid-cols-[minmax(0,1.35fr)_minmax(20rem,1fr)] @[860px]:items-start',
           )}>
-            <a
-              href={originalUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-100 hover:text-[var(--text-primary)]"
-            >
-              <ExternalLink size={11} />
-              {paperlessLabel}
-            </a>
-            {owlUrl ? (
-              <a
-                href={owlUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-1.5 text-xs font-medium text-blue-400 transition-colors duration-100 hover:bg-blue-500/20"
-              >
-                <ExternalLink size={11} />
-                Open in OWL
-              </a>
-            ) : canEmbed ? (
-              <button
-                type="button"
-                onClick={() => setExpanded(true)}
-                className="flex items-center justify-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-1.5 text-xs font-medium text-blue-400 transition-colors duration-100 hover:bg-blue-500/20"
-              >
-                <Maximize2 size={11} />
-                Review document
-              </button>
-            ) : null}
-          </div>
+            <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)]">
+              <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5">
+                <div className="flex h-10 w-8 shrink-0 items-center justify-center rounded bg-[var(--surface-3)]">
+                  <FileText size={14} className="text-indigo-300" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium text-[var(--text-primary)]">{title}</p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {metadata.documentType || 'Paperless-ngx document'}
+                  </p>
+                </div>
+                {canEmbed && (
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(true)}
+                    className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-2 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+                    aria-label="Expand document preview"
+                  >
+                    <Maximize2 size={12} />
+                    <span className="hidden xl:inline">Expand</span>
+                  </button>
+                )}
+              </div>
 
-          {sourceActions}
+              <div className={cn(
+                'relative overflow-hidden bg-[var(--surface-0)]',
+                !documentFocusedLayout && 'border-b border-[var(--border-subtle)]',
+              )}>
+                {canEmbed ? (
+                  <>
+                    <DocumentPreview
+                      url={previewUrl}
+                      title={title}
+                      type={previewType}
+                      trustedPdf={shouldProxyPdf}
+                      fillAvailableSpace={fillAvailableSpace || documentFocusedLayout}
+                    />
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/20 to-transparent" />
+                  </>
+                ) : (
+                  <DocumentPreviewPlaceholder
+                    title={title}
+                    fillAvailableSpace={fillAvailableSpace || documentFocusedLayout}
+                  />
+                )}
+              </div>
+            </div>
+
+            <aside
+              aria-label="Document metadata and actions"
+              className={cn(
+                'space-y-3',
+                documentFocusedLayout
+                  && 'order-first @[860px]:order-none @[860px]:sticky @[860px]:top-[5.25rem]',
+              )}
+            >
+              <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-0)]/45">
+                <div className="border-b border-[var(--border-subtle)] px-3 py-2.5">
+                  <h3 className="text-xs font-semibold text-[var(--text-heading)]">Document metadata</h3>
+                  <p className="mt-0.5 text-xs text-[var(--text-muted)]">Details extracted by OWL</p>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-3 px-3 py-3">
+                  {metadata.correspondent && (
+                    <MetadataItem label="Correspondent" value={metadata.correspondent} />
+                  )}
+                  {typeof metadata.amount === 'number' && (
+                    <MetadataItem label="Amount" value={`$${metadata.amount.toFixed(2)}`} accent />
+                  )}
+                  {metadata.actionType && (
+                    <MetadataItem label="Action" value={metadata.actionType} capitalize />
+                  )}
+                  {metadata.urgency && (
+                    <MetadataItem
+                      label="Priority"
+                      value={{
+                        critical: 'P0 · Critical',
+                        high: 'P1 · High',
+                        medium: 'P2 · Medium',
+                        low: 'P3 · Low',
+                      }[metadata.urgency] || metadata.urgency}
+                    />
+                  )}
+                  {typeof metadata.confidence === 'number' && (
+                    <MetadataItem label="OWL confidence" value={`${Math.round(metadata.confidence * 100)}%`} />
+                  )}
+                  {metadata.reviewState && (
+                    <MetadataItem label="Review state" value={metadata.reviewState.replace(/_/g, ' ')} capitalize />
+                  )}
+                  {formattedDueDate && (
+                    <MetadataItem label="Due date" value={formattedDueDate} />
+                  )}
+                  {metadata.documentId != null && (
+                    <MetadataItem label="Document ID" value={String(metadata.documentId)} />
+                  )}
+                </dl>
+              </div>
+
+              <div className={cn(
+                'grid gap-2',
+                owlUrl || canEmbed ? 'grid-cols-2' : 'grid-cols-1',
+              )}>
+                <a
+                  href={originalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-2 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-100 hover:text-[var(--text-primary)]"
+                >
+                  <ExternalLink size={11} />
+                  {paperlessLabel}
+                </a>
+                {owlUrl ? (
+                  <a
+                    href={owlUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-2 text-xs font-medium text-blue-400 transition-colors duration-100 hover:bg-blue-500/20"
+                  >
+                    <ExternalLink size={11} />
+                    Open in OWL
+                  </a>
+                ) : canEmbed ? (
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(true)}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-2 text-xs font-medium text-blue-400 transition-colors duration-100 hover:bg-blue-500/20"
+                  >
+                    <Maximize2 size={11} />
+                    Review document
+                  </button>
+                ) : null}
+              </div>
+
+              {sourceActions}
+            </aside>
+          </div>
 
           {canEmbed && typeof document !== 'undefined' && createPortal(
             <Modal

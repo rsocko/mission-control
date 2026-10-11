@@ -24,6 +24,7 @@ describe('Tyrion sync activity metrics', () => {
       evaluated: 10,
       notificationsCreated: 2,
       notificationsUpdated: 3,
+      notificationsSettled: 1,
       tasksCreated: 1,
       tasksUpdated: 1,
       tasksSettled: 1,
@@ -47,6 +48,11 @@ describe('Tyrion sync activity metrics', () => {
           expect.objectContaining({ key: 'attention-created', value: 2, kind: 'created' }),
           expect.objectContaining({ key: 'attention-updated', value: 3, kind: 'updated' }),
           expect.objectContaining({ key: 'attention-resolved', value: 2, kind: 'resolved' }),
+          expect.objectContaining({
+            key: 'attention-summaries-closed',
+            value: 1,
+            kind: 'resolved',
+          }),
         ]),
       }),
       expect.objectContaining({

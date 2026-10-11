@@ -169,20 +169,23 @@ only in the final transaction after every page validates. Failure or
 cancellation records the attempt but leaves the last successful window
 unchanged.
 
-Tyrion is the first domain-activity producer. It reports transaction records
-synchronized and their exact create/update/remove deltas, attribution
-evaluations, Finance attention summary creation/update/settlement, and any
-locally created or resolved review Tasks. Counts never include transaction,
-account, merchant, or household identities.
+Tyrion is the first domain-activity producer. It reports transactions checked
+and attribution signals evaluated as processing volume, separate from exact
+transaction create/material-update/remove deltas. Finance review summaries and
+Tasks report only exact open/material-change/close or resolve transitions from
+that run; routine last-sync refreshes and already-settled records do not count
+as changes. Counts never include transaction, account, merchant, or household
+identities.
 
 `sync_log.activity` is nullable JSON (`TEXT` JSON in SQLite and `jsonb` in
 PostgreSQL). Null remains the backward-compatible representation for historical
-runs. Sync History's **Has changes** filter includes positive non-snapshot
-activity metrics; **No changes** includes successful rows with neither legacy
-task/push/retention/notification deltas nor domain activity. Rolling back the
-PostgreSQL migration drops `sync_log.activity`; SQLite rollback requires the
-repository-standard table rebuild because SQLite cannot safely preserve every
-table invariant with a portable `DROP COLUMN`.
+runs. Sync History's **Has changes** filter includes positive created, updated,
+removed, or resolved activity metrics. Processed volume and snapshot totals are
+display context only, so **No changes** includes successful scans with neither
+legacy task/push/retention/notification deltas nor domain mutations. Rolling
+back the PostgreSQL migration drops `sync_log.activity`; SQLite rollback
+requires the repository-standard table rebuild because SQLite cannot safely
+preserve every table invariant with a portable `DROP COLUMN`.
 
 The worker defaults to one job at a time. PostgreSQL deployments can increase
 `MC_SYNC_WORKER_CONCURRENCY` for bounded parallel execution across different

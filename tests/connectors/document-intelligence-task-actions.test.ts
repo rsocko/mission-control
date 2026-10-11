@@ -249,6 +249,102 @@ describe('OWL task action service', () => {
     }));
   });
 
+  it.each([
+    {
+      label: 'action type',
+      input: { action: 'correct', field: 'action_type', value: 'sign' } as const,
+      refreshedMetadata: {
+        actionType: 'sign',
+        urgency: undefined,
+        amount: undefined,
+      },
+      expectedMetadata: { actionType: 'sign', urgency: 'high', amount: 50 },
+      expectedFeedback: { feedback_type: 'misclassified', corrected_action_type: 'sign' },
+    },
+    {
+      label: 'urgency',
+      input: { action: 'correct', field: 'urgency', value: 'critical' } as const,
+      refreshedMetadata: {
+        actionType: undefined,
+        urgency: 'critical',
+        amount: undefined,
+      },
+      expectedMetadata: { actionType: 'pay', urgency: 'critical', amount: 50 },
+      expectedFeedback: { feedback_type: 'wrong_urgency', corrected_urgency: 'critical' },
+    },
+    {
+      label: 'amount',
+      input: { action: 'correct', field: 'amount', value: 75 } as const,
+      refreshedMetadata: {
+        actionType: undefined,
+        urgency: undefined,
+        amount: 75,
+      },
+      expectedMetadata: { actionType: 'pay', urgency: 'high', amount: 75 },
+      expectedFeedback: { feedback_type: 'wrong_amount', corrected_amount: 75 },
+    },
+  ])('updates $label while preserving untouched metadata', async ({
+    input,
+    refreshedMetadata,
+    expectedMetadata,
+    expectedFeedback,
+  }) => {
+    submitActionFeedback.mockResolvedValueOnce({
+      title: 'Pay: Acme',
+      description: 'Pay invoice',
+      status: 'todo',
+      priority: input.field === 'urgency' ? input.value : 'high',
+      dueDate: '2026-08-30',
+      snoozedUntil: null,
+      completedAt: null,
+      metadata: refreshedMetadata,
+    });
+
+    const result = await performOwlTaskAction('task-1', input);
+
+    expect(submitActionFeedback).toHaveBeenCalledWith('owl-action-1', expectedFeedback);
+    expect(writes()[0].metadata).toEqual(expect.objectContaining(expectedMetadata));
+    expect(result.metadata).toEqual(expect.objectContaining(expectedMetadata));
+  });
+
+  it('allows an amount correction to explicitly clear the amount', async () => {
+    submitActionFeedback.mockResolvedValueOnce({
+      title: 'Pay: Acme',
+      description: 'Pay invoice',
+      status: 'todo',
+      priority: 'high',
+      dueDate: '2026-08-30',
+      snoozedUntil: null,
+      completedAt: null,
+      metadata: {
+        actionType: undefined,
+        urgency: undefined,
+        amount: null,
+      },
+    });
+
+    const result = await performOwlTaskAction('task-1', {
+      action: 'correct',
+      field: 'amount',
+      value: null,
+    });
+
+    expect(submitActionFeedback).toHaveBeenCalledWith('owl-action-1', {
+      feedback_type: 'wrong_amount',
+      corrected_amount: null,
+    });
+    expect(writes()[0].metadata).toEqual(expect.objectContaining({
+      actionType: 'pay',
+      urgency: 'high',
+      amount: null,
+    }));
+    expect(result.metadata).toEqual(expect.objectContaining({
+      actionType: 'pay',
+      urgency: 'high',
+      amount: null,
+    }));
+  });
+
   it('keeps explicit completion separate from contextual CTA navigation', async () => {
     const result = await performOwlTaskAction('task-1', { action: 'complete' });
 

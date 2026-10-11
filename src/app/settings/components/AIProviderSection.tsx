@@ -376,11 +376,11 @@ function AIProviderSection() {
         </p>
       </div>
 
-      <motion.div variants={fadeSlideUp}>
+      <motion.div variants={fadeSlideUp} data-settings-subsection="execution-destinations" className="scroll-mt-6">
         <ExecutionDestinationsSection />
       </motion.div>
 
-      <motion.div variants={fadeSlideUp} className="border-t border-[var(--border)] pt-6">
+      <motion.div variants={fadeSlideUp} data-settings-subsection="ai-provider" className="scroll-mt-6 border-t border-[var(--border)] pt-6">
         <h3 className="text-base font-semibold text-[var(--text-primary)]">AI Provider</h3>
         <p className="mt-1 text-sm text-[var(--text-tertiary)]">
           Configure the model used for smart priority, daily digest, task triage, and other AI features.
@@ -443,7 +443,7 @@ function AIProviderSection() {
       {/* Config Form */}
       <motion.div variants={fadeSlideUp} className="bg-[var(--surface-1)] border border-[var(--border)] rounded-xl p-5 space-y-5">
         <div>
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Completion route</h3>
+          <h3 data-settings-subsection="completion-route" className="scroll-mt-6 text-sm font-semibold text-[var(--text-primary)]">Completion route</h3>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
             Used for chat, planning, classification, and generated suggestions.
           </p>
@@ -567,7 +567,7 @@ function AIProviderSection() {
 
         <div className="space-y-4 border-t border-[var(--border)] pt-5">
           <div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Embedding route</h3>
+            <h3 data-settings-subsection="embedding-route" className="scroll-mt-6 text-sm font-semibold text-[var(--text-primary)]">Embedding route</h3>
             <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
               Independent from completions. Bifrost to Azure OpenAI is the recommended default.
             </p>
@@ -754,7 +754,7 @@ function AIProviderSection() {
 
       <motion.div variants={fadeSlideUp} className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-5">
         <div>
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Sensitivity routing policies</h3>
+          <h3 data-settings-subsection="sensitivity-policies" className="scroll-mt-6 text-sm font-semibold text-[var(--text-primary)]">Sensitivity routing policies</h3>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
             Mission Control permits only enabled routes. The configured order is forwarded to gateways that support policy-aware fallback.
           </p>

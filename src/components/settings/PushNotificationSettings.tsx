@@ -365,64 +365,67 @@ export function PushNotificationSettings() {
       )}
 
       {/* ─── Global Controls ─── */}
-      <SectionLabel>Global</SectionLabel>
-      <SectionCard>
-        <SettingRow
-          icon={<Bell size={14} />}
-          label="Push Delivery"
-          description="Allow eligible notifications to reach registered devices"
-          trailing={
-            <Toggle
-              enabled={prefs.pushDeliveryEnabled}
-              onChange={(v) => update({ pushDeliveryEnabled: v })}
-              label="Push Delivery"
-            />
-          }
-        />
-        <SettingRow
-          icon={<BellOff size={14} />}
-          label="Do Not Disturb"
-          description="Suppress all push notifications"
-          trailing={
-            <Toggle
-              enabled={prefs.doNotDisturb}
-              onChange={(v) => update({ doNotDisturb: v })}
-              label="Do Not Disturb"
-            />
-          }
-        />
-        <SettingRow
-          icon={<Repeat2 size={14} />}
-          label="Persistent Reminders"
-          description="Emergency stop for all Repeat until done alerts"
-          trailing={
-            <Toggle
-              enabled={prefs.persistentRemindersEnabled}
-              onChange={(v) => update({ persistentRemindersEnabled: v })}
-              label="Persistent Reminders"
-            />
-          }
-        />
-        <SettingRow
-          icon={<Power size={14} />}
-          label="Scheduled Summaries"
-          description={(scheduler?.enabled ?? scheduler?.running)
-            ? 'Morning, triage, and carry-forward summaries are enabled'
-            : 'Morning, triage, and carry-forward summaries are stopped'}
-          trailing={
-            <Toggle
-              enabled={scheduler?.enabled ?? scheduler?.running ?? false}
-              onChange={schedulerBusy ? () => {} : toggleScheduler}
-              label="Scheduled Summaries"
-            />
-          }
-          isLast
-        />
-      </SectionCard>
+      <div data-settings-subsection="notification-delivery" className="scroll-mt-6">
+        <SectionLabel>Global</SectionLabel>
+        <SectionCard>
+          <SettingRow
+            icon={<Bell size={14} />}
+            label="Push Delivery"
+            description="Allow eligible notifications to reach registered devices"
+            trailing={
+              <Toggle
+                enabled={prefs.pushDeliveryEnabled}
+                onChange={(v) => update({ pushDeliveryEnabled: v })}
+                label="Push Delivery"
+              />
+            }
+          />
+          <SettingRow
+            icon={<BellOff size={14} />}
+            label="Do Not Disturb"
+            description="Suppress all push notifications"
+            trailing={
+              <Toggle
+                enabled={prefs.doNotDisturb}
+                onChange={(v) => update({ doNotDisturb: v })}
+                label="Do Not Disturb"
+              />
+            }
+          />
+          <SettingRow
+            icon={<Repeat2 size={14} />}
+            label="Persistent Reminders"
+            description="Emergency stop for all Repeat until done alerts"
+            trailing={
+              <Toggle
+                enabled={prefs.persistentRemindersEnabled}
+                onChange={(v) => update({ persistentRemindersEnabled: v })}
+                label="Persistent Reminders"
+              />
+            }
+          />
+          <SettingRow
+            icon={<Power size={14} />}
+            label="Scheduled Summaries"
+            description={(scheduler?.enabled ?? scheduler?.running)
+              ? 'Morning, triage, and carry-forward summaries are enabled'
+              : 'Morning, triage, and carry-forward summaries are stopped'}
+            trailing={
+              <Toggle
+                enabled={scheduler?.enabled ?? scheduler?.running ?? false}
+                onChange={schedulerBusy ? () => {} : toggleScheduler}
+                label="Scheduled Summaries"
+              />
+            }
+            isLast
+          />
+        </SectionCard>
+      </div>
 
       {/* ─── Triggers ─── */}
-      <SectionLabel>Triggers</SectionLabel>
-      <SectionCard>
+      <div data-settings-subsection="notification-triggers" className="scroll-mt-6">
+        <SectionLabel>Triggers</SectionLabel>
+        <SectionCard>
         <SettingRow
           icon={<Sun size={14} />}
           label="Morning Summary"
@@ -489,11 +492,13 @@ export function PushNotificationSettings() {
           }
           isLast
         />
-      </SectionCard>
+        </SectionCard>
+      </div>
 
       {/* ─── Quiet Hours ─── */}
-      <SectionLabel>Quiet Hours</SectionLabel>
-      <SectionCard>
+      <div data-settings-subsection="notification-quiet-hours" className="scroll-mt-6">
+        <SectionLabel>Quiet Hours</SectionLabel>
+        <SectionCard>
         <SettingRow
           icon={<Moon size={14} />}
           label="Quiet Hours"
@@ -534,7 +539,8 @@ export function PushNotificationSettings() {
             </div>
           </div>
         )}
-      </SectionCard>
+        </SectionCard>
+      </div>
 
       {/* ─── Scheduler Status ─── */}
       {scheduler && scheduler.jobs.length > 0 && (

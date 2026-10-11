@@ -115,7 +115,7 @@ function GeneralSettingsSection() {
       <div className="bg-[var(--surface-2)] rounded-lg border border-[var(--border)] p-5">
         <div className="flex items-center gap-2 mb-3">
           <Clock size={18} className="text-[var(--text-muted)]" />
-          <h3 className="text-sm font-medium text-[var(--text-primary)]">Timezone</h3>
+          <h3 data-settings-subsection="timezone" className="scroll-mt-6 text-sm font-medium text-[var(--text-primary)]">Timezone</h3>
         </div>
         <p className="text-xs text-[var(--text-tertiary)] mb-3">
           Used for calendar events, due dates, scheduling, and the daily timeline. 
@@ -159,7 +159,7 @@ function GeneralSettingsSection() {
           <div>
             <div className="flex items-center gap-2 mb-1">
               <Sparkles size={18} className="text-[var(--text-muted)]" />
-              <h3 className="text-sm font-medium text-[var(--text-primary)]">Completion animation</h3>
+              <h3 data-settings-subsection="completion-feedback" className="scroll-mt-6 text-sm font-medium text-[var(--text-primary)]">Completion animation</h3>
             </div>
             <p className="text-xs text-[var(--text-tertiary)]">
               Show a particle burst when completing tasks. Automatically disabled when your OS has reduced motion enabled.
@@ -194,7 +194,7 @@ function GeneralSettingsSection() {
         <div className="mb-4 flex items-center gap-2">
           <CalendarDays size={18} className="text-[var(--text-muted)]" />
           <div>
-            <h3 className="text-sm font-medium text-[var(--text-primary)]">Quick Add parsing</h3>
+            <h3 data-settings-subsection="quick-add" className="scroll-mt-6 text-sm font-medium text-[var(--text-primary)]">Quick Add parsing</h3>
             <p className="text-xs text-[var(--text-tertiary)]">
               Control date suggestions and whether metadata tokens remain in task titles.
             </p>
@@ -249,13 +249,17 @@ function GeneralSettingsSection() {
       </div>
 
       {/* App badge setting */}
-      <BadgeSettingsCard />
+      <div data-settings-subsection="badges" className="scroll-mt-6">
+        <BadgeSettingsCard />
+      </div>
 
       {/* Navigation tab badge setting */}
       <NavBadgeSettingsCard />
 
       {/* Capture destination & inbox settings */}
-      <CaptureDestinationSection />
+      <div data-settings-subsection="capture" className="scroll-mt-6">
+        <CaptureDestinationSection />
+      </div>
       <InboxListsSection />
 
       {/* Dopamine Menu settings */}
@@ -346,7 +350,7 @@ function DopamineMenuSettingsCard() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Zap size={18} className="text-[var(--text-muted)]" />
-            <h3 className="text-sm font-medium text-[var(--text-primary)]">Dopamine Menu</h3>
+            <h3 data-settings-subsection="dopamine-menu" className="scroll-mt-6 text-sm font-medium text-[var(--text-primary)]">Dopamine Menu</h3>
           </div>
           <p className="text-xs text-[var(--text-tertiary)]">
             Show a reward picker after completing tasks. Celebrate progress and take healthy breaks.

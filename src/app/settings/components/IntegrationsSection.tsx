@@ -301,7 +301,7 @@ function IntegrationsSection() {
                   <Puzzle size={18} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">n8n</h3>
+                  <h3 data-settings-subsection="n8n" className="scroll-mt-6 text-sm font-semibold text-[var(--text-primary)]">n8n</h3>
                   <p className="text-xs text-[var(--text-tertiary)]">Use Mission Control as both a webhook source and automation target.</p>
                 </div>
               </div>
@@ -376,7 +376,7 @@ function IntegrationsSection() {
                   <WebhookIcon size={18} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">Webhook delivery</h3>
+                  <h3 data-settings-subsection="webhook-delivery" className="scroll-mt-6 text-sm font-semibold text-[var(--text-primary)]">Webhook delivery</h3>
                   <p className="text-xs text-[var(--text-tertiary)]">Operate system-managed intake and dispatch Mission Control events to external listeners.</p>
                 </div>
               </div>
@@ -663,7 +663,7 @@ function IntegrationsSection() {
                   <ArrowDownToLine size={18} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">Custom inbound endpoints</h3>
+                  <h3 data-settings-subsection="inbound-endpoints" className="scroll-mt-6 text-sm font-semibold text-[var(--text-primary)]">Custom inbound endpoints</h3>
                   <p className="text-xs text-[var(--text-tertiary)]">Generic payload mapping for n8n, IFTTT, Home Assistant, and other external systems.</p>
                 </div>
               </div>

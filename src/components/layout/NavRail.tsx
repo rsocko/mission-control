@@ -32,6 +32,7 @@ import {
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
+  Clock3,
   RefreshCw,
   ListChecks,
 } from 'lucide-react';
@@ -163,6 +164,7 @@ interface NavRailProps {
   syncStatus?: ConnectorHealthInfo[];
   syncProgress?: SyncProgress;
   syncProgresses?: SyncProgress[];
+  queuedSyncConnectorIds?: string[];
   onSyncConnector?: (connectorId: string) => void;
   showSyncBanner?: boolean;
   onShowSyncBannerChange?: (show: boolean) => void;
@@ -181,6 +183,7 @@ export function NavRail({
   syncStatus = [],
   syncProgress,
   syncProgresses = [],
+  queuedSyncConnectorIds = [],
   onSyncConnector,
   showSyncBanner = true,
   onShowSyncBannerChange,
@@ -571,6 +574,7 @@ export function NavRail({
             const isHealthy = status.status === 'healthy';
             const isThisConnectorSyncing = isSyncing
               && displayedSyncProgresses.some((item) => item.connectorId === status.id);
+            const isThisConnectorQueued = queuedSyncConnectorIds.includes(status.id);
             return (
               <div key={status.id} className="flex items-center justify-between gap-2 text-xs">
                 <div className="flex min-w-0 items-center gap-1.5">
@@ -585,7 +589,12 @@ export function NavRail({
                   <span className="truncate text-[var(--text-secondary)]">{status.name}</span>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-1">
-                  {status.lastSyncAt ? (
+                  {isThisConnectorQueued ? (
+                    <span className="flex items-center gap-1 text-amber-400">
+                      <Clock3 size={10} aria-hidden="true" />
+                      <span>Queued</span>
+                    </span>
+                  ) : status.lastSyncAt ? (
                     <span
                       className={cn(
                         'flex items-center gap-1',
@@ -604,9 +613,13 @@ export function NavRail({
                   {onSyncConnector && (
                     <button
                       type="button"
-                      aria-label={`Sync ${status.name}`}
-                      title={`Sync ${status.name}`}
-                      disabled={isSyncing}
+                      aria-label={isThisConnectorQueued
+                        ? `${status.name} sync queued`
+                        : `Sync ${status.name}`}
+                      title={isThisConnectorQueued
+                        ? `${status.name} sync queued`
+                        : `Sync ${status.name}`}
+                      disabled={isThisConnectorSyncing || isThisConnectorQueued}
                       onClick={() => onSyncConnector(status.id)}
                       className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-3)] hover:text-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 disabled:cursor-not-allowed disabled:opacity-45"
                     >

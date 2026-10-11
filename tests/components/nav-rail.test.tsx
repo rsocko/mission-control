@@ -17,6 +17,7 @@ function renderNavRail({
   counts,
   syncProgress,
   syncProgresses,
+  queuedSyncConnectorIds,
   onSyncConnector,
   showSyncBanner,
   onShowSyncBannerChange,
@@ -27,6 +28,7 @@ function renderNavRail({
   counts?: NavigationCounts;
   syncProgress?: SyncProgress;
   syncProgresses?: SyncProgress[];
+  queuedSyncConnectorIds?: string[];
   onSyncConnector?: (connectorId: string) => void;
   showSyncBanner?: boolean;
   onShowSyncBannerChange?: (show: boolean) => void;
@@ -41,6 +43,7 @@ function renderNavRail({
         counts={counts}
         syncProgress={syncProgress}
         syncProgresses={syncProgresses}
+        queuedSyncConnectorIds={queuedSyncConnectorIds}
         onSyncConnector={onSyncConnector}
         showSyncBanner={showSyncBanner}
         onShowSyncBannerChange={onShowSyncBannerChange}
@@ -553,10 +556,11 @@ describe('NavRail', () => {
     expect(onSyncConnector).toHaveBeenCalledWith('connector-1');
   });
 
-  it('disables connector sync controls and spins the active connector during a sync', () => {
+  it('keeps other connector sync controls available while one connector is syncing', () => {
+    const onSyncConnector = vi.fn();
     renderNavRail({
       isSyncing: true,
-      onSyncConnector: vi.fn(),
+      onSyncConnector,
       syncProgress: {
         ...initialProgress,
         isSyncing: true,
@@ -587,7 +591,46 @@ describe('NavRail', () => {
     const activeButton = screen.getByRole('button', { name: 'Sync GitHub' });
     expect(activeButton).toBeDisabled();
     expect(activeButton.querySelector('svg')).toHaveClass('animate-spin', 'text-blue-400');
-    expect(screen.getByRole('button', { name: 'Sync To Do' })).toBeDisabled();
+    const availableButton = screen.getByRole('button', { name: 'Sync To Do' });
+    expect(availableButton).toBeEnabled();
+    fireEvent.click(availableButton);
+    expect(onSyncConnector).toHaveBeenCalledWith('connector-2');
+  });
+
+  it('shows a queued connector and prevents duplicate requests', () => {
+    renderNavRail({
+      isSyncing: true,
+      queuedSyncConnectorIds: ['connector-2'],
+      onSyncConnector: vi.fn(),
+      syncProgress: {
+        ...initialProgress,
+        isSyncing: true,
+        connectorId: 'connector-1',
+      },
+      syncStatus: [
+        {
+          id: 'connector-1',
+          type: 'github',
+          name: 'GitHub',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: '2026-09-10T22:00:00.000Z',
+        },
+        {
+          id: 'connector-2',
+          type: 'mstodo',
+          name: 'To Do',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: '2026-09-10T22:00:00.000Z',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync status' }));
+
+    expect(screen.getByText('Queued')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'To Do sync queued' })).toBeDisabled();
   });
 
   it('shows inline sync details whenever the navigation is expanded', () => {

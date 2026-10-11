@@ -79,6 +79,51 @@ describe('useSyncStreamConnection history refresh', () => {
     unmount();
   });
 
+  it('queues a different connector while a sync is already active', async () => {
+    vi.stubGlobal('EventSource', MockEventSource);
+    const pendingResponse = new Promise<never>(() => {});
+    const fetchMock = vi.fn(() => pendingResponse);
+    vi.stubGlobal('fetch', fetchMock);
+    const { result, unmount } = renderHook(() => useSyncStreamConnection(), {
+      wrapper: createQueryWrapper(),
+    });
+
+    act(() => {
+      MockEventSource.instances[0].emit('sync:start', {
+        type: 'sync:start',
+        connectorId: 'github-1',
+        connectorName: 'GitHub',
+        phase: 'tasks',
+      });
+      result.current.triggerSync('todo-1');
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectorId: 'todo-1' }),
+      });
+      expect(result.current.queuedConnectorIds).toEqual(['todo-1']);
+    });
+
+    act(() => {
+      result.current.triggerSync('todo-1');
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      MockEventSource.instances[0].emit('sync:start', {
+        type: 'sync:start',
+        connectorId: 'todo-1',
+        connectorName: 'Microsoft To Do',
+        phase: 'tasks',
+      });
+    });
+    expect(result.current.queuedConnectorIds).toEqual([]);
+    unmount();
+  });
+
   it('does not poll sync status while the SSE connection is healthy', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('EventSource', MockEventSource);

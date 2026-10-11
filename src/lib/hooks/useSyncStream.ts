@@ -43,6 +43,8 @@ export interface SyncStreamContextValue {
   progress: SyncProgress;
   /** Per-connector progress for every sync currently in flight. */
   activeProgresses: SyncProgress[];
+  /** Connector sync requests accepted by the client but not started yet. */
+  queuedConnectorIds: string[];
   /** Trigger an incremental sync, optionally scoped to one connector. */
   triggerSync: (connectorId?: string) => void;
 }
@@ -66,6 +68,7 @@ const initialProgress: SyncProgress = {
 const SyncStreamContext = createContext<SyncStreamContextValue>({
   progress: initialProgress,
   activeProgresses: [],
+  queuedConnectorIds: [],
   triggerSync: () => {},
 });
 
@@ -98,7 +101,9 @@ export function useSyncStreamConnection() {
   const queryClient = useQueryClient();
   const [progress, setProgress] = useState<SyncProgress>(initialProgress);
   const [activeProgresses, setActiveProgresses] = useState<SyncProgress[]>([]);
+  const [queuedConnectorIds, setQueuedConnectorIds] = useState<string[]>([]);
   const activeProgressesRef = useRef<Record<string, SyncProgress>>({});
+  const pendingManualSyncsRef = useRef(new Set<string>());
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -309,6 +314,9 @@ export function useSyncStreamConnection() {
         ...activeProgressesRef.current,
         [data.connectorId]: connectorProgress,
       };
+      setQueuedConnectorIds((previous) => (
+        previous.filter((connectorId) => connectorId !== data.connectorId)
+      ));
       setActiveProgresses(Object.values(activeProgressesRef.current));
       setProgress((prev) => ({
         ...connectorProgress,
@@ -535,24 +543,41 @@ export function useSyncStreamConnection() {
   }, [connect, stopFallbackPolling]);
 
   const triggerSync = useCallback(async (connectorId?: string) => {
-    if (progress.isSyncing) return;
-    // Immediately show syncing state so banner + bottom-left react instantly
-    setProgress((prev) => ({
-      ...prev,
-      isSyncing: true,
-      phase: null,
-      connectorId: connectorId ?? null,
-      connectorName: null,
-      currentList: null,
-      listIndex: 0,
-      totalLists: 0,
-      totalTasks: 0,
-      parentTasks: 0,
-      subtasks: 0,
-      listsFound: 0,
-      byStatus: { todo: 0, done: 0 },
-    }));
-    knownSyncingRef.current = true;
+    const requestKey = connectorId ?? '__all__';
+    const joiningExistingSync = knownSyncingRef.current;
+    if (
+      pendingManualSyncsRef.current.has(requestKey)
+      || (connectorId && activeProgressesRef.current[connectorId])
+      || (!connectorId && joiningExistingSync)
+    ) {
+      return;
+    }
+
+    pendingManualSyncsRef.current.add(requestKey);
+    if (connectorId && joiningExistingSync) {
+      setQueuedConnectorIds((previous) => (
+        previous.includes(connectorId) ? previous : [...previous, connectorId]
+      ));
+    } else {
+      // Immediately show syncing state so banner + bottom-left react instantly.
+      setProgress((prev) => ({
+        ...prev,
+        isSyncing: true,
+        phase: null,
+        connectorId: connectorId ?? null,
+        connectorName: null,
+        currentList: null,
+        listIndex: 0,
+        totalLists: 0,
+        totalTasks: 0,
+        parentTasks: 0,
+        subtasks: 0,
+        listsFound: 0,
+        byStatus: { todo: 0, done: 0 },
+      }));
+      knownSyncingRef.current = true;
+    }
+
     try {
       const res = await fetch('/api/sync', {
         method: 'POST',
@@ -562,8 +587,10 @@ export function useSyncStreamConnection() {
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         toast.error(`Sync failed: ${data.error || res.statusText}`);
-        knownSyncingRef.current = false;
-        setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
+        if (!joiningExistingSync) {
+          knownSyncingRef.current = false;
+          setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
+        }
         return;
       }
       const data = await res.json().catch(() => ({ results: [] }));
@@ -572,8 +599,10 @@ export function useSyncStreamConnection() {
         toast('No sources configured — add a connector in Settings to sync tasks', {
           duration: 4000,
         });
-        knownSyncingRef.current = false;
-        setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
+        if (!joiningExistingSync) {
+          knownSyncingRef.current = false;
+          setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
+        }
         return;
       }
       // SSE stream handles per-connector progress and the final toast via
@@ -581,16 +610,25 @@ export function useSyncStreamConnection() {
       window.dispatchEvent(new CustomEvent('mission-control:sync-complete'));
     } catch {
       toast.error('Sync request failed — check your connection');
-      knownSyncingRef.current = false;
-      setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
+      if (!joiningExistingSync) {
+        knownSyncingRef.current = false;
+        setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
+      }
+    } finally {
+      pendingManualSyncsRef.current.delete(requestKey);
+      if (connectorId) {
+        setQueuedConnectorIds((previous) => (
+          previous.filter((queuedConnectorId) => queuedConnectorId !== connectorId)
+        ));
+      }
     }
     // Note: isSyncing is reset by the SSE sync:complete / sync:error handler,
     // not here — the POST resolving doesn't mean the SSE stream is done.
-  }, [progress.isSyncing]);
+  }, []);
 
   const contextValue = useMemo<SyncStreamContextValue>(
-    () => ({ progress, activeProgresses, triggerSync }),
-    [activeProgresses, progress, triggerSync],
+    () => ({ progress, activeProgresses, queuedConnectorIds, triggerSync }),
+    [activeProgresses, progress, queuedConnectorIds, triggerSync],
   );
 
   return contextValue;

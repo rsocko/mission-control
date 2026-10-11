@@ -31,6 +31,14 @@ function normalizePreviewUrl(value: string | undefined): string | null {
   }
 }
 
+function formatOwlConfidence(value: number | undefined): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+    return null;
+  }
+  const normalized = value > 1 ? value / 100 : value;
+  return `${Math.round(normalized * 100)}%`;
+}
+
 function DocumentPreview({
   url,
   title,
@@ -135,6 +143,7 @@ export function TaskDocumentPreviewSection({
   const formattedDueDate = dueDate
     ? parseLocalDate(dueDate)?.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
     : null;
+  const formattedConfidence = formatOwlConfidence(metadata.confidence);
 
   return (
     <div className={cn(
@@ -239,8 +248,8 @@ export function TaskDocumentPreviewSection({
                       }[metadata.urgency] || metadata.urgency}
                     />
                   )}
-                  {typeof metadata.confidence === 'number' && (
-                    <MetadataItem label="OWL confidence" value={`${Math.round(metadata.confidence * 100)}%`} />
+                  {formattedConfidence && (
+                    <MetadataItem label="OWL confidence" value={formattedConfidence} />
                   )}
                   {metadata.reviewState && (
                     <MetadataItem label="Review state" value={metadata.reviewState.replace(/_/g, ' ')} capitalize />

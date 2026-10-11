@@ -104,6 +104,16 @@ describe('mapActionToTask', () => {
     expect(task.metadata.documentTitle).toBe('Invoice #123');
   });
 
+  it('normalizes whole-number OWL confidence percentages', () => {
+    const task = mapActionToTask(makeAction({ confidence: 80 }), CONNECTOR_TYPE, CONNECTOR_ID);
+    expect(task.metadata.confidence).toBe(0.8);
+  });
+
+  it('preserves fractional OWL confidence values', () => {
+    const task = mapActionToTask(makeAction({ confidence: 0.8 }), CONNECTOR_TYPE, CONNECTOR_ID);
+    expect(task.metadata.confidence).toBe(0.8);
+  });
+
   it('uses the Paperless document creation date while preserving the OWL action timestamp', () => {
     const task = mapActionToTask(
       makeAction({

@@ -312,7 +312,11 @@ for (const file of workflowFiles) {
       );
     }
     assert.deepEqual(impeccable.needs, ['changes'], 'Impeccable must depend on change classification');
-    assert.equal(impeccable.if, 'always()', 'Impeccable must retain its required check context');
+    assert.equal(
+      impeccable.if,
+      '${{ !cancelled() }}',
+      'Impeccable must retain its required check context without blocking superseding runs',
+    );
     assert.equal(impeccable.name, 'Impeccable integration', 'Impeccable must retain its required name');
     assert.ok(
       impeccable.steps?.some((step) =>
@@ -332,7 +336,11 @@ for (const file of workflowFiles) {
     );
     for (const [jobName, job] of Object.entries({ lint, 'production-build': productionBuild })) {
       assert.deepEqual(job.needs, ['changes'], `${jobName} must depend on change classification`);
-      assert.equal(job.if, 'always()', `${jobName} must retain its required check context`);
+      assert.equal(
+        job.if,
+        '${{ !cancelled() }}',
+        `${jobName} must retain its required check context without blocking superseding runs`,
+      );
       const install = job.steps?.find((step) => step.run === 'npm ci --no-audit --no-fund');
       assert.ok(
         install?.if?.includes("needs.changes.result != 'success'") &&
@@ -363,7 +371,7 @@ for (const file of workflowFiles) {
       'PostgreSQL route sentinel must retain its stable check name',
     );
     for (const invariant of [
-      'always()',
+      '!cancelled()',
       "needs.changes.result != 'success'",
       expensiveStepCondition,
     ]) {
@@ -395,7 +403,7 @@ for (const file of workflowFiles) {
     );
     for (const [jobName, job] of Object.entries({ 'unit-test-shards': shards })) {
       for (const invariant of [
-        'always()',
+        '!cancelled()',
         "needs.changes.result != 'success'",
         expensiveStepCondition,
       ]) {
@@ -424,7 +432,7 @@ for (const file of workflowFiles) {
       'PostgreSQL integration worker must not claim the required check name',
     );
     for (const invariant of [
-      'always()',
+      '!cancelled()',
       "needs.changes.result != 'success'",
       expensiveStepCondition,
     ]) {
@@ -662,7 +670,11 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     for (const [jobName, gate] of Object.entries(aggregateGates)) {
       assert.equal(gate.job.name, gate.name, `${jobName} must retain its stable check name`);
-      assert.equal(gate.job.if, 'always()', `${jobName} must materialize after skipped or failed needs`);
+      assert.equal(
+        gate.job.if,
+        '${{ !cancelled() }}',
+        `${jobName} must materialize after skipped or failed needs without blocking superseding runs`,
+      );
       assert.deepEqual(gate.job.needs, gate.needs, `${jobName} must depend on classification and its validation`);
       assert.equal(gate.job.steps?.length, 1, `${jobName} must remain a cheap summary gate`);
       const [step] = gate.job.steps;

@@ -239,7 +239,7 @@ describe('Document Intelligence Importer', () => {
       ).rejects.toThrow('Document intelligence import failed: 503');
     });
 
-    it('persists oversized remote responses in bounded batches without dropping items', async () => {
+    it('paginates remote responses and persists bounded batches without dropping items', async () => {
       const actions = Array.from({ length: 105 }, (_, index) => ({
         id: String(index),
         document_id: index,
@@ -250,13 +250,20 @@ describe('Document Intelligence Importer', () => {
         status: 'pending',
         created_at: '2026-07-20T10:00:00',
       }));
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(actions),
-        headers: new Headers(),
+      global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        const offset = Number(url.searchParams.get('offset'));
+        const limit = Number(url.searchParams.get('limit'));
+        return new Response(
+          JSON.stringify(actions.slice(offset, offset + limit)),
+          { status: 200 },
+        );
       });
-      const { importDocumentIntelligenceActions, MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE } =
+      const {
+        importDocumentIntelligenceActions,
+        DOCUMENT_INTELLIGENCE_PAGE_SIZE,
+        MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE,
+      } =
         await import('@/lib/triage/importers/document-intelligence-importer');
 
       const summary = await importDocumentIntelligenceActions({
@@ -268,7 +275,17 @@ describe('Document Intelligence Importer', () => {
       );
       expect(mockBatchIngest.mock.calls[0][0]).toHaveLength(MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE);
       expect(mockBatchIngest.mock.calls[1][0]).toHaveLength(5);
-      expect(summary).toMatchObject({ imported: 105, skipped: 0, errors: [] });
+      const requestedUrls = vi.mocked(global.fetch).mock.calls.map(([input]) => new URL(String(input)));
+      expect(requestedUrls.map((url) => url.searchParams.get('offset'))).toEqual(['0', '100']);
+      expect(requestedUrls.every(
+        (url) => url.searchParams.get('limit') === String(DOCUMENT_INTELLIGENCE_PAGE_SIZE),
+      )).toBe(true);
+      expect(summary).toMatchObject({
+        imported: 105,
+        skipped: 0,
+        errors: [],
+        pagesProcessed: 2,
+      });
     });
   });
 

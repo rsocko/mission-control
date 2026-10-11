@@ -30,6 +30,7 @@ export interface DocIntelligenceImportOptions {
 
 const DEFAULT_DI_URL = 'http://localhost:8200';
 export const MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE = 100;
+export const DOCUMENT_INTELLIGENCE_PAGE_SIZE = 100;
 
 /**
  * Resolve DI connection settings from env vars.
@@ -42,16 +43,13 @@ export function resolveDocIntelligenceSettings(): DocIntelligenceImportOptions {
 }
 
 /**
- * Import pending DI actions into the triage queue (single fetch, no pagination).
+ * Import every pending DI action into the triage queue using bounded offset pages.
  */
 export async function importDocumentIntelligenceActions(
   options?: DocIntelligenceImportOptions,
 ): Promise<TriageImportSummary> {
   const settings = options || resolveDocIntelligenceSettings();
   const baseUrl = (settings.baseUrl || 'http://localhost:8200').replace(/\/$/, '');
-
-  const url = new URL(`${baseUrl}/api/action-queue/actions`);
-  url.searchParams.set('status', 'pending');
 
   const headers: Record<string, string> = {
     Accept: 'application/json',
@@ -61,81 +59,101 @@ export async function importDocumentIntelligenceActions(
     headers['Authorization'] = `Bearer ${settings.apiKey}`;
   }
 
-  const response = await fetchWithRateLimit(url, { headers });
-
-  if (!response.ok) {
-    throw remoteResponseError('Document intelligence import', response);
-  }
-
-  const payload = await response.json();
-  if (!Array.isArray(payload)) {
-    throw new Error('Document intelligence import returned malformed data');
-  }
-  const actions = payload as DocAction[];
   const summary: TriageImportSummary = {
     imported: 0,
     skipped: 0,
     errors: [],
+    pagesProcessed: 0,
   };
+  const seenPages = new Set<string>();
+  let offset = 0;
 
-  const imports: TriageImportInput[] = [];
-  for (const action of actions) {
-    if (!action.id || !action.document_title) {
-      summary.skipped += 1;
-      summary.errors.push(`Skipped DI action missing id or document_title`);
-      continue;
+  while (true) {
+    const url = new URL(`${baseUrl}/api/action-queue/actions`);
+    url.searchParams.set('status', 'pending');
+    url.searchParams.set('limit', String(DOCUMENT_INTELLIGENCE_PAGE_SIZE));
+    url.searchParams.set('offset', String(offset));
+
+    const response = await fetchWithRateLimit(url, { headers });
+    if (!response.ok) {
+      throw remoteResponseError('Document intelligence import', response);
     }
-    if (!isActionReady(action)) {
-      summary.skipped += 1;
-      continue;
+
+    const payload = await response.json();
+    if (!Array.isArray(payload)) {
+      throw new Error('Document intelligence import returned malformed data');
+    }
+    const actions = payload as DocAction[];
+    summary.pagesProcessed = (summary.pagesProcessed ?? 0) + 1;
+
+    const pageKey = actions.map((action) => action.id).join('\u0000');
+    if (actions.length > 0 && seenPages.has(pageKey)) {
+      throw new Error('Document intelligence import pagination repeated a page');
+    }
+    seenPages.add(pageKey);
+
+    const imports: TriageImportInput[] = [];
+    for (const action of actions) {
+      if (!action.id || !action.document_title) {
+        summary.skipped += 1;
+        summary.errors.push('Skipped DI action missing id or document_title');
+        continue;
+      }
+      if (!isActionReady(action)) {
+        summary.skipped += 1;
+        continue;
+      }
+
+      const documentUrl =
+        action.document_url ||
+        (settings.paperlessBaseUrl
+          ? `${settings.paperlessBaseUrl}/documents/${action.document_id}/details`
+          : '');
+      const primaryAction = resolveActionCta(action);
+
+      imports.push({
+        sourcePlatform: 'document-intelligence',
+        sourceId: `docintel-action-${action.id}`,
+        sourceUrl: documentUrl,
+        canonicalUrl: documentUrl,
+        title: buildTitle(action),
+        description: action.summary,
+        capturedAt: action.created_at || undefined,
+        rawMetadata: {
+          actionType: action.action_type,
+          amount: action.amount,
+          correspondent: action.correspondent,
+          documentId: action.document_id,
+          documentTitle: action.document_title,
+          urgency: action.urgency,
+          dueDate: action.due_date,
+          category: action.category,
+          actionReady: isActionReady(action),
+          reviewState: action.review_state,
+          reviewUrl: resolveReviewUrl(action, null),
+          primaryActionId: primaryAction?.id,
+          primaryActionLabel: primaryAction?.label,
+          primaryActionUrl: primaryAction?.url,
+          connectorType: 'document-intelligence',
+        },
+      });
     }
 
-    const documentUrl =
-      action.document_url ||
-      (settings.paperlessBaseUrl
-        ? `${settings.paperlessBaseUrl}/documents/${action.document_id}/details`
-        : '');
-    const primaryAction = resolveActionCta(action);
-
-    imports.push({
-      sourcePlatform: 'document-intelligence',
-      sourceId: `docintel-action-${action.id}`,
-      sourceUrl: documentUrl,
-      canonicalUrl: documentUrl,
-      title: buildTitle(action),
-      description: action.summary,
-      capturedAt: action.created_at || undefined,
-      rawMetadata: {
-        actionType: action.action_type,
-        amount: action.amount,
-        correspondent: action.correspondent,
-        documentId: action.document_id,
-        documentTitle: action.document_title,
-        urgency: action.urgency,
-        dueDate: action.due_date,
-        category: action.category,
-        actionReady: isActionReady(action),
-        reviewState: action.review_state,
-        reviewUrl: resolveReviewUrl(action, null),
-        primaryActionId: primaryAction?.id,
-        primaryActionLabel: primaryAction?.label,
-        primaryActionUrl: primaryAction?.url,
-        connectorType: 'document-intelligence',
-      },
-    });
-  }
-
-  for (
-    let offset = 0;
-    offset < imports.length;
-    offset += MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE
-  ) {
-    const outcomes = await ingestTriageImports(
-      imports.slice(offset, offset + MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE),
-    );
-    for (const outcome of outcomes) {
-      summary[outcome.status === 'imported' ? 'imported' : 'skipped'] += 1;
+    for (
+      let batchOffset = 0;
+      batchOffset < imports.length;
+      batchOffset += MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE
+    ) {
+      const outcomes = await ingestTriageImports(
+        imports.slice(batchOffset, batchOffset + MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE),
+      );
+      for (const outcome of outcomes) {
+        summary[outcome.status === 'imported' ? 'imported' : 'skipped'] += 1;
+      }
     }
+
+    if (actions.length < DOCUMENT_INTELLIGENCE_PAGE_SIZE) break;
+    offset += actions.length;
   }
 
   return summary;
@@ -143,7 +161,6 @@ export async function importDocumentIntelligenceActions(
 
 /**
  * Full sync: fetch all pending actions and ingest them.
- * DI doesn't paginate its action-queue, so this is a single-pass operation.
  */
 export async function importAllDocumentIntelligenceActions(
   options?: DocIntelligenceImportOptions & { incremental?: boolean },
@@ -154,7 +171,7 @@ export async function importAllDocumentIntelligenceActions(
 
   try {
     const summary = await importDocumentIntelligenceActions(options);
-    result.pagesProcessed = 1;
+    result.pagesProcessed = summary.pagesProcessed ?? 1;
     result.imported = summary.imported;
     result.skipped = summary.skipped;
     result.errors = summary.errors;

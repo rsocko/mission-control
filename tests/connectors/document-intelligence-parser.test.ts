@@ -15,6 +15,7 @@ import {
   isTaskAction,
   isSinceMatch,
   resolveActionCta,
+  resolveReviewUrl,
 } from '@/lib/connectors/document-intelligence/document-parser';
 import type {
   DocAction,
@@ -324,6 +325,29 @@ describe('OWL action readiness and review', () => {
       ...action,
       review_state: 'resolved_no_action',
     })).toBe(false);
+  });
+
+  it('prefers the canonical action URL and safely resolves OWL-relative review links', () => {
+    const action = makeAction({
+      action_url: '#/actions/306',
+      needs_review_url: '/legacy/review/306',
+    });
+
+    expect(resolveReviewUrl(
+      action,
+      'https://fallback.example/actions/306',
+      'https://owl.example',
+    )).toBe('https://owl.example/#/actions/306');
+    expect(resolveReviewUrl(
+      makeAction({ action_url: '//attacker.example/actions/306', needs_review_url: null }),
+      null,
+      'https://owl.example',
+    )).toBeNull();
+    expect(resolveReviewUrl(
+      makeAction({ action_url: 'https://attacker.example/actions/306', needs_review_url: null }),
+      null,
+      'https://owl.example',
+    )).toBeNull();
   });
 
   it('rejects unsafe CTA URLs and accepts safe extracted action links', () => {

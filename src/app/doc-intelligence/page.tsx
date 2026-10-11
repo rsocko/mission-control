@@ -28,6 +28,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
+import { loadConnectorData, requestConnectorSync } from '@/lib/connectors/client';
 import { fetchAllTasks } from '@/lib/tasks/fetch-all';
 import { AgentAttribution } from '@/components/domains/AgentAttribution';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
@@ -192,6 +193,7 @@ export default function DocIntelligencePage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [reviewAlerts, setReviewAlerts] = useState<Array<{ id: string; title: string; reviewUrl: string }>>([]);
   const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [detailMode, setDetailMode] = useState<Exclude<TaskDetailMode, 'mobile'>>('panel');
@@ -224,23 +226,27 @@ export default function DocIntelligencePage() {
     return () => cancelAnimationFrame(restoreFrame);
   }, []);
 
+  const loadDocumentData = useCallback(async () => {
+    const [allTasks, alerts] = await Promise.all([
+      fetchAllTasks<DocumentTask>(
+        '/api/tasks?source=document-intelligence&openOnly=true&sortBy=dueDate&sortDirection=asc',
+      ),
+      fetchAllReviewAlerts().catch(() => {
+        toast.error('OWL review alerts could not be loaded');
+        return [];
+      }),
+    ]);
+    setTasks(allTasks.filter((task) => parseDocumentTaskMetadata(task.metadata).actionReady !== false));
+    setReviewAlerts(alerts);
+  }, []);
+
   const fetchTasks = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
     setLoadError(null);
 
     try {
-      const [allTasks, alerts] = await Promise.all([
-        fetchAllTasks<DocumentTask>(
-          '/api/tasks?source=document-intelligence&openOnly=true&sortBy=dueDate&sortDirection=asc',
-        ),
-        fetchAllReviewAlerts().catch(() => {
-          toast.error('OWL review alerts could not be loaded');
-          return [];
-        }),
-      ]);
-      setTasks(allTasks);
-      setReviewAlerts(alerts);
+      await loadDocumentData();
     } catch {
       setLoadError('OWL document actions could not be loaded. Check the connector and try again.');
       toast.error('OWL could not load Paperless-ngx document actions');
@@ -248,10 +254,49 @@ export default function DocIntelligencePage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [loadDocumentData]);
+
+  const syncAndRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setRefreshError(null);
+
+    let syncCompleted = false;
+    try {
+      const { connectors } = await loadConnectorData();
+      const owlConnectors = connectors.filter((connector) => (
+        connector.type === 'document-intelligence' && connector.enabled
+      ));
+      if (owlConnectors.length === 0) {
+        throw new Error('No enabled OWL connector is configured');
+      }
+      for (const connector of owlConnectors) {
+        const response = await requestConnectorSync({ connectorId: connector.id });
+        const payload = await response.json().catch(() => null) as {
+          results?: Array<{ success?: boolean; errors?: string[] }>;
+        } | null;
+        const failedResult = payload?.results?.find((result) => result.success === false);
+        if (failedResult) {
+          throw new Error(failedResult.errors?.join('; ') || 'OWL reported an unsuccessful sync');
+        }
+      }
+      syncCompleted = true;
+      await loadDocumentData();
+      toast.success('OWL sync completed');
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Unknown sync error';
+      const message = syncCompleted
+        ? `OWL sync completed, but refreshed document actions could not be loaded: ${detail}. Existing actions remain visible.`
+        : `OWL sync failed: ${detail}. Displayed document actions were not reloaded.`;
+      setRefreshError(message);
+      toast.error(message);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadDocumentData, refreshing]);
 
   useEffect(() => {
-    // Initial connector synchronization is intentionally client-driven for this interactive workspace.
+    // Initial workspace data is loaded client-side for this interactive view.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchTasks();
   }, [fetchTasks]);
@@ -389,17 +434,29 @@ export default function DocIntelligencePage() {
           </div>
           <button
             type="button"
-            onClick={() => void fetchTasks(true)}
+            onClick={() => void syncAndRefresh()}
             disabled={refreshing}
+            aria-label={refreshing ? 'Syncing OWL document actions' : 'Sync OWL document actions'}
+            aria-busy={refreshing}
             className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-100 hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)]"
           >
             <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
-            Refresh
+            {refreshing ? 'Syncing…' : 'Refresh'}
           </button>
         </div>
         <p className="mt-2 text-xs text-[var(--text-muted)]">
           Execute trusted OWL actions here; review document uncertainty in OWL.
         </p>
+
+        {refreshError && (
+          <div
+            role="alert"
+            className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+          >
+            <ShieldAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>{refreshError}</span>
+          </div>
+        )}
 
         {reviewAlerts.length > 0 && (
           <aside

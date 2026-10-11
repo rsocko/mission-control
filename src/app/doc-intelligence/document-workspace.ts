@@ -15,6 +15,7 @@ export interface DocumentTask {
 }
 
 export interface DocumentTaskMetadata {
+  actionReady?: boolean;
   actionType?: string;
   category?: string;
   urgency?: string;
@@ -83,6 +84,7 @@ export function parseDocumentTaskMetadata(
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     const value = parsed as Record<string, unknown>;
     return {
+      actionReady: typeof value.actionReady === 'boolean' ? value.actionReady : undefined,
       actionType: typeof value.actionType === 'string' ? value.actionType : undefined,
       category: typeof value.category === 'string' ? value.category : undefined,
       urgency: typeof value.urgency === 'string' ? value.urgency : undefined,
@@ -159,6 +161,7 @@ export function filterDocumentTasks(
   const query = filters.query.trim().toLocaleLowerCase();
   return tasks.filter((task) => {
     const metadata = parseDocumentTaskMetadata(task.metadata);
+    if (metadata.actionReady === false) return false;
     if (!matchesView(task, filters.view, now)) return false;
     if (filters.actionType !== 'all' && metadata.actionType !== filters.actionType) return false;
     if (filters.category !== 'all' && metadata.category !== filters.category) return false;

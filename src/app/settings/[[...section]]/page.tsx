@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -50,6 +50,10 @@ import { PriorityEntitiesPanel } from '@/components/smart-score';
 import { SETTINGS_SECTION_NAMES, type SettingsSection } from '../settings-search';
 import { useSettingsAdministration } from '../useSettingsAdministration';
 import { useSettingsSearchFocus } from '../useSettingsSearchFocus';
+import {
+  DesktopSettingsSubsections,
+  MobileSettingsSubsectionJump,
+} from '../components/SettingsSubsectionNavigation';
 
 type ActiveSection = SettingsSection;
 
@@ -126,6 +130,7 @@ const NAV_GROUPS: NavGroup[] = [
 export default function SettingsPage() {
   const params = useParams();
   const router = useRouter();
+  const mobileContentRef = useRef<HTMLDivElement | null>(null);
 
   // Derive active section from URL path
   const sectionSlug = Array.isArray(params.section) ? params.section[0] : undefined;
@@ -164,7 +169,8 @@ export default function SettingsPage() {
         <AboutSection />
       </div>
     ) : activeSection === 'ai' ? (
-      <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-28 pt-4 sm:hidden">
+      <div ref={mobileContentRef} className="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-28 pt-4 sm:hidden">
+        <MobileSettingsSubsectionJump section={activeSection} rootRef={mobileContentRef} />
         <AIProviderSection />
       </div>
     ) : (
@@ -241,14 +247,22 @@ export default function SettingsPage() {
                 {group.items.map(item => {
                   const Icon = item.icon;
                   return (
-                    <div key={item.id} onClick={() => navigateToSection(item.id)}
-                      className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md cursor-pointer transition-colors ${
-                        activeSection === item.id
-                          ? 'font-medium text-blue-300 bg-blue-900/30'
-                          : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)]'
-                      }`}>
-                      <Icon size={16} className={activeSection === item.id ? 'text-blue-400' : 'text-[var(--text-muted)]'} />
-                      <span>{item.label}</span>
+                    <div key={item.id}>
+                      <button
+                        type="button"
+                        onClick={() => navigateToSection(item.id)}
+                        className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 ${
+                          activeSection === item.id
+                            ? 'font-medium text-blue-300 bg-blue-900/30'
+                            : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)]'
+                        }`}
+                      >
+                        <Icon size={16} className={activeSection === item.id ? 'text-blue-400' : 'text-[var(--text-muted)]'} />
+                        <span>{item.label}</span>
+                      </button>
+                      {activeSection === item.id && (
+                        <DesktopSettingsSubsections section={item.id} rootRef={mainContentRef} />
+                      )}
                     </div>
                   );
                 })}
@@ -369,7 +383,9 @@ export default function SettingsPage() {
             )}
             {activeSection === 'notifications' && (
               <motion.div key="notifications" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-                <NotificationEnrichmentSection />
+                <div data-settings-subsection="notification-enrichment" className="scroll-mt-6">
+                  <NotificationEnrichmentSection />
+                </div>
                 <div className="mt-8">
                   <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-4">Push Notifications</h2>
                   <PushNotificationSettings />

@@ -141,7 +141,7 @@ export function StorageSection() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Storage & Cache</h3>
+        <h3 data-settings-subsection="storage-overview" className="scroll-mt-6 text-lg font-semibold text-[var(--text-primary)]">Storage & Cache</h3>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
           Thumbnail cache, retention, and cleanup for triage.
         </p>
@@ -211,7 +211,7 @@ export function StorageSection() {
 
           {/* Actions */}
           <div className="space-y-3">
-            <h4 className="text-sm font-semibold text-[var(--text-secondary)]">Maintenance Actions</h4>
+            <h4 data-settings-subsection="maintenance-actions" className="scroll-mt-6 text-sm font-semibold text-[var(--text-secondary)]">Maintenance Actions</h4>
 
             <div className="flex flex-wrap gap-3">
               <button
@@ -274,7 +274,7 @@ export function StorageSection() {
 
           {/* Clear by source — Issue #455 */}
           <div className="space-y-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
-            <h4 className="text-sm font-semibold text-red-300">Clear Items by Source</h4>
+            <h4 data-settings-subsection="clear-by-source" className="scroll-mt-6 text-sm font-semibold text-red-300">Clear Items by Source</h4>
             <p className="text-xs text-[var(--text-tertiary)]">
               Delete items from a specific source platform and their cached thumbnails.
               By default, actioned and collected items are preserved. Useful for a clean re-import.

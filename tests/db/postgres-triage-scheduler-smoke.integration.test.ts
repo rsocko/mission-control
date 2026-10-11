@@ -154,7 +154,7 @@ function installSyntheticRemotes(): void {
     }
 
     if (url.origin === 'http://localhost:8200') {
-      return jsonResponse(Array.from({ length: 101 }, (_, index) => ({
+      const actions = Array.from({ length: 101 }, (_, index) => ({
         id: `${sourcePrefix}-${index}`,
         document_id: index,
         document_title: `Synthetic document ${index}`,
@@ -165,7 +165,10 @@ function installSyntheticRemotes(): void {
         action_ready: true,
         created_at: '2026-08-30T10:00:00.000Z',
         document_url: `https://documents.invalid/${sourcePrefix}/${index}`,
-      })));
+      }));
+      const offset = Number(url.searchParams.get('offset') ?? 0);
+      const limit = Number(url.searchParams.get('limit') ?? actions.length);
+      return jsonResponse(actions.slice(offset, offset + limit));
     }
 
     throw new Error(`Unexpected synthetic remote URL: ${url.toString()}`);

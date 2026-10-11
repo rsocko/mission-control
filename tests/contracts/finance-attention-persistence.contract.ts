@@ -321,6 +321,17 @@ export function describeFinanceAttentionPersistenceContract(
           (total, result) => total + result.summary.notificationsCreated,
           0,
         )).toBe(1);
+        const unchanged = await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: BASE,
+        });
+        expect(unchanged.summary).toMatchObject({
+          notificationsCreated: 0,
+          notificationsUpdated: 0,
+          notificationsSettled: 0,
+          settled: 0,
+        });
+        expect(unchanged.summary.evaluated).toBeGreaterThan(0);
         expect(await harness.countNotifications()).toBe(1);
         expect(await harness.notificationBySourceId(sourceId)).toMatchObject({
           title: 'Review unattributed activity for Household checking',
@@ -339,7 +350,10 @@ export function describeFinanceAttentionPersistenceContract(
           connectorId: CONNECTOR_ID,
           decisionAt: new Date(BASE.getTime() + 60_000),
         });
-        expect(worsened.summary.notificationsCreated).toBe(0);
+        expect(worsened.summary).toMatchObject({
+          notificationsCreated: 0,
+          notificationsUpdated: 1,
+        });
         expect(await harness.countNotifications()).toBe(1);
         expect(await harness.notificationBySourceId(sourceId)).toMatchObject({
           level: 'action_needed',
@@ -349,10 +363,11 @@ export function describeFinanceAttentionPersistenceContract(
 
         await harness.markNotificationRead(sourceId);
         await harness.resolveNoMatchTransactions('account-summary', 1);
-        await harness.routing.reconcile({
+        const improved = await harness.routing.reconcile({
           connectorId: CONNECTOR_ID,
           decisionAt: new Date(BASE.getTime() + 120_000),
         });
+        expect(improved.summary.notificationsUpdated).toBe(1);
         expect(await harness.notificationBySourceId(sourceId)).toMatchObject({
           level: 'heads_up',
           readState: 'read',
@@ -360,9 +375,22 @@ export function describeFinanceAttentionPersistenceContract(
         });
 
         await harness.resolveNoMatchTransactions('account-summary', 10);
-        await harness.routing.reconcile({
+        const closed = await harness.routing.reconcile({
           connectorId: CONNECTOR_ID,
           decisionAt: new Date(BASE.getTime() + 180_000),
+        });
+        expect(closed.summary).toMatchObject({
+          notificationsSettled: 1,
+          settled: 1,
+        });
+        const closedReplay = await harness.routing.reconcile({
+          connectorId: CONNECTOR_ID,
+          decisionAt: new Date(BASE.getTime() + 180_000),
+        });
+        expect(closedReplay.summary).toMatchObject({
+          notificationsUpdated: 0,
+          notificationsSettled: 0,
+          settled: 0,
         });
         expect(await harness.notificationBySourceId(sourceId)).toMatchObject({
           sourceState: 'resolved',
@@ -382,6 +410,7 @@ export function describeFinanceAttentionPersistenceContract(
           decisionAt: new Date(BASE.getTime() + 240_000),
         });
         expect(requalified.summary.notificationsCreated).toBe(0);
+        expect(requalified.summary.notificationsUpdated).toBe(1);
         expect(await harness.countNotifications()).toBe(1);
         expect(await harness.notificationBySourceId(sourceId)).toMatchObject({
           sourceState: 'active',
@@ -441,7 +470,11 @@ export function describeFinanceAttentionPersistenceContract(
           connectorId: CONNECTOR_ID,
           decisionAt: BASE,
         });
-        expect(escalated.summary).toMatchObject({ tasksCreated: 1, taskPromoted: 1 });
+        expect(escalated.summary).toMatchObject({
+          tasksCreated: 1,
+          taskPromoted: 1,
+          notificationsSettled: 1,
+        });
 
         const notification = await harness.notificationBySourceId(sourceId);
         const task = await harness.taskBySourceId(sourceId);

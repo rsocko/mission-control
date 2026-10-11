@@ -131,6 +131,7 @@ describe('finance automation consumer contracts', () => {
         evaluated: replayed ? 0 : 1,
         notificationsCreated: 0,
         notificationsUpdated: 0,
+        notificationsSettled: 0,
         tasksCreated: replayed ? 0 : 1,
         tasksUpdated: 0,
         tasksSettled: 0,

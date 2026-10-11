@@ -7,7 +7,7 @@ import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-d
 import type { ConnectorConfig } from '@/types';
 
 type SnapshotSynchronizer = InstanceType<
-  typeof import('@/lib/connectors/monarch-money/snapshot-sync')['FinanceSnapshotSynchronizer']
+  typeof import('@/lib/connectors/monarch-money/snapshot-synchronizer')['FinanceSnapshotSynchronizer']
 >;
 
 const tempDirectory = mkdtempSync(join(tmpdir(), 'mc-finance-snapshot-'));
@@ -112,10 +112,13 @@ beforeAll(async () => {
     ) VALUES (?, 'finance-manager', 'Finance snapshot test', 1, 'poll',
       '{}', '{}', '{}', '[]', ?, ?)
   `).run(connectorConfig.id, configuredAt, configuredAt);
-  const snapshotModule = await import('@/lib/connectors/monarch-money/snapshot-sync');
-  synchronizer = new snapshotModule.FinanceSnapshotSynchronizer(connectorConfig);
-  createSynchronizer = (config) => new snapshotModule.FinanceSnapshotSynchronizer(config);
-  updateFinanceCategory = snapshotModule.updateFinanceCategory;
+  const [{ FinanceSnapshotSynchronizer }, snapshotMutations] = await Promise.all([
+    import('@/lib/connectors/monarch-money/snapshot-synchronizer'),
+    import('@/lib/connectors/monarch-money/snapshot-sync'),
+  ]);
+  synchronizer = new FinanceSnapshotSynchronizer(connectorConfig);
+  createSynchronizer = (config) => new FinanceSnapshotSynchronizer(config);
+  updateFinanceCategory = snapshotMutations.updateFinanceCategory;
   applyManualAttributionDecision = (
     await import('@/lib/connectors/monarch-money/attribution-service')
   ).applyManualAttributionDecision;
@@ -268,11 +271,22 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
         })
       : item);
     mockPages([contextFixtures.slice(0, 500), contextFixtures.slice(500)]);
-    expect(await synchronizer.sync({ full: false })).toMatchObject({
+    const identical = await synchronizer.sync({ full: false });
+    expect(identical).toMatchObject({
       itemsAdded: 0,
       itemsUpdated: 0,
       itemsRemoved: 0,
     });
+    expect(identical.activity?.groups[0]?.metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'transactions-processed',
+        value: 501,
+        kind: 'processed',
+      }),
+      expect.objectContaining({ key: 'transactions-created', value: 0 }),
+      expect.objectContaining({ key: 'transactions-updated', value: 0 }),
+      expect.objectContaining({ key: 'transactions-removed', value: 0 }),
+    ]));
     expect(sqlite.prepare(`
       SELECT business_context AS businessContext, source_fingerprint AS fingerprint
       FROM finance_transactions
@@ -314,11 +328,15 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
           })
         : item);
     mockPages([updatedFixtures.slice(0, 500), updatedFixtures.slice(500)]);
-    expect(await synchronizer.sync({ full: false })).toMatchObject({
+    const materiallyUpdated = await synchronizer.sync({ full: false });
+    expect(materiallyUpdated).toMatchObject({
       itemsAdded: 0,
       itemsUpdated: 1,
       itemsRemoved: 0,
     });
+    expect(materiallyUpdated.activity?.groups[0]?.metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'transactions-updated', value: 1 }),
+    ]));
     expect(sqlite.prepare(`
       SELECT amount, is_pending AS isPending, assigned_kid_id AS kidId
       FROM finance_transactions WHERE upstream_transaction_id = 'transaction-0'
@@ -373,6 +391,10 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
 
     expect(result.itemsAdded).toBe(1);
     expect(result.itemsRemoved).toBe(501);
+    expect(result.activity?.groups[0]?.metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'transactions-created', value: 1 }),
+      expect.objectContaining({ key: 'transactions-removed', value: 501 }),
+    ]));
     expect(sqlite.prepare(`
       SELECT lifecycle_status AS lifecycle
       FROM finance_transactions WHERE upstream_transaction_id = 'transaction-0'

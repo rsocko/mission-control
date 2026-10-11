@@ -130,6 +130,15 @@ export function hasSyncActivity(value: unknown): boolean {
   )) ?? false;
 }
 
+export function hasSyncChanges(value: unknown): boolean {
+  const activity = normalizeSyncActivity(value);
+  return activity?.groups.some(group => group.metrics.some(
+    metric => metric.kind !== 'processed'
+      && metric.kind !== 'snapshot'
+      && metric.value > 0,
+  )) ?? false;
+}
+
 export function mergeSyncActivity(
   ...payloads: Array<SyncActivityPayload | null | undefined>
 ): SyncActivityPayload | undefined {

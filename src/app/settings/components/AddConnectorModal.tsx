@@ -63,19 +63,41 @@ const CONNECTOR_SEARCH_KEYWORDS: Record<string, string[]> = {
 
 type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-paperclip' | 'configure-home-assistant' | 'configure-rymessage' | 'configure-other';
 
+function setupStepForConnector(type: string | null): ConnectorSetupStep {
+  if (type === 'microsoft-todo') return 'configure-mstodo';
+  if (type === 'microsoft-todo-work') return 'configure-work-todo';
+  if (type === 'github-issues') return 'configure-github';
+  if (type === 'finance-manager') return 'configure-finance';
+  if (type === 'document-intelligence') return 'configure-doc-intelligence';
+  if (type === 'outlook-email') return 'configure-outlook-email';
+  if (type === 'outlook-calendar') return 'configure-outlook-calendar';
+  if (type === 'scout') return 'configure-scout';
+  if (type === 'paperclip') return 'configure-paperclip';
+  if (type === 'home-assistant') return 'configure-home-assistant';
+  if (type === 'rymessage') return 'configure-rymessage';
+  return type ? 'configure-other' : 'select';
+}
+
 function AddConnectorModal({
   onClose,
   onAdded,
   classificationDefaults,
   connectors = [],
+  initialType = null,
 }: {
   onClose: () => void;
   onAdded: () => void;
   classificationDefaults?: Record<string, ConnectorDataClassification>;
   connectors?: ConnectorConfig[];
+  initialType?: string | null;
 }) {
-  const [step, setStep] = useState<ConnectorSetupStep>('select');
-  const [selectedType, setSelectedType] = useState<string | null>(null);
+  const supportedInitialType = CONNECTOR_TYPES.some(({ type }) => type === initialType)
+    ? initialType
+    : null;
+  const [step, setStep] = useState<ConnectorSetupStep>(
+    setupStepForConnector(supportedInitialType),
+  );
+  const [selectedType, setSelectedType] = useState<string | null>(supportedInitialType);
   const [classificationOverride, setClassificationOverride] =
     useState<ConnectorDataClassification | null>(null);
   const [dismissible, setDismissible] = useState(true);
@@ -87,31 +109,7 @@ function AddConnectorModal({
   function handleSelectType(type: string) {
     setSelectedType(type);
     setClassificationOverride(null);
-    if (type === 'microsoft-todo') {
-      setStep('configure-mstodo');
-    } else if (type === 'microsoft-todo-work') {
-      setStep('configure-work-todo');
-    } else if (type === 'github-issues') {
-      setStep('configure-github');
-    } else if (type === 'finance-manager') {
-      setStep('configure-finance');
-    } else if (type === 'document-intelligence') {
-      setStep('configure-doc-intelligence');
-    } else if (type === 'outlook-email') {
-      setStep('configure-outlook-email');
-    } else if (type === 'outlook-calendar') {
-      setStep('configure-outlook-calendar');
-    } else if (type === 'scout') {
-      setStep('configure-scout');
-    } else if (type === 'paperclip') {
-      setStep('configure-paperclip');
-    } else if (type === 'home-assistant') {
-      setStep('configure-home-assistant');
-    } else if (type === 'rymessage') {
-      setStep('configure-rymessage');
-    } else {
-      setStep('configure-other');
-    }
+    setStep(setupStepForConnector(type));
   }
 
   return (
@@ -846,6 +844,7 @@ function ConnectorTypeSelector({
   const recommendedTypes = new Set(['microsoft-todo', 'github-issues', 'outlook-email']);
 
   const connectedCounts = connectors.reduce<Record<string, number>>((counts, connector) => {
+    if (connector.deletedAt) return counts;
     const catalogType = isFinanceConnectorType(connector.type)
       ? 'finance-manager'
       : connector.type;
@@ -920,16 +919,22 @@ function ConnectorTypeSelector({
     connector: (typeof connectorOptions)[number],
   ) {
     const connectedCount = connectedCounts[connector.type] ?? 0;
+    const singleInstanceConfigured = connector.type === 'scout' && connectedCount > 0;
     return (
       <motion.button
         key={connector.type}
-        data-connector-card
+        data-connector-card={singleInstanceConfigured ? undefined : true}
         variants={fadeSlideUp}
-        onClick={() => onSelect(connector.type)}
+        onClick={() => {
+          if (!singleInstanceConfigured) onSelect(connector.type);
+        }}
+        disabled={singleInstanceConfigured}
         whileHover={{ y: -1, borderColor: 'rgba(96, 165, 250, 0.5)' }}
         whileTap={{ scale: 0.98 }}
-        className="group min-h-24 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 text-left transition-colors hover:bg-blue-900/10"
-        aria-label={`${connectedCount > 0 ? 'Add another' : 'Add'} ${connector.name} ${connector.description}${connectedCount > 0 ? `, ${connectedCount} connected` : ''}`}
+        className="group min-h-24 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 text-left transition-colors hover:bg-blue-900/10 disabled:cursor-default disabled:opacity-70 disabled:hover:bg-[var(--surface-1)]"
+        aria-label={singleInstanceConfigured
+          ? `${connector.name} connected, manage the existing connector`
+          : `${connectedCount > 0 ? 'Add another' : 'Add'} ${connector.name} ${connector.description}${connectedCount > 0 ? `, ${connectedCount} connected` : ''}`}
       >
         <div className="flex items-start gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)]">
@@ -952,7 +957,7 @@ function ConnectorTypeSelector({
             <div className="mt-2 flex items-center justify-between gap-2">
               <ConnectorClassificationBadge classification={connector.classification} />
               <span className="text-xs font-medium text-blue-300 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                {connectedCount > 0 ? 'Add another' : 'Add'}
+                {singleInstanceConfigured ? 'Connected' : connectedCount > 0 ? 'Add another' : 'Add'}
               </span>
             </div>
           </div>

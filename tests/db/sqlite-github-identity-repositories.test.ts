@@ -250,6 +250,10 @@ describeGitHubIdentityRepositoriesContract('SQLite', async (): Promise<GitHubIde
         .where(eq(schema.tasks.id, id))
         .run();
     },
+    hardDeleteTask: async (id) => {
+      db.delete(schema.taskLinkedSources).where(eq(schema.taskLinkedSources.taskId, id)).run();
+      db.delete(schema.tasks).where(eq(schema.tasks.id, id)).run();
+    },
     openCollisionCount: async (id) => {
       const row = sqlite.prepare(`
         SELECT COUNT(*) AS value

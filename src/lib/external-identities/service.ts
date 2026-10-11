@@ -1057,7 +1057,7 @@ function persistExternalIdentity(
       .limit(1)
       .get()
     : undefined;
-  const replacementTask = staleTaskOwner?.deletedAt
+  const replacementTask = staleTaskOwner === undefined || staleTaskOwner.deletedAt
     ? tx.select({ deletedAt: tasks.deletedAt })
       .from(tasks)
       .where(and(
@@ -1067,8 +1067,10 @@ function persistExternalIdentity(
       .limit(1)
       .get()
     : undefined;
-  const canTakeOverDeletedTaskBinding = Boolean(
-    staleTaskOwner?.deletedAt && replacementTask && replacementTask.deletedAt === null,
+  const canTakeOverStaleTaskBinding = Boolean(
+    (staleTaskOwner === undefined || staleTaskOwner.deletedAt)
+    && replacementTask
+    && replacementTask.deletedAt === null,
   );
 
   if (localBinding && localBinding.externalEntityId !== entity.id) {
@@ -1085,7 +1087,7 @@ function persistExternalIdentity(
   if (entityBinding && (
     entityBinding.bindingType !== target.bindingType
     || entityBinding.localId !== target.localId
-  ) && !canTakeOverDeletedTaskBinding) {
+  ) && !canTakeOverStaleTaskBinding) {
     return recordWriteCollision(
       tx,
       target,
@@ -1124,13 +1126,13 @@ function persistExternalIdentity(
   const existingBinding = localBinding ?? entityBinding;
   if (existingBinding) {
     tx.update(externalEntityBindings).set({
-      ...(canTakeOverDeletedTaskBinding
+      ...(canTakeOverStaleTaskBinding
         ? { localId: target.localId, state: bindingState }
         : {}),
       verifiedAt: evidence.entity.observedAt,
       updatedAt: evidence.entity.observedAt,
     }).where(eq(externalEntityBindings.id, existingBinding.id)).run();
-    if (canTakeOverDeletedTaskBinding && entityBinding) {
+    if (canTakeOverStaleTaskBinding && entityBinding) {
       const localIds = boundedSorted([entityBinding.localId, target.localId]);
       const externalEntityIds = [entity.id];
       const fingerprint = digestExternalIdentifier(JSON.stringify({
@@ -1144,7 +1146,7 @@ function persistExternalIdentity(
         resolution: {
           localId: target.localId,
           externalEntityId: entity.id,
-          rationale: 'Reassigned stable identity from a soft-deleted task owner',
+          rationale: 'Reassigned stable identity from a deleted or missing task owner',
         },
         resolvedAt: evidence.entity.observedAt,
         resolvedBy: 'system:stable-identity-recovery',

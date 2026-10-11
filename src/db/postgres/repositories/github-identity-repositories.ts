@@ -928,7 +928,8 @@ async function persistPrimaryIdentityWrite(
         [entityBinding.localId, target.connectorInstanceId],
       )
     : null;
-  const replacementTaskResult = staleTaskOwnerResult?.rows[0]?.deletedAt
+  const replacementTaskResult = !staleTaskOwnerResult?.rows[0]
+    || staleTaskOwnerResult.rows[0].deletedAt
     ? await query<{ deletedAt: string | null }>(
         client,
         `SELECT deleted_at AS "deletedAt"
@@ -939,8 +940,8 @@ async function persistPrimaryIdentityWrite(
         [target.localId, target.connectorInstanceId],
       )
     : null;
-  const canTakeOverDeletedTaskBinding = Boolean(
-    staleTaskOwnerResult?.rows[0]?.deletedAt
+  const canTakeOverStaleTaskBinding = Boolean(
+    (!staleTaskOwnerResult?.rows[0] || staleTaskOwnerResult.rows[0].deletedAt)
     && replacementTaskResult?.rows[0]
     && replacementTaskResult.rows[0].deletedAt === null,
   );
@@ -959,7 +960,7 @@ async function persistPrimaryIdentityWrite(
       entityBinding.bindingType !== target.bindingType
       || entityBinding.localId !== target.localId
     )
-    && !canTakeOverDeletedTaskBinding
+    && !canTakeOverStaleTaskBinding
   ) {
     return recordPrimaryIdentityCollision(
       client,
@@ -1011,12 +1012,12 @@ async function persistPrimaryIdentityWrite(
       [
         existingBinding.id,
         evidence.entity.observedAt,
-        canTakeOverDeletedTaskBinding,
+        canTakeOverStaleTaskBinding,
         target.localId,
         'active',
       ],
     );
-    if (canTakeOverDeletedTaskBinding && entityBinding) {
+    if (canTakeOverStaleTaskBinding && entityBinding) {
       const localIds = boundedPrimaryIdentityCollisionIds([
         entityBinding.localId,
         target.localId,
@@ -1046,7 +1047,7 @@ async function persistPrimaryIdentityWrite(
           JSON.stringify({
             localId: target.localId,
             externalEntityId: entity.id,
-            rationale: 'Reassigned stable identity from a soft-deleted task owner',
+            rationale: 'Reassigned stable identity from a deleted or missing task owner',
           }),
           evidence.entity.observedAt,
         ],
@@ -1731,11 +1732,14 @@ async function persistPrimaryIdentityFastBatch(
     const entity = entities.get(entityKey)!;
     const localBinding = bindings.byTarget.get(primaryIdentityTargetKey(write));
     const entityBinding = bindings.byEntity.get(entity.id);
-    const canTakeOverDeletedTaskBinding = Boolean(
+    const canTakeOverStaleTaskBinding = Boolean(
       entityBinding?.bindingType === 'task'
       && write.target.bindingType === 'task'
       && entityBinding.localId !== write.target.localId
-      && taskDeletionById.get(entityBinding.localId)
+      && (
+        !taskDeletionById.has(entityBinding.localId)
+        || taskDeletionById.get(entityBinding.localId)
+      )
       && taskDeletionById.has(write.target.localId)
       && taskDeletionById.get(write.target.localId) === null,
     );
@@ -1756,7 +1760,7 @@ async function persistPrimaryIdentityFastBatch(
         entityBinding.bindingType !== write.target.bindingType
         || entityBinding.localId !== write.target.localId
       )
-      && !canTakeOverDeletedTaskBinding
+      && !canTakeOverStaleTaskBinding
     ) {
       if (repositoryKey) locatorPlansToApply.set(repositoryKey, repositoryPlan!);
       collisions.push({
@@ -1799,7 +1803,7 @@ async function persistPrimaryIdentityFastBatch(
     bindingsToApply.push({
       existing: localBinding ?? entityBinding ?? null,
       entityId: entity.id,
-      replacedLocalId: canTakeOverDeletedTaskBinding ? entityBinding!.localId : null,
+      replacedLocalId: canTakeOverStaleTaskBinding ? entityBinding!.localId : null,
       write,
     });
     results[index] = {
@@ -1845,7 +1849,7 @@ async function persistPrimaryIdentityFastBatch(
         JSON.stringify({
           localId: binding.write.target.localId,
           externalEntityId: binding.entityId,
-          rationale: 'Reassigned stable identity from a soft-deleted task owner',
+          rationale: 'Reassigned stable identity from a deleted or missing task owner',
         }),
         binding.write.evidence.entity.observedAt,
       ],

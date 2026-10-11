@@ -38,6 +38,7 @@ export interface GitHubIdentityHarness {
   seedTerminalException(now: string): Promise<void>;
   seedTask(taskId: string, now: string): Promise<void>;
   softDeleteTask(taskId: string, now: string): Promise<void>;
+  hardDeleteTask(taskId: string): Promise<void>;
   openCollisionCount(connectorInstanceId: string): Promise<number>;
   leaseState(
     leaseId: string,
@@ -156,7 +157,10 @@ export function describeGitHubIdentityRepositoriesContract(
         expect(rows).toEqual([]);
       });
 
-      it('recovers a stable binding from a soft-deleted task owner', async () => {
+      it.each([
+        ['soft-deleted', false],
+        ['missing', true],
+      ] as const)('recovers a stable binding from a %s task owner', async (_owner, hardDelete) => {
         await harness.seedBaseline(NOW);
         const replacementTaskId = 'task-1-replacement';
         await harness.seedTask(replacementTaskId, NOW);
@@ -208,7 +212,11 @@ export function describeGitHubIdentityRepositoriesContract(
             collisionCategory: 'multiple_local_one_stable',
           }),
         ]);
-        await harness.softDeleteTask(GITHUB_IDENTITY_CONTRACT.taskId, LATER);
+        if (hardDelete) {
+          await harness.hardDeleteTask(GITHUB_IDENTITY_CONTRACT.taskId);
+        } else {
+          await harness.softDeleteTask(GITHUB_IDENTITY_CONTRACT.taskId, LATER);
+        }
         const rows = await identity.lookupStableIdentityBatch({
           connectorInstanceId: GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
           namespace: {

@@ -16,6 +16,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import type { TaskField } from '@/types';
 import {
   canEditTaskField,
+  taskFieldAllowedValues,
   canRemoveTask,
   canSetTaskLocalDisposition,
   TASK_DISPOSITION_OPTIONS,
@@ -875,6 +876,7 @@ export function TaskDetailPanel({
           }}
           priority={{
             priority: task.priority,
+            allowedPriorities: taskFieldAllowedValues(task.editPolicy, 'priority'),
             planningHorizon: task.planningHorizon,
             canEditPriority,
             canEditPlanningHorizon,
@@ -916,6 +918,9 @@ export function TaskDetailPanel({
         <TaskNotesSection
           mode={mode}
           taskId={task.id}
+          sourceSummary={task.connectorType === 'document-intelligence'
+            ? parsedMetadata.actionSummary
+            : undefined}
           description={task.description}
           descValue={descValue}
           editingDesc={editingDesc}

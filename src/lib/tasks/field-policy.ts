@@ -222,6 +222,9 @@ export function resolveTaskFieldPolicy(
       ? 'merge'
       : 'local-wins';
   const mutation = resolveMutation(sourceModel, authority, writeBack);
+  const valueConstraint = profile?.allowedValues
+    ? { allowedValues: profile.allowedValues }
+    : {};
 
   if (mutation === 'blocked') {
     return {
@@ -230,6 +233,7 @@ export function resolveTaskFieldPolicy(
       mutation,
       inbound,
       reason: `${titleFor(field)} is controlled by the upstream task source`,
+      ...valueConstraint,
     };
   }
 
@@ -249,10 +253,11 @@ export function resolveTaskFieldPolicy(
       mutation: 'blocked',
       inbound,
       reason: `${titleFor(field)} cannot be changed while its connector is disabled`,
+      ...valueConstraint,
     };
   }
 
-  return { field, sourceModel, mutation, inbound };
+  return { field, sourceModel, mutation, inbound, ...valueConstraint };
 }
 
 export function resolveTaskSourceModel(

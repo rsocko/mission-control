@@ -29,6 +29,7 @@ import type { LocalDisposition, PlanningHorizon } from '@/types';
 import type { ScoreBreakdown } from '@/lib/smart-score';
 import {
   canEditTaskField,
+  taskFieldAllowedValues,
   canSetTaskLocalDisposition,
   TASK_DISPOSITION_OPTIONS,
   taskFieldBlockedReason,
@@ -416,12 +417,14 @@ function StatusMenu({
 
 function PriorityMenu({
   priority,
+  allowedValues,
   onChange,
   onFilter,
   disabled = false,
   disabledReason,
 }: {
   priority: string;
+  allowedValues?: readonly string[];
   onChange: (priority: string) => void | Promise<void>;
   onFilter?: (priority: string) => void;
   disabled?: boolean;
@@ -444,7 +447,9 @@ function PriorityMenu({
       {(close, run) => (
         <>
           <p className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Set priority</p>
-          {PRIORITY_OPTIONS.map((option) => (
+          {PRIORITY_OPTIONS
+            .filter((option) => !allowedValues || allowedValues.includes(option.value))
+            .map((option) => (
             <button
               key={option.value}
               type="button"
@@ -643,6 +648,7 @@ export function TaskRowActions({
       <span className="flex h-8 w-8 items-center justify-center">
         <PriorityMenu
           priority={priority}
+          allowedValues={taskFieldAllowedValues(editPolicy, 'priority')}
           onChange={onSetPriority}
           onFilter={onFilterPriority}
           disabled={!canEditPriority}

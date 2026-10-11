@@ -100,6 +100,7 @@ import {
 import { LARGE_PHASE_TASK_THRESHOLD } from '@/lib/projects/phase-reorganization';
 import {
   canEditTaskField,
+  selectedTaskFieldAllowedValues,
   selectedTaskFieldBlockedReason,
   selectedTaskRemovalBlockedReason,
   taskFieldBlockedReason,
@@ -334,6 +335,7 @@ export function ProjectPhasesTab({
   const selectedBulkPolicies = selectedBulkTasks.map((task) => task.editPolicy);
   const bulkStatusBlockedReason = selectedTaskFieldBlockedReason(selectedBulkPolicies, 'status');
   const bulkPriorityBlockedReason = selectedTaskFieldBlockedReason(selectedBulkPolicies, 'priority');
+  const bulkAllowedPriorities = selectedTaskFieldAllowedValues(selectedBulkPolicies, 'priority');
   const bulkDueDateBlockedReason = selectedTaskFieldBlockedReason(selectedBulkPolicies, 'dueDate');
   const bulkRemovalBlockedReason = selectedTaskRemovalBlockedReason(selectedBulkPolicies);
 
@@ -1053,6 +1055,7 @@ export function ProjectPhasesTab({
                   }}
                 />
                 <BulkPriorityDropdown
+                  allowedValues={bulkAllowedPriorities}
                   disabled={Boolean(bulkPriorityBlockedReason)}
                   disabledReason={bulkPriorityBlockedReason}
                   onSetPriority={async (priority) => {

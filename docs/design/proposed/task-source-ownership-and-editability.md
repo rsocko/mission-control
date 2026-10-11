@@ -344,7 +344,13 @@ through while keeping effort and project membership local.
 All currently registered connectors also have an explicit classification in
 `task-source-profiles.ts`; these defaults now serve only unknown or legacy
 connector types. Custom REST resolves its model per instance from
-`updateEndpoint`, while Document Intelligence uses a status-only write profile.
+`updateEndpoint`, while Document Intelligence writes lifecycle and due-date
+changes through directly and maps Mission Control priority to OWL urgency
+feedback. Mission Control title maps to OWL's user-correctable action title.
+Mission Control Notes remain local because Paperless Notes are append-only and
+cannot safely represent an editable synchronized field. OWL's compact action
+summary remains read-only context in Mission Control, and neither title nor
+Notes renames or mutates the Paperless document.
 
 ### Why `write` is retained
 

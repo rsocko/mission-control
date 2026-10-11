@@ -59,6 +59,11 @@ const SOURCE_READ_ONLY_FIELD = Object.freeze({
   authority: 'source',
   writeBack: 'none',
 }) satisfies TaskFieldCapabilityProfile;
+const OWL_URGENCY_FIELD = Object.freeze({
+  authority: 'source',
+  writeBack: 'direct',
+  allowedValues: ['critical', 'high', 'medium', 'low'],
+}) satisfies TaskFieldCapabilityProfile;
 const MERGE_FIELD = Object.freeze({
   authority: 'merge',
   writeBack: 'none',
@@ -110,11 +115,10 @@ export const GITHUB_ISSUES_FIELD_PROFILE = completeProfile({
 });
 
 export const DOCUMENT_INTELLIGENCE_FIELD_PROFILE = completeProfile({
-  title: SOURCE_READ_ONLY_FIELD,
-  description: SOURCE_READ_ONLY_FIELD,
+  title: SOURCE_DIRECT_FIELD,
   status: SOURCE_DIRECT_FIELD,
-  priority: SOURCE_READ_ONLY_FIELD,
-  dueDate: SOURCE_READ_ONLY_FIELD,
+  priority: OWL_URGENCY_FIELD,
+  dueDate: SOURCE_DIRECT_FIELD,
   snoozedUntil: SOURCE_READ_ONLY_FIELD,
 });
 

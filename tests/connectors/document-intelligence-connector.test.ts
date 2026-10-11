@@ -159,6 +159,101 @@ describe('DocumentIntelligenceConnector', () => {
       expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ status: 'pending' });
     });
 
+    it('writes due-date changes back to OWL', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
+      const connector = await createConnector();
+
+      await connector.updateTask('act-1', { dueDate: '2026-10-31' });
+
+      const patchCall = fetchMock.mock.calls.find(
+        (call: unknown[]) => (call[1] as RequestInit)?.method === 'PATCH'
+      );
+      expect(patchCall).toBeDefined();
+      expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({
+        due_date: '2026-10-31',
+      });
+    });
+
+    it('writes the action title without changing the document title, summary, or notes', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
+      const connector = await createConnector();
+
+      await connector.updateTask('act-1', {
+        title: 'Pay the corrected utility invoice',
+        description: 'Confirm the adjusted balance, then submit payment.',
+      });
+
+      const patchCall = fetchMock.mock.calls.find(
+        (call: unknown[]) => (call[1] as RequestInit)?.method === 'PATCH'
+      );
+      expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({
+        title: 'Pay the corrected utility invoice',
+      });
+      expect(JSON.parse((patchCall![1] as RequestInit).body as string))
+        .not.toHaveProperty('document_title');
+      expect(JSON.parse((patchCall![1] as RequestInit).body as string))
+        .not.toHaveProperty('summary');
+      expect(JSON.parse((patchCall![1] as RequestInit).body as string))
+        .not.toHaveProperty('notes');
+    });
+
+    it('clears the OWL due date with an explicit null', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
+      const connector = await createConnector();
+
+      await connector.updateTask('act-1', { dueDate: null });
+
+      const patchCall = fetchMock.mock.calls.find(
+        (call: unknown[]) => (call[1] as RequestInit)?.method === 'PATCH'
+      );
+      expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({
+        due_date: null,
+      });
+    });
+
+    it('combines status and due-date changes in one OWL patch', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
+      const connector = await createConnector();
+
+      await connector.updateTask('act-1', {
+        status: 'todo',
+        dueDate: '2026-11-01',
+      });
+
+      const patchCalls = fetchMock.mock.calls.filter(
+        (call: unknown[]) => (call[1] as RequestInit)?.method === 'PATCH'
+      );
+      expect(patchCalls).toHaveLength(1);
+      expect(JSON.parse((patchCalls[0][1] as RequestInit).body as string)).toEqual({
+        status: 'pending',
+        due_date: '2026-11-01',
+      });
+    });
+
+    it('maps Mission Control priority to OWL urgency feedback', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
+      const connector = await createConnector();
+
+      await connector.updateTask('act-1', { priority: 'critical' });
+
+      const feedbackCall = fetchMock.mock.calls.find(
+        (call: unknown[]) => String(call[0]).endsWith('/api/action-queue/actions/act-1/feedback')
+      );
+      expect(feedbackCall).toBeDefined();
+      expect(JSON.parse((feedbackCall![1] as RequestInit).body as string)).toEqual({
+        feedback_type: 'wrong_urgency',
+        corrected_urgency: 'critical',
+      });
+    });
+
+    it('rejects clearing priority because OWL requires urgency', async () => {
+      const connector = await createConnector();
+
+      await expect(connector.updateTask('act-1', { priority: 'none' }))
+        .rejects.toThrow('OWL requires an urgency value');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('rejects statuses OWL cannot represent', async () => {
       const connector = await createConnector();
 

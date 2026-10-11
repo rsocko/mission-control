@@ -11,6 +11,7 @@ import type {
 import { createDocumentClient } from './document-client';
 import type {
   DocActionFeedback,
+  DocActionStatus,
   DocClient,
   DocHealthResponse,
   DocStatsResponse,
@@ -99,6 +100,7 @@ export class DocumentIntelligenceConnector implements IConnector {
     lists: true,
     tags: true,
     tagWriteBack: false,
+    dueDate: true,
     listSelectionMode: 'not-applicable',
     ...DOCUMENT_INTELLIGENCE_TASK_AUTHORITY,
   };
@@ -242,32 +244,59 @@ export class DocumentIntelligenceConnector implements IConnector {
   }
 
   async completeTask(sourceId: string): Promise<void> {
-    await this.client!.patchActionStatus(sourceId, 'completed');
+    await this.client!.patchAction(sourceId, { status: 'completed' });
   }
 
   async reopenTask(sourceId: string): Promise<void> {
-    await this.client!.patchActionStatus(sourceId, 'pending');
+    await this.client!.patchAction(sourceId, { status: 'pending' });
   }
 
   async dismissAlert(sourceId: string): Promise<void> {
     // Alert sourceIds are prefixed: "stmt-{id}" for statements, "eob-{id}" for EOBs.
-    // Statement alerts have no dismiss endpoint; EOB/action alerts use patchActionStatus.
+    // Statement alerts have no dismiss endpoint; EOB/action alerts use the action PATCH endpoint.
     if (sourceId.startsWith('eob-') || sourceId.startsWith('action-')) {
       const rawId = sourceId.replace(/^(eob-|action-)/, '');
-      await this.client!.patchActionStatus(rawId, 'dismissed');
+      await this.client!.patchAction(rawId, { status: 'dismissed' });
     }
     // Statement alerts ("stmt-*") are informational — no writeback needed
   }
 
-  async updateTask(sourceId: string, updates: Partial<TaskItem>): Promise<TaskItem> {
+  async updateTask(
+    sourceId: string,
+    updates: Omit<Partial<TaskItem>, 'description' | 'dueDate'> & {
+      description?: string | null;
+      dueDate?: string | null;
+    },
+  ): Promise<TaskItem> {
+    let status: DocActionStatus | undefined;
     if (updates.status === 'done') {
-      await this.client!.patchActionStatus(sourceId, 'completed');
+      status = 'completed';
     } else if (updates.status === 'cancelled') {
-      await this.client!.patchActionStatus(sourceId, 'dismissed');
+      status = 'dismissed';
     } else if (updates.status === 'todo') {
-      await this.client!.patchActionStatus(sourceId, 'pending');
+      status = 'pending';
     } else if (updates.status !== undefined) {
       throw new Error(`OWL does not support task status "${updates.status}"`);
+    }
+    if (
+      status !== undefined
+      || updates.dueDate !== undefined
+      || updates.title !== undefined
+    ) {
+      await this.client!.patchAction(sourceId, {
+        ...(status !== undefined ? { status } : {}),
+        ...(updates.dueDate !== undefined ? { due_date: updates.dueDate } : {}),
+        ...(updates.title !== undefined ? { title: updates.title } : {}),
+      });
+    }
+    if (updates.priority !== undefined) {
+      if (updates.priority === 'none') {
+        throw new Error('OWL requires an urgency value');
+      }
+      await this.client!.submitActionFeedback(sourceId, {
+        feedback_type: 'wrong_urgency',
+        corrected_urgency: updates.priority,
+      });
     }
 
     return {
@@ -276,10 +305,10 @@ export class DocumentIntelligenceConnector implements IConnector {
       connectorType: this.type,
       connectorInstanceId: this.id,
       title: updates.title || 'OWL task',
-      description: updates.description,
+      description: updates.description ?? undefined,
       status: updates.status || 'todo',
       priority: updates.priority || 'none',
-      dueDate: updates.dueDate,
+      dueDate: updates.dueDate ?? undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       childIds: [],

@@ -254,6 +254,16 @@ export async function PATCH(
         blockedFields,
       }, { status: 403 });
     }
+    const priorityPolicy = policies.get('priority');
+    if (
+      input.priority !== undefined
+      && priorityPolicy?.allowedValues
+      && !priorityPolicy.allowedValues.includes(input.priority)
+    ) {
+      return ApiErrors.validation(
+        `Priority must be one of: ${priorityPolicy.allowedValues.join(', ')}`,
+      );
+    }
 
     let tagWriteThrough: WriteThroughUpdates['tags'];
     if (input.tags !== undefined && policies.get('tags')?.mutation === 'write-through') {

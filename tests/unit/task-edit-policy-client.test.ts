@@ -3,7 +3,9 @@ import {
   canEditTaskField,
   canRemoveTask,
   canSetTaskLocalDisposition,
+  selectedTaskFieldAllowedValues,
   selectedTaskFieldBlockedReason,
+  taskFieldAllowedValues,
   taskFieldBlockedReason,
   taskFieldSaveLabel,
   taskRemovalLabel,
@@ -11,6 +13,24 @@ import {
 import { makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
 describe('task edit-policy client contract', () => {
+  it('exposes and intersects connector field value constraints', () => {
+    const owlPolicy = makeTaskEditPolicy();
+    owlPolicy.fields.priority.allowedValues = ['critical', 'high', 'medium', 'low'];
+    const restrictedPolicy = makeTaskEditPolicy();
+    restrictedPolicy.fields.priority.allowedValues = ['high', 'medium'];
+
+    expect(taskFieldAllowedValues(owlPolicy, 'priority')).toEqual([
+      'critical',
+      'high',
+      'medium',
+      'low',
+    ]);
+    expect(selectedTaskFieldAllowedValues(
+      [owlPolicy, restrictedPolicy],
+      'priority',
+    )).toEqual(['high', 'medium']);
+  });
+
   it.each([
     ['mc-owned', 'local', 'Delete task'],
     ['remote-managed', 'write-through', 'Delete from source'],

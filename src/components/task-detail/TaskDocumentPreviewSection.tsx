@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { ExternalLink, FileText, Maximize2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { normalizeDocHubUrl } from '@/lib/connectors/document-intelligence/doc-hub-links';
+import { withPdfFitToWidth } from '@/lib/pdf-preview';
 import { cn } from '@/lib/utils';
 import { parseLocalDate } from '@/lib/utils/date-format';
 import type { TaskDetailMetadata, TaskDetailMode } from './task-detail-types';
@@ -74,7 +75,7 @@ function DocumentPreview({
 
   return (
     <iframe
-      src={url}
+      src={type === 'pdf' ? withPdfFitToWidth(url) : url}
       title={`Preview of ${title}`}
       loading="lazy"
       referrerPolicy="no-referrer"

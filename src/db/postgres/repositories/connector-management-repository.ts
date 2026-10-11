@@ -12,6 +12,7 @@ import type {
 import type { SourceListRecord } from '@/db/persistence/connector-execution';
 import { initializePostgresGitHubConnectorIdentityStateInTransaction } from './github-identity-repositories';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
+import { normalizeSyncActivity } from '@/lib/sync/activity';
 
 type Client = Pool | PoolClient;
 
@@ -100,6 +101,7 @@ const SYNC_HISTORY_COLUMNS = `
   alerts_added AS "notificationsAdded",
   errors,
   details,
+  activity,
   synced_at AS "syncedAt",
   duration_ms AS "durationMs",
   job_id AS "jobId",
@@ -1075,9 +1077,17 @@ export function createPostgresConnectorManagementRepository(
           if (result === 'errors') {
             return `(success = FALSE OR jsonb_array_length(errors) > 0)`;
           }
+          const hasDomainActivity = `(
+            activity @> '{"version":1}'::jsonb
+            AND jsonb_path_exists(
+              activity,
+              '$.groups[*].metrics[*] ? (@.value > 0 && @.kind != "snapshot")'
+            )
+          )`;
           const hasChanges = `(
             tasks_added > 0 OR tasks_updated > 0 OR tasks_removed > 0
             OR tasks_pushed > 0 OR local_only_protected > 0 OR alerts_added > 0
+            OR ${hasDomainActivity}
           )`;
           if (result === 'changes') return hasChanges;
           return `(
@@ -1100,7 +1110,13 @@ export function createPostgresConnectorManagementRepository(
         parameters,
       );
       const hasMore = historyRows.length > input.limit;
-      return { history: historyRows.slice(0, input.limit), hasMore };
+      return {
+        history: historyRows.slice(0, input.limit).map(row => ({
+          ...row,
+          activity: normalizeSyncActivity(row.activity),
+        })),
+        hasMore,
+      };
     },
 
     async getSyncWorkerHeartbeat() {

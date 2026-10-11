@@ -196,7 +196,22 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
     );
 
     const first = await synchronizer.sync({ full: true });
-    expect(first).toEqual({ itemsAdded: 501, itemsUpdated: 0, itemsRemoved: 0 });
+    expect(first).toMatchObject({ itemsAdded: 501, itemsUpdated: 0, itemsRemoved: 0 });
+    expect(first.activity?.groups[0]).toMatchObject({
+      key: 'transactions',
+      metrics: expect.arrayContaining([
+        expect.objectContaining({
+          key: 'transactions-processed',
+          value: 501,
+          kind: 'processed',
+        }),
+        expect.objectContaining({
+          key: 'transactions-created',
+          value: 501,
+          kind: 'created',
+        }),
+      ]),
+    });
     expect(sqlite.prepare(`
       SELECT count(*) AS count FROM finance_transactions
       WHERE connector_instance_id = ?
@@ -253,7 +268,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
         })
       : item);
     mockPages([contextFixtures.slice(0, 500), contextFixtures.slice(500)]);
-    expect(await synchronizer.sync({ full: false })).toEqual({
+    expect(await synchronizer.sync({ full: false })).toMatchObject({
       itemsAdded: 0,
       itemsUpdated: 0,
       itemsRemoved: 0,
@@ -274,7 +289,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       WHERE upstream_transaction_id = 'transaction-0'
     `).run();
     mockPages([contextFixtures.slice(0, 500), contextFixtures.slice(500)]);
-    expect(await synchronizer.sync({ full: false })).toEqual({
+    expect(await synchronizer.sync({ full: false })).toMatchObject({
       itemsAdded: 0,
       itemsUpdated: 0,
       itemsRemoved: 0,
@@ -518,9 +533,18 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       }), { headers: { 'content-type': 'application/json' } });
     }));
 
-    await expect(followCurrentSynchronizer.sync({ full: false })).resolves.toMatchObject({
+    const attributed = await followCurrentSynchronizer.sync({ full: false });
+    expect(attributed).toMatchObject({
       itemsAdded: 1,
     });
+    expect(attributed.activity?.groups.find(group => group.key === 'attribution'))
+      .toMatchObject({
+        metrics: [expect.objectContaining({
+          key: 'attribution-evaluated',
+          value: 1,
+          kind: 'processed',
+        })],
+      });
     const firstAttributionBody = attributionBodies[0] as {
       items: Array<Record<string, unknown>>;
     };

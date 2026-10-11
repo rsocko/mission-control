@@ -769,6 +769,7 @@ export interface SyncResult {
   syncedAt: string;
   /** Exact durable sync journal row produced by this execution attempt. */
   syncRunId?: string;
+  activity?: import('@/lib/sync/activity').SyncActivityPayload;
   domainStatus?: 'fresh' | 'stale' | 'partial' | 'unavailable';
   datasetErrors?: DomainSyncResult['datasetErrors'];
 }
@@ -783,6 +784,7 @@ export interface DomainSyncResult {
   itemsAdded: number;
   itemsUpdated: number;
   itemsRemoved: number;
+  activity?: import('@/lib/sync/activity').SyncActivityPayload;
   /** Notifications newly created while synchronizing connector-owned domain data. */
   notificationsAdded?: number;
   status?: 'fresh' | 'stale' | 'partial' | 'unavailable';

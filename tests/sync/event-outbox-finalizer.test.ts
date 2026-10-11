@@ -122,6 +122,30 @@ afterAll(() => {
 });
 
 describe('sync job finalizer event coupling', () => {
+  it('includes connector activity in completion events when provided', async () => {
+    const job = await claimJob('github-1');
+    const result: SyncResult = {
+      ...successResult('github-1', 'run-activity'),
+      activity: {
+        version: 1,
+        groups: [{
+          key: 'data',
+          label: 'Data synchronized',
+          category: 'data',
+          metrics: [{
+            key: 'records',
+            label: 'records synchronized',
+            value: 10,
+            kind: 'processed',
+          }],
+        }],
+      },
+    };
+
+    expect(terminalEvents.buildSyncCompletedEvent(job, result).payload.activity)
+      .toEqual(result.activity);
+  });
+
   it('enqueues sync.completed atomically with the successful terminal transition', async () => {
     const job = await claimJob('github-1');
     const result = successResult('github-1', 'run-1');

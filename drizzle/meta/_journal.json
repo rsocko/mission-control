@@ -1058,6 +1058,13 @@
       "when": 1791606499727,
       "tag": "0150_finance_clean_bootstrap",
       "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "6",
+      "when": 1791737565164,
+      "tag": "0151_sync_activity_payload",
+      "breakpoints": true
     }
   ]
 }

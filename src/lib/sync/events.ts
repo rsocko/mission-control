@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { syncLogger } from '@/lib/logger';
+import type { SyncActivityPayload } from './activity';
 
 // ─── Sync Stream Event Types ────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ export interface SyncCompleteEvent {
     durationMs: number;
     parentTasksAdded?: number;
     subtasksAdded?: number;
+    activity?: SyncActivityPayload;
   };
 }
 

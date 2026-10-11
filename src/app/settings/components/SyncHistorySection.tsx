@@ -30,6 +30,11 @@ import {
   type RetentionResolution,
   type RetentionResolutionStatus,
 } from '@/lib/sync/retention';
+import {
+  hasSyncActivity,
+  normalizeSyncActivity,
+  type SyncActivityPayload,
+} from '@/lib/sync/activity';
 
 const PAGE_SIZE = 10;
 const DETAIL_PAGE_SIZE = 10;
@@ -157,6 +162,60 @@ function ScheduleHealthPanel({
 /** Format a number with locale-appropriate thousands separators */
 function fmt(n: number): string {
   return n.toLocaleString();
+}
+
+function parseActivity(value: SyncLogEntry['activity']): SyncActivityPayload | null {
+  if (typeof value !== 'string') return normalizeSyncActivity(value);
+  try {
+    return normalizeSyncActivity(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function ActivityDetails({ activity }: { activity: SyncActivityPayload }) {
+  return (
+    <section aria-labelledby="connector-activity-heading" className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Activity size={14} className="text-[var(--text-muted)]" aria-hidden="true" />
+        <h4 id="connector-activity-heading" className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+          Connector activity
+        </h4>
+        {activity.status === 'partial' && (
+          <span className="rounded bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+            Partial
+          </span>
+        )}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {activity.groups.map(group => (
+          <div
+            key={group.key}
+            className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] p-3"
+          >
+            <div className="text-xs font-medium text-[var(--text-secondary)]">{group.label}</div>
+            <dl className="mt-2 space-y-1.5">
+              {group.metrics.map(metric => (
+                <div key={metric.key} className="flex items-baseline justify-between gap-3 text-xs">
+                  <dt className="min-w-0 text-[var(--text-muted)]">
+                    {metric.label}
+                    {metric.kind === 'snapshot' && (
+                      <span className="ml-1 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
+                        total
+                      </span>
+                    )}
+                  </dt>
+                  <dd className="shrink-0 font-semibold tabular-nums text-[var(--text-primary)]">
+                    {fmt(metric.value)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function SyncHistorySkeleton() {
@@ -290,6 +349,7 @@ function DetailPanel({ entry, auditDetails, connectorCapabilities, pushed, forma
     [auditDetails]
   );
   const protectedCount = Math.max(entry.localOnlyProtected || 0, protectedFromAudit);
+  const activity = parseActivity(entry.activity);
 
   // Items with actual changes (exclude untouched — items not in audit are untouched)
   const changedDetails = useMemo(
@@ -389,6 +449,9 @@ function DetailPanel({ entry, auditDetails, connectorCapabilities, pushed, forma
 
   return (
     <div className="space-y-3">
+      {activity && (
+        <ActivityDetails activity={activity} />
+      )}
       {/* Stats grid — clickable KPI cards */}
       <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
         {kpiCards.map(({ key, label, value, color }) => (
@@ -404,7 +467,7 @@ function DetailPanel({ entry, auditDetails, connectorCapabilities, pushed, forma
           </button>
         ))}
         <div className="bg-[var(--surface-2)] rounded-lg px-3 py-2">
-          <div className="text-xs text-[var(--text-muted)] uppercase tracking-wide">Notifications</div>
+          <div className="text-xs text-[var(--text-muted)] uppercase tracking-wide">New notifications</div>
           <div className={`text-sm font-semibold tabular-nums ${entry.notificationsAdded > 0 ? 'text-orange-400' : 'text-[var(--text-primary)]'}`}>{fmt(entry.notificationsAdded)}</div>
         </div>
         <div className="bg-[var(--surface-2)] rounded-lg px-3 py-2">
@@ -1297,6 +1360,13 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
             const pushed = entry.tasksPushed || 0;
             const protectedFromDetails = auditDetails.filter(d => d.action === 'protected').length;
             const protectedCount = Math.max(entry.localOnlyProtected || 0, protectedFromDetails);
+            const activity = parseActivity(entry.activity);
+            const domainActivity = hasSyncActivity(activity);
+            const activityMetrics = activity?.groups.flatMap(group => group.metrics.map(metric => ({
+              ...metric,
+              groupKey: group.key,
+            })))
+              .filter(metric => metric.kind !== 'snapshot' && metric.value > 0) ?? [];
 
             return (
               <div key={entry.id}
@@ -1335,18 +1405,37 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
                           {triggerLabels[entry.trigger]}
                         </span>
                       )}
+                      {activity?.status === 'partial' && (
+                        <span className="rounded bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                          Partial activity
+                        </span>
+                      )}
                     </div>
-                    <div className="text-xs text-[var(--text-muted)] mt-0.5 flex items-center gap-2 font-variant-numeric tabular-nums">
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-variant-numeric tabular-nums text-[var(--text-muted)]">
+                      {activityMetrics.map(metric => (
+                        <span key={`${metric.groupKey}:${metric.key}`}>{fmt(metric.value)} {metric.label}</span>
+                      ))}
                       {entry.tasksAdded > 0 && <span className="text-emerald-400">+{fmt(entry.tasksAdded)} added</span>}
                       {entry.tasksUpdated > 0 && <span className="text-blue-400">~{fmt(entry.tasksUpdated)} updated</span>}
                       {entry.tasksRemoved > 0 && <span className="text-red-400">-{fmt(entry.tasksRemoved)} removed</span>}
                       {pushed > 0 && <span className="text-purple-400">↑{fmt(pushed)} pushed</span>}
                       {protectedCount > 0 && <span className="text-amber-400">🛡{fmt(protectedCount)} retained locally</span>}
-                      {entry.notificationsAdded > 0 && <span className="text-amber-400">{fmt(entry.notificationsAdded)} notifications</span>}
+                      {entry.notificationsAdded > 0 && (
+                        <span className="text-amber-400">
+                          {fmt(entry.notificationsAdded)} new {entry.notificationsAdded === 1 ? 'notification' : 'notifications'}
+                        </span>
+                      )}
+                      {domainActivity
+                        && totalChanges === 0
+                        && pushed === 0
+                        && protectedCount === 0
+                        && entry.notificationsAdded === 0
+                        && <span>0 Tasks · 0 new notifications</span>}
                       {totalChanges === 0
                         && pushed === 0
                         && protectedCount === 0
                         && entry.notificationsAdded === 0
+                        && !domainActivity
                         && entry.success
                         && <span>No changes</span>}
                       {!entry.success && errors.length > 0 && <span className="text-red-400 truncate max-w-[200px]">{errors[0]?.slice(0, 60)}</span>}

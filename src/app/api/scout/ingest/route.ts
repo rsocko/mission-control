@@ -862,6 +862,7 @@ export async function POST(request: Request) {
       notificationsAdded: 0,
       errors: [],
       details: [],
+      activity: null,
       syncedAt,
       durationMs: Math.max(1, Date.now() - startedAt),
       jobId: null,

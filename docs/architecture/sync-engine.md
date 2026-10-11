@@ -143,6 +143,13 @@ boundary:
    the same durable job, lease heartbeat, retry, cancellation, and terminal
    result boundary as the rest of the connector run. Finance transaction
    snapshots therefore cannot bypass queue deduplication or worker recovery.
+   Domain syncs return a versioned, connector-neutral activity payload alongside
+   their internal result. Each connector supplies concise labels and exact
+   per-run metrics classified as `created`, `updated`, `removed`, `resolved`,
+   `processed`, or `snapshot`. Snapshot totals are display context only and do
+   not count as changes. The pipeline persists the payload in `sync_log`,
+   includes it in durable job results, completion events, and sync-stream
+   events, and marks a failed run's completed domain work as partial.
 10. Connector persistence bounds database work. On SQLite, task pages use small
    synchronous mutation batches, source-list discovery chunks bulk inserts,
    and retention yields between independent records while keeping each
@@ -161,6 +168,21 @@ page one. Page upserts are replay-safe, and authoritative absence is applied
 only in the final transaction after every page validates. Failure or
 cancellation records the attempt but leaves the last successful window
 unchanged.
+
+Tyrion is the first domain-activity producer. It reports transaction records
+synchronized and their exact create/update/remove deltas, attribution
+evaluations, Finance attention summary creation/update/settlement, and any
+locally created or resolved review Tasks. Counts never include transaction,
+account, merchant, or household identities.
+
+`sync_log.activity` is nullable JSON (`TEXT` JSON in SQLite and `jsonb` in
+PostgreSQL). Null remains the backward-compatible representation for historical
+runs. Sync History's **Has changes** filter includes positive non-snapshot
+activity metrics; **No changes** includes successful rows with neither legacy
+task/push/retention/notification deltas nor domain activity. Rolling back the
+PostgreSQL migration drops `sync_log.activity`; SQLite rollback requires the
+repository-standard table rebuild because SQLite cannot safely preserve every
+table invariant with a portable `DROP COLUMN`.
 
 The worker defaults to one job at a time. PostgreSQL deployments can increase
 `MC_SYNC_WORKER_CONCURRENCY` for bounded parallel execution across different

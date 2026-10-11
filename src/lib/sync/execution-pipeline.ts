@@ -903,6 +903,7 @@ export class SyncExecutionPipeline {
         errors,
         syncedAt: new Date().toISOString(),
         syncRunId,
+        ...(domainDataResult?.activity ? { activity: domainDataResult.activity } : {}),
         ...(domainDataResult?.status ? { domainStatus: domainDataResult.status } : {}),
         ...(domainDataResult?.datasetErrors
           ? { datasetErrors: domainDataResult.datasetErrors }
@@ -922,6 +923,7 @@ export class SyncExecutionPipeline {
         notificationsAdded,
         errors,
         details,
+        activity: domainDataResult?.activity ?? null,
         syncedAt: result.syncedAt,
         durationMs: Date.now() - startTime,
         // The durable queue finalizer owns job timing/retry metadata and uses
@@ -955,6 +957,7 @@ export class SyncExecutionPipeline {
           durationMs: Date.now() - startTime,
           parentTasksAdded: upsertResult.parentTasksAdded,
           subtasksAdded: upsertResult.subtasksAdded,
+          ...(domainDataResult?.activity ? { activity: domainDataResult.activity } : {}),
         },
       });
       if (
@@ -975,6 +978,7 @@ export class SyncExecutionPipeline {
               tasksUpdated,
               tasksRemoved,
               notificationsAdded,
+              ...(domainDataResult?.activity ? { activity: domainDataResult.activity } : {}),
               errors,
             },
           }, { stableKey: `sync.completed:run:${syncRunId}` });
@@ -1047,6 +1051,14 @@ export class SyncExecutionPipeline {
         errors: [err instanceof Error ? err.message : String(err)],
         syncedAt: new Date().toISOString(),
         syncRunId,
+        ...(domainDataResult?.activity
+          ? {
+              activity: {
+                ...domainDataResult.activity,
+                status: 'partial' as const,
+              },
+            }
+          : {}),
       };
 
       const failureLog: SyncRunRecord = {
@@ -1061,6 +1073,7 @@ export class SyncExecutionPipeline {
         notificationsAdded: 0,
         errors: result.errors,
         details,
+        activity: result.activity ?? null,
         syncedAt: result.syncedAt,
         durationMs: Date.now() - startTime,
         jobId: options?.jobId ?? null,

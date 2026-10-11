@@ -27,6 +27,7 @@ function record(
     notificationsAdded: 5,
     errors: [],
     details: [{ action: 'contract' }],
+    activity: null,
     syncedAt: '2026-08-26T00:00:00.000Z',
     durationMs: 100,
     jobId: null,

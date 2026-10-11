@@ -1,4 +1,5 @@
 import type { ConnectorRepository } from './core-repositories';
+import type { SyncActivityPayload } from '@/lib/sync/activity';
 import type { ConnectorExecutionRepositories } from './connector-execution';
 import type { GitHubWorkerRepositories } from './github-worker';
 import type { NonFinanceConnectorStateRepositories } from './work-todo';
@@ -41,6 +42,7 @@ export interface SyncRunRecord extends SyncRunSummary {
   tasksPushed: number;
   localOnlyProtected: number;
   details: readonly unknown[];
+  activity: SyncActivityPayload | null;
   jobId: string | null;
   identityMode: 'legacy' | 'stable' | null;
   identityModeRevision: number | null;

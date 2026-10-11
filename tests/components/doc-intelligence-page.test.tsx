@@ -95,4 +95,76 @@ describe('Document Actions task detail lifecycle', () => {
     fireEvent.click(screen.getByRole('button', { name: /Sign second document/ }));
     expect(screen.getByLabelText('Mock task detail task-2')).toHaveTextContent('panel');
   });
+
+  it('loads every task and review-notification page', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/notifications')) {
+        const cursor = new URL(url, 'http://localhost').searchParams.get('cursor');
+        return new Response(JSON.stringify(cursor
+          ? {
+              notifications: [{
+                id: 'review-2',
+                title: 'Review second document',
+                templateKey: 'owl_needs_review',
+                metadata: { reviewUrl: 'https://owl.example/review/2' },
+              }],
+              hasMore: false,
+              cursor: null,
+            }
+          : {
+              notifications: [{
+                id: 'review-1',
+                title: 'Review first document',
+                templateKey: 'owl_needs_review',
+                metadata: { reviewUrl: 'https://owl.example/review/1' },
+              }],
+              hasMore: true,
+              cursor: 'next-review-page',
+            }), { status: 200 });
+      }
+
+      const offset = new URL(url, 'http://localhost').searchParams.get('offset');
+      return new Response(JSON.stringify(offset === '1'
+        ? { tasks: [tasks[1]], hasMore: false }
+        : { tasks: [tasks[0]], hasMore: true }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<DocIntelligencePage />);
+
+    expect(await screen.findByRole('button', { name: /Pay first invoice/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Sign second document/ })).toBeInTheDocument();
+    expect(await screen.findByText('2 items need review in OWL')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('offset=0'), undefined);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('offset=1'), undefined);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('cursor=next-review-page'));
+  });
+
+  it('renders large result sets in bounded pages', async () => {
+    const manyTasks = Array.from({ length: 101 }, (_, index) => ({
+      ...tasks[0],
+      id: `task-${index + 1}`,
+      sourceId: `owl:task-${index + 1}`,
+      title: `Document action ${index + 1}`,
+    }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith('/api/notifications')) {
+        return new Response(JSON.stringify({ notifications: [], hasMore: false }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ tasks: manyTasks, hasMore: false }), { status: 200 });
+    }));
+
+    render(<DocIntelligencePage />);
+
+    expect(await screen.findAllByRole('button', { name: /Document action/ })).toHaveLength(100);
+    expect(screen.getByText('1–100 of 101')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /Document action/ })).toHaveLength(1);
+    });
+    expect(screen.getByText('101–101 of 101')).toBeInTheDocument();
+  });
 });

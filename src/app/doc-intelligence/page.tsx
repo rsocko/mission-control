@@ -7,6 +7,7 @@ import {
   CalendarClock,
   CalendarPlus,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Clock,
   CreditCard,
@@ -27,6 +28,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { toast } from '@/lib/toast';
+import { fetchAllTasks } from '@/lib/tasks/fetch-all';
 import { AgentAttribution } from '@/components/domains/AgentAttribution';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { GroupByDropdown, type GroupOption } from '@/components/toolbar/GroupByDropdown';
@@ -123,6 +125,67 @@ const STORAGE_KEYS = {
   direction: 'mission-control:docs:sort-direction',
   group: 'mission-control:docs:group',
 } as const;
+const DOCUMENT_ACTION_PAGE_SIZE = 100;
+
+interface OwlReviewNotification {
+  id?: unknown;
+  title?: unknown;
+  templateKey?: unknown;
+  metadata?: unknown;
+}
+
+interface OwlReviewNotificationPage {
+  notifications?: OwlReviewNotification[];
+  hasMore?: boolean;
+  cursor?: string | null;
+}
+
+async function fetchAllReviewAlerts(): Promise<Array<{ id: string; title: string; reviewUrl: string }>> {
+  const alerts: Array<{ id: string; title: string; reviewUrl: string }> = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+
+  while (true) {
+    const params = new URLSearchParams({
+      source: 'document-intelligence',
+      limit: '200',
+    });
+    if (cursor) params.set('cursor', cursor);
+
+    const response = await fetch(`/api/notifications?${params}`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch OWL review notifications: ${response.status}`);
+    }
+    const page = await response.json() as OwlReviewNotificationPage;
+    for (const notification of page.notifications ?? []) {
+      if (
+        notification.templateKey !== 'owl_needs_review'
+        || typeof notification.id !== 'string'
+        || typeof notification.title !== 'string'
+        || !notification.metadata
+        || typeof notification.metadata !== 'object'
+        || Array.isArray(notification.metadata)
+      ) {
+        continue;
+      }
+      const reviewUrl = normalizeExternalUrl(
+        (notification.metadata as Record<string, unknown>).reviewUrl,
+      );
+      if (reviewUrl) {
+        alerts.push({ id: notification.id, title: notification.title, reviewUrl });
+      }
+    }
+
+    if (!page.hasMore) break;
+    if (!page.cursor || seenCursors.has(page.cursor)) {
+      throw new Error('OWL review notification pagination did not advance');
+    }
+    seenCursors.add(page.cursor);
+    cursor = page.cursor;
+  }
+
+  return alerts;
+}
 
 export default function DocIntelligencePage() {
   const [tasks, setTasks] = useState<DocumentTask[]>([]);
@@ -140,6 +203,7 @@ export default function DocIntelligencePage() {
   const [sortBy, setSortBy] = useState<DocumentSort>('dueDate');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [groupBy, setGroupBy] = useState<DocumentGroup>('dueDate');
+  const [pageIndex, setPageIndex] = useState(0);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const taskSelection = useTaskSelection({
     selectedTaskId,
@@ -166,41 +230,17 @@ export default function DocIntelligencePage() {
     setLoadError(null);
 
     try {
-      const [res, notificationsResponse] = await Promise.all([
-        fetch('/api/tasks?source=document-intelligence&openOnly=true&sortBy=dueDate&sortDirection=asc&limit=200'),
-        fetch('/api/notifications?source=document-intelligence&limit=200').catch(() => null),
+      const [allTasks, alerts] = await Promise.all([
+        fetchAllTasks<DocumentTask>(
+          '/api/tasks?source=document-intelligence&openOnly=true&sortBy=dueDate&sortDirection=asc',
+        ),
+        fetchAllReviewAlerts().catch(() => {
+          toast.error('OWL review alerts could not be loaded');
+          return [];
+        }),
       ]);
-      if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
-      const data = await res.json();
-      setTasks(data.tasks || []);
-      if (notificationsResponse?.ok) {
-        const notificationData = await notificationsResponse.json() as {
-          notifications?: Array<{
-            id?: unknown;
-            title?: unknown;
-            templateKey?: unknown;
-            metadata?: unknown;
-          }>;
-        };
-        setReviewAlerts((notificationData.notifications || []).flatMap((notification) => {
-          if (
-            notification.templateKey !== 'owl_needs_review'
-            || typeof notification.id !== 'string'
-            || typeof notification.title !== 'string'
-            || !notification.metadata
-            || typeof notification.metadata !== 'object'
-            || Array.isArray(notification.metadata)
-          ) {
-            return [];
-          }
-          const reviewUrl = normalizeExternalUrl(
-            (notification.metadata as Record<string, unknown>).reviewUrl,
-          );
-          return reviewUrl ? [{ id: notification.id, title: notification.title, reviewUrl }] : [];
-        }));
-      } else {
-        setReviewAlerts([]);
-      }
+      setTasks(allTasks);
+      setReviewAlerts(alerts);
     } catch {
       setLoadError('OWL document actions could not be loaded. Check the connector and try again.');
       toast.error('OWL could not load Paperless-ngx document actions');
@@ -229,7 +269,19 @@ export default function DocIntelligencePage() {
     () => sortDocumentTasks(filteredTasks, sortBy, sortDirection),
     [filteredTasks, sortBy, sortDirection],
   );
-  const taskGroups = useMemo(() => groupDocumentTasks(sortedTasks, groupBy), [sortedTasks, groupBy]);
+  const pageCount = Math.max(1, Math.ceil(sortedTasks.length / DOCUMENT_ACTION_PAGE_SIZE));
+  const visiblePageIndex = Math.min(pageIndex, pageCount - 1);
+  const visibleTasks = useMemo(
+    () => sortedTasks.slice(
+      visiblePageIndex * DOCUMENT_ACTION_PAGE_SIZE,
+      (visiblePageIndex + 1) * DOCUMENT_ACTION_PAGE_SIZE,
+    ),
+    [sortedTasks, visiblePageIndex],
+  );
+  const taskGroups = useMemo(
+    () => groupDocumentTasks(visibleTasks, groupBy),
+    [visibleTasks, groupBy],
+  );
   const viewCounts = useMemo(() => countDocumentViews(tasks), [tasks]);
   const actionTypeCounts = useMemo(() => countByMetadata(tasks, 'actionType'), [tasks]);
   const urgencyCounts = useMemo(() => countByMetadata(tasks, 'urgency'), [tasks]);
@@ -249,7 +301,23 @@ export default function DocIntelligencePage() {
 
   function changeView(view: DocumentView) {
     setSelectedView(view);
+    setPageIndex(0);
     localStorage.setItem(STORAGE_KEYS.view, view);
+  }
+
+  function changeActionType(value: ActionTypeFilter) {
+    setActionTypeFilter(value);
+    setPageIndex(0);
+  }
+
+  function changeUrgency(value: UrgencyFilter) {
+    setUrgencyFilter(value);
+    setPageIndex(0);
+  }
+
+  function changeCorrespondent(value: string) {
+    setCorrespondentFilter(value);
+    setPageIndex(0);
   }
 
   function selectDocumentTask(taskId: string) {
@@ -268,12 +336,14 @@ export default function DocIntelligencePage() {
   function handleSortChange(nextSort: string, nextDirection: SortDirection) {
     setSortBy(nextSort as DocumentSort);
     setSortDirection(nextDirection);
+    setPageIndex(0);
     localStorage.setItem(STORAGE_KEYS.sort, nextSort);
     localStorage.setItem(STORAGE_KEYS.direction, nextDirection);
   }
 
   function handleGroupChange(nextGroup: string) {
     setGroupBy(nextGroup as DocumentGroup);
+    setPageIndex(0);
     localStorage.setItem(STORAGE_KEYS.group, nextGroup);
   }
 
@@ -283,6 +353,7 @@ export default function DocIntelligencePage() {
     setUrgencyFilter('all');
     setCorrespondentFilter('all');
     setSearchQuery('');
+    setPageIndex(0);
     localStorage.setItem(STORAGE_KEYS.view, 'all');
   }
 
@@ -358,7 +429,10 @@ export default function DocIntelligencePage() {
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <SearchInput
             value={searchQuery}
-            onChange={setSearchQuery}
+            onChange={(value) => {
+              setSearchQuery(value);
+              setPageIndex(0);
+            }}
             placeholder="Search actions, documents, correspondents..."
             clearLabel="Clear document search"
             className="min-w-[180px] max-w-md flex-1 rounded-lg bg-[var(--surface-2)] px-2.5 py-1.5 focus-within:border-[var(--accent)]"
@@ -368,11 +442,11 @@ export default function DocIntelligencePage() {
             selectedView={selectedView}
             onViewChange={changeView}
             actionTypeFilter={actionTypeFilter}
-            onActionTypeChange={setActionTypeFilter}
+            onActionTypeChange={changeActionType}
             urgencyFilter={urgencyFilter}
-            onUrgencyChange={setUrgencyFilter}
+            onUrgencyChange={changeUrgency}
             correspondentFilter={correspondentFilter}
-            onCorrespondentChange={setCorrespondentFilter}
+            onCorrespondentChange={changeCorrespondent}
             correspondents={correspondents}
           />
 
@@ -424,13 +498,13 @@ export default function DocIntelligencePage() {
             onViewChange={changeView}
             viewCounts={viewCounts}
             actionTypeFilter={actionTypeFilter}
-            onActionTypeChange={setActionTypeFilter}
+            onActionTypeChange={changeActionType}
             actionTypeCounts={actionTypeCounts}
             urgencyFilter={urgencyFilter}
-            onUrgencyChange={setUrgencyFilter}
+            onUrgencyChange={changeUrgency}
             urgencyCounts={urgencyCounts}
             correspondentFilter={correspondentFilter}
-            onCorrespondentChange={setCorrespondentFilter}
+            onCorrespondentChange={changeCorrespondent}
             correspondents={correspondents}
           />
         </div>
@@ -443,13 +517,13 @@ export default function DocIntelligencePage() {
             onViewChange={changeView}
             viewCounts={viewCounts}
             actionTypeFilter={actionTypeFilter}
-            onActionTypeChange={setActionTypeFilter}
+            onActionTypeChange={changeActionType}
             actionTypeCounts={actionTypeCounts}
             urgencyFilter={urgencyFilter}
-            onUrgencyChange={setUrgencyFilter}
+            onUrgencyChange={changeUrgency}
             urgencyCounts={urgencyCounts}
             correspondentFilter={correspondentFilter}
-            onCorrespondentChange={setCorrespondentFilter}
+            onCorrespondentChange={changeCorrespondent}
             correspondents={correspondents}
           />
         </aside>
@@ -479,7 +553,7 @@ export default function DocIntelligencePage() {
           ) : filteredTasks.length === 0 ? (
             <EmptyState hasFilters={hasFilters} onClearFilters={clearFilters} />
           ) : (
-            <div className={cn(groupBy !== 'none' && 'space-y-1 pb-4')}>
+            <div className={cn(groupBy !== 'none' && 'space-y-1')}>
               {taskGroups.map((group) => (
                 <section key={group.id}>
                   {group.label && (
@@ -502,6 +576,41 @@ export default function DocIntelligencePage() {
                   </div>
                 </section>
               ))}
+              {pageCount > 1 && (
+                <nav
+                  aria-label="Document action pages"
+                  className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-[var(--border)] bg-[var(--surface-1)]/95 px-4 py-3 backdrop-blur-sm"
+                >
+                  <span className="text-xs tabular-nums text-[var(--text-muted)]">
+                    {visiblePageIndex * DOCUMENT_ACTION_PAGE_SIZE + 1}–
+                    {Math.min((visiblePageIndex + 1) * DOCUMENT_ACTION_PAGE_SIZE, sortedTasks.length)}
+                    {' '}of {sortedTasks.length}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPageIndex(Math.max(0, visiblePageIndex - 1))}
+                      disabled={visiblePageIndex === 0}
+                      className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <ChevronLeft size={13} aria-hidden="true" />
+                      Previous
+                    </button>
+                    <span className="min-w-16 text-center text-xs tabular-nums text-[var(--text-secondary)]">
+                      {visiblePageIndex + 1} / {pageCount}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPageIndex(Math.min(pageCount - 1, visiblePageIndex + 1))}
+                      disabled={visiblePageIndex === pageCount - 1}
+                      className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                      <ChevronRight size={13} aria-hidden="true" />
+                    </button>
+                  </div>
+                </nav>
+              )}
             </div>
           )}
         </main>

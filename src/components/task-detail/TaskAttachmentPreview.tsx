@@ -6,6 +6,7 @@ import { Download, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Modal } from '@/components/ui/Modal';
+import { withPdfFitToWidth } from '@/lib/pdf-preview';
 
 export interface PreviewAttachment {
   id: string;
@@ -171,7 +172,11 @@ export function TaskAttachmentPreview({ taskId, attachment, onClose }: TaskAttac
           <pre className="whitespace-pre-wrap break-words font-mono text-xs text-[var(--text-secondary)]">{text}</pre>
         )}
         {!error && kind === 'pdf' && objectUrl && (
-          <iframe src={objectUrl} title={attachment.name} className="h-full min-h-[60vh] w-full rounded-md bg-white" />
+          <iframe
+            src={withPdfFitToWidth(objectUrl)}
+            title={attachment.name}
+            className="h-full min-h-[60vh] w-full rounded-md bg-white"
+          />
         )}
         {!error && kind === 'audio' && objectUrl && (
           <div className="flex h-full items-center justify-center">

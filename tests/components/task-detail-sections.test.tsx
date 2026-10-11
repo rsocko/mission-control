@@ -326,7 +326,10 @@ describe('TaskDocumentPreviewSection', () => {
     expect(screen.getByRole('complementary', { name: 'Document metadata and actions' })).toBeInTheDocument();
     expect(screen.getByText('$42.50')).toBeInTheDocument();
     expect(screen.getByText('P1 · High')).toBeInTheDocument();
-    expect(screen.getByTitle('Preview of Invoice 4711')).toHaveAttribute('src', 'https://docs.example/1');
+    expect(screen.getByTitle('Preview of Invoice 4711')).toHaveAttribute(
+      'src',
+      'https://docs.example/1#zoom=page-width',
+    );
     expect(screen.getByRole('link', { name: /Open in Paperless-ngx/ })).toHaveAttribute(
       'href',
       'https://paperless.example/documents/1',
@@ -415,7 +418,7 @@ describe('TaskDocumentPreviewSection', () => {
     const preview = screen.getByTitle('Preview of Legacy statement');
     expect(preview).toHaveAttribute(
       'src',
-      '/api/tasks/task%2F42/document-preview',
+      '/api/tasks/task%2F42/document-preview#zoom=page-width',
     );
     expect(preview).not.toHaveAttribute('sandbox');
     expect(screen.getByRole('link', { name: /Open in Paperless-ngx/ })).toHaveAttribute(

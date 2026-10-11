@@ -305,6 +305,7 @@ describe('TaskDocumentPreviewSection', () => {
         taskId="task-1"
         mode="panel"
         connectorType="document-intelligence"
+        documentFocusedLayout
         metadata={{
           previewUrl: 'https://docs.example/1',
           documentUrl: 'https://paperless.example/documents/1',
@@ -322,6 +323,7 @@ describe('TaskDocumentPreviewSection', () => {
     );
 
     expect(screen.getByText('Invoice 4711')).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Document metadata and actions' })).toBeInTheDocument();
     expect(screen.getByText('$42.50')).toBeInTheDocument();
     expect(screen.getByText('P1 · High')).toBeInTheDocument();
     expect(screen.getByTitle('Preview of Invoice 4711')).toHaveAttribute('src', 'https://docs.example/1');

@@ -13,16 +13,19 @@ vi.mock('@/components/task-detail/TaskDetailPanel', () => ({
   TaskDetailPanel: ({
     taskId,
     mode,
+    documentFocusedLayout,
     onClose,
     onModeChange,
   }: {
     taskId: string;
     mode: string;
+    documentFocusedLayout?: boolean;
     onClose: () => void;
     onModeChange: (mode: 'panel' | 'dialog' | 'workspace') => void;
   }) => (
     <div aria-label={`Mock task detail ${taskId}`}>
       <span>{mode}</span>
+      <span>{documentFocusedLayout ? 'document-focused' : 'standard-layout'}</span>
       <button type="button" onClick={() => onModeChange('workspace')}>Expand mock task</button>
       <button type="button" onClick={onClose}>Close mock task</button>
     </div>
@@ -79,6 +82,7 @@ describe('Document Actions task detail lifecycle', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Pay first invoice/ }));
     expect(screen.getByLabelText('Mock task detail task-1')).toHaveTextContent('panel');
+    expect(screen.getByLabelText('Mock task detail task-1')).toHaveTextContent('document-focused');
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand mock task' }));
     expect(screen.getByLabelText('Mock task detail task-1')).toHaveTextContent('workspace');

@@ -98,6 +98,7 @@ export function TaskDetailPanel({
   portalDialog = false,
   minPanelWidth = 280,
   fillContainer = false,
+  documentFocusedLayout = false,
   focusPanelOnMount = false,
   allowPopout = true,
   notesOpenRequest = null,
@@ -756,6 +757,8 @@ export function TaskDetailPanel({
       <div className={cn(
         'mx-auto w-full',
         mode === 'panel' && 'flex flex-col gap-4 p-5',
+        mode === 'panel' && documentFocusedLayout
+          && '[&>header]:-order-2 [&>[data-document-preview]]:-order-1',
         mode === 'mobile' && 'flex flex-col gap-3 px-4 pb-28 [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11',
         mode === 'dialog' && 'grid max-w-4xl grid-cols-2 items-start gap-4 p-6',
         mode === 'workspace' && 'grid max-w-[1320px] grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(380px,1.35fr)] items-start gap-5 p-7',
@@ -1113,6 +1116,7 @@ export function TaskDetailPanel({
           connectorType={task.connectorType}
           metadata={parsedMetadata}
           dueDate={task.dueDate}
+          documentFocusedLayout={documentFocusedLayout}
           sourceActions={task.connectorType === 'document-intelligence' ? (
             <OwlTaskActions
               key={`${task.id}:${parsedMetadata.owlUpdatedAt || task.updatedAt}`}
@@ -1262,6 +1266,7 @@ export function TaskDetailPanel({
       tabIndex={focusPanelOnMount ? -1 : undefined}
       className={cn(
         'relative flex-shrink-0 overflow-y-auto border-l border-[var(--border)] bg-[var(--surface-1)] shadow-[-12px_0_30px_-24px_rgba(0,0,0,0.45)]',
+        documentFocusedLayout && '@container',
         fillContainer && 'h-full w-full',
       )}
       style={fillContainer

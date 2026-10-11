@@ -222,6 +222,8 @@ export interface TaskDetailPanelProps {
   minPanelWidth?: number;
   /** Fill a host-owned pane instead of using the user's global side-panel width. */
   fillContainer?: boolean;
+  /** Prioritize a live document preview and its metadata in document-oriented hosts. */
+  documentFocusedLayout?: boolean;
   /** Move keyboard focus into the panel when it opens. */
   focusPanelOnMount?: boolean;
   /** Hide the separate-window action when this panel already owns a task window. */

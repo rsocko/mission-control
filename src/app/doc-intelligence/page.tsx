@@ -519,6 +519,7 @@ export default function DocIntelligencePage() {
                 portalDialog
                 minPanelWidth={420}
                 fillContainer
+                documentFocusedLayout
               />
             </div>
           </section>

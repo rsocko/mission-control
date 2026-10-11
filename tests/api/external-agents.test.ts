@@ -122,6 +122,44 @@ describe('external-agent API', () => {
     expect(body.agent.dataPolicy.fieldAllowlist).toContain('instruction');
   });
 
+  it('allows only one GitHub Copilot Cloud destination', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ login: 'octocat' })));
+    const input = {
+      name: 'GitHub Copilot Cloud',
+      type: 'copilot-cloud',
+      endpoint: 'https://api.github.com',
+      authType: 'github-user',
+      credential: 'github_pat_test',
+      capabilities: {
+        canAnalyzeCode: true,
+        canWriteCode: true,
+      },
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+      },
+    };
+
+    try {
+      const created = await registryRoute.POST(mutationRequest(
+        '/api/external-agents',
+        input,
+      ));
+      const duplicate = await registryRoute.POST(mutationRequest(
+        '/api/external-agents',
+        { ...input, name: 'Second GitHub route' },
+      ));
+
+      expect(created.status).toBe(201);
+      expect(duplicate.status).toBe(409);
+      await expect(duplicate.json()).resolves.toMatchObject({
+        error: 'GitHub Copilot Cloud is already configured',
+        code: 'DESTINATION_ALREADY_EXISTS',
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('enforces preview confirmation and scoped pull claim/result authentication', async () => {
     await registryRoute.POST(mutationRequest('/api/external-agents', {
       id: 'api-pull',

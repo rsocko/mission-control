@@ -133,6 +133,7 @@ const NAV_GROUPS: NavGroup[] = [
 export default function SettingsPage() {
   const params = useParams();
   const router = useRouter();
+  const [initialConnectorType, setInitialConnectorType] = React.useState<string | null>(null);
 
   // Derive active section from URL path
   const sectionSlug = Array.isArray(params.section) ? params.section[0] : undefined;
@@ -203,6 +204,39 @@ export default function SettingsPage() {
     selectResult: selectSearchResult,
   } = useSettingsSearchFocus({ activeSection, navigate: navigateToSearchResult });
 
+  React.useEffect(() => {
+    if (activeSection !== 'connectors') return;
+    const requestedType = new URLSearchParams(window.location.search).get('add');
+    if (!requestedType) return;
+    queueMicrotask(() => {
+      setInitialConnectorType(requestedType);
+      setShowAddModal(true);
+    });
+  }, [activeSection, setShowAddModal]);
+
+  const openAddConnector = useCallback(() => {
+    setInitialConnectorType(null);
+    setShowAddModal(true);
+  }, [setShowAddModal]);
+
+  const closeAddConnector = useCallback(() => {
+    setShowAddModal(false);
+    setInitialConnectorType(null);
+    if (new URLSearchParams(window.location.search).has('add')) {
+      router.replace('/settings/connectors');
+    }
+  }, [router, setShowAddModal]);
+
+  const connectorAdded = useCallback(() => {
+    const returnTarget = new URLSearchParams(window.location.search).get('return');
+    setShowAddModal(false);
+    setInitialConnectorType(null);
+    void fetchData();
+    if (returnTarget === 'ai') {
+      router.push('/settings/ai-provider');
+    }
+  }, [fetchData, router, setShowAddModal]);
+
   return (
     <>
     {/* Mobile settings view (F-99, F-100, F-101) */}
@@ -215,7 +249,7 @@ export default function SettingsPage() {
         <AIProviderSection />
       </div>
     ) : (
-      <MobileSettings onAddConnector={() => setShowAddModal(true)} />
+      <MobileSettings onAddConnector={openAddConnector} />
     )}
 
     {/* Desktop settings view */}
@@ -367,7 +401,7 @@ export default function SettingsPage() {
                   onUpdate={updateConnector}
                   onTested={fetchData}
                   onPurgeSourceList={purgeRetainedSourceList}
-                  onAdd={() => setShowAddModal(true)}
+                  onAdd={openAddConnector}
                   selectedConnector={selectedConnector}
                   onSelect={selectConnector}
                   selectedTab={selectedConnectorTab}
@@ -473,10 +507,11 @@ export default function SettingsPage() {
     <AnimatePresence>
       {showAddModal && (
         <AddConnectorModal
-          onClose={() => setShowAddModal(false)}
-          onAdded={() => { setShowAddModal(false); fetchData(); }}
+          onClose={closeAddConnector}
+          onAdded={connectorAdded}
           classificationDefaults={classificationDefaults}
           connectors={connectors}
+          initialType={initialConnectorType}
         />
       )}
     </AnimatePresence>

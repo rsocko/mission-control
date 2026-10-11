@@ -46,6 +46,7 @@ describe('receipt reconciliation attention policy', () => {
     evaluated: 0,
     notificationsCreated: 0,
     notificationsUpdated: 0,
+    notificationsSettled: 0,
     tasksCreated,
     tasksUpdated,
     tasksSettled: 0,

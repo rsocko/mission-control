@@ -622,6 +622,29 @@ export function runConnectorManagementRepositoryContract(
             }],
           },
         }),
+        history(`${PREFIX}-filter-domain-change`, '2099-09-05T02:40:00.000Z', {
+          connectorId: connectorB,
+          tasksAdded: 0,
+          tasksUpdated: 0,
+          tasksRemoved: 0,
+          tasksPushed: 0,
+          localOnlyProtected: 0,
+          notificationsAdded: 0,
+          activity: {
+            version: 1,
+            groups: [{
+              key: 'data',
+              label: 'Data synchronized',
+              category: 'data',
+              metrics: [{
+                key: 'created',
+                label: 'records created',
+                value: 1,
+                kind: 'created',
+              }],
+            }],
+          },
+        }),
         history(`${PREFIX}-filter-snapshot-total`, '2099-09-05T02:45:00.000Z', {
           connectorId: connectorB,
           tasksAdded: 0,
@@ -670,6 +693,7 @@ export function runConnectorManagementRepositoryContract(
       });
       expect(noChanges.history.map(({ id }) => id)).toEqual([
         `${PREFIX}-filter-snapshot-total`,
+        `${PREFIX}-filter-domain-activity`,
         `${PREFIX}-filter-empty`,
       ]);
 
@@ -680,13 +704,13 @@ export function runConnectorManagementRepositoryContract(
         connectorIds: [connectorB],
       });
       expect(domainChanges.history.map(({ id }) => id)).toEqual([
-        `${PREFIX}-filter-domain-activity`,
+        `${PREFIX}-filter-domain-change`,
       ]);
       expect(domainChanges.history[0].activity).toMatchObject({
         version: 1,
         groups: [{
           key: 'data',
-          metrics: [{ key: 'processed', value: 10 }],
+          metrics: [{ key: 'created', value: 1 }],
         }],
       });
 

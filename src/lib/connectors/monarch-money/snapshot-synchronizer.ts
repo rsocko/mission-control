@@ -13,6 +13,7 @@ import {
 } from './client';
 import { MONARCH_TRANSACTION_MAX_BACKFILL_DAYS } from './constants';
 import { FinanceAttributionCoordinator } from './attribution-coordinator';
+import { SYNC_ACTIVITY_VERSION } from '@/lib/sync/activity';
 
 const DEFAULT_BACKFILL_DAYS = 90;
 const DEFAULT_OVERLAP_DAYS = 7;
@@ -115,6 +116,7 @@ export class FinanceSnapshotSynchronizer {
 
     let added = 0;
     let updated = 0;
+    let synchronized = 0;
     let cursor: string | undefined;
     let sourceAsOf: string | null = null;
     const seenCursors = new Set<string>();
@@ -152,6 +154,7 @@ export class FinanceSnapshotSynchronizer {
         });
         added += counts.added;
         updated += counts.updated;
+        synchronized += page.transactions.length;
         await attribution.attributePage(
           page.transactions,
           provenance.fetchedAt,
@@ -196,8 +199,56 @@ export class FinanceSnapshotSynchronizer {
         added,
         updated,
       });
-      await attribution.finish(completedAt);
-      return { itemsAdded: added, itemsUpdated: updated, itemsRemoved: removed };
+      const attributionActivity = await attribution.finish(completedAt);
+      return {
+        itemsAdded: added,
+        itemsUpdated: updated,
+        itemsRemoved: removed,
+        activity: {
+          version: SYNC_ACTIVITY_VERSION,
+          groups: [{
+            key: 'transactions',
+            label: 'Transaction sync',
+            category: 'data',
+            metrics: [
+              {
+                key: 'transactions-processed',
+                label: 'transactions checked',
+                value: synchronized,
+                kind: 'processed',
+              },
+              {
+                key: 'transactions-created',
+                label: 'transactions created',
+                value: added,
+                kind: 'created',
+              },
+              {
+                key: 'transactions-updated',
+                label: 'transactions materially changed',
+                value: updated,
+                kind: 'updated',
+              },
+              {
+                key: 'transactions-removed',
+                label: 'transactions removed',
+                value: removed,
+                kind: 'removed',
+              },
+            ],
+          }, {
+            key: 'attribution',
+            label: 'Attribution review',
+            category: 'attention',
+            metrics: [{
+              key: 'attribution-evaluated',
+              label: 'transactions checked for attribution',
+              value: attributionActivity?.evaluated ?? 0,
+              kind: 'processed',
+            }],
+          }],
+        },
+      };
     } catch (error) {
       const failure = errorDetails(error);
       const failedAt = new Date().toISOString();

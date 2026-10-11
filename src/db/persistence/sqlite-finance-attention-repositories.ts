@@ -30,6 +30,7 @@ import {
   financeAttentionDeliveryDigest,
   FINANCE_ATTENTION_MAX_REPAIR_SCOPE,
   financeAttentionMetadata,
+  financeAttentionMateriallyChanged,
   financeAttentionTaskCopy,
   financeAttentionMyDayCandidateRank,
   FINANCE_ATTENTION_REPAIR_CUTOVER,
@@ -245,6 +246,8 @@ function settleNotification(
 ): boolean {
   if (!notification) return false;
   const promoted = taskId !== null && signal.sourceLifecycle === 'open';
+  const route = promoted ? 'task' : 'settled';
+  const changed = financeAttentionMateriallyChanged(signal, route, notification.metadata);
   const state = notification.disposition === 'dismissed'
     ? 'dismissed'
     : notification.disposition === 'handled'
@@ -263,7 +266,7 @@ function settleNotification(
     primaryActionId: null,
     metadata: financeAttentionMetadata(
       signal,
-      promoted ? 'task' : 'settled',
+      route,
       decisionAt,
       notification.metadata,
     ),
@@ -281,7 +284,7 @@ function settleNotification(
     eq(notificationDeliveryEvents.notificationId, notification.id),
     eq(notificationDeliveryEvents.status, 'pending'),
   )).run();
-  return true;
+  return changed;
 }
 
 function settleTask(
@@ -292,6 +295,8 @@ function settleTask(
 ): boolean {
   if (!task) return false;
   const status = financeAttentionSettlementTaskStatus(signal);
+  const changed = task.status !== status
+    || financeAttentionMateriallyChanged(signal, 'settled', task.metadata);
   const metadata = financeAttentionMetadata(signal, 'settled', decisionAt, task.metadata);
   delete metadata.verificationPending;
   transaction.update(tasks).set({
@@ -303,7 +308,7 @@ function settleTask(
     metadata,
   }).where(eq(tasks.id, task.id)).run();
   transaction.delete(myDayItems).where(eq(myDayItems.taskId, task.id)).run();
-  return true;
+  return changed;
 }
 
 function preserveStale(
@@ -398,7 +403,12 @@ function createOrUpdateTask(
   transaction: Transaction,
   signal: FinanceAttentionSignal,
   decisionAt: Date,
-): { task: typeof tasks.$inferSelect; created: boolean; promoted: boolean } {
+): {
+  task: typeof tasks.$inferSelect;
+  created: boolean;
+  updated: boolean;
+  promoted: boolean;
+} {
   const sourceId = financeAttentionSourceId(signal);
   const existing = findTask(transaction, sourceId);
   if (existing) {
@@ -413,6 +423,8 @@ function createOrUpdateTask(
         || previousAttention.sourceLifecycle !== 'open'
       );
     const metadata = financeAttentionMetadata(signal, 'task', decisionAt, existing.metadata);
+    const updated = resurface
+      || financeAttentionMateriallyChanged(signal, 'task', existing.metadata);
     if (wasCompleted && !resurface) {
       metadata.verificationPending = true;
     } else {
@@ -439,6 +451,7 @@ function createOrUpdateTask(
     return {
       task: findTask(transaction, sourceId)!,
       created: false,
+      updated,
       promoted: resurface,
     };
   }
@@ -469,6 +482,7 @@ function createOrUpdateTask(
   return {
     task: findTask(transaction, sourceId)!,
     created: inserted.changes > 0,
+    updated: false,
     promoted: inserted.changes > 0,
   };
 }
@@ -631,6 +645,7 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           evaluated: 0,
           notificationsCreated: 0,
           notificationsUpdated: 0,
+          notificationsSettled: 0,
           tasksCreated: 0,
           tasksUpdated: 0,
           tasksSettled: 0,
@@ -679,6 +694,7 @@ export function createSqliteFinanceAttentionRoutingPersistence(
         const pendingNotifications: Array<{
           signal: FinanceAttentionSignal;
           existing: typeof notifications.$inferSelect | undefined;
+          materiallyChanged: boolean;
           materiallyWorsened: boolean;
         }> = [];
         result.evaluated += signals.length;
@@ -734,13 +750,21 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           const decidedRoute = selectFinanceAttentionRoute(signal, decisionAt);
           if (decidedRoute === 'settled') {
             const notification = findNotification(transaction, sourceId);
-            result.settled++;
-            if (settleTask(transaction, task, signal, decisionAt)) {
+            const taskSettled = settleTask(transaction, task, signal, decisionAt);
+            const notificationSettled = settleNotification(
+              transaction,
+              notification,
+              signal,
+              decisionAt,
+              task?.id ?? null,
+            );
+            if (taskSettled) {
               result.tasksSettled++;
             }
-            if (settleNotification(transaction, notification, signal, decisionAt, task?.id ?? null)) {
-              result.notificationsUpdated++;
+            if (notificationSettled) {
+              result.notificationsSettled++;
             }
+            if (taskSettled || notificationSettled) result.settled++;
             continue;
           }
           if (decidedRoute === 'stale') {
@@ -764,6 +788,8 @@ export function createSqliteFinanceAttentionRoutingPersistence(
             pendingNotifications.push({
               signal,
               existing,
+              materiallyChanged: !existing
+                || financeAttentionMateriallyChanged(signal, decidedRoute, existing.metadata),
               materiallyWorsened: signal.signalKind === 'attributionAccountReview'
                 && (
                   !existing
@@ -781,10 +807,18 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           }
           const routedTask = createOrUpdateTask(transaction, signal, decisionAt);
           if (routedTask.created) result.tasksCreated++;
-          else result.tasksUpdated++;
+          else if (routedTask.updated) result.tasksUpdated++;
           if (routedTask.promoted) result.taskPromoted++;
           const notification = findNotification(transaction, sourceId);
-          settleNotification(transaction, notification, signal, decisionAt, routedTask.task.id);
+          if (settleNotification(
+            transaction,
+            notification,
+            signal,
+            decisionAt,
+            routedTask.task.id,
+          )) {
+            result.notificationsSettled++;
+          }
         }
         if (pendingNotifications.length > 0) {
           const inputs: CreateNotificationInput[] = pendingNotifications.map(({ signal, existing }) => (
@@ -803,7 +837,9 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           syncFinanceAttentionNotificationPresentation(transaction, routed);
           for (const [index, routedResult] of routed.entries()) {
             if (routedResult.created) result.notificationsCreated++;
-            else result.notificationsUpdated++;
+            else if (pendingNotifications[index]?.materiallyChanged) {
+              result.notificationsUpdated++;
+            }
             if (pendingNotifications[index]?.materiallyWorsened) {
               transaction.update(notifications).set({
                 state: 'unread',

@@ -148,7 +148,7 @@ describe('Sync History retained items', () => {
             category: 'data',
             metrics: [{
               key: 'transactions-processed',
-              label: 'transactions synchronized',
+              label: 'transactions checked',
               value: 10,
               kind: 'processed',
             }],
@@ -158,7 +158,7 @@ describe('Sync History retained items', () => {
             category: 'attention',
             metrics: [{
               key: 'attribution-evaluated',
-              label: 'evaluated for attribution',
+              label: 'transactions checked for attribution',
               value: 10,
               kind: 'processed',
             }],
@@ -186,10 +186,10 @@ describe('Sync History retained items', () => {
       deletedAt: null,
     }]} />);
 
-    expect(await screen.findByText('10 transactions synchronized')).toBeInTheDocument();
-    expect(screen.getByText('10 evaluated for attribution')).toBeInTheDocument();
-    expect(screen.getByText('0 Tasks · 0 new notifications')).toBeInTheDocument();
-    expect(screen.queryByText('No changes')).not.toBeInTheDocument();
+    expect(await screen.findByText('10 transactions checked')).toBeInTheDocument();
+    expect(screen.getByText('10 transactions checked for attribution')).toBeInTheDocument();
+    expect(screen.getByText('No changes')).toBeInTheDocument();
+    expect(screen.queryByText('0 Tasks · 0 new notifications')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Tyrion/i }));
     expect(await screen.findByRole('region', { name: 'Connector activity' })).toBeInTheDocument();

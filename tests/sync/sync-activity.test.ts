@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   hasSyncActivity,
+  hasSyncChanges,
   mergeSyncActivity,
   normalizeSyncActivity,
   type SyncActivityPayload,
@@ -25,6 +26,7 @@ describe('sync activity payload', () => {
   it('normalizes a versioned connector-neutral payload', () => {
     expect(normalizeSyncActivity(domainActivity)).toEqual(domainActivity);
     expect(hasSyncActivity(domainActivity)).toBe(true);
+    expect(hasSyncChanges(domainActivity)).toBe(false);
   });
 
   it('does not treat a snapshot total as a per-run change', () => {
@@ -42,6 +44,24 @@ describe('sync activity payload', () => {
         }],
       }],
     })).toBe(false);
+  });
+
+  it('treats only mutation and transition metrics as changes', () => {
+    expect(hasSyncChanges({
+      ...domainActivity,
+      groups: [{
+        ...domainActivity.groups[0]!,
+        metrics: [
+          ...domainActivity.groups[0]!.metrics,
+          {
+            key: 'transactions-created',
+            label: 'transactions created',
+            value: 1,
+            kind: 'created',
+          },
+        ],
+      }],
+    })).toBe(true);
   });
 
   it('rejects malformed and unsupported payloads safely', () => {

@@ -15,6 +15,7 @@ import {
   financeAttentionDeliveryDigest,
   FINANCE_ATTENTION_MAX_REPAIR_SCOPE,
   financeAttentionMetadata,
+  financeAttentionMateriallyChanged,
   financeAttentionTaskCopy,
   financeAttentionMyDayCandidateRank,
   FINANCE_ATTENTION_REPAIR_CUTOVER,
@@ -378,10 +379,12 @@ async function settleNotification(
 ): Promise<boolean> {
   if (!notification) return false;
   const promoted = taskId !== null && signal.sourceLifecycle === 'open';
+  const route = promoted ? 'task' : 'settled';
+  const changed = financeAttentionMateriallyChanged(signal, route, notification.metadata);
   const state = notificationSettleState(notification.disposition);
   const metadata = financeAttentionMetadata(
     signal,
-    promoted ? 'task' : 'settled',
+    route,
     decisionAt,
     notification.metadata,
   );
@@ -415,7 +418,7 @@ async function settleNotification(
         next_attempt_at = NULL, lease_expires_at = NULL
     WHERE notification_id = $1 AND status = 'pending'
   `, [notification.id]);
-  return true;
+  return changed;
 }
 
 async function settleTask(
@@ -426,6 +429,8 @@ async function settleTask(
 ): Promise<boolean> {
   if (!task) return false;
   const status = financeAttentionSettlementTaskStatus(signal);
+  const changed = task.status !== status
+    || financeAttentionMateriallyChanged(signal, 'settled', task.metadata);
   const now = decisionAt.toISOString();
   const metadata = financeAttentionMetadata(signal, 'settled', decisionAt, task.metadata);
   delete metadata.verificationPending;
@@ -445,7 +450,7 @@ async function settleTask(
     task.id,
   ]);
   await query(client, `DELETE FROM my_day_items WHERE task_id = $1`, [task.id]);
-  return true;
+  return changed;
 }
 
 async function preserveStale(
@@ -550,7 +555,7 @@ async function createOrUpdateTask(
   client: PoolClient,
   signal: FinanceAttentionSignal,
   decisionAt: Date,
-): Promise<{ task: PgTaskRow; created: boolean; promoted: boolean }> {
+): Promise<{ task: PgTaskRow; created: boolean; updated: boolean; promoted: boolean }> {
   const sourceId = financeAttentionSourceId(signal);
   const existing = await findTask(client, sourceId);
   const now = decisionAt.toISOString();
@@ -566,6 +571,8 @@ async function createOrUpdateTask(
         || previousAttention.sourceLifecycle !== 'open'
       );
     const metadata = financeAttentionMetadata(signal, 'task', decisionAt, existing.metadata);
+    const updated = resurface
+      || financeAttentionMateriallyChanged(signal, 'task', existing.metadata);
     if (wasCompleted && !resurface) {
       metadata.verificationPending = true;
     } else {
@@ -605,7 +612,12 @@ async function createOrUpdateTask(
         existing.id,
       ]);
     }
-    return { task: (await findTask(client, sourceId))!, created: false, promoted: resurface };
+    return {
+      task: (await findTask(client, sourceId))!,
+      created: false,
+      updated,
+      promoted: resurface,
+    };
   }
   const metadata = financeAttentionMetadata(signal, 'task', decisionAt);
   financeAttentionRecord(metadata.financeAttention).promotedAt = now;
@@ -640,6 +652,7 @@ async function createOrUpdateTask(
   return {
     task: (await findTask(client, sourceId))!,
     created: inserted.length > 0,
+    updated: false,
     promoted: inserted.length > 0,
   };
 }
@@ -745,7 +758,12 @@ async function createPendingNotification(
   client: PoolClient,
   signal: FinanceAttentionSignal,
   decisionAt: Date,
-): Promise<{ created: boolean; notificationId: string; pendingDelivery: boolean }> {
+): Promise<{
+  created: boolean;
+  updated: boolean;
+  notificationId: string;
+  pendingDelivery: boolean;
+}> {
   const sourceId = financeAttentionSourceId(signal);
   const existing = await findNotification(client, sourceId);
   const materiallyWorsened = signal.signalKind === 'attributionAccountReview'
@@ -825,6 +843,12 @@ async function createPendingNotification(
   }
   return {
     created: result.created,
+    updated: !result.created
+      && financeAttentionMateriallyChanged(
+        signal,
+        selectFinanceAttentionRoute(signal, decisionAt),
+        existing?.metadata,
+      ),
     notificationId: result.id,
     pendingDelivery: result.pendingDelivery,
   };
@@ -888,6 +912,7 @@ export function createPostgresFinanceAttentionRoutingPersistence(
           evaluated: 0,
           notificationsCreated: 0,
           notificationsUpdated: 0,
+          notificationsSettled: 0,
           tasksCreated: 0,
           tasksUpdated: 0,
           tasksSettled: 0,
@@ -992,11 +1017,17 @@ export function createPostgresFinanceAttentionRoutingPersistence(
           const decidedRoute = selectFinanceAttentionRoute(signal, decisionAt);
           if (decidedRoute === 'settled') {
             const notification = await findNotification(client, sourceId);
-            result.settled++;
-            if (await settleTask(client, task, signal, decisionAt)) result.tasksSettled++;
-            if (await settleNotification(client, notification, signal, decisionAt, task?.id ?? null)) {
-              result.notificationsUpdated++;
-            }
+            const taskSettled = await settleTask(client, task, signal, decisionAt);
+            const notificationSettled = await settleNotification(
+              client,
+              notification,
+              signal,
+              decisionAt,
+              task?.id ?? null,
+            );
+            if (taskSettled) result.tasksSettled++;
+            if (notificationSettled) result.notificationsSettled++;
+            if (taskSettled || notificationSettled) result.settled++;
             continue;
           }
           if (decidedRoute === 'stale') {
@@ -1020,7 +1051,7 @@ export function createPostgresFinanceAttentionRoutingPersistence(
             hasPendingDelivery ||= created.pendingDelivery;
             if (created.created) {
               result.notificationsCreated++;
-            } else {
+            } else if (created.updated) {
               result.notificationsUpdated++;
             }
             continue;
@@ -1034,10 +1065,18 @@ export function createPostgresFinanceAttentionRoutingPersistence(
           }
           const routedTask = await createOrUpdateTask(client, signal, decisionAt);
           if (routedTask.created) result.tasksCreated++;
-          else result.tasksUpdated++;
+          else if (routedTask.updated) result.tasksUpdated++;
           if (routedTask.promoted) result.taskPromoted++;
           const notification = await findNotification(client, sourceId);
-          await settleNotification(client, notification, signal, decisionAt, routedTask.task.id);
+          if (await settleNotification(
+            client,
+            notification,
+            signal,
+            decisionAt,
+            routedTask.task.id,
+          )) {
+            result.notificationsSettled++;
+          }
         }
         const myDay = await rebuildFinanceMyDay(client, decisionAt);
         result.autoIncluded = myDay.autoIncluded;

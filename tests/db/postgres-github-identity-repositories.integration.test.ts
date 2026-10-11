@@ -250,6 +250,10 @@ if (connectionString) {
             [id, now],
           );
         },
+        hardDeleteTask: async (id) => {
+          await pool.query(`DELETE FROM task_linked_sources WHERE task_id = $1`, [id]);
+          await pool.query(`DELETE FROM tasks WHERE id = $1`, [id]);
+        },
         openCollisionCount: async (id) => {
           const result = await pool.query<{ value: number }>(
             `SELECT COUNT(*)::integer AS value

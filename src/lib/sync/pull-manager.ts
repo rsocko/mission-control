@@ -1120,6 +1120,8 @@ async function applyRemoteUpdate(
     caps?.taskFieldProfile?.microStatus?.authority === 'source';
   const connectorOwnsStatusReason =
     caps?.taskFieldProfile?.statusReason?.authority === 'source';
+  const descriptionIsLocal =
+    caps?.taskFieldProfile?.description?.authority === 'local';
 
   // A remote priority of 'none' means "no priority set" — it should never
   // overwrite a locally-set value. Only an explicit non-none priority from
@@ -1156,6 +1158,9 @@ async function applyRemoteUpdate(
   const remoteMetadata = remote.metadata && typeof remote.metadata === 'object'
     ? remote.metadata
     : {};
+  const resolvedDescription = descriptionIsLocal
+    ? existingTask.description || null
+    : remote.description || null;
   const githubHierarchyManaged = (
     remote.connectorType === 'github-issues'
     || existingTask.connectorType === 'github-issues'
@@ -1164,7 +1169,7 @@ async function applyRemoteUpdate(
   const indexedTask = {
     id: existingTask.id,
     title: remote.title,
-    description: remote.description || null,
+    description: resolvedDescription,
     sourceListName: resolvedListName || remote.sourceListName || existingTask.sourceListName || null,
     connectorType: remote.connectorType || existingTask.connectorType,
     status: resolvedStatus,

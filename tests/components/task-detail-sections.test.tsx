@@ -6,6 +6,7 @@ import { TaskDetailHeader } from '@/components/task-detail/TaskDetailHeader';
 import { TaskTagsSection } from '@/components/task-detail/TaskTagsSection';
 import { TaskDocumentPreviewSection } from '@/components/task-detail/TaskDocumentPreviewSection';
 import { TaskSourceActionsSection } from '@/components/task-detail/TaskSourceActionsSection';
+import { TaskNotesSection } from '@/components/task-detail/TaskNotesSection';
 import { TaskDetailFooter, TaskMobileActionBar } from '@/components/task-detail/TaskDetailFooter';
 import { TaskDuplicatesSection } from '@/components/task-detail/TaskDuplicatesSection';
 import { TaskStatusField } from '@/components/task-detail/TaskPropertiesSection';
@@ -25,6 +26,38 @@ vi.mock('@/components/task-detail/DuplicateTaskPreview', () => ({
 function renderWithTooltips(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>);
 }
+
+describe('TaskNotesSection', () => {
+  it('shows the read-only OWL summary separately from editable Mission Control notes', async () => {
+    renderWithTooltips(
+      <TaskNotesSection
+        mode="panel"
+        taskId="task-42"
+        sourceSummary="Payment for professional services rendered by your physician."
+        description="Call the billing office before paying."
+        descValue="Call the billing office before paying."
+        editingDesc={false}
+        canEditDescription
+        supportsAttachments={false}
+        sourceUrl={null}
+        descRef={createRef<HTMLTextAreaElement>()}
+        expandButtonRef={createRef<HTMLButtonElement>()}
+        onDescValueChange={vi.fn()}
+        onEditStart={vi.fn()}
+        onEditCancel={vi.fn()}
+        onEditorBlur={vi.fn()}
+        onExpand={vi.fn()}
+        onPaste={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('OWL summary')).toBeInTheDocument();
+    expect(screen.getByText('Payment for professional services rendered by your physician.'))
+      .toBeInTheDocument();
+    expect(await screen.findByText('Call the billing office before paying.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit notes' })).toBeEnabled();
+  });
+});
 
 const headerProps = {
   taskId: 'task-42',

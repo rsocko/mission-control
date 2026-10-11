@@ -60,6 +60,27 @@ export function taskFieldSaveLabel(
     : 'Saved in Mission Control';
 }
 
+export function taskFieldAllowedValues(
+  policy: TaskEditPolicy | null | undefined,
+  field: TaskField,
+): readonly string[] | undefined {
+  return policy?.fields?.[field]?.allowedValues;
+}
+
+export function selectedTaskFieldAllowedValues(
+  policies: readonly TaskEditPolicy[],
+  field: TaskField,
+): readonly string[] | undefined {
+  const constrained = policies
+    .map((policy) => taskFieldAllowedValues(policy, field))
+    .filter((values): values is readonly string[] => values !== undefined);
+  if (constrained.length === 0) return undefined;
+  return constrained.slice(1).reduce<readonly string[]>(
+    (allowed, values) => allowed.filter((value) => values.includes(value)),
+    constrained[0],
+  );
+}
+
 export function selectedTaskFieldBlockedReason(
   policies: readonly TaskEditPolicy[],
   field: TaskField,

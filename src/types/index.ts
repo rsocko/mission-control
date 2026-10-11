@@ -619,6 +619,7 @@ export interface TaskFieldPolicy {
   mutation: TaskFieldMutationMode;
   inbound: TaskFieldInboundMode;
   reason?: string;
+  allowedValues?: readonly string[];
 }
 
 export interface TaskEditPolicy {
@@ -639,6 +640,7 @@ export interface TaskEditPolicy {
 export interface TaskFieldCapabilityProfile {
   authority: 'source' | 'local' | 'merge';
   writeBack?: WriteBackMode;
+  allowedValues?: readonly string[];
 }
 
 // ─── CONNECTOR CONFIG ───────────────────────────────────────────────────────

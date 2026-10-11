@@ -14,6 +14,7 @@ import type {
 } from './components';
 import { useKanbanColumns, useKanbanSources, useKanbanTasks, type KanbanConfirmDialogState } from './hooks';
 import {
+  selectedTaskFieldAllowedValues,
   selectedTaskFieldBlockedReason,
   selectedTaskRemovalBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
@@ -79,6 +80,7 @@ function KanbanPageInner() {
     'kanbanPlacement',
   );
   const bulkPriorityBlockedReason = selectedTaskFieldBlockedReason(selectedBulkPolicies, 'priority');
+  const bulkAllowedPriorities = selectedTaskFieldAllowedValues(selectedBulkPolicies, 'priority');
   const bulkRemovalBlockedReason = selectedTaskRemovalBlockedReason(selectedBulkPolicies);
 
   const unmappedColumns = columnsState.isProjectView
@@ -197,6 +199,7 @@ function KanbanPageInner() {
               </Select>
             )}
             <BulkPriorityDropdown
+              allowedValues={bulkAllowedPriorities}
               disabled={Boolean(bulkPriorityBlockedReason)}
               disabledReason={bulkPriorityBlockedReason}
               onSetPriority={async priority => {

@@ -166,6 +166,7 @@ export interface TaskDetailMetadata {
   correspondent?: string;
   amount?: number;
   actionType?: string;
+  actionSummary?: string;
   category?: string;
   urgency?: string;
   confidence?: number;

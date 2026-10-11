@@ -80,6 +80,7 @@ import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
 import { useTaskContextMenuActionFactory } from '@/lib/hooks/useTaskContextMenuActionFactory';
 import {
   canEditTaskField,
+  selectedTaskFieldAllowedValues,
   selectedTaskFieldBlockedReason,
   selectedTaskRemovalBlockedReason,
   taskFieldBlockedReason,
@@ -245,6 +246,7 @@ export function TodayMainPanel({
   const selectedBulkPolicies = selectedBulkItems.map((item) => item.editPolicy);
   const bulkStatusBlockedReason = selectedTaskFieldBlockedReason(selectedBulkPolicies, 'status');
   const bulkPriorityBlockedReason = selectedTaskFieldBlockedReason(selectedBulkPolicies, 'priority');
+  const bulkAllowedPriorities = selectedTaskFieldAllowedValues(selectedBulkPolicies, 'priority');
   const bulkDueDateBlockedReason = selectedTaskFieldBlockedReason(selectedBulkPolicies, 'dueDate');
   const bulkMoveBlockedReason = selectedBulkItems.find((item) => !item.editPolicy.sourceMoveSupported)?.editPolicy.sourceMoveReason;
   const bulkRemovalBlockedReason = selectedTaskRemovalBlockedReason(selectedBulkPolicies);
@@ -809,6 +811,7 @@ export function TodayMainPanel({
                     <Check size={12} className="inline" /> Complete
                   </button>
                   <BulkPriorityDropdown
+                    allowedValues={bulkAllowedPriorities}
                     disabled={Boolean(bulkPriorityBlockedReason)}
                     disabledReason={bulkPriorityBlockedReason}
                     onSetPriority={async (priority) => {

@@ -10,6 +10,8 @@ import type { TaskDetailMode } from './task-detail-types';
 export interface TaskNotesSectionProps {
   mode: TaskDetailMode;
   taskId: string;
+  /** Compact source-authored context shown separately from editable notes. */
+  sourceSummary?: string;
   /** Saved notes markdown. */
   description: string | null;
   /** Draft notes while the editor is open. */
@@ -38,6 +40,7 @@ export interface TaskNotesSectionProps {
 export function TaskNotesSection({
   mode,
   taskId,
+  sourceSummary,
   description,
   descValue,
   editingDesc,
@@ -62,6 +65,16 @@ export function TaskNotesSection({
       mode === 'dialog' && 'col-span-2 row-start-7 min-h-72 self-stretch',
       mode === 'workspace' && 'col-start-3 row-start-2 row-span-3 min-h-[520px] self-stretch',
     )}>
+      {sourceSummary && (
+        <div className="mb-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)]/70 px-3 py-2.5">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+            OWL summary
+          </div>
+          <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+            {sourceSummary}
+          </p>
+        </div>
+      )}
       <div className="mb-2 flex items-center gap-2">
         <FileText size={14} className="text-[var(--text-tertiary)]" />
         <h3 className="text-sm font-semibold text-[var(--text-heading)]">Notes</h3>

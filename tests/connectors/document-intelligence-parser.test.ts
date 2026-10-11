@@ -75,6 +75,30 @@ function makeUnmatchedEob(overrides?: Partial<UnmatchedEob>): UnmatchedEob {
 // ─── mapActionToTask ───────────────────────────────────────────────────────
 
 describe('mapActionToTask', () => {
+  it('prefers an explicit OWL action title over the generated document title', () => {
+    const action = makeAction({
+      title: 'Pay the corrected electric bill',
+    });
+    const task = mapActionToTask(
+      action,
+      'document-intelligence',
+      'owl-main',
+    );
+
+    expect(task.title).toBe('Pay the corrected electric bill');
+    expect(task.description).toBeUndefined();
+    expect(task.metadata.actionSummary).toBe(action.summary);
+    expect(task.metadata.documentTitle).toBe(action.document_title);
+  });
+
+  it('keeps the OWL summary separate from local Mission Control notes', () => {
+    const action = makeAction();
+    const task = mapActionToTask(action, CONNECTOR_TYPE, CONNECTOR_ID);
+
+    expect(task.description).toBeUndefined();
+    expect(task.metadata.actionSummary).toBe('Pay outstanding invoice');
+  });
+
   it('retains the Paperless document URL when OWL provides no preview', () => {
     const task = mapActionToTask(makeAction(), CONNECTOR_TYPE, CONNECTOR_ID);
     expect(task.metadata.previewUrl).toBe('http://paperless.example:8000/documents/42');

@@ -121,7 +121,8 @@ describe('mapActionToTask', () => {
     expect(task.id).toBe('docintel-action-001');
     expect(task.sourceId).toBe('action-001');
     expect(task.title).toBe('Pay: PG&E — $143.22');
-    expect(task.description).toBe('Monthly electric bill due July 31');
+    expect(task.description).toBeUndefined();
+    expect(task.metadata.actionSummary).toBe('Monthly electric bill due July 31');
     expect(task.status).toBe('todo');
     expect(task.priority).toBe('high');
     expect(task.dueDate).toBe('2026-07-31');

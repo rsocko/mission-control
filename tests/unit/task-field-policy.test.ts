@@ -137,7 +137,7 @@ describe('resolveTaskFieldPolicy', () => {
     });
   });
 
-  it('models Document Intelligence as status-only write-back', () => {
+  it('writes supported Document Intelligence fields back', () => {
     const caps = capabilities({
       write: true,
       taskSourceModel: 'remote-managed',
@@ -150,6 +150,16 @@ describe('resolveTaskFieldPolicy', () => {
     };
 
     expect(resolveTaskFieldPolicy(task, caps, 'status').mutation).toBe('write-through');
+    expect(resolveTaskFieldPolicy(task, caps, 'title').mutation).toBe('write-through');
+    expect(resolveTaskFieldPolicy(task, caps, 'description')).toMatchObject({
+      mutation: 'local',
+      inbound: 'local-wins',
+    });
+    expect(resolveTaskFieldPolicy(task, caps, 'dueDate').mutation).toBe('write-through');
+    expect(resolveTaskFieldPolicy(task, caps, 'priority')).toMatchObject({
+      mutation: 'write-through',
+      allowedValues: ['critical', 'high', 'medium', 'low'],
+    });
     expect(resolveTaskFieldPolicy(task, caps, 'statusReason').mutation).toBe('local');
     expect(resolveTaskFieldPolicy(task, caps, 'microStatus').mutation).toBe('local');
     expect(resolveTaskFieldPolicy(task, caps, 'snoozedUntil').mutation).toBe('blocked');

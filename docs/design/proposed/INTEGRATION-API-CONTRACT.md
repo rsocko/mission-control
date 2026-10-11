@@ -91,6 +91,7 @@ interface DocAction {
   id: string;
   document_id: number;
   document_title: string;
+  title?: string | null; // User-correctable action title; does not rename the document
   action_type: 'pay' | 'respond' | 'file' | 'archive' | 'review' | 'sign' | 'schedule';
   category?: string | null;
   urgency: 'critical' | 'high' | 'medium' | 'low';
@@ -150,7 +151,7 @@ intelligence.
 
 #### `PATCH /api/action-queue/actions/{id}`
 
-Update an action's status (task completion / alert dismissal writeback).
+Update an action's lifecycle or due date.
 
 **Path Parameters:**
 
@@ -161,8 +162,10 @@ Update an action's status (task completion / alert dismissal writeback).
 **Request Body:**
 
 ```typescript
-interface ActionStatusUpdate {
-  status: 'pending' | 'completed' | 'done' | 'dismissed';
+interface ActionUpdate {
+  status?: 'pending' | 'completed' | 'done' | 'dismissed';
+  due_date?: string | null;
+  title?: string;
 }
 ```
 
@@ -172,10 +175,12 @@ interface ActionStatusUpdate {
 - `completeTask(sourceId)` → sends `{ status: 'completed' }`
 - `reopenTask(sourceId)` → sends `{ status: 'pending' }`
 - `updateTask(sourceId, { status: 'cancelled' })` → sends `{ status: 'dismissed' }`
+- `updateTask(sourceId, { dueDate })` → sends `{ due_date: dueDate }`
+- `updateTask(sourceId, { title })` → sends `{ title }` without changing `document_title`
 - `dismissAlert(sourceId)` → sends `{ status: 'dismissed' }` (for `eob-*` and `action-*` prefixed IDs)
 
-OWL performs the corresponding Paperless-aware mutation before reporting
-success.
+OWL performs the corresponding Paperless-aware lifecycle or due-date mutation
+before reporting success.
 
 ---
 
@@ -211,6 +216,11 @@ reclassification shortcut. MC clears rejected action metadata while retaining
 durable document facts. The correction variants update the extracted value and
 return the corrected action, including its current contextual CTA, without
 changing lifecycle.
+
+Mission Control maps Priority directly to OWL urgency through
+`wrong_urgency` feedback. OWL requires one of `critical`, `high`, `medium`, or
+`low`, so Mission Control does not offer its local-only `None` value for OWL
+tasks.
 
 ---
 
@@ -506,7 +516,8 @@ When a module is disabled, the connector skips the corresponding API call entire
 | `id` | `sourceId` | Direct |
 | — | `id` | `docintel-{id}` |
 | `action_type` + fields | `title` | `buildTaskTitle()` — e.g. "Pay: PG&E — $143.22" |
-| `summary` | `description` | Direct |
+| `summary` | `metadata.actionSummary` | Read-only compact action context |
+| — | `description` | Mission Control-local Notes; never appended to Paperless Notes implicitly |
 | `status` | `status` | `pending` → `todo`; `completed`/legacy `done` → `done`; `dismissed`/`not_an_action` → `cancelled`; `snoozed` → `todo` |
 | `snoozed_until` | `snoozedUntil` | Preserved only while OWL status is `snoozed` |
 | `updated_at` | `updatedAt` | Source freshness timestamp; falls back to `created_at` |

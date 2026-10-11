@@ -120,7 +120,7 @@ jobs:
 
   impeccable:
     name: Impeccable integration
-    if: always()
+    if: ${{ !cancelled() }}
     needs:
       - changes
     runs-on: ubuntu-24.04
@@ -168,7 +168,7 @@ jobs:
 
   lint:
     name: Lint
-    if: always()
+    if: ${{ !cancelled() }}
     needs:
       - changes
     runs-on: ubuntu-24.04
@@ -265,7 +265,7 @@ jobs:
 
   production-build:
     name: Production build
-    if: always()
+    if: ${{ !cancelled() }}
     needs:
       - changes
     runs-on: ubuntu-24.04
@@ -338,7 +338,7 @@ jobs:
 
   workflow-policy:
     name: Workflow policy
-    if: always()
+    if: ${{ !cancelled() }}
     needs:
       - changes
       - lint
@@ -365,7 +365,7 @@ jobs:
 
   worker-runtime:
     name: Worker runtime
-    if: always()
+    if: ${{ !cancelled() }}
     needs:
       - changes
       - production-build
@@ -393,7 +393,7 @@ jobs:
   unit-test-shards:
     name: Unit tests (${{ matrix.shard }}/4)
     if: >-
-      always() &&
+      !cancelled() &&
       (needs.changes.result != 'success' ||
       needs.changes.outputs.docs_only != 'true')
     needs:
@@ -434,7 +434,7 @@ jobs:
 
   unit-tests:
     name: Unit tests
-    if: always()
+    if: ${{ !cancelled() }}
     needs:
       - changes
       - unit-test-shards
@@ -463,7 +463,7 @@ jobs:
   postgres-route-sentinel:
     name: PostgreSQL route sentinel
     if: >-
-      always() &&
+      !cancelled() &&
       (needs.changes.result != 'success' ||
       needs.changes.outputs.docs_only != 'true')
     needs:
@@ -491,7 +491,7 @@ jobs:
   persisted-state-compatibility:
     name: Persisted-state compatibility
     if: >-
-      always() &&
+      !cancelled() &&
       (needs.changes.result != 'success' ||
       needs.changes.outputs.docs_only != 'true')
     needs:
@@ -528,7 +528,7 @@ jobs:
   postgres-integration-shards:
     name: PostgreSQL integration worker (${{ matrix.shard }}/${{ matrix.count }})
     if: >-
-      always() &&
+      !cancelled() &&
       (needs.changes.result != 'success' ||
       needs.changes.outputs.docs_only != 'true')
     needs:
@@ -645,7 +645,7 @@ jobs:
 
   postgres-integration:
     name: PostgreSQL integration
-    if: always()
+    if: ${{ !cancelled() }}
     needs:
       - changes
       - postgres-integration-shards

@@ -62,6 +62,34 @@ it('keeps connected connector types available for additional instances', () => {
   expect(screen.getByRole('button', { name: 'Manage connected' })).toBeInTheDocument();
 });
 
+it('treats Scout as a single connector instance', () => {
+  render(
+    <AddConnectorModal
+      onClose={vi.fn()}
+      onAdded={vi.fn()}
+      connectors={[connector('scout-primary', 'scout')]}
+    />,
+  );
+
+  expect(
+    screen.getByRole('button', { name: 'Scout connected, manage the existing connector' }),
+  ).toBeDisabled();
+  expect(screen.getByText('Connected')).toBeInTheDocument();
+});
+
+it('opens directly to a requested connector setup', () => {
+  render(
+    <AddConnectorModal
+      onClose={vi.fn()}
+      onAdded={vi.fn()}
+      initialType="scout"
+    />,
+  );
+
+  expect(screen.getByRole('heading', { name: 'Scout Setup' })).toBeInTheDocument();
+  expect(screen.queryByRole('searchbox', { name: 'Search connectors' })).not.toBeInTheDocument();
+});
+
 it('shows a recoverable empty state when no connectors match', () => {
   render(<AddConnectorModal onClose={vi.fn()} onAdded={vi.fn()} />);
 

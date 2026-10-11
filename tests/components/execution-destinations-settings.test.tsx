@@ -45,6 +45,10 @@ describe('ExecutionDestinationsSection', () => {
       'src',
       'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/microsoft-copilot.svg',
     );
+    expect(screen.getByRole('link', { name: 'Add Microsoft Scout' })).toHaveAttribute(
+      'href',
+      '/settings/connectors?add=scout&return=ai',
+    );
   });
 
   it('shows a retryable load error instead of a false empty state', async () => {
@@ -453,7 +457,7 @@ describe('ExecutionDestinationsSection', () => {
     expect(getCount).toBeGreaterThanOrEqual(2);
   });
 
-  it('recommends one standard integration agent and flags duplicate company routes', async () => {
+  it('recommends the Board-approved connector and flags duplicate company routes', async () => {
     const paperclipRoute = (id: string, name: string) => ({
       id,
       name,
@@ -502,11 +506,50 @@ describe('ExecutionDestinationsSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Paperclip route' }));
 
-    expect(screen.getByText('Use one integration agent per Paperclip company'))
+    expect(screen.getByText('Reuse your Board-approved Paperclip connection'))
       .toBeInTheDocument();
-    expect(screen.getByText(/Mission Control Dispatcher/)).toBeInTheDocument();
-    expect(screen.getByText(/standard trust/)).toBeInTheDocument();
-    expect(screen.getByText(/A CEO key works, but is not required/)).toBeInTheDocument();
+    expect(screen.getByText(/Use one route per company by default/)).toBeInTheDocument();
+    expect(screen.getByRole('link', {
+      name: 'Connect Paperclip with Board approval',
+    })).toHaveAttribute('href', '/settings/connectors?add=paperclip&return=ai');
     expect(screen.getByLabelText('Agent API key')).toBeInTheDocument();
+  });
+
+  it('does not offer a second GitHub Copilot Cloud destination', async () => {
+    const destination = {
+      id: 'github-cloud',
+      name: 'GitHub Copilot Cloud',
+      type: 'copilot-cloud',
+      description: null,
+      endpoint: 'https://api.github.com/',
+      authType: 'github-user',
+      providerConfig: {},
+      capabilities: { canAnalyzeCode: true },
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+        fieldAllowlist: [],
+        retentionDays: 30,
+        maxRequestsPerMinute: 30,
+      },
+      enabled: true,
+      executionLocality: 'github-hosted',
+      hasCredentialReference: true,
+      credentialSource: 'mission-control',
+      updatedAt: '2026-10-03T00:00:00.000Z',
+    };
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/connectors') return response({ connectors: [] });
+      if (url === '/api/external-agents') return response({ agents: [destination] });
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<ExecutionDestinationsSection />);
+
+    expect(await screen.findByText(/Personal access token stored in Mission Control/))
+      .toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'GitHub Copilot Cloud' }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Paperclip route' })).toBeInTheDocument();
   });
 });

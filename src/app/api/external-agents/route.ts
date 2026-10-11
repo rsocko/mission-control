@@ -5,6 +5,7 @@ import {
   publicExternalAgent,
   type ExternalAgentInput,
 } from '@/lib/external-agents/registry';
+import { ExternalAgentError } from '@/lib/external-agents/errors';
 import {
   externalAgentErrorResponse,
   requireTrustedMutation,
@@ -22,7 +23,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     requireTrustedMutation(request);
-    const agent = await createExternalAgent(await request.json() as ExternalAgentInput);
+    const input = await request.json() as ExternalAgentInput;
+    if (
+      input.type === 'copilot-cloud'
+      && (await listExternalAgents()).some((agent) => agent.type === 'copilot-cloud')
+    ) {
+      throw new ExternalAgentError(
+        'GitHub Copilot Cloud is already configured',
+        'DESTINATION_ALREADY_EXISTS',
+        409,
+      );
+    }
+    const agent = await createExternalAgent(input);
     return NextResponse.json({ agent: publicExternalAgent(agent) }, { status: 201 });
   } catch (error) {
     return externalAgentErrorResponse(error);

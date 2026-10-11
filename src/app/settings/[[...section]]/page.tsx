@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -28,7 +28,10 @@ const MobileSettings = dynamic(
   },
 );
 import { ListGroupsSection } from '../components/ListGroupsSection';
-import { ConnectorsSection } from '../components/ConnectorsSection';
+import {
+  ConnectorsSection,
+  type ConnectorSettingsTab,
+} from '../components/ConnectorsSection';
 import { SyncHistorySection } from '../components/SyncHistorySection';
 import { TagReviewPanel } from '../components/TagReviewPanel';
 import { IntegrationsSection } from '../components/IntegrationsSection';
@@ -50,6 +53,10 @@ import { PriorityEntitiesPanel } from '@/components/smart-score';
 import { SETTINGS_SECTION_NAMES, type SettingsSection } from '../settings-search';
 import { useSettingsAdministration } from '../useSettingsAdministration';
 import { useSettingsSearchFocus } from '../useSettingsSearchFocus';
+import {
+  buildConnectorSettingsHref,
+  readConnectorSettingsState,
+} from '../connector-settings-navigation';
 
 type ActiveSection = SettingsSection;
 
@@ -126,6 +133,7 @@ const NAV_GROUPS: NavGroup[] = [
 export default function SettingsPage() {
   const params = useParams();
   const router = useRouter();
+  const [initialConnectorType, setInitialConnectorType] = React.useState<string | null>(null);
 
   // Derive active section from URL path
   const sectionSlug = Array.isArray(params.section) ? params.section[0] : undefined;
@@ -144,6 +152,46 @@ export default function SettingsPage() {
     deleteListGroup, assignSourceListToGroup,
     updateSourceListAppearance,
   } = useSettingsAdministration();
+  const [selectedConnectorTab, setSelectedConnectorTab] = useState<ConnectorSettingsTab>(
+    () => typeof window === 'undefined'
+      ? 'general'
+      : readConnectorSettingsState(window.location.search).tab,
+  );
+
+  const updateConnectorRoute = useCallback((
+    connectorId: string | null,
+    tab: ConnectorSettingsTab,
+    replace = false,
+  ) => {
+    if (typeof window === 'undefined') return;
+    const href = buildConnectorSettingsHref(window.location.href, connectorId, tab);
+    if (replace) {
+      router.replace(href, { scroll: false });
+    } else {
+      router.push(href, { scroll: false });
+    }
+  }, [router]);
+
+  const selectConnector = useCallback((connectorId: string | null) => {
+    setSelectedConnector(connectorId);
+    setSelectedConnectorTab('general');
+    updateConnectorRoute(connectorId, 'general');
+  }, [setSelectedConnector, updateConnectorRoute]);
+
+  const selectConnectorTab = useCallback((tab: ConnectorSettingsTab) => {
+    setSelectedConnectorTab(tab);
+    updateConnectorRoute(selectedConnector, tab, true);
+  }, [selectedConnector, updateConnectorRoute]);
+
+  useEffect(() => {
+    const syncFromHistory = () => {
+      const state = readConnectorSettingsState(window.location.search);
+      setSelectedConnector(state.connectorId);
+      setSelectedConnectorTab(state.tab);
+    };
+    window.addEventListener('popstate', syncFromHistory);
+    return () => window.removeEventListener('popstate', syncFromHistory);
+  }, [setSelectedConnector]);
 
   const navigateToSearchResult = useCallback((section: SettingsSection, target: string) => {
     router.push(`/settings/${SECTION_TO_SLUG[section]}?setting=${encodeURIComponent(target)}`);
@@ -155,6 +203,39 @@ export default function SettingsPage() {
     results: settingsResults,
     selectResult: selectSearchResult,
   } = useSettingsSearchFocus({ activeSection, navigate: navigateToSearchResult });
+
+  React.useEffect(() => {
+    if (activeSection !== 'connectors') return;
+    const requestedType = new URLSearchParams(window.location.search).get('add');
+    if (!requestedType) return;
+    queueMicrotask(() => {
+      setInitialConnectorType(requestedType);
+      setShowAddModal(true);
+    });
+  }, [activeSection, setShowAddModal]);
+
+  const openAddConnector = useCallback(() => {
+    setInitialConnectorType(null);
+    setShowAddModal(true);
+  }, [setShowAddModal]);
+
+  const closeAddConnector = useCallback(() => {
+    setShowAddModal(false);
+    setInitialConnectorType(null);
+    if (new URLSearchParams(window.location.search).has('add')) {
+      router.replace('/settings/connectors');
+    }
+  }, [router, setShowAddModal]);
+
+  const connectorAdded = useCallback(() => {
+    const returnTarget = new URLSearchParams(window.location.search).get('return');
+    setShowAddModal(false);
+    setInitialConnectorType(null);
+    void fetchData();
+    if (returnTarget === 'ai') {
+      router.push('/settings/ai-provider');
+    }
+  }, [fetchData, router, setShowAddModal]);
 
   return (
     <>
@@ -168,7 +249,7 @@ export default function SettingsPage() {
         <AIProviderSection />
       </div>
     ) : (
-      <MobileSettings onAddConnector={() => setShowAddModal(true)} />
+      <MobileSettings onAddConnector={openAddConnector} />
     )}
 
     {/* Desktop settings view */}
@@ -312,13 +393,19 @@ export default function SettingsPage() {
                   syncing={syncing}
                   onToggle={toggleConnector}
                   onSync={triggerSync}
-                  onDelete={deleteConnector}
+                  onDelete={(id) => {
+                    deleteConnector(id);
+                    setSelectedConnector(null);
+                    updateConnectorRoute(null, 'general', true);
+                  }}
                   onUpdate={updateConnector}
                   onTested={fetchData}
                   onPurgeSourceList={purgeRetainedSourceList}
-                  onAdd={() => setShowAddModal(true)}
+                  onAdd={openAddConnector}
                   selectedConnector={selectedConnector}
-                  onSelect={setSelectedConnector}
+                  onSelect={selectConnector}
+                  selectedTab={selectedConnectorTab}
+                  onTabChange={selectConnectorTab}
                   deletedConnectors={connectors.filter(c => c.deletedAt)}
                   onRestore={restoreConnector}
                   onPermanentDelete={permanentlyDeleteConnector}
@@ -420,10 +507,11 @@ export default function SettingsPage() {
     <AnimatePresence>
       {showAddModal && (
         <AddConnectorModal
-          onClose={() => setShowAddModal(false)}
-          onAdded={() => { setShowAddModal(false); fetchData(); }}
+          onClose={closeAddConnector}
+          onAdded={connectorAdded}
           classificationDefaults={classificationDefaults}
           connectors={connectors}
+          initialType={initialConnectorType}
         />
       )}
     </AnimatePresence>

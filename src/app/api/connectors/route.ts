@@ -192,6 +192,13 @@ export async function POST(request: Request) {
 
     const id = requestedId || crypto.randomUUID();
     const now = new Date().toISOString();
+    if (type === 'scout') {
+      const existingScout = (await persistence.getOverview(false)).connectors
+        .find((connector) => connector.type === 'scout' && !connector.deletedAt);
+      if (existingScout) {
+        return ApiErrors.conflict('Scout is already connected');
+      }
+    }
     let connectorSettings = {
       ...(type === 'scout' ? DEFAULT_SCOUT_SETTINGS : {}),
       ...(settings || {}),

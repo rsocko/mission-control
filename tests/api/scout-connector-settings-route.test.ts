@@ -5,6 +5,7 @@ import { DEFAULT_AI_ROUTING_POLICY } from '@/lib/ai/sensitivity-policy';
 const createConnector = vi.fn(async () => true);
 const ensureSourceLists = vi.fn(async () => undefined);
 const getConnector = vi.fn();
+const getOverview = vi.fn();
 const updateConnector = vi.fn(async () => true);
 const projectExists = vi.fn(async () => true);
 
@@ -13,6 +14,7 @@ vi.mock('@/lib/connectors/management-service', () => ({
     createConnector,
     ensureSourceLists,
     getConnector,
+    getOverview,
     updateConnector,
     projectExists,
   })),
@@ -34,6 +36,7 @@ describe('Scout connector settings API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getConnector.mockResolvedValue(null);
+    getOverview.mockResolvedValue({ connectors: [], sourceLists: [] });
   });
 
   it('stores complete defaults for new Scout connectors', async () => {
@@ -57,6 +60,35 @@ describe('Scout connector settings API', () => {
     expect(ensureSourceLists).toHaveBeenCalledWith(expect.arrayContaining([
       expect.objectContaining({ connectorInstanceId: 'scout-primary' }),
     ]));
+  });
+
+  it('rejects a second Scout connector', async () => {
+    getOverview.mockResolvedValue({
+      connectors: [{
+        id: 'scout-primary',
+        type: 'scout',
+        name: 'Scout',
+        deletedAt: null,
+      }],
+      sourceLists: [],
+    });
+    const { POST } = await import('@/app/api/connectors/route');
+    const response = await POST(new Request('http://localhost/api/connectors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'scout-secondary',
+        type: 'scout',
+        name: 'Second Scout',
+        settings: {},
+      }),
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'Scout is already connected',
+    });
+    expect(createConnector).not.toHaveBeenCalled();
   });
 
   it('delegates GitHub creation to the atomic management repository operation', async () => {

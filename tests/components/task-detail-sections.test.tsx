@@ -313,6 +313,7 @@ describe('TaskDocumentPreviewSection', () => {
           documentTitle: 'Invoice 4711',
           correspondent: 'Acme',
           amount: 42.5,
+          confidence: 80,
           urgency: 'high',
           previewType: 'pdf',
           docHubUrl: 'https://owl.example/admin/actions/action-1',
@@ -325,6 +326,7 @@ describe('TaskDocumentPreviewSection', () => {
     expect(screen.getByText('Invoice 4711')).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Document metadata and actions' })).toBeInTheDocument();
     expect(screen.getByText('$42.50')).toBeInTheDocument();
+    expect(screen.getByText('80%')).toBeInTheDocument();
     expect(screen.getByText('P1 · High')).toBeInTheDocument();
     expect(screen.getByTitle('Preview of Invoice 4711')).toHaveAttribute(
       'src',

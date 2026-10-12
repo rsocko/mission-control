@@ -1,1250 +1,1076 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { toast } from '@/lib/toast';
+import React, { useMemo, useState } from 'react';
 import {
-  ChevronRight, ChevronDown, Trash2, Loader2,
-  Plus, Eye, EyeOff, FolderTree, GripVertical,
-  Save, PenLine, X, Check, ChevronsDownUp, ChevronsUpDown,
-  Search,
-} from 'lucide-react';
-import {
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectValue,
-} from '@/components/ui/select';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import {
-  DndContext, closestCenter, KeyboardSensor, PointerSensor,
-  useSensor, useSensors, DragEndEvent,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  type DragEndEvent,
+  useSensor,
+  useSensors,
 } from '@dnd-kit/core';
 import {
-  arrayMove, SortableContext, sortableKeyboardCoordinates,
-  useSortable, verticalListSortingStrategy,
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import {
+  Check,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  FolderPlus,
+  GripVertical,
+  Loader2,
+  Palette,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { IconPickerButton } from '@rsocko/icon-picker/picker';
+import { IconRenderer } from '@rsocko/icon-picker/renderer';
+import { toast } from '@/lib/toast';
 import { settingsLogger } from '@/lib/client-logger';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { ContextAppearancePicker } from '@/components/context-theme/ContextAppearancePicker';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import type { ContextAppearance } from '@/types';
+import { getConnectorDisplayName } from '@/lib/connectors/display-name';
+import { runSourceListRenameRequest, settleSourceListRename } from '../source-list-renames';
 import {
   isSourceListSelected,
   type ConnectorConfig,
-  type SourceList,
   type ListGroup,
+  type SourceList,
 } from './types';
-import { getConnectorDisplayName } from '@/lib/connectors/display-name';
-import { useInlineRename } from '@/lib/hooks/useInlineRename';
-import { runSourceListRenameRequest, settleSourceListRename } from '../source-list-renames';
-import { ContextAppearancePicker } from '@/components/context-theme/ContextAppearancePicker';
-import type { ContextAppearance } from '@/types';
 
-import { IconPickerButton as EmojiPickerButton } from '@rsocko/icon-picker/picker';
-import { IconRenderer } from '@rsocko/icon-picker/renderer';
+type GroupScope = string | 'other' | null;
 
-type SourceListSort = 'name' | 'connector' | 'type' | 'manual';
-
-function ListGroupsSection({
-  connectors,
-  sourceLists,
-  listGroups,
-  loading,
-  onCreateGroup,
-  onUpdateGroup,
-  onDeleteGroup,
-  onAssignList,
-  onRefresh,
-  onRenameList,
-  onUpdateAppearance,
-}: {
+interface ListGroupsSectionProps {
   connectors: ConnectorConfig[];
   sourceLists: SourceList[];
   listGroups: ListGroup[];
   loading: boolean;
-  onCreateGroup: (name: string, icon?: string, iconColor?: string) => Promise<void>;
+  onCreateGroup: (
+    connectorInstanceId: string,
+    name: string,
+    icon?: string,
+    iconColor?: string,
+  ) => Promise<void>;
   onUpdateGroup: (id: string, updates: Partial<ListGroup>) => Promise<void>;
   onDeleteGroup: (id: string) => Promise<void>;
   onAssignList: (id: string, groupId: string | null) => Promise<void>;
   onRefresh: () => Promise<void>;
   onRenameList: (sourceListId: string, newName: string) => (() => Promise<void>);
-  onUpdateAppearance?: (sourceListId: string, appearance: ContextAppearance | null) => Promise<void>;
-}) {
-  const [newName, setNewName] = useState('');
-  const [newIcon, setNewIcon] = useState('');
-  const [newIconColor, setNewIconColor] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [assigningListId, setAssigningListId] = useState<string | null>(null);
-  const [appearanceListId, setAppearanceListId] = useState('');
-  const [localGroupOrder, setLocalGroupOrder] = useState<string[]>([]);
-  const [localUngroupedOrder, setLocalUngroupedOrder] = useState<string[]>([]);
-  const [collapseAllVersion, setCollapseAllVersion] = useState<{ version: number; collapsed: boolean }>({ version: 1, collapsed: true });
+  onUpdateAppearance?: (
+    sourceListId: string,
+    appearance: ContextAppearance | null,
+  ) => Promise<void>;
+}
+
+export function ListGroupsSection(props: ListGroupsSectionProps) {
+  const {
+    connectors,
+    sourceLists,
+    listGroups,
+    loading,
+    onCreateGroup,
+    onUpdateGroup,
+    onDeleteGroup,
+    onAssignList,
+    onRefresh,
+    onRenameList,
+    onUpdateAppearance,
+  } = props;
+  const availableConnectors = useMemo(
+    () => connectors.filter((connector) => !connector.deletedAt),
+    [connectors],
+  );
+  const [selectedConnectorId, setSelectedConnectorId] = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState<GroupScope>(null);
+  const [groupQuery, setGroupQuery] = useState('');
   const [listQuery, setListQuery] = useState('');
-  const [listSort, setListSort] = useState<SourceListSort>('name');
+  const [groupOrder, setGroupOrder] = useState<string[]>([]);
+  const [listOrder, setListOrder] = useState<string[]>([]);
+  const [selectedListIds, setSelectedListIds] = useState<Set<string>>(new Set());
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupIcon, setNewGroupIcon] = useState<string | null>(null);
+  const [newGroupColor, setNewGroupColor] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleteGroup, setDeleteGroup] = useState<ListGroup | null>(null);
+  const [appearanceListId, setAppearanceListId] = useState<string | null>(null);
 
-  const connectorById = new Map(connectors.map((connector) => [connector.id, connector]));
-  const connectorNameById = new Map(connectors.map((connector) => [connector.id, getConnectorDisplayName(connector)]));
-  const sourceListsWithSelection = sourceLists.map((sourceList) => {
-    const connector = connectorById.get(sourceList.connectorInstanceId);
-    return {
-      ...sourceList,
-      selectedForSync: connector ? isSourceListSelected(connector, sourceList) : false,
-    };
-  });
-  const sortedGroups = [...listGroups].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  const connectorId = availableConnectors.some((item) => item.id === selectedConnectorId)
+    ? selectedConnectorId
+    : availableConnectors[0]?.id ?? '';
 
-  // Keep local group order in sync with props
-  useEffect(() => {
-    setLocalGroupOrder(sortedGroups.map((g) => g.id));
-  }, [listGroups]); // eslint-disable-line react-hooks/exhaustive-deps
+  const connector = availableConnectors.find((candidate) => candidate.id === connectorId);
+  const connectorLists = useMemo(
+    () => sourceLists
+      .filter((list) => list.connectorInstanceId === connectorId)
+      .map((list) => ({
+        ...list,
+        selectedForSync: connector ? isSourceListSelected(connector, list) : false,
+      })),
+    [connector, connectorId, sourceLists],
+  );
+  const connectorGroups = useMemo(
+    () => listGroups
+      .filter((group) => group.connectorInstanceId === connectorId)
+      .sort(compareGroupOrder),
+    [connectorId, listGroups],
+  );
 
-  const orderedGroups = localGroupOrder.length > 0
-    ? localGroupOrder.map((id) => sortedGroups.find((g) => g.id === id)).filter(Boolean) as ListGroup[]
-    : sortedGroups;
-
+  const orderedGroupIds = [
+    ...groupOrder.filter((id) => connectorGroups.some((group) => group.id === id)),
+    ...connectorGroups
+      .map((group) => group.id)
+      .filter((id) => !groupOrder.includes(id)),
+  ];
+  const orderedGroups = orderedGroupIds
+    .map((id) => connectorGroups.find((group) => group.id === id))
+    .filter((group): group is ListGroup => Boolean(group));
+  const visibleGroups = orderedGroups.filter((group) =>
+    group.name.toLocaleLowerCase().includes(groupQuery.trim().toLocaleLowerCase()),
+  );
+  const activeGroup = selectedGroupId && selectedGroupId !== 'other'
+    ? connectorGroups.find((group) => group.id === selectedGroupId) ?? null
+    : null;
+  const scopeLists = connectorLists
+    .filter((list) => {
+      if (selectedGroupId === null) return true;
+      if (selectedGroupId === 'other') return !list.groupId;
+      return list.groupId === selectedGroupId;
+    })
+    .sort(compareListOrder);
   const normalizedListQuery = listQuery.trim().toLocaleLowerCase();
-
-  function matchesListQuery(sourceList: SourceList) {
-    if (!normalizedListQuery) return true;
-    const connectorName = connectorNameById.get(sourceList.connectorInstanceId) || sourceList.connectorInstanceId;
-    return [sourceList.name, sourceList.type, connectorName, sourceList.sourceId]
-      .some((value) => value.toLocaleLowerCase().includes(normalizedListQuery));
-  }
-
-  function compareSourceLists(a: SourceList, b: SourceList) {
-    const connectorA = connectorNameById.get(a.connectorInstanceId) || a.connectorInstanceId;
-    const connectorB = connectorNameById.get(b.connectorInstanceId) || b.connectorInstanceId;
-    const primary = listSort === 'connector'
-      ? connectorA.localeCompare(connectorB, undefined, { numeric: true, sensitivity: 'base' })
-      : listSort === 'type'
-        ? a.type.localeCompare(b.type, undefined, { numeric: true, sensitivity: 'base' })
-        : listSort === 'manual'
-          ? (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
-          : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-
-    return primary
-      || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-      || connectorA.localeCompare(connectorB, undefined, { numeric: true, sensitivity: 'base' })
-      || a.id.localeCompare(b.id);
-  }
-
-  const sortedSourceLists = sourceListsWithSelection
-    .filter(matchesListQuery)
-    .sort(compareSourceLists);
-
-  // Ungrouped lists sorted by sortOrder then name
-  const ungroupedVisible = sourceListsWithSelection
-    .filter((sourceList) => !sourceList.groupId && !sourceList.hidden && matchesListQuery(sourceList))
-    .sort(compareSourceLists);
-
-  // Keep local ungrouped order in sync
-  useEffect(() => {
-    setLocalUngroupedOrder(
-      sourceListsWithSelection
-        .filter((sourceList) => !sourceList.groupId && !sourceList.hidden)
-        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name))
-        .map((sourceList) => sourceList.id),
-    );
-  }, [sourceLists, connectors]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const manuallyOrderedUngrouped = localUngroupedOrder.length > 0
-    ? localUngroupedOrder.map((id) => ungroupedVisible.find((sl) => sl.id === id)).filter(Boolean) as SourceList[]
-    : ungroupedVisible;
-  const orderedUngrouped = listSort === 'manual' ? manuallyOrderedUngrouped : ungroupedVisible;
-  const hiddenSourceLists = sourceListsWithSelection
-    .filter((sourceList) => sourceList.hidden && matchesListQuery(sourceList))
-    .sort(compareSourceLists);
-  const visibleGroups = orderedGroups.filter((group) => {
-    if (!normalizedListQuery) return true;
-    if (group.name.toLocaleLowerCase().includes(normalizedListQuery)) return true;
-    return sourceListsWithSelection.some((sourceList) =>
-      sourceList.groupId === group.id && matchesListQuery(sourceList),
-    );
-  });
-  const filteringLists = normalizedListQuery.length > 0;
-
+  const visibleLists = scopeLists.filter((list) =>
+    !normalizedListQuery
+    || [list.name, list.sourceId, list.type]
+      .some((value) => value.toLocaleLowerCase().includes(normalizedListQuery)),
+  );
+  const ungroupedCount = connectorLists.filter((list) => !list.groupId).length;
+  const scopeTitle = selectedGroupId === null
+    ? ''
+    : selectedGroupId === 'other'
+      ? 'Other'
+      : activeGroup?.name ?? '';
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  async function handleGroupDragEnd(event: DragEndEvent) {
-    if (filteringLists) return;
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
+  const orderedListIds = [
+    ...listOrder.filter((id) => scopeLists.some((list) => list.id === id)),
+    ...scopeLists.map((list) => list.id).filter((id) => !listOrder.includes(id)),
+  ];
 
-    const oldIndex = localGroupOrder.indexOf(String(active.id));
-    const newIndex = localGroupOrder.indexOf(String(over.id));
-    const previousOrder = localGroupOrder;
-    const newOrder = arrayMove(localGroupOrder, oldIndex, newIndex);
-    setLocalGroupOrder(newOrder);
-
-    // Persist to server
-    try {
-      const res = await fetch('/api/list-groups/reorder', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderedIds: newOrder }),
-      });
-      if (!res.ok) throw new Error('Failed to reorder');
-    } catch {
-      setLocalGroupOrder(previousOrder);
-      toast.error('Failed to save group order');
-    }
+  function selectGroup(groupId: GroupScope) {
+    setSelectedGroupId(groupId);
+    setSelectedListIds(new Set());
+    setListOrder([]);
   }
 
-  async function handleUngroupedDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = localUngroupedOrder.indexOf(String(active.id));
-    const newIndex = localUngroupedOrder.indexOf(String(over.id));
-    const previousOrder = localUngroupedOrder;
-    const newOrder = arrayMove(localUngroupedOrder, oldIndex, newIndex);
-    setLocalUngroupedOrder(newOrder);
-
-    try {
-      const res = await fetch('/api/source-lists/reorder', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderedIds: newOrder }),
-      });
-      if (!res.ok) throw new Error('Failed to reorder');
-    } catch {
-      setLocalUngroupedOrder(previousOrder);
-      toast.error('Failed to save list order');
-    }
+  function changeConnector(nextConnectorId: string) {
+    setSelectedConnectorId(nextConnectorId);
+    setSelectedGroupId(null);
+    setGroupQuery('');
+    setListQuery('');
+    setGroupOrder([]);
+    setListOrder([]);
+    setSelectedListIds(new Set());
+    setAppearanceListId(null);
   }
 
-  async function handleCreateGroup() {
-    if (!newName.trim()) return;
-
-    setSubmitting(true);
+  async function createGroup() {
+    const name = newGroupName.trim();
+    if (!connectorId || !name) return;
+    setSaving(true);
     try {
-      await onCreateGroup(newName.trim(), newIcon.trim() || undefined, newIconColor.trim() || undefined);
-      setNewName('');
-      setNewIcon('');
-      setNewIconColor('');
+      await onCreateGroup(
+        connectorId,
+        name,
+        newGroupIcon?.trim() || undefined,
+        newGroupColor?.trim() || undefined,
+      );
+      setCreatingGroup(false);
+      setNewGroupName('');
+      setNewGroupIcon(null);
+      setNewGroupColor(null);
       toast.success('Group created');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to create group');
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   }
 
-  async function handleAssignList(sourceListId: string, groupId: string | null) {
-    setAssigningListId(sourceListId);
+  async function reorderGroups(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id || groupQuery) return;
+    const previous = orderedGroupIds;
+    const next = arrayMove(previous, previous.indexOf(String(active.id)), previous.indexOf(String(over.id)));
+    setGroupOrder(next);
     try {
-      await onAssignList(sourceListId, groupId);
-    } catch (error) {
-      settingsLogger.error('Failed to assign source list', { err: error });
-    } finally {
-      setAssigningListId(null);
-    }
-  }
-
-  async function handleToggleHidden(sourceListId: string, hidden: boolean) {
-    setAssigningListId(sourceListId);
-    try {
-      await fetch(`/api/source-lists/${encodeURIComponent(sourceListId)}`, {
-        method: 'PATCH',
+      const response = await fetch('/api/list-groups/reorder', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hidden }),
+        body: JSON.stringify({ connectorInstanceId: connectorId, orderedIds: next }),
       });
-      await onRefresh();
+      if (!response.ok) throw new Error('Failed to save group order');
     } catch (error) {
-      settingsLogger.error('Failed to toggle list visibility', { err: error });
-    } finally {
-      setAssigningListId(null);
+      setGroupOrder(previous);
+      toast.error(error instanceof Error ? error.message : 'Failed to save group order');
     }
   }
 
-  async function handleRenameList(sourceListId: string, newName: string, icon?: string, iconColor?: string) {
-    // Optimistically update parent state immediately so the name persists
-    // across tab switches regardless of network timing or caching.
-    // The returned cleanup clears the pending-rename guard so future fetches
-    // are no longer overridden.
-    const clearPending = onRenameList(sourceListId, newName);
-
-    let res: Response;
+  async function reorderLists(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id || listQuery || selectedGroupId === null) return;
+    const previous = orderedListIds;
+    const next = arrayMove(previous, previous.indexOf(String(active.id)), previous.indexOf(String(over.id)));
+    setListOrder(next);
     try {
-      res = await runSourceListRenameRequest(
-        () => fetch('/api/source-lists/rename', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: sourceListId, name: newName, icon, iconColor }),
-        }),
-        (response) => settleSourceListRename(response, clearPending, onRefresh),
-      );
+      const response = await fetch('/api/source-lists/reorder', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderedIds: next }),
+      });
+      if (!response.ok) throw new Error('Failed to save list order');
     } catch (error) {
-      toast.error('Rename failed. Check your connection and try again.');
-      throw error;
+      setListOrder(previous);
+      toast.error(error instanceof Error ? error.message : 'Failed to save list order');
     }
+  }
 
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      const msg = data.error || 'Rename failed';
-      toast.error(msg);
-      throw new Error(msg);
+  async function moveLists(ids: readonly string[], groupId: string | null) {
+    setSaving(true);
+    try {
+      await Promise.all(ids.map((id) => onAssignList(id, groupId)));
+      setSelectedListIds(new Set());
+      toast.success(ids.length === 1 ? 'List moved' : `${ids.length} lists moved`);
+    } catch (error) {
+      settingsLogger.error('Failed to move source lists', { err: error });
+      toast.error('Failed to move lists');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function renameList(
+    sourceListId: string,
+    name: string,
+    icon?: string,
+    iconColor?: string,
+  ) {
+    const clearPending = onRenameList(sourceListId, name);
+    const response = await runSourceListRenameRequest(
+      () => fetch('/api/source-lists/rename', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: sourceListId, name, icon, iconColor }),
+      }),
+      (result) => settleSourceListRename(result, clearPending, onRefresh),
+    );
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'Rename failed');
+    }
+  }
+
+  const displayedLists = selectedGroupId === null
+    ? visibleLists
+    : orderedListIds
+      .map((id) => visibleLists.find((list) => list.id === id))
+      .filter((list): list is SourceList & { selectedForSync: boolean } => Boolean(list));
+
+  return (
+    <div className="space-y-5">
+      <div className="max-w-3xl">
+        <h2 className="text-xl font-semibold text-[var(--text-primary)] [text-wrap:balance]">
+          List organization
+        </h2>
+        <p className="mt-1 text-sm leading-relaxed text-[var(--text-tertiary)] [text-wrap:pretty]">
+          Arrange the groups and lists shown under each source in navigation. Sources without
+          groups stay as a simple flat list.
+        </p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-[minmax(240px,0.8fr)_minmax(280px,1.2fr)]">
+        <Select value={connectorId} onValueChange={changeConnector}>
+          <SelectTrigger className="h-14 px-4" aria-label="Choose source">
+            <SelectValue placeholder="Choose a source" />
+          </SelectTrigger>
+          <SelectContent>
+            {availableConnectors.map((item) => {
+              const count = sourceLists.filter((list) => list.connectorInstanceId === item.id).length;
+              return (
+                <SelectItem key={item.id} value={item.id} className="py-3">
+                  <span className="flex min-w-0 flex-col text-left">
+                    <span className="truncate">{getConnectorDisplayName(item)}</span>
+                    <span className="text-xs font-normal text-[var(--text-muted)]">
+                      {item.type} · {count} {count === 1 ? 'list' : 'lists'}
+                    </span>
+                  </span>
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+        <SearchField
+          value={listQuery}
+          onChange={setListQuery}
+          placeholder="Find list"
+          label="Find list"
+        />
+      </div>
+
+      {!connectorId && !loading ? (
+        <EmptyState
+          icon={<FolderOpen size={22} />}
+          title="No sources available"
+          description="Connect a source before organizing its lists."
+        />
+      ) : loading ? (
+        <div className="flex items-center gap-2 py-10 text-sm text-[var(--text-muted)]">
+          <Loader2 size={16} className="animate-spin" />
+          Loading list organization…
+        </div>
+      ) : (
+        <div className="grid min-h-[560px] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_14px_36px_rgba(0,0,0,0.16)] lg:grid-cols-[280px_minmax(0,1fr)]">
+          <aside className="border-b border-[var(--border)] bg-[var(--surface-0)]/45 p-4 lg:border-b-0 lg:border-r">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Groups</h3>
+              <button
+                type="button"
+                onClick={() => setCreatingGroup(true)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-[var(--accent-500)] transition-colors hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
+              >
+                <Plus size={14} />
+                New group
+              </button>
+            </div>
+            <div className="mt-3">
+              <SearchField
+                value={groupQuery}
+                onChange={setGroupQuery}
+                placeholder="Find group"
+                label="Find group"
+                compact
+              />
+            </div>
+
+            {creatingGroup && (
+              <div className="mt-3 rounded-xl border border-[var(--accent-500)]/35 bg-[var(--surface-1)] p-3">
+                <div className="flex items-center gap-2">
+                  <IconPickerButton
+                    value={newGroupIcon}
+                    onChange={setNewGroupIcon}
+                    color={newGroupColor || undefined}
+                    onColorChange={setNewGroupColor}
+                    size="sm"
+                  />
+                  <input
+                    autoFocus
+                    value={newGroupName}
+                    onChange={(event) => setNewGroupName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') void createGroup();
+                      if (event.key === 'Escape') setCreatingGroup(false);
+                    }}
+                    placeholder="Group name"
+                    className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void createGroup()}
+                    disabled={saving || !newGroupName.trim()}
+                    aria-label="Create group"
+                    className="flex size-8 items-center justify-center rounded-lg bg-[var(--accent-500)] text-white disabled:opacity-40"
+                  >
+                    {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCreatingGroup(false)}
+                    aria-label="Cancel new group"
+                    className="flex size-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderGroups}>
+              <SortableContext items={orderedGroupIds} strategy={verticalListSortingStrategy}>
+                <div className="mt-3 space-y-1">
+                  {visibleGroups.map((group) => (
+                    <GroupNavItem
+                      key={group.id}
+                      group={group}
+                      count={connectorLists.filter((list) => list.groupId === group.id).length}
+                      selected={selectedGroupId === group.id}
+                      sortable={!groupQuery}
+                      onSelect={() => selectGroup(group.id)}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+
+            {connectorGroups.length === 0 && !creatingGroup ? (
+              <div className="mt-5 rounded-xl border border-dashed border-[var(--border)] px-4 py-5 text-center">
+                <FolderPlus size={20} className="mx-auto text-[var(--text-muted)]" />
+                <p className="mt-2 text-sm font-medium text-[var(--text-secondary)]">No groups yet</p>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                  Navigation stays flat until you create one.
+                </p>
+              </div>
+            ) : visibleGroups.length === 0 ? (
+              <p className="mt-5 text-center text-sm text-[var(--text-muted)]">No groups found.</p>
+            ) : null}
+
+            {connectorGroups.length > 0 && (
+              <button
+                type="button"
+                onClick={() => selectGroup('other')}
+                className={`mt-3 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
+                  selectedGroupId === 'other'
+                    ? 'bg-[var(--surface-2)] font-medium text-[var(--text-primary)]'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-1)]'
+                }`}
+              >
+                <FolderOpen size={16} className="text-[var(--text-muted)]" />
+                <span className="min-w-0 flex-1 truncate">Other</span>
+                <span className="text-xs tabular-nums text-[var(--text-muted)]">{ungroupedCount}</span>
+              </button>
+            )}
+          </aside>
+
+          <section className="min-w-0 p-4 sm:p-5" aria-label={scopeTitle || 'All lists'}>
+            <div className="flex flex-col gap-3 border-b border-[var(--border-subtle)] pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                {selectedGroupId === null ? (
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    Showing every list in {connector ? getConnectorDisplayName(connector) : 'this source'}.
+                  </p>
+                ) : activeGroup ? (
+                  <EditableGroupHeading
+                    group={activeGroup}
+                    onUpdate={onUpdateGroup}
+                    onDelete={() => setDeleteGroup(activeGroup)}
+                  />
+                ) : (
+                  <div>
+                    <h3 className="text-lg font-semibold text-[var(--text-primary)]">Other</h3>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                      Lists outside a group appear after grouped navigation.
+                    </p>
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => selectGroup(null)}
+                className={`shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                  selectedGroupId === null
+                    ? 'border-[var(--accent-500)]/40 bg-[var(--accent-500)]/10 text-[var(--accent-500)]'
+                    : 'border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]'
+                }`}
+              >
+                All lists in source
+              </button>
+            </div>
+
+            {selectedListIds.size > 0 && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl bg-[var(--surface-2)] px-3 py-2">
+                <span className="mr-auto text-xs font-medium text-[var(--text-secondary)]">
+                  {selectedListIds.size} selected
+                </span>
+                <Select
+                  onValueChange={(value) => void moveLists(
+                    [...selectedListIds],
+                    value === 'other' ? null : value,
+                  )}
+                >
+                  <SelectTrigger className="h-8 min-h-0 w-[180px] text-xs" aria-label="Move selected lists">
+                    <SelectValue placeholder="Move to…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {connectorGroups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+                    ))}
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+                <button
+                  type="button"
+                  onClick={() => setSelectedListIds(new Set())}
+                  className="flex size-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-1)]"
+                  aria-label="Clear selection"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <p className="text-xs tabular-nums text-[var(--text-muted)]" aria-live="polite">
+                {visibleLists.length === scopeLists.length
+                  ? `${scopeLists.length} ${scopeLists.length === 1 ? 'list' : 'lists'}`
+                  : `${visibleLists.length} of ${scopeLists.length} lists`}
+              </p>
+              {selectedGroupId !== null && !listQuery && visibleLists.length > 1 ? (
+                <span className="text-xs text-[var(--text-muted)]">Drag to reorder</span>
+              ) : null}
+            </div>
+
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderLists}>
+              <SortableContext items={orderedListIds} strategy={verticalListSortingStrategy}>
+                <div className="mt-2 divide-y divide-[var(--border-subtle)]">
+                  {displayedLists.map((list) => (
+                    <ListRow
+                      key={list.id}
+                      list={list}
+                      groups={connectorGroups}
+                      selected={selectedListIds.has(list.id)}
+                      sortable={selectedGroupId !== null && !listQuery}
+                      saving={saving}
+                      onSelect={(selected) => setSelectedListIds((current) => {
+                        const next = new Set(current);
+                        if (selected) next.add(list.id);
+                        else next.delete(list.id);
+                        return next;
+                      })}
+                      onMove={(groupId) => void moveLists([list.id], groupId)}
+                      onRename={renameList}
+                      onToggleHidden={async () => {
+                        try {
+                          const response = await fetch(`/api/source-lists/${encodeURIComponent(list.id)}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ hidden: !list.hidden }),
+                          });
+                          if (!response.ok) throw new Error('Failed to update list visibility');
+                          await onRefresh();
+                        } catch {
+                          toast.error('Failed to update list visibility');
+                        }
+                      }}
+                      onAppearance={onUpdateAppearance ? () => setAppearanceListId(list.id) : undefined}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+
+            {visibleLists.length === 0 && (
+              <EmptyState
+                icon={<Search size={20} />}
+                title={listQuery ? 'No lists found' : 'No lists here'}
+                description={listQuery
+                  ? 'Try a different list name.'
+                  : selectedGroupId === null
+                    ? 'Lists appear after this source completes its first sync.'
+                    : 'Move a list here or choose another group.'}
+              />
+            )}
+          </section>
+        </div>
+      )}
+
+      {appearanceListId && onUpdateAppearance ? (() => {
+        const list = sourceLists.find((candidate) => candidate.id === appearanceListId);
+        if (!list) return null;
+        return (
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  {list.name} appearance
+                </h3>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">
+                  Used when this list is the only active dashboard context.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAppearanceListId(null)}
+                aria-label="Close appearance editor"
+                className="flex size-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+              >
+                <X size={15} />
+              </button>
+            </div>
+            <ContextAppearancePicker
+              value={list.appearance ?? null}
+              kind="list"
+              fallbackAccent={list.iconColor || '#3b82f6'}
+              inheritLabel="Use global list style"
+              onChange={(appearance) => {
+                void onUpdateAppearance(list.id, appearance)
+                  .then(() => toast.success('List appearance updated'))
+                  .catch(() => toast.error('Failed to update list appearance'));
+              }}
+            />
+          </div>
+        );
+      })() : null}
+
+      <ConfirmDialog
+        open={Boolean(deleteGroup)}
+        title="Delete group?"
+        message={`Lists in ${deleteGroup?.name ?? 'this group'} will move to Other. The lists themselves will not be deleted.`}
+        confirmLabel="Delete group"
+        confirmVariant="danger"
+        onCancel={() => setDeleteGroup(null)}
+        onConfirm={() => {
+          if (!deleteGroup) return;
+          void onDeleteGroup(deleteGroup.id)
+            .then(() => {
+              setDeleteGroup(null);
+              setSelectedGroupId('other');
+              toast.success('Group deleted');
+            })
+            .catch(() => toast.error('Failed to delete group'));
+        }}
+      />
+    </div>
+  );
+}
+
+function SearchField({
+  value,
+  onChange,
+  placeholder,
+  label,
+  compact = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  label: string;
+  compact?: boolean;
+}) {
+  return (
+    <label className={`input-glow flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3 ${
+      compact ? 'h-9' : 'h-14'
+    }`}>
+      <Search size={15} className="shrink-0 text-[var(--text-muted)]" />
+      <span className="sr-only">{label}</span>
+      <input
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+      />
+      {value ? (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          aria-label={`Clear ${label.toLocaleLowerCase()}`}
+          className="flex size-7 items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+        >
+          <X size={13} />
+        </button>
+      ) : null}
+    </label>
+  );
+}
+
+function GroupNavItem({
+  group,
+  count,
+  selected,
+  sortable,
+  onSelect,
+}: {
+  group: ListGroup;
+  count: number;
+  selected: boolean;
+  sortable: boolean;
+  onSelect: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: group.id,
+    disabled: !sortable,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`group flex items-center rounded-xl transition-colors ${
+        selected
+          ? 'bg-[var(--accent-500)]/12 text-[var(--text-primary)]'
+          : 'text-[var(--text-secondary)] hover:bg-[var(--surface-1)]'
+      } ${isDragging ? 'z-10 opacity-70 shadow-lg' : ''}`}
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label={`Reorder ${group.name}`}
+        className={`ml-1 flex size-7 items-center justify-center text-[var(--text-muted)] ${
+          sortable ? 'cursor-grab opacity-0 group-hover:opacity-100 focus:opacity-100' : 'invisible'
+        }`}
+      >
+        <GripVertical size={14} />
+      </button>
+      <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-center gap-2 py-2.5 pr-3 text-left text-sm">
+        {group.icon ? (
+          <IconRenderer value={group.icon} size={16} color={group.iconColor || undefined} />
+        ) : (
+          <FolderOpen size={16} className="text-[var(--text-muted)]" />
+        )}
+        <span className="min-w-0 flex-1 truncate font-medium">{group.name}</span>
+        <span className="text-xs tabular-nums text-[var(--text-muted)]">{count}</span>
+      </button>
+    </div>
+  );
+}
+
+function EditableGroupHeading({
+  group,
+  onUpdate,
+  onDelete,
+}: {
+  group: ListGroup;
+  onUpdate: (id: string, updates: Partial<ListGroup>) => Promise<void>;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(group.name);
+  const [icon, setIcon] = useState<string | null>(group.icon);
+  const [iconColor, setIconColor] = useState<string | null>(group.iconColor);
+  const [saving, setSaving] = useState(false);
+
+  function startEditing() {
+    setName(group.name);
+    setIcon(group.icon);
+    setIconColor(group.iconColor);
+    setEditing(true);
+  }
+
+  async function save() {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      await onUpdate(group.id, {
+        name: name.trim(),
+        icon,
+        iconColor,
+      });
+      setEditing(false);
+      toast.success('Group updated');
+    } catch {
+      toast.error('Failed to update group');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex max-w-xl items-center gap-2">
+        <IconPickerButton
+          value={icon}
+          onChange={setIcon}
+          color={iconColor || undefined}
+          onColorChange={setIconColor}
+          size="sm"
+        />
+        <input
+          autoFocus
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') void save();
+            if (event.key === 'Escape') setEditing(false);
+          }}
+          className="min-w-0 flex-1 border-b border-[var(--accent-500)] bg-transparent py-1 text-lg font-semibold text-[var(--text-primary)] outline-none"
+        />
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving}
+          aria-label="Save group"
+          className="flex size-8 items-center justify-center rounded-lg text-[var(--accent-500)] hover:bg-[var(--surface-2)]"
+        >
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={15} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing(false)}
+          aria-label="Cancel group edit"
+          className="flex size-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+        >
+          <X size={15} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group flex items-start gap-3">
+      <button
+        type="button"
+        onClick={startEditing}
+        className="flex min-w-0 items-center gap-2 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
+        title="Edit group name and icon"
+      >
+        {group.icon ? (
+          <IconRenderer value={group.icon} size={20} color={group.iconColor || undefined} />
+        ) : (
+          <FolderOpen size={20} className="text-[var(--text-muted)]" />
+        )}
+        <span className="truncate text-lg font-semibold text-[var(--text-primary)] decoration-[var(--text-muted)] underline-offset-4 group-hover:underline">
+          {group.name}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={`Delete ${group.name}`}
+        className="flex size-8 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100 focus:opacity-100"
+      >
+        <Trash2 size={14} />
+      </button>
+    </div>
+  );
+}
+
+function ListRow({
+  list,
+  groups,
+  selected,
+  sortable,
+  saving,
+  onSelect,
+  onMove,
+  onRename,
+  onToggleHidden,
+  onAppearance,
+}: {
+  list: SourceList & { selectedForSync?: boolean };
+  groups: ListGroup[];
+  selected: boolean;
+  sortable: boolean;
+  saving: boolean;
+  onSelect: (selected: boolean) => void;
+  onMove: (groupId: string | null) => void;
+  onRename: (id: string, name: string, icon?: string, iconColor?: string) => Promise<void>;
+  onToggleHidden: () => void;
+  onAppearance?: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(list.name);
+  const [icon, setIcon] = useState<string | null>(list.icon ?? null);
+  const [iconColor, setIconColor] = useState<string | null>(list.iconColor ?? null);
+  const [renaming, setRenaming] = useState(false);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: list.id,
+    disabled: !sortable,
+  });
+
+  function startEditing() {
+    setName(list.name);
+    setIcon(list.icon ?? null);
+    setIconColor(list.iconColor ?? null);
+    setEditing(true);
+  }
+
+  async function saveRename() {
+    if (!name.trim()) return;
+    setRenaming(true);
+    try {
+      await onRename(
+        list.id,
+        name.trim(),
+        icon?.trim() || undefined,
+        iconColor?.trim() || undefined,
+      );
+      setEditing(false);
+      toast.success('List updated');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update list');
+    } finally {
+      setRenaming(false);
     }
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold text-[var(--text-primary)] [text-wrap:balance]">List Groups</h2>
-          <p className="mt-1 text-sm text-[var(--text-tertiary)] [text-wrap:pretty]">
-            Group source lists across connectors.
-          </p>
-        </div>
-      </div>
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`group/row flex min-w-0 items-center gap-2 py-3 ${isDragging ? 'z-10 bg-[var(--surface-1)] opacity-80 shadow-lg' : ''}`}
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label={`Reorder ${list.name}`}
+        className={`flex size-7 shrink-0 items-center justify-center text-[var(--text-muted)] ${
+          sortable ? 'cursor-grab opacity-0 group-hover/row:opacity-100 focus:opacity-100' : 'invisible'
+        }`}
+      >
+        <GripVertical size={14} />
+      </button>
+      <label className="flex size-7 shrink-0 cursor-pointer items-center justify-center">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={(event) => onSelect(event.target.checked)}
+          className="size-4 rounded border-[var(--border)] accent-[var(--accent-500)]"
+          aria-label={`Select ${list.name}`}
+        />
+      </label>
 
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
-        <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)_auto]">
-          <EmojiPickerButton value={newIcon} onChange={setNewIcon} color={newIconColor || undefined} onColorChange={setNewIconColor} />
-          <input
-            type="text"
-            value={newName}
-            onChange={(event) => setNewName(event.target.value)}
-            placeholder="Create a new list group"
-            className="h-10 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow]"
+      {editing ? (
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <IconPickerButton
+            value={icon}
+            onChange={setIcon}
+            color={iconColor || undefined}
+            onColorChange={setIconColor}
+            size="sm"
           />
-          <motion.button
+          <input
+            autoFocus
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void saveRename();
+              if (event.key === 'Escape') setEditing(false);
+            }}
+            className="min-w-0 flex-1 border-b border-[var(--accent-500)] bg-transparent py-1 text-sm font-medium text-[var(--text-primary)] outline-none"
+          />
+          <button
             type="button"
-            onClick={handleCreateGroup}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.96 }}
-            disabled={submitting || !newName.trim()}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white shadow-[0_12px_24px_rgba(37,99,235,0.28)] transition-[background-color,opacity] hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => void saveRename()}
+            disabled={renaming}
+            aria-label="Save list"
+            className="flex size-8 items-center justify-center rounded-lg text-[var(--accent-500)] hover:bg-[var(--surface-2)]"
           >
-            {submitting ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Create Group
-          </motion.button>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3 border-y border-[var(--border-subtle)] py-3 sm:flex-row sm:items-center">
-        <label className="input-glow flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3">
-          <Search size={15} className="shrink-0 text-[var(--text-muted)]" />
-          <span className="sr-only">Search lists</span>
-          <input
-            type="search"
-            value={listQuery}
-            onChange={(event) => setListQuery(event.target.value)}
-            placeholder="Search by list, connector, or type"
-            className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
-          />
-          {listQuery && (
-            <button
-              type="button"
-              onClick={() => setListQuery('')}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color,color] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
-              aria-label="Clear list search"
-            >
-              <X size={13} />
-            </button>
-          )}
-        </label>
-        <div className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3 text-xs text-[var(--text-muted)]">
-          Sort by
-          <Select
-            value={listSort}
-            onValueChange={(value) => setListSort(value as SourceListSort)}
+            {renaming ? <Loader2 size={14} className="animate-spin" /> : <Check size={15} />}
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            aria-label="Cancel list edit"
+            className="flex size-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
           >
-            <SelectTrigger
-              variant="inline"
-              className="text-sm text-[var(--text-primary)]"
-              aria-label="Sort lists by"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="name">Name</SelectItem>
-              <SelectItem value="connector">Connector</SelectItem>
-              <SelectItem value="type">Type</SelectItem>
-              <SelectItem value="manual">Manual order</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <p className="shrink-0 text-xs tabular-nums text-[var(--text-muted)]" aria-live="polite">
-          {filteringLists
-            ? `${sortedSourceLists.length} of ${sourceListsWithSelection.length} lists`
-            : `${sourceListsWithSelection.length} lists`}
-        </p>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-          <Loader2 size={16} className="animate-spin" />
-          Loading groups...
+            <X size={15} />
+          </button>
         </div>
       ) : (
         <>
-          {/* Three-column layout: Groups | Ungrouped | All Lists */}
-          <div className="grid gap-6 xl:grid-cols-3 lg:grid-cols-2 [&>section]:min-w-0">
-            {/* Column 1: Groups (collapsible, draggable) */}
-            <section className="space-y-3" aria-labelledby="list-groups-heading">
-              <div className="flex items-center justify-between">
-                <h3 id="list-groups-heading" className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                  Groups ({filteringLists ? `${visibleGroups.length} of ${orderedGroups.length}` : orderedGroups.length})
-                </h3>
-                {orderedGroups.length > 0 && !filteringLists && (
-                  <button
-                    type="button"
-                    onClick={() => setCollapseAllVersion((prev) => ({ version: prev.version + 1, collapsed: !prev.collapsed }))}
-                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition-[background-color,color] hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]"
-                    title={collapseAllVersion.collapsed ? 'Expand all groups' : 'Collapse all groups'}
-                  >
-                    {collapseAllVersion.collapsed ? <ChevronsUpDown size={12} /> : <ChevronsDownUp size={12} />}
-                    {collapseAllVersion.collapsed ? 'Expand All' : 'Collapse All'}
-                  </button>
-                )}
-              </div>
-              {visibleGroups.length > 0 ? (
-                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
-                  <SortableContext items={localGroupOrder} strategy={verticalListSortingStrategy}>
-                    <div className="space-y-3">
-                      {visibleGroups.map((group) => {
-                        const groupNameMatches = filteringLists
-                          && group.name.toLocaleLowerCase().includes(normalizedListQuery);
-                        const assignedLists = sourceListsWithSelection
-                          .filter((sourceList) =>
-                            sourceList.groupId === group.id
-                            && (groupNameMatches || matchesListQuery(sourceList)),
-                          )
-                          .sort(compareSourceLists);
-
-                        return (
-                          <SortableGroupCard
-                            key={group.id}
-                            group={group}
-                            assignedLists={assignedLists}
-                            connectorNameById={connectorNameById}
-                            onUpdateGroup={onUpdateGroup}
-                            onDeleteGroup={onDeleteGroup}
-                            onRenameList={handleRenameList}
-                            collapseAllVersion={collapseAllVersion}
-                            listSort={listSort}
-                            searchActive={filteringLists}
-                          />
-                        );
-                      })}
-                    </div>
-                  </SortableContext>
-                </DndContext>
+          <button
+            type="button"
+            onClick={startEditing}
+            title="Edit list name and icon"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
+              {list.icon ? (
+                <IconRenderer value={list.icon} size={17} color={list.iconColor || undefined} />
               ) : (
-                <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface-1)] p-6 text-center">
-                  <FolderTree size={24} className="mx-auto text-[var(--text-muted)]" />
-                  <p className="mt-2 text-sm text-[var(--text-muted)]">
-                    {filteringLists ? 'No groups or grouped lists match your search.' : 'Create your first group above — it helps keep things tidy.'}
-                  </p>
-                </div>
+                <FolderOpen size={16} />
               )}
-            </section>
-
-            {/* Column 2: Ungrouped lists */}
-            <section className="space-y-3" aria-labelledby="ungrouped-lists-heading">
-              <h3 id="ungrouped-lists-heading" className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                Ungrouped ({filteringLists ? `${orderedUngrouped.length} of ${sourceListsWithSelection.filter((sourceList) => !sourceList.groupId && !sourceList.hidden).length}` : orderedUngrouped.length})
-              </h3>
-              <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface-1)] p-4">
-                <div className="space-y-2">
-                  {orderedUngrouped.length > 0 ? (
-                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleUngroupedDragEnd}>
-                      <SortableContext items={orderedUngrouped.map((sourceList) => sourceList.id)} strategy={verticalListSortingStrategy}>
-                        {orderedUngrouped.map((sourceList) => (
-                          <SortableUngroupedItem
-                            key={sourceList.id}
-                            sourceList={sourceList}
-                            connectorName={connectorNameById.get(sourceList.connectorInstanceId) || sourceList.connectorInstanceId}
-                            sortedGroups={sortedGroups}
-                            assigningListId={assigningListId}
-                            onAssign={(groupId) => void handleAssignList(sourceList.id, groupId)}
-                            onHide={() => void handleToggleHidden(sourceList.id, true)}
-                            onRename={(newName, icon, iconColor) => handleRenameList(sourceList.id, newName, icon, iconColor)}
-                            sortable={listSort === 'manual'}
-                          />
-                        ))}
-                      </SortableContext>
-                    </DndContext>
-                  ) : (
-                    <p className="py-4 text-center text-sm text-[var(--text-muted)]">
-                      {filteringLists ? 'No ungrouped lists match your search.' : 'All lists are assigned to groups.'}
-                    </p>
-                  )}
-                </div>
-
-                {/* Hidden lists disclosure */}
-                {hiddenSourceLists.length > 0 && (
-                  <details className="mt-4">
-                    <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-[var(--text-muted)] [&::-webkit-details-marker]:hidden">
-                      <EyeOff size={12} />
-                      {hiddenSourceLists.length} hidden list{hiddenSourceLists.length === 1 ? '' : 's'}
-                    </summary>
-                    <div className="mt-2 space-y-1.5">
-                      {hiddenSourceLists.map((sourceList) => (
-                          <div key={sourceList.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-1.5 opacity-50">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              {sourceList.icon && (
-                                <IconRenderer value={sourceList.icon} size={16} color={sourceList.iconColor || undefined} />
-                              )}
-                              <p className="truncate text-sm text-[var(--text-muted)]">{sourceList.name}</p>
-                              <SourceSyncBadge sourceList={sourceList} />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => void handleToggleHidden(sourceList.id, false)}
-                              className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color,color] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
-                              title="Show this list"
-                            >
-                              <Eye size={13} />
-                            </button>
-                          </div>
-                      ))}
-                    </div>
-                  </details>
-                )}
-              </div>
-            </section>
-
-            {/* Column 3: All Source Lists */}
-            <section className="space-y-3 lg:col-span-2 xl:col-span-1" aria-labelledby="all-source-lists-heading">
-              <h3 id="all-source-lists-heading" className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                All Lists ({filteringLists ? `${sortedSourceLists.length} of ${sourceListsWithSelection.length}` : sortedSourceLists.length})
-              </h3>
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
-                <div className="space-y-2 max-h-[600px] overflow-y-auto">
-                  {sortedSourceLists.map((sourceList) => (
-                    <AllSourceListItem
-                      key={sourceList.id}
-                      sourceList={sourceList}
-                      connectorName={connectorNameById.get(sourceList.connectorInstanceId) || sourceList.connectorInstanceId}
-                      sortedGroups={sortedGroups}
-                      assigningListId={assigningListId}
-                      onAssign={(groupId) => void handleAssignList(sourceList.id, groupId)}
-                      onToggleHidden={() => void handleToggleHidden(sourceList.id, !sourceList.hidden)}
-                      onRename={(newName, icon, iconColor) => handleRenameList(sourceList.id, newName, icon, iconColor)}
-                    />
-                  ))}
-                  {sortedSourceLists.length === 0 && (
-                    <p className="text-sm text-[var(--text-muted)]">
-                      {filteringLists ? 'No source lists match your search.' : 'Source lists appear after your first sync — run one from a connector above.'}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </section>
-          </div>
-
-          {onUpdateAppearance ? <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-5">
-            <div className="mb-5 max-w-md">
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">List appearance</h3>
-              <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
-                Choose how a list feels when it is the only active dashboard context.
-              </p>
-              <Select value={appearanceListId} onValueChange={setAppearanceListId}>
-                <SelectTrigger className="mt-3">
-                  <SelectValue placeholder="Choose a list..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {sortedSourceLists.map((sourceList) => (
-                    <SelectItem key={sourceList.id} value={sourceList.id}>
-                      {sourceList.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {appearanceListId ? (() => {
-              const sourceList = sortedSourceLists.find((candidate) => candidate.id === appearanceListId);
-              if (!sourceList) return null;
-              return (
-                <ContextAppearancePicker
-                  value={sourceList.appearance ?? null}
-                  kind="list"
-                  fallbackAccent={sourceList.iconColor || '#3b82f6'}
-                  inheritLabel="Use global list style"
-                  onChange={(appearance) => {
-                    void onUpdateAppearance(sourceList.id, appearance)
-                      .then(() => toast.success(appearance ? 'List appearance updated' : 'List appearance now follows the global style'))
-                      .catch(() => toast.error('Failed to update list appearance'));
-                  }}
-                />
-              );
-            })() : (
-              <div className="rounded-xl border border-dashed border-[var(--border)] px-4 py-8 text-center text-sm text-[var(--text-muted)]">
-                Select a list to preview and customize its context theme.
-              </div>
-            )}
-          </div> : null}
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium text-[var(--text-primary)] decoration-[var(--text-muted)] underline-offset-4 group-hover/row:underline">
+                {list.name}
+              </span>
+              <span className="mt-0.5 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                <span>{list.type}</span>
+                <span>{list.taskCount} active</span>
+                {list.selectedForSync === false ? (
+                  <span className="text-amber-500">Not syncing</span>
+                ) : null}
+              </span>
+            </span>
+          </button>
+          <Select
+            value={list.groupId ?? 'other'}
+            onValueChange={(value) => onMove(value === 'other' ? null : value)}
+            disabled={saving}
+          >
+            <SelectTrigger variant="inline" className="hidden max-w-36 sm:flex" aria-label={`Move ${list.name}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {groups.map((group) => (
+                <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
+              ))}
+              <SelectItem value="other">Other</SelectItem>
+            </SelectContent>
+          </Select>
+          {onAppearance ? (
+            <button
+              type="button"
+              onClick={onAppearance}
+              aria-label={`Customize ${list.name} appearance`}
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 transition-opacity hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] group-hover/row:opacity-100 focus:opacity-100"
+            >
+              <Palette size={14} />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onToggleHidden}
+            aria-label={list.hidden ? `Show ${list.name}` : `Hide ${list.name}`}
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 transition-opacity hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] group-hover/row:opacity-100 focus:opacity-100"
+          >
+            {list.hidden ? <Eye size={14} /> : <EyeOff size={14} />}
+          </button>
         </>
       )}
     </div>
   );
 }
 
-function AllSourceListItem({
-  sourceList,
-  connectorName,
-  sortedGroups,
-  assigningListId,
-  onAssign,
-  onToggleHidden,
-  onRename,
+function EmptyState({
+  icon,
+  title,
+  description,
 }: {
-  sourceList: SourceList;
-  connectorName: string;
-  sortedGroups: ListGroup[];
-  assigningListId: string | null;
-  onAssign: (groupId: string | null) => void;
-  onToggleHidden: () => void;
-  onRename: (newName: string, icon?: string, iconColor?: string) => Promise<void>;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
 }) {
-  const {
-    editing,
-    name: editName,
-    setName: setEditName,
-    icon: editIcon,
-    setIcon: setEditIcon,
-    iconColor: editIconColor,
-    setIconColor: setEditIconColor,
-    saving,
-    startEditing,
-    cancel,
-    save: handleSaveRename,
-    scheduleBlur: handleBlur,
-    setPickerOpen,
-  } = useInlineRename({
-    name: sourceList.name,
-    icon: sourceList.icon,
-    iconColor: sourceList.iconColor,
-    onSave: onRename,
-    onError: (error) => settingsLogger.error('Failed to rename source list', { err: error }),
-  });
-
   return (
-    <div className={`group/allitem rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-3 ${sourceList.hidden ? 'opacity-50' : ''}`}>
-      <div className="flex flex-col gap-2 min-w-0">
-        <div className="min-w-0 flex-1">
-          {editing ? (
-            <div className="flex items-center gap-1.5">
-              <span onMouseDown={(e) => e.preventDefault()}>
-                <EmojiPickerButton
-                  value={editIcon}
-                  onChange={(icon) => { setEditIcon(icon); }}
-                  color={editIconColor || undefined}
-                  onColorChange={setEditIconColor}
-                  onOpenChange={setPickerOpen}
-                />
-              </span>
-              <input
-                type="text"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') cancel(); }}
-                onBlur={handleBlur}
-                autoFocus
-                className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow]"
-              />
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void handleSaveRename()} disabled={saving} className="flex h-8 w-8 items-center justify-center rounded-lg text-green-400 hover:bg-green-500/10" title="Save">
-                {saving ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}><Loader2 size={13} /></motion.span> : <Check size={13} />}
-              </button>
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={cancel} className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]" title="Cancel">
-                <X size={13} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-2">
-                {sourceList.icon && (
-                  <IconRenderer value={sourceList.icon} size={16} color={sourceList.iconColor || undefined} />
-                )}
-                <p className="truncate text-sm font-medium text-[var(--text-primary)]">{sourceList.name}</p>
-                <SourceSyncBadge sourceList={sourceList} />
-                <button
-                  type="button"
-                  onClick={startEditing}
-                  className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] opacity-0 transition-opacity group-hover/allitem:opacity-100 hover:text-[var(--text-secondary)]"
-                  title="Rename"
-                >
-                  <PenLine size={11} />
-                </button>
-                <span className="rounded-full bg-[var(--accent)]/15 px-2 py-0.5 text-xs uppercase tracking-[0.08em] text-[var(--accent)]">
-                  {sourceList.type}
-                </span>
-                {sourceList.hidden && (
-                  <span className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-xs uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                    hidden
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-xs text-[var(--text-muted)]">
-                {connectorName}
-                {' · '}
-                <span className="tabular-nums">{sourceList.taskCount} items</span>
-              </p>
-            </>
-          )}
-        </div>
-        {!editing && (
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={onToggleHidden}
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-[background-color,color] ${
-                sourceList.hidden
-                  ? 'border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                  : 'border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]'
-              }`}
-              title={sourceList.hidden ? 'Show this list' : 'Hide this list'}
-            >
-              {sourceList.hidden ? <Eye size={13} /> : <EyeOff size={13} />}
-            </button>
-            {assigningListId === sourceList.id && <Loader2 size={14} className="animate-spin text-[var(--text-muted)]" />}
-            <Select value={sourceList.groupId || ''} onValueChange={(v) => onAssign(v || null)}>
-              <SelectTrigger className="h-8 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2 text-xs text-[var(--text-primary)]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">No group</SelectItem>
-                {sortedGroups.map((group) => (
-                  <SelectItem key={group.id} value={group.id}>
-                    <span className="inline-flex items-center gap-1.5">
-                      {group.icon && <IconRenderer value={group.icon} size={14} color={group.iconColor || undefined} />}
-                      {group.name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-      </div>
+    <div className="my-8 rounded-xl border border-dashed border-[var(--border)] px-5 py-10 text-center">
+      <span className="mx-auto flex size-10 items-center justify-center rounded-xl bg-[var(--surface-2)] text-[var(--text-muted)]">
+        {icon}
+      </span>
+      <p className="mt-3 text-sm font-medium text-[var(--text-secondary)]">{title}</p>
+      <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-[var(--text-muted)]">{description}</p>
     </div>
   );
 }
 
-function SortableUngroupedItem({
-  sourceList,
-  connectorName,
-  sortedGroups,
-  assigningListId,
-  onAssign,
-  onHide,
-  onRename,
-  sortable,
-}: {
-  sourceList: SourceList;
-  connectorName: string;
-  sortedGroups: ListGroup[];
-  assigningListId: string | null;
-  onAssign: (groupId: string | null) => void;
-  onHide: () => void;
-  onRename: (newName: string, icon?: string, iconColor?: string) => Promise<void>;
-  sortable: boolean;
-}) {
-  const {
-    attributes, listeners, setNodeRef, transform, transition, isDragging,
-  } = useSortable({ id: sourceList.id, disabled: !sortable });
-  const {
-    editing,
-    name: editName,
-    setName: setEditName,
-    icon: editIcon,
-    setIcon: setEditIcon,
-    iconColor: editIconColor,
-    setIconColor: setEditIconColor,
-    saving,
-    startEditing,
-    cancel,
-    save: handleSaveRename,
-    scheduleBlur: handleBlur,
-    setPickerOpen,
-  } = useInlineRename({
-    name: sourceList.name,
-    icon: sourceList.icon,
-    iconColor: sourceList.iconColor,
-    onSave: onRename,
-    onError: (error) => settingsLogger.error('Failed to rename source list', { err: error }),
-  });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="group/ungrouped rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-2"
-    >
-      <div className="flex items-center gap-2">
-        {sortable && (
-          <button
-            type="button"
-            {...attributes}
-            {...listeners}
-            className="flex h-5 w-5 shrink-0 cursor-grab items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
-            title="Drag to reorder"
-          >
-            <GripVertical size={12} />
-          </button>
-        )}
-        <div className="min-w-0 flex-1">
-          {editing ? (
-            <div className="flex items-center gap-1.5">
-              <span onMouseDown={(e) => e.preventDefault()}>
-                <EmojiPickerButton
-                  value={editIcon}
-                  onChange={(icon) => { setEditIcon(icon); }}
-                  color={editIconColor || undefined}
-                  onColorChange={setEditIconColor}
-                  onOpenChange={setPickerOpen}
-                />
-              </span>
-              <input
-                type="text"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') cancel(); }}
-                onBlur={handleBlur}
-                autoFocus
-                className="h-8 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow]"
-              />
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void handleSaveRename()} disabled={saving} className="flex h-7 w-7 items-center justify-center rounded-md text-green-400 transition-[background-color] hover:bg-green-500/10" title="Save">
-                {saving ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}><Loader2 size={13} /></motion.span> : <Check size={13} />}
-              </button>
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={cancel} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color] hover:bg-[var(--surface-2)]" title="Cancel">
-                <X size={13} />
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5">
-              {sourceList.icon && (
-                <IconRenderer value={sourceList.icon} size={16} color={sourceList.iconColor || undefined} />
-              )}
-              <p className="truncate text-sm text-[var(--text-primary)]">{sourceList.name}</p>
-              <SourceSyncBadge sourceList={sourceList} />
-              <button
-                type="button"
-                onClick={startEditing}
-                className="flex h-5 w-5 items-center justify-center rounded text-[var(--text-muted)] opacity-0 transition-opacity group-hover/ungrouped:opacity-100 hover:text-[var(--text-secondary)]"
-                title="Rename"
-              >
-                <PenLine size={11} />
-              </button>
-            </div>
-          )}
-          {!editing && <p className="text-xs text-[var(--text-muted)]">{connectorName}</p>}
-        </div>
-        {!editing && (
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={onHide}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color,color] hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]"
-              title="Hide this list"
-            >
-              <EyeOff size={13} />
-            </button>
-            {assigningListId === sourceList.id && <Loader2 size={14} className="animate-spin text-[var(--text-muted)]" />}
-            <Select value="" onValueChange={(v) => onAssign(v || null)}>
-              <SelectTrigger className="h-8 min-w-36 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2 text-xs text-[var(--text-primary)]">
-                <SelectValue placeholder="Assign to group…" />
-              </SelectTrigger>
-              <SelectContent>
-                {sortedGroups.map((group) => (
-                  <SelectItem key={group.id} value={group.id}>
-                    <span className="inline-flex items-center gap-1.5">
-                      {group.icon && <IconRenderer value={group.icon} size={14} color={group.iconColor || undefined} />}
-                      {group.name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+function compareGroupOrder(left: ListGroup, right: ListGroup) {
+  return left.sortOrder - right.sortOrder
+    || left.name.localeCompare(right.name)
+    || left.id.localeCompare(right.id);
 }
 
-function SortableGroupCard({
-  group,
-  assignedLists,
-  connectorNameById,
-  onUpdateGroup,
-  onDeleteGroup,
-  onRenameList,
-  collapseAllVersion,
-  listSort,
-  searchActive,
-}: {
-  group: ListGroup;
-  assignedLists: SourceList[];
-  connectorNameById: Map<string, string>;
-  onUpdateGroup: (id: string, updates: Partial<ListGroup>) => Promise<void>;
-  onDeleteGroup: (id: string) => Promise<void>;
-  onRenameList: (listId: string, newName: string, icon?: string, iconColor?: string) => Promise<void>;
-  collapseAllVersion: { version: number; collapsed: boolean };
-  listSort: SourceListSort;
-  searchActive: boolean;
-}) {
-  const [name, setName] = useState(group.name);
-  const [icon, setIcon] = useState(group.icon || '');
-  const [iconColor, setIconColor] = useState(group.iconColor || '');
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [collapsed, setCollapsed] = useState(true);
-  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; title: string; message: string; confirmLabel: string; variant: 'danger' | 'warning'; onConfirm: () => void }>({ open: false, title: '', message: '', confirmLabel: '', variant: 'danger', onConfirm: () => {} });
-  const [localListOrder, setLocalListOrder] = useState<string[]>(
-    [...assignedLists].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map((list) => list.id),
-  );
-
-  // Sync local list order when assignedLists changes
-  useEffect(() => {
-    setLocalListOrder(
-      [...assignedLists].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map((list) => list.id),
-    );
-  }, [assignedLists]);
-
-  // Respond to collapse all / expand all
-  useEffect(() => {
-    if (collapseAllVersion.version > 0) {
-      setCollapsed(collapseAllVersion.collapsed);
-    }
-  }, [collapseAllVersion]);
-
-  const manuallyOrderedLists = localListOrder
-    .map((id) => assignedLists.find((list) => list.id === id))
-    .filter(Boolean) as SourceList[];
-  const orderedLists = listSort === 'manual' ? manuallyOrderedLists : assignedLists;
-  const isCollapsed = searchActive ? false : collapsed;
-
-  const {
-    attributes, listeners, setNodeRef, transform, transition, isDragging,
-  } = useSortable({ id: group.id, disabled: searchActive });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  const listSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  async function handleListDragEnd(event: DragEndEvent) {
-    if (listSort !== 'manual') return;
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = localListOrder.indexOf(String(active.id));
-    const newIndex = localListOrder.indexOf(String(over.id));
-    const previousOrder = localListOrder;
-    const newOrder = arrayMove(localListOrder, oldIndex, newIndex);
-    setLocalListOrder(newOrder);
-
-    try {
-      const res = await fetch('/api/source-lists/reorder', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderedIds: newOrder }),
-      });
-      if (!res.ok) throw new Error('Failed to reorder');
-    } catch {
-      setLocalListOrder(previousOrder);
-      toast.error('Failed to save list order');
-    }
-  }
-
-  async function handleSave() {
-    if (!name.trim()) return;
-
-    setSaving(true);
-    try {
-      await onUpdateGroup(group.id, {
-        name: name.trim(),
-        icon: icon.trim() || null,
-        iconColor: iconColor.trim() || null,
-        sortOrder: group.sortOrder,
-      });
-    } catch (error) {
-      settingsLogger.error('Failed to update list group', { err: error });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDelete() {
-    setConfirmDialog({
-      open: true,
-      title: 'Delete group?',
-      message: `Delete "${group.name}"? Lists will be unassigned from this group.`,
-      confirmLabel: 'Delete',
-      variant: 'danger',
-      onConfirm: async () => {
-        setConfirmDialog((d) => ({ ...d, open: false }));
-        setDeleting(true);
-        try {
-          await onDeleteGroup(group.id);
-        } catch (error) {
-          settingsLogger.error('Failed to delete list group', { err: error });
-          setDeleting(false);
-        }
-      },
-    });
-  }
-
-  return (
-    <div ref={setNodeRef} style={style} className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
-      {/* Header — always visible */}
-      <div className="flex items-center gap-2 px-2 py-3 pr-4">
-        {!searchActive && (
-          <button
-            type="button"
-            {...attributes}
-            {...listeners}
-            className="flex h-7 w-7 cursor-grab items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color] hover:bg-[var(--surface-2)] active:cursor-grabbing"
-            title="Drag to reorder"
-          >
-            <GripVertical size={14} />
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => setCollapsed(!collapsed)}
-          disabled={searchActive}
-          aria-expanded={!isCollapsed}
-          className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color] hover:bg-[var(--surface-2)]"
-          title={searchActive ? 'Groups stay expanded while searching' : isCollapsed ? 'Expand group' : 'Collapse group'}
-        >
-          {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-        </button>
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          {group.icon && <IconRenderer value={group.icon} size={16} color={group.iconColor || undefined} />}
-          <h3 className="truncate text-sm font-semibold text-[var(--text-primary)]">{group.name}</h3>
-          <span className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium tabular-nums text-[var(--text-muted)]">
-            {assignedLists.length}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <motion.button
-            type="button"
-            onClick={handleDelete}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.96 }}
-            disabled={deleting}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-500/20 bg-red-500/10 text-red-300 transition-[background-color,opacity] hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-            title="Delete group"
-          >
-            {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-          </motion.button>
-        </div>
-      </div>
-
-      {/* Collapsible body */}
-      <AnimatePresence initial={false}>
-        {!isCollapsed && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <div className="border-t border-[var(--border)] px-4 pb-4 pt-3">
-              {/* Edit fields */}
-              <div className="grid gap-2 md:grid-cols-[auto_minmax(0,1fr)_auto]">
-                <EmojiPickerButton value={icon} onChange={setIcon} color={iconColor || undefined} onColorChange={setIconColor} />
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  className="h-9 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow]"
-                />
-                <motion.button
-                  type="button"
-                  onClick={handleSave}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.96 }}
-                  disabled={saving || !name.trim()}
-                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 text-xs font-medium text-blue-200 transition-[background-color,opacity] hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {saving ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}><Loader2 size={12} /></motion.span> : <Save size={12} />}
-                  Save
-                </motion.button>
-              </div>
-
-              {/* Assigned lists — sortable within group */}
-              <div className="mt-3 space-y-1.5">
-                {orderedLists.length > 0 ? (
-                  <DndContext sensors={listSensors} collisionDetection={closestCenter} onDragEnd={handleListDragEnd}>
-                    <SortableContext items={orderedLists.map((list) => list.id)} strategy={verticalListSortingStrategy}>
-                      {orderedLists.map((sourceList) => (
-                        <SortableListItem
-                          key={sourceList.id}
-                          sourceList={sourceList}
-                          connectorName={connectorNameById.get(sourceList.connectorInstanceId) || sourceList.connectorInstanceId}
-                          onRename={(newName, icon, iconColor) => onRenameList(sourceList.id, newName, icon, iconColor)}
-                          sortable={listSort === 'manual'}
-                        />
-                      ))}
-                    </SortableContext>
-                  </DndContext>
-                ) : (
-                  <p className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface-0)] px-3 py-3 text-center text-xs text-[var(--text-muted)]">
-                    Drag lists here to assign them to this group.
-                  </p>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <ConfirmDialog
-        open={confirmDialog.open}
-        title={confirmDialog.title}
-        message={confirmDialog.message}
-        confirmLabel={confirmDialog.confirmLabel}
-        confirmVariant={confirmDialog.variant}
-        onConfirm={confirmDialog.onConfirm}
-        onCancel={() => setConfirmDialog((d) => ({ ...d, open: false }))}
-      />
-    </div>
-  );
+function compareListOrder(left: SourceList, right: SourceList) {
+  return (left.sortOrder ?? 0) - (right.sortOrder ?? 0)
+    || left.name.localeCompare(right.name)
+    || left.id.localeCompare(right.id);
 }
-
-function SortableListItem({
-  sourceList,
-  connectorName,
-  onRename,
-  sortable,
-}: {
-  sourceList: SourceList;
-  connectorName: string;
-  onRename: (newName: string, icon?: string, iconColor?: string) => Promise<void>;
-  sortable: boolean;
-}) {
-  const {
-    attributes, listeners, setNodeRef, transform, transition, isDragging,
-  } = useSortable({ id: sourceList.id, disabled: !sortable });
-  const {
-    editing,
-    name: editName,
-    setName: setEditName,
-    icon: editIcon,
-    setIcon: setEditIcon,
-    iconColor: editIconColor,
-    setIconColor: setEditIconColor,
-    saving,
-    startEditing,
-    cancel,
-    save: handleSaveRename,
-    scheduleBlur: handleBlur,
-    setPickerOpen,
-  } = useInlineRename({
-    name: sourceList.name,
-    icon: sourceList.icon,
-    iconColor: sourceList.iconColor,
-    onSave: onRename,
-    onError: (error) => settingsLogger.error('Failed to rename source list', { err: error }),
-  });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="group/listitem flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-1.5"
-    >
-      {sortable && (
-        <button
-          type="button"
-          {...attributes}
-          {...listeners}
-          className="flex h-5 w-5 cursor-grab items-center justify-center rounded text-[var(--text-muted)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
-          title="Drag to reorder"
-        >
-          <GripVertical size={12} />
-        </button>
-      )}
-      <div className="min-w-0 flex-1">
-        {editing ? (
-          <div className="flex items-center gap-1.5">
-            <span onMouseDown={(e) => e.preventDefault()}>
-              <EmojiPickerButton
-                value={editIcon}
-                onChange={(icon) => { setEditIcon(icon); }}
-                color={editIconColor || undefined}
-                onColorChange={setEditIconColor}
-                onOpenChange={setPickerOpen}
-              />
-            </span>
-            <input
-              type="text"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') cancel(); }}
-              onBlur={handleBlur}
-              autoFocus
-              className="h-7 min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow]"
-            />
-            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void handleSaveRename()} disabled={saving} className="flex h-6 w-6 items-center justify-center rounded text-green-400 hover:bg-green-500/10" title="Save">
-              {saving ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}><Loader2 size={11} /></motion.span> : <Check size={11} />}
-            </button>
-            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={cancel} className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-2)]" title="Cancel">
-              <X size={11} />
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-1.5">
-            {sourceList.icon && (
-                <IconRenderer value={sourceList.icon} size={16} color={sourceList.iconColor || undefined} />
-            )}
-            <p className="truncate text-sm text-[var(--text-primary)]">{sourceList.name}</p>
-            <SourceSyncBadge sourceList={sourceList} />
-            <button
-              type="button"
-              onClick={startEditing}
-              className="flex h-5 w-5 items-center justify-center rounded text-[var(--text-muted)] opacity-0 transition-opacity group-hover/listitem:opacity-100 hover:text-[var(--text-secondary)]"
-              title="Rename"
-            >
-              <PenLine size={10} />
-            </button>
-          </div>
-        )}
-        {!editing && <p className="text-xs text-[var(--text-muted)]">{connectorName}</p>}
-      </div>
-      {!editing && (
-        <span className="shrink-0 rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-xs uppercase tracking-[0.08em] text-[var(--text-muted)]">
-          {sourceList.type}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function SourceSyncBadge({ sourceList }: { sourceList: SourceList }) {
-  if (sourceList.selectedForSync !== false) return null;
-  return (
-    <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.06em] text-amber-400">
-      Not syncing
-    </span>
-  );
-}
-
-
-export { ListGroupsSection, EmojiPickerButton };

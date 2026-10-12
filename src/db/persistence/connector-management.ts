@@ -278,7 +278,7 @@ export interface ConnectorManagementPersistence {
   }>;
   hardDeleteConnector(connectorId: string): Promise<void>;
   getSourceList(sourceListId: string): Promise<SourceListRecord | null>;
-  listGroupExists(groupId: string): Promise<boolean>;
+  getListGroupOwner(groupId: string): Promise<string | null>;
   patchSourceList(input: {
     sourceListId: string;
     groupId?: string | null;

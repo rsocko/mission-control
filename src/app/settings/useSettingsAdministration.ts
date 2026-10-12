@@ -191,11 +191,16 @@ export function useSettingsAdministration() {
     }
   }, [fetchData, refreshConnectorLists]);
 
-  const createListGroup = useCallback(async (name: string, icon?: string, iconColor?: string) => {
+  const createListGroup = useCallback(async (
+    connectorInstanceId: string,
+    name: string,
+    icon?: string,
+    iconColor?: string,
+  ) => {
     const response = await fetch('/api/list-groups', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, icon, iconColor }),
+      body: JSON.stringify({ connectorInstanceId, name, icon, iconColor }),
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));

@@ -172,8 +172,9 @@ describe('SQLite project-organization adapters', () => {
         );
 
         const insertGroup = sqlite.prepare(`
-          INSERT INTO list_groups (id, name, sort_order, created_at)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO list_groups (
+            id, connector_instance_id, name, sort_order, created_at
+          ) VALUES (?, '${ORGANIZATION_FIXTURE.connectorId}', ?, ?, ?)
         `);
         insertGroup.run(
           ORGANIZATION_FIXTURE.groupA,

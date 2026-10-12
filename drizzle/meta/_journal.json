@@ -1065,6 +1065,13 @@
       "when": 1791737565164,
       "tag": "0151_sync_activity_payload",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "6",
+      "when": 1791763162819,
+      "tag": "0152_source_scoped_list_groups",
+      "breakpoints": true
     }
   ]
 }

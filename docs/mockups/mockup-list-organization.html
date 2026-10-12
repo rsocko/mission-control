@@ -1,0 +1,1903 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Control — List Organization Concepts</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --background: #020617;
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --border: #1e293b;
+      --border-subtle: #162032;
+      --border-strong: #334155;
+      --text-primary: #f8fafc;
+      --text-heading: #c4cede;
+      --text-secondary: #94a3b8;
+      --text-muted: #8190a6;
+      --accent: #3b82f6;
+      --accent-action: #2563eb;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --todo: #3b82f6;
+      --github: #a855f7;
+      --local: #64748b;
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-xl: 16px;
+      --ease: cubic-bezier(.2, .8, .2, 1);
+      --shadow-panel: 0 10px 15px -3px rgba(0, 0, 0, .5), 0 4px 6px -4px rgba(0, 0, 0, .4);
+      font-family: "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--background); }
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      overflow-x: hidden;
+      background: var(--background);
+      color: var(--text-primary);
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input { font: inherit; }
+    button { color: inherit; cursor: pointer; }
+    button:focus-visible, input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    ::selection { background: var(--accent); color: white; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--surface-0); }
+    ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 999px; }
+
+    svg { display: block; }
+    .icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .icon-sm { width: 13px; height: 13px; }
+    .hidden { display: none !important; }
+    .muted { color: var(--text-muted); }
+    .tabular { font-variant-numeric: tabular-nums; }
+
+    .prototype-bar {
+      position: sticky;
+      z-index: 50;
+      top: 0;
+      display: grid;
+      grid-template-columns: minmax(230px, 1fr) auto minmax(230px, 1fr);
+      align-items: center;
+      gap: 16px;
+      min-height: 72px;
+      padding: 11px 18px;
+      border-bottom: 1px solid var(--border);
+      background: #070d1a;
+      box-shadow: var(--shadow-panel);
+    }
+    .prototype-copy h1 { margin: 0; font-size: 14px; line-height: 1.25; letter-spacing: -.01em; }
+    .prototype-copy p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.35; }
+    .concept-switcher {
+      display: inline-flex;
+      gap: 3px;
+      justify-self: center;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-0);
+    }
+    .concept-switcher button {
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 650;
+      transition: background 150ms, color 150ms, box-shadow 150ms;
+    }
+    .concept-switcher button:hover { color: var(--text-primary); }
+    .concept-switcher button[aria-pressed="true"] {
+      background: var(--surface-2);
+      color: var(--text-primary);
+      box-shadow: var(--shadow-panel);
+    }
+    .prototype-note {
+      max-width: 320px;
+      justify-self: end;
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 1.4;
+      text-align: right;
+    }
+    .prototype-note strong { color: var(--text-secondary); font-weight: 650; }
+
+    .app {
+      display: grid;
+      grid-template-columns: 222px minmax(0, 1fr);
+      min-height: calc(100vh - 72px);
+    }
+    .settings-rail {
+      position: sticky;
+      top: 72px;
+      height: calc(100vh - 72px);
+      overflow-y: auto;
+      border-right: 1px solid var(--border);
+      background: var(--surface-0);
+    }
+    .brand {
+      display: flex;
+      height: 58px;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 720;
+    }
+    .brand-mark {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      place-items: center;
+      border-radius: var(--radius-sm);
+      background: var(--accent-action);
+      color: white;
+    }
+    .settings-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 18px 15px 8px;
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 760;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .settings-nav { padding: 0 8px 20px; }
+    .nav-item {
+      display: flex;
+      width: 100%;
+      min-height: 36px;
+      align-items: center;
+      gap: 9px;
+      margin: 2px 0;
+      padding: 0 9px;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-secondary);
+      text-align: left;
+      font-size: 12px;
+      transition: background 130ms, color 130ms;
+    }
+    .nav-item:hover { background: var(--surface-2); color: var(--text-primary); }
+    .nav-item.active { background: var(--surface-2); color: var(--text-primary); }
+    .nav-item.active .nav-icon { color: var(--accent); }
+    .nav-icon { display: grid; width: 18px; place-items: center; color: var(--text-muted); }
+
+    main { min-width: 0; }
+    .page {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 28px 30px 52px;
+    }
+    .page-heading {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+    .page-heading h2 { margin: 0; font-size: 20px; line-height: 1.2; letter-spacing: -.02em; }
+    .page-heading p { max-width: 690px; margin: 7px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.55; }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .button {
+      display: inline-flex;
+      min-height: 36px;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 7px 12px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      background: var(--surface-1);
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 650;
+      transition: background 140ms, border-color 140ms, color 140ms, transform 140ms;
+    }
+    .button:hover { border-color: #475569; background: var(--surface-2); color: var(--text-primary); }
+    .button:active { transform: scale(.98); }
+    .button.primary { border-color: var(--accent-action); background: var(--accent-action); color: white; }
+    .button.primary:hover { border-color: var(--accent); background: var(--accent); }
+    .button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
+    .button.ghost { border-color: transparent; background: transparent; }
+    .button.danger:hover { border-color: rgba(239,68,68,.55); color: #fca5a5; }
+
+    .search-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+      padding-block: 12px;
+      border-block: 1px solid var(--border-subtle);
+    }
+    .search {
+      display: flex;
+      min-width: 260px;
+      flex: 1;
+      align-items: center;
+      gap: 9px;
+      min-height: 38px;
+      padding: 0 11px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-0);
+      color: var(--text-muted);
+    }
+    .search input {
+      width: 100%;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 12px;
+    }
+    .search input::placeholder { color: var(--text-muted); opacity: 1; }
+    .summary { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+
+    .section-label {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 760;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .source-key {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+    .source-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .todo { color: var(--todo); }
+    .github { color: var(--github); }
+    .local { color: var(--local); }
+    .count {
+      min-width: 23px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--text-muted);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-0);
+      color: var(--text-muted);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .badge.info { border-color: rgba(59,130,246,.32); background: rgba(59,130,246,.08); color: #93c5fd; }
+
+    .notice {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding: 10px 12px;
+      border: 1px solid rgba(59,130,246,.28);
+      border-radius: var(--radius-md);
+      background: rgba(59,130,246,.07);
+      color: #bfdbfe;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .notice strong {     color: var(--text-primary); }
+
+    /* Concept A: matrix */
+    .matrix-wrap {
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface-1);
+      box-shadow: var(--shadow-panel);
+    }
+    .matrix {
+      display: grid;
+      grid-template-columns: minmax(210px, .8fr) repeat(3, minmax(235px, 1fr));
+      min-width: 980px;
+    }
+    .matrix-cell {
+      min-height: 70px;
+      padding: 12px;
+      border-right: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .matrix-cell:nth-child(4n) { border-right: 0; }
+    .matrix-head {
+      position: sticky;
+      z-index: 2;
+      top: 0;
+      min-height: 55px;
+      background: #0e1626;
+    }
+    .matrix-head:first-child { z-index: 3; left: 0; }
+    .group-cell {
+      position: sticky;
+      z-index: 1;
+      left: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface-1);
+    }
+    .matrix-group-icon {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 auto;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-0);
+      color: var(--text-secondary);
+    }
+    .group-name { font-size: 12px; font-weight: 680; }
+    .group-meta { margin-top: 3px; color: var(--text-muted); font-size: 10px; }
+    .matrix-lists { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+    .list-chip {
+      display: inline-flex;
+      max-width: 100%;
+      align-items: center;
+      gap: 6px;
+      min-height: 29px;
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface-0);
+      color: var(--text-secondary);
+      font-size: 11px;
+      transition: border-color 130ms, color 130ms, background 130ms;
+    }
+    .list-chip:hover { border-color: var(--border-strong); background: var(--surface-2); color: var(--text-primary); }
+    .list-chip .dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: currentColor; }
+    .matrix-empty {
+      display: flex;
+      min-height: 42px;
+      align-items: center;
+      justify-content: center;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+    .matrix-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 12px 14px;
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    /* Concept B: focused workspace */
+    .workspace {
+      display: grid;
+      grid-template-columns: 280px minmax(360px, 1fr) 310px;
+      min-height: 610px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface-1);
+      box-shadow: var(--shadow-panel);
+    }
+    .pane { min-width: 0; padding: 14px; }
+    .pane + .pane { border-left: 1px solid var(--border); }
+    .pane-head {
+      display: flex;
+      min-height: 34px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .group-list { display: grid; gap: 4px; }
+    .group-button {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      width: 100%;
+      min-height: 46px;
+      padding: 7px 9px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-secondary);
+      text-align: left;
+    }
+    .group-button:hover { background: var(--surface-2); color: var(--text-primary); }
+    .group-button.active { border-color: var(--border-strong); background: var(--surface-2); color: var(--text-primary); }
+    .group-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .selected-group-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 13px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .selected-group-title { display: flex; align-items: center; gap: 10px; }
+    .selected-group-title h3 { margin: 0; font-size: 16px; }
+    .selected-group-title p { margin: 3px 0 0; color: var(--text-muted); font-size: 10px; }
+    .source-section { margin-top: 18px; }
+    .source-section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .source-section-title { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; }
+    .list-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 9px;
+      min-height: 42px;
+      padding: 7px 9px;
+      border-top: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+    }
+    .list-row:hover { background: rgba(30, 41, 59, .45); color: var(--text-primary); }
+    .list-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .row-action {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      place-items: center;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-muted);
+    }
+    .row-action:hover { background: var(--surface-2); color: var(--text-primary); }
+    .inbox-pane { background: var(--surface-0); }
+    .inbox-copy { margin: -2px 0 12px; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
+    .inbox-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      padding: 9px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-1);
+    }
+    .inbox-card strong { display: block; overflow: hidden; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .inbox-card small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 9px; }
+    .assign-button {
+      display: inline-flex;
+      min-height: 27px;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 7px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+    .assign-button:hover { border-color: var(--accent); color: #93c5fd; }
+
+    /* Concept C: jobs split */
+    .job-tabs {
+      display: flex;
+      gap: 18px;
+      margin-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .job-tab {
+      position: relative;
+      min-height: 42px;
+      padding: 0 2px;
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .job-tab:hover { color: var(--text-primary); }
+    .job-tab.active { color: var(--text-primary); }
+    .job-tab.active::after {
+      position: absolute;
+      right: 0;
+      bottom: -1px;
+      left: 0;
+      height: 2px;
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+      background: var(--accent);
+      content: "";
+    }
+    .split-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(300px, .7fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .flat-section {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface-1);
+    }
+    .flat-section-head {
+      display: flex;
+      min-height: 52px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 13px;
+      border-bottom: 1px solid var(--border);
+    }
+    .flat-section-head h3 { margin: 0; font-size: 12px; }
+    .flat-section-head p { margin: 3px 0 0; color: var(--text-muted); font-size: 9px; }
+    .group-table-row {
+      display: grid;
+      grid-template-columns: 22px minmax(150px, .8fr) minmax(250px, 1.4fr) 68px 64px;
+      align-items: center;
+      gap: 10px;
+      min-height: 52px;
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .group-table-row:last-child { border-bottom: 0; }
+    .group-table-row:hover { background: rgba(30,41,59,.42); }
+    .table-label {
+      overflow: hidden;
+      color: var(--text-primary);
+      font-size: 11px;
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .source-stack { display: flex; min-width: 0; gap: 6px; overflow: hidden; }
+    .icon-button {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-muted);
+    }
+    .icon-button:hover { border-color: var(--border); background: var(--surface-2); color: var(--text-primary); }
+    .side-help { padding: 14px; }
+    .side-help h3 { margin: 0 0 7px; font-size: 12px; }
+    .side-help p { margin: 0 0 13px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+    .behavior-list { display: grid; gap: 10px; }
+    .behavior-item { display: grid; grid-template-columns: auto 1fr; gap: 9px; color: var(--text-secondary); font-size: 10px; line-height: 1.4; }
+    .check {
+      display: grid;
+      width: 18px;
+      height: 18px;
+      place-items: center;
+      border-radius: 50%;
+      background: rgba(16,185,129,.12);
+      color: #6ee7b7;
+    }
+    .details-table { width: 100%; border-collapse: collapse; }
+    .details-table th, .details-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: left;
+      font-size: 11px;
+    }
+    .details-table th {
+      color: var(--text-muted);
+      font-size: 9px;
+      font-weight: 750;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .details-table td { color: var(--text-secondary); }
+    .details-table tr:hover td { background: rgba(30,41,59,.4); color: var(--text-primary); }
+    .name-cell { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-weight: 650; }
+    .tiny-color { width: 16px; height: 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: #3b82f6; }
+
+    /* Revised concept: source-scoped group manager */
+    .source-switcher {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .source-button {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 54px;
+      padding: 8px 11px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-0);
+      color: var(--text-secondary);
+      text-align: left;
+      transition: border-color 140ms, background 140ms, color 140ms;
+    }
+    .source-button:hover { border-color: var(--border-strong); background: var(--surface-1); color: var(--text-primary); }
+    .source-button.active { border-color: var(--accent); background: rgba(59,130,246,.08); color: var(--text-primary); }
+    .source-emblem {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-1);
+    }
+    .source-button strong { display: block; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .source-button small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 9px; }
+    .source-manager {
+      display: grid;
+      grid-template-columns: 250px minmax(340px, .9fr) minmax(360px, 1.1fr);
+      min-height: 620px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface-1);
+      box-shadow: var(--shadow-panel);
+    }
+    .manager-pane { min-width: 0; }
+    .manager-pane + .manager-pane { border-left: 1px solid var(--border); }
+    .manager-sidebar { padding: 13px 10px; background: var(--surface-0); }
+    .manager-pane-head {
+      display: flex;
+      min-height: 42px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 0 4px 8px;
+    }
+    .manager-pane-head h3 { margin: 0; font-size: 12px; }
+    .manager-pane-head p { margin: 3px 0 0; color: var(--text-muted); font-size: 9px; }
+    .manager-group-list { display: grid; gap: 3px; }
+    .manager-group {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-height: 42px;
+      padding: 6px 8px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-secondary);
+      text-align: left;
+    }
+    .manager-group:hover { background: var(--surface-2); color: var(--text-primary); }
+    .manager-group.active { border-color: var(--border-strong); background: var(--surface-2); color: var(--text-primary); }
+    .manager-group.drop-ready { border-color: rgba(59,130,246,.55); background: rgba(59,130,246,.08); }
+    .manager-group-name { overflow: hidden; font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .manager-group-meta { display: block; margin-top: 2px; color: var(--text-muted); font-size: 9px; font-weight: 400; }
+    .unassigned-group { margin-bottom: 8px; border-bottom: 1px solid var(--border); border-radius: 0; }
+    .manager-group[draggable="true"] { cursor: grab; }
+    .manager-group[draggable="true"]:active { cursor: grabbing; }
+    .manager-group-list .unassigned-group { margin: 8px 0 0; border-top: 1px solid var(--border); border-bottom: 0; }
+    .new-group-row {
+      display: flex;
+      gap: 7px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .new-group-row input {
+      min-width: 0;
+      flex: 1;
+      height: 32px;
+      padding: 0 9px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      outline: 0;
+      background: var(--surface-1);
+      color: var(--text-primary);
+      font-size: 10px;
+    }
+    .members-pane { padding: 14px; }
+    .member-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding-bottom: 13px;
+      border-bottom: 1px solid var(--border);
+    }
+    .member-header h3 { margin: 0; font-size: 16px; }
+    .member-header p { margin: 5px 0 0; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
+    .member-list { margin-top: 10px; }
+    .member-item {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 45px;
+      padding: 7px 5px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+    }
+    .member-item[draggable="true"] { cursor: grab; }
+    .member-item[draggable="true"]:active { cursor: grabbing; }
+    .member-item:hover { color: var(--text-primary); }
+    .member-item strong { display: block; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .member-item small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 9px; }
+    .move-select {
+      min-height: 29px;
+      padding: 4px 24px 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface-0);
+      color: var(--text-muted);
+      font-size: 9px;
+    }
+    .drag-tip {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 12px;
+      color: var(--text-muted);
+      font-size: 9px;
+    }
+    .assign-pane { display: flex; min-height: 0; flex-direction: column; padding: 14px; background: #0e1626; }
+    .assign-search { margin: 10px 0; min-height: 34px; }
+    .candidate-list { min-height: 0; flex: 1; overflow-y: auto; border-top: 1px solid var(--border); }
+    .candidate-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      min-height: 51px;
+      padding: 7px 4px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .candidate-row input { width: 15px; height: 15px; accent-color: var(--accent); }
+    .candidate-row strong { display: block; overflow: hidden; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .candidate-row small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 9px; }
+    .current-group { color: var(--text-muted); font-size: 9px; white-space: nowrap; }
+    .current-group b { color: var(--text-secondary); font-weight: 650; }
+    .batch-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 10px;
+      padding: 9px 10px;
+      border: 1px solid rgba(59,130,246,.35);
+      border-radius: var(--radius-md);
+      background: rgba(59,130,246,.08);
+      color: #93c5fd;
+      font-size: 10px;
+    }
+    .source-picker-wrap { position: relative; width: min(430px, 100%); margin-bottom: 16px; }
+    .source-control-row {
+      display: grid;
+      grid-template-columns: minmax(300px, 430px) minmax(240px, 1fr);
+      align-items: start;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .source-control-row .source-picker-wrap { width: 100%; margin-bottom: 0; }
+    .source-control-row > .search { min-height: 56px; }
+    .source-picker {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 11px;
+      width: 100%;
+      min-height: 56px;
+      padding: 8px 11px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      background: var(--surface-1);
+      color: var(--text-primary);
+      text-align: left;
+    }
+    .source-picker:hover { border-color: var(--accent); }
+    .source-picker strong { display: block; font-size: 12px; }
+    .source-picker small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 9px; }
+    .source-menu {
+      position: absolute;
+      z-index: 20;
+      top: calc(100% + 6px);
+      right: 0;
+      left: 0;
+      display: none;
+      padding: 5px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      background: var(--surface-2);
+      box-shadow: var(--shadow-panel);
+    }
+    .source-menu.open { display: grid; gap: 3px; }
+    .source-menu .source-button { background: var(--surface-1); }
+    .source-manager { grid-template-columns: 250px minmax(0, 1fr); }
+    .group-filter { min-width: 0; min-height: 32px; margin-bottom: 8px; }
+    .group-filter input { font-size: 10px; }
+    .group-name-editor {
+      width: min(320px, 100%);
+      height: 34px;
+      padding: 0 9px;
+      border: 1px solid var(--accent);
+      border-radius: var(--radius-sm);
+      outline: 0;
+      background: var(--surface-0);
+      color: var(--text-primary);
+      font-size: 14px;
+      font-weight: 650;
+    }
+    .editable-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin: 0;
+      padding: 2px 4px 2px 0;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-primary);
+      font-size: 16px;
+      font-weight: 650;
+      text-align: left;
+    }
+    .editable-title:hover { color: #93c5fd; }
+    .editable-title::after { color: var(--text-muted); font-size: 9px; font-weight: 500; content: "click to edit"; opacity: 0; }
+    .editable-title:hover::after { opacity: 1; }
+    .list-tools {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      margin: 12px 0 4px;
+    }
+    .scope-switch {
+      display: inline-flex;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-0);
+    }
+    .scope-switch button {
+      min-height: 29px;
+      padding: 4px 9px;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 9px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .scope-switch button.active { background: var(--surface-2); color: var(--text-primary); }
+    .manager-result {
+      display: grid;
+      grid-template-columns: auto auto auto minmax(0, 1fr) minmax(110px, auto) auto;
+      align-items: center;
+      gap: 9px;
+      min-height: 49px;
+      padding: 7px 5px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+    }
+    .manager-result:hover { background: rgba(30,41,59,.36); color: var(--text-primary); }
+    .manager-result.flat-result { grid-template-columns: auto auto minmax(0, 1fr); }
+    .manager-result input { width: 15px; height: 15px; accent-color: var(--accent); }
+    .manager-result strong { display: block; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .manager-result small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 9px; }
+    .results-empty { padding: 40px 12px; color: var(--text-muted); font-size: 11px; text-align: center; }
+    .batch-target {
+      min-height: 30px;
+      padding: 4px 25px 4px 8px;
+      border: 1px solid rgba(59,130,246,.42);
+      border-radius: var(--radius-sm);
+      background: var(--surface-1);
+      color: var(--text-primary);
+      font-size: 10px;
+    }
+    .list-name-button {
+      min-width: 0;
+      padding: 2px 4px;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: inherit;
+      text-align: left;
+    }
+    .list-name-button:hover { background: var(--surface-2); color: var(--text-primary); }
+    .list-name-editor {
+      width: 100%;
+      height: 30px;
+      padding: 0 7px;
+      border: 1px solid var(--accent);
+      border-radius: var(--radius-sm);
+      outline: 0;
+      background: var(--surface-0);
+      color: var(--text-primary);
+      font-size: 11px;
+    }
+    .icon-picker-trigger {
+      display: grid;
+      width: 29px;
+      height: 29px;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface-0);
+      color: var(--text-muted);
+    }
+    .icon-picker-trigger:hover { border-color: var(--accent); color: #93c5fd; }
+    .icon-popover {
+      position: fixed;
+      z-index: 100;
+      display: grid;
+      grid-template-columns: repeat(4, 34px);
+      gap: 4px;
+      padding: 7px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      background: var(--surface-2);
+      box-shadow: var(--shadow-panel);
+    }
+    .icon-popover button {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      background: var(--surface-1);
+      color: var(--text-secondary);
+    }
+    .icon-popover button:hover { border-color: var(--accent); color: var(--text-primary); }
+    .no-groups {
+      margin: 8px 0;
+      padding: 14px 10px;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius-md);
+      color: var(--text-muted);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .concept-view {
+      animation: settle 260ms var(--ease) both;
+    }
+    @keyframes settle {
+      from { opacity: .2; transform: translateY(5px); filter: blur(2px); }
+      to { opacity: 1; transform: translateY(0); filter: blur(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; transition-duration: .001ms !important; }
+    }
+
+    @media (max-width: 1120px) {
+      .prototype-bar { grid-template-columns: 1fr auto; }
+      .prototype-note { display: none; }
+      .workspace { grid-template-columns: 240px minmax(380px, 1fr); }
+      .inbox-pane { grid-column: 1 / -1; border-top: 1px solid var(--border); border-left: 0 !important; }
+      .split-layout { grid-template-columns: 1fr; }
+      .source-manager { grid-template-columns: 230px minmax(360px, 1fr); }
+    }
+    @media (max-width: 760px) {
+      .prototype-bar { position: relative; grid-template-columns: 1fr; padding: 12px; }
+      .concept-switcher { width: 100%; justify-self: stretch; overflow-x: auto; }
+      .concept-switcher button { flex: 1 0 auto; }
+      .app { grid-template-columns: 1fr; min-height: auto; }
+      .settings-rail { display: none; }
+      .page { padding: 20px 14px 40px; }
+      .page-heading { flex-direction: column; }
+      .page-heading .toolbar { width: 100%; }
+      .page-heading .button { flex: 1; }
+      .search-row { align-items: stretch; flex-wrap: wrap; }
+      .search { min-width: 100%; }
+      .workspace { grid-template-columns: 1fr; }
+      .pane + .pane { border-top: 1px solid var(--border); border-left: 0; }
+      .source-manager { grid-template-columns: 1fr; }
+      .manager-pane + .manager-pane { border-top: 1px solid var(--border); border-left: 0; }
+      .source-control-row { grid-template-columns: 1fr; }
+      .list-tools { grid-template-columns: 1fr; }
+      .scope-switch { width: 100%; }
+      .scope-switch button { flex: 1; }
+      .manager-result { grid-template-columns: auto auto auto minmax(0, 1fr) auto; }
+      .manager-result .current-group { display: none; }
+      .group-table-row { grid-template-columns: 22px minmax(130px, 1fr) 64px; }
+      .group-table-row .source-stack, .group-table-row > .muted { display: none; }
+      .details-scroller { overflow-x: auto; }
+      .details-table { min-width: 690px; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" focusable="false">
+    <symbol id="i-orbit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"></circle><ellipse cx="12" cy="12" rx="10" ry="4.5" transform="rotate(32 12 12)"></ellipse><ellipse cx="12" cy="12" rx="10" ry="4.5" transform="rotate(-32 12 12)"></ellipse></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M7 7h10v3a5 5 0 0 1-5 5v6M9 21h6"></path></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h3M11 12h9M4 18h8M16 18h4"></path><circle cx="16" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="14" cy="18" r="2"></circle></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"></path></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></symbol>
+    <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16M15 4v16"></path></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10Z"></path><path d="m14 7 3 3"></path></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="8" cy="6" r="1"></circle><circle cx="16" cy="6" r="1"></circle><circle cx="8" cy="12" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="8" cy="18" r="1"></circle><circle cx="16" cy="18" r="1"></circle></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12"></path><circle cx="12" cy="12" r="2.5"></circle></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5M12 8h.01"></path></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></symbol>
+  </svg>
+
+  <header class="prototype-bar">
+    <div class="prototype-copy">
+      <h1>List organization concepts</h1>
+      <p>Revised around the source as the boundary for grouping.</p>
+    </div>
+    <div class="concept-switcher" role="group" aria-label="Choose a mockup concept">
+      <button data-concept="source-manager" aria-pressed="true">Source manager</button>
+      <button data-concept="matrix" aria-pressed="false">Source matrix</button>
+      <button data-concept="workspace" aria-pressed="false">Group workspace</button>
+      <button data-concept="jobs" aria-pressed="false">Two jobs, two views</button>
+    </div>
+    <div class="prototype-note"><strong>Revised recommendation:</strong> choose a source first, then organize only that source’s lists.</div>
+  </header>
+
+  <div class="app">
+    <aside class="settings-rail">
+      <div class="brand"><span class="brand-mark"><svg class="icon"><use href="#i-orbit"></use></svg></span>Mission Control</div>
+      <div class="settings-title">Settings</div>
+      <nav class="settings-nav" aria-label="Settings navigation">
+        <button class="nav-item"><span class="nav-icon"><svg class="icon"><use href="#i-grid"></use></svg></span>General</button>
+        <button class="nav-item"><span class="nav-icon"><svg class="icon"><use href="#i-plug"></use></svg></span>Connectors</button>
+        <button class="nav-item active"><span class="nav-icon"><svg class="icon"><use href="#i-folder"></use></svg></span>List organization</button>
+        <button class="nav-item"><span class="nav-icon"><svg class="icon"><use href="#i-sliders"></use></svg></span>Task defaults</button>
+        <button class="nav-item"><span class="nav-icon"><svg class="icon"><use href="#i-bell"></use></svg></span>Notifications</button>
+      </nav>
+    </aside>
+
+    <main>
+      <div class="page">
+        <div class="page-heading">
+          <div>
+            <h2>List organization</h2>
+            <p id="page-description">Choose a source, then create and manage the groups that organize only that source’s lists in Mission Control navigation.</p>
+          </div>
+          <div class="toolbar">
+            <button class="button primary hidden" id="create-group"><svg class="icon icon-sm"><use href="#i-plus"></use></svg>New group</button>
+          </div>
+        </div>
+
+        <div class="search-row hidden" id="global-search-row">
+          <label class="search">
+            <svg class="icon icon-sm"><use href="#i-search"></use></svg>
+            <input id="list-search" type="search" placeholder="Search groups, lists, or sources" aria-label="Search groups, lists, or sources">
+          </label>
+          <span class="source-key todo"><span class="source-dot"></span>Microsoft To Do</span>
+          <span class="source-key github"><span class="source-dot"></span>GitHub</span>
+          <span class="source-key local"><span class="source-dot"></span>Local</span>
+          <span class="summary tabular">11 groups · 155 lists</span>
+        </div>
+
+        <section id="concept-source-manager" class="concept-view" aria-label="Source-scoped group manager concept">
+          <div class="source-control-row">
+            <div class="source-picker-wrap">
+              <button class="source-picker" id="source-picker" aria-expanded="false" aria-haspopup="listbox">
+                <span class="source-emblem todo" id="source-picker-emblem"><svg class="icon"><use href="#i-list"></use></svg></span>
+                <span><strong id="source-picker-name">Microsoft To Do</strong><small id="source-picker-meta">70 lists · 4 groups</small></span>
+                <svg class="icon icon-sm"><use href="#i-chevron"></use></svg>
+              </button>
+              <div class="source-menu" id="source-menu" role="listbox" aria-label="Choose a source to organize">
+                <button class="source-button active" role="option" aria-selected="true" data-manager-source="todo">
+                  <span class="source-emblem todo"><svg class="icon"><use href="#i-list"></use></svg></span>
+                  <span><strong>Microsoft To Do</strong><small>70 lists · 4 groups</small></span>
+                  <svg class="icon icon-sm"><use href="#i-check"></use></svg>
+                </button>
+                <button class="source-button" role="option" aria-selected="false" data-manager-source="github">
+                  <span class="source-emblem github"><svg class="icon"><use href="#i-grid"></use></svg></span>
+                  <span><strong>GitHub</strong><small>63 repositories · no groups</small></span>
+                  <svg class="icon icon-sm"><use href="#i-check"></use></svg>
+                </button>
+                <button class="source-button" role="option" aria-selected="false" data-manager-source="local">
+                  <span class="source-emblem local"><svg class="icon"><use href="#i-orbit"></use></svg></span>
+                  <span><strong>Mission Control</strong><small>22 lists · 4 groups</small></span>
+                  <svg class="icon icon-sm"><use href="#i-check"></use></svg>
+                </button>
+              </div>
+            </div>
+            <label class="search">
+              <svg class="icon icon-sm"><use href="#i-search"></use></svg>
+              <input id="manager-list-search" type="search" placeholder="Find list" aria-label="Find list">
+            </label>
+          </div>
+
+          <div class="notice">
+            <svg class="icon icon-sm"><use href="#i-info"></use></svg>
+            <div id="manager-notice-copy"><strong>Microsoft To Do groups</strong> organize only lists from this source. Search stays within this source even when you switch to “All lists.”</div>
+          </div>
+
+          <div class="source-manager">
+            <aside class="manager-pane manager-sidebar">
+              <div class="manager-pane-head">
+                <div><h3>Groups</h3><p id="manager-source-caption">Microsoft To Do navigation</p></div>
+                <button class="icon-button" aria-label="Create group"><svg class="icon icon-sm"><use href="#i-plus"></use></svg></button>
+              </div>
+              <label class="search group-filter">
+                <svg class="icon icon-sm"><use href="#i-search"></use></svg>
+                <input id="manager-group-search" type="search" placeholder="Find a group" aria-label="Find a group in this source">
+              </label>
+              <div id="manager-group-list" class="manager-group-list"></div>
+              <div class="new-group-row">
+                <input id="new-source-group" type="text" placeholder="New group name" aria-label="New group name">
+                <button class="button primary" id="add-source-group" aria-label="Add group"><svg class="icon icon-sm"><use href="#i-plus"></use></svg></button>
+              </div>
+            </aside>
+
+            <section class="manager-pane members-pane">
+              <div class="member-header">
+                <div>
+                  <button class="editable-title" id="manager-current-group">Home</button>
+                  <input id="manager-group-name-input" class="group-name-editor hidden" type="text" aria-label="Edit group name">
+                  <p><span id="manager-member-count">3 lists</span> · <span id="manager-view-source">Microsoft To Do</span></p>
+                </div>
+                <div class="toolbar">
+                  <button class="icon-picker-trigger" id="manager-group-icon" aria-label="Choose group icon"><svg class="icon icon-sm"><use href="#i-folder"></use></svg></button>
+                  <button class="icon-button danger" id="manager-delete-group" aria-label="Delete selected group"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button>
+                </div>
+              </div>
+              <div class="list-tools">
+                <div class="scope-switch" aria-label="List search scope">
+                  <button class="active" data-list-scope="group"><span id="current-group-scope">Home</span> only</button>
+                  <button data-list-scope="all">All lists in source</button>
+                </div>
+              </div>
+              <div id="manager-member-list" class="member-list"></div>
+              <div class="batch-bar" id="manager-batch-bar">
+                <span id="batch-selection-count">0 lists selected</span>
+                <div class="toolbar">
+                  <select class="batch-target" id="batch-target-group" aria-label="Move selected lists to group"></select>
+                  <button class="button primary" id="batch-move" disabled>Move selected</button>
+                </div>
+              </div>
+            </section>
+          </div>
+          <div class="icon-popover hidden" id="icon-picker-popover" aria-label="Choose an icon">
+            <button data-icon-choice="i-folder" aria-label="Folder icon"><svg class="icon"><use href="#i-folder"></use></svg></button>
+            <button data-icon-choice="i-list" aria-label="List icon"><svg class="icon"><use href="#i-list"></use></svg></button>
+            <button data-icon-choice="i-grid" aria-label="Grid icon"><svg class="icon"><use href="#i-grid"></use></svg></button>
+            <button data-icon-choice="i-orbit" aria-label="Orbit icon"><svg class="icon"><use href="#i-orbit"></use></svg></button>
+          </div>
+        </section>
+
+        <section id="concept-matrix" class="concept-view hidden" aria-label="Source matrix concept">
+          <div class="notice">
+            <svg class="icon icon-sm"><use href="#i-info"></use></svg>
+            <div><strong>Groups are shared navigation, not source folders.</strong> A group can contain lists from several sources. Source-native groups, such as Microsoft To Do folder groups, are imported into this shared layer.</div>
+          </div>
+          <div class="matrix-wrap">
+            <div class="matrix">
+              <div class="matrix-cell matrix-head"><p class="section-label">Navigation groups</p></div>
+              <div class="matrix-cell matrix-head"><span class="source-key todo"><span class="source-dot"></span>Microsoft To Do</span><div class="group-meta">70 visible lists</div></div>
+              <div class="matrix-cell matrix-head"><span class="source-key github"><span class="source-dot"></span>GitHub</span><div class="group-meta">63 repositories</div></div>
+              <div class="matrix-cell matrix-head"><span class="source-key local"><span class="source-dot"></span>Mission Control</span><div class="group-meta">22 local lists</div></div>
+
+              <div class="matrix-cell group-cell searchable" data-search="home outside cape house chores">
+                <span class="matrix-group-icon"><svg class="icon"><use href="#i-folder"></use></svg></span>
+                <div><div class="group-name">Home</div><div class="group-meta">28 lists · 3 sources</div></div>
+              </div>
+              <div class="matrix-cell searchable" data-search="outside cape house medical home todo"><div class="matrix-lists"><button class="list-chip todo"><span class="dot"></span>Outside</button><button class="list-chip todo"><span class="dot"></span>Cape House</button><button class="list-chip todo"><span class="dot"></span>Medical</button></div></div>
+              <div class="matrix-cell searchable" data-search="home assistant homelab renovations github"><div class="matrix-lists"><button class="list-chip github"><span class="dot"></span>home-assistant</button><button class="list-chip github"><span class="dot"></span>renovations</button></div></div>
+              <div class="matrix-cell searchable" data-search="maintenance errands local"><div class="matrix-lists"><button class="list-chip local"><span class="dot"></span>Maintenance</button><button class="list-chip local"><span class="dot"></span>Errands</button></div></div>
+
+              <div class="matrix-cell group-cell searchable" data-search="tech development automation">
+                <span class="matrix-group-icon"><svg class="icon"><use href="#i-folder"></use></svg></span>
+                <div><div class="group-name">Tech</div><div class="group-meta">19 lists · 3 sources</div></div>
+              </div>
+              <div class="matrix-cell searchable" data-search="work career automation todo"><div class="matrix-lists"><button class="list-chip todo"><span class="dot"></span>Work</button><button class="list-chip todo"><span class="dot"></span>Automation</button></div></div>
+              <div class="matrix-cell searchable" data-search="mission control ideation github"><div class="matrix-lists"><button class="list-chip github"><span class="dot"></span>mission-control</button><button class="list-chip github"><span class="dot"></span>ideation</button></div></div>
+              <div class="matrix-cell searchable" data-search="lab notes local"><div class="matrix-lists"><button class="list-chip local"><span class="dot"></span>Lab notes</button></div></div>
+
+              <div class="matrix-cell group-cell searchable" data-search="current trip travel">
+                <span class="matrix-group-icon"><svg class="icon"><use href="#i-folder"></use></svg></span>
+                <div><div class="group-name">Current trip</div><div class="group-meta">6 lists · 2 sources</div></div>
+              </div>
+              <div class="matrix-cell searchable" data-search="packing flights reservations todo"><div class="matrix-lists"><button class="list-chip todo"><span class="dot"></span>Packing</button><button class="list-chip todo"><span class="dot"></span>Reservations</button></div></div>
+              <div class="matrix-cell"><div class="matrix-empty">No lists from this source</div></div>
+              <div class="matrix-cell searchable" data-search="trip ideas local"><div class="matrix-lists"><button class="list-chip local"><span class="dot"></span>Trip ideas</button></div></div>
+
+              <div class="matrix-cell group-cell searchable" data-search="other lists uncategorized">
+                <span class="matrix-group-icon"><svg class="icon"><use href="#i-folder"></use></svg></span>
+                <div><div class="group-name">Other lists</div><div class="group-meta">3 lists · 1 source</div></div>
+              </div>
+              <div class="matrix-cell searchable" data-search="gifts jokes todo"><div class="matrix-lists"><button class="list-chip todo"><span class="dot"></span>Gifts</button><button class="list-chip todo"><span class="dot"></span>Jokes</button></div></div>
+              <div class="matrix-cell"><div class="matrix-empty">No lists from this source</div></div>
+              <div class="matrix-cell"><div class="matrix-empty">No lists from this source</div></div>
+            </div>
+            <div class="matrix-footer">
+              <span>Drag a list between rows to change its Mission Control group. Its source never changes.</span>
+              <button class="button ghost"><svg class="icon icon-sm"><use href="#i-eye"></use></svg>4 hidden lists</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="concept-workspace" class="concept-view hidden" aria-label="Group workspace concept">
+          <div class="workspace">
+            <div class="pane">
+              <div class="pane-head"><p class="section-label">Groups</p><button class="icon-button" aria-label="Create group"><svg class="icon icon-sm"><use href="#i-plus"></use></svg></button></div>
+              <div class="group-list">
+                <button class="group-button active" data-group="Home"><svg class="icon icon-sm"><use href="#i-grip"></use></svg><span>Home</span><span class="count">28</span></button>
+                <button class="group-button" data-group="Cape House"><svg class="icon icon-sm"><use href="#i-grip"></use></svg><span>Cape House</span><span class="count">11</span></button>
+                <button class="group-button" data-group="Tech"><svg class="icon icon-sm"><use href="#i-grip"></use></svg><span>Tech</span><span class="count">19</span></button>
+                <button class="group-button" data-group="Money"><svg class="icon icon-sm"><use href="#i-grip"></use></svg><span>Money</span><span class="count">8</span></button>
+                <button class="group-button" data-group="Current trip"><svg class="icon icon-sm"><use href="#i-grip"></use></svg><span>Current trip</span><span class="count">6</span></button>
+                <button class="group-button" data-group="Movies to watch"><svg class="icon icon-sm"><use href="#i-grip"></use></svg><span>Movies to watch</span><span class="count">2</span></button>
+              </div>
+            </div>
+
+            <div class="pane">
+              <div class="selected-group-head">
+                <div class="selected-group-title">
+                  <span class="matrix-group-icon"><svg class="icon"><use href="#i-folder"></use></svg></span>
+                  <div><h3 id="workspace-group-name">Home</h3><p>Shown as one group inside each source in navigation</p></div>
+                </div>
+                <div class="toolbar"><button class="icon-button" aria-label="Rename group"><svg class="icon icon-sm"><use href="#i-edit"></use></svg></button><button class="icon-button" aria-label="Delete group"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button></div>
+              </div>
+
+              <div class="source-section">
+                <div class="source-section-head"><span class="source-section-title todo"><span class="source-dot"></span>Microsoft To Do</span><span class="count">3</span></div>
+                <div class="list-row"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="list-row-name">Outside</span><span class="muted tabular">22 items</span><button class="row-action" aria-label="Remove Outside from group"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button></div>
+                <div class="list-row"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="list-row-name">Cape House</span><span class="muted tabular">11 items</span><button class="row-action" aria-label="Remove Cape House from group"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button></div>
+                <div class="list-row"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="list-row-name">Medical</span><span class="muted tabular">16 items</span><button class="row-action" aria-label="Remove Medical from group"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button></div>
+              </div>
+              <div class="source-section">
+                <div class="source-section-head"><span class="source-section-title github"><span class="source-dot"></span>GitHub</span><span class="count">2</span></div>
+                <div class="list-row"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="list-row-name">home-assistant</span><span class="muted tabular">8 open</span><button class="row-action" aria-label="Remove home-assistant from group"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button></div>
+                <div class="list-row"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="list-row-name">renovations</span><span class="muted tabular">4 open</span><button class="row-action" aria-label="Remove renovations from group"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button></div>
+              </div>
+              <div class="source-section">
+                <div class="source-section-head"><span class="source-section-title local"><span class="source-dot"></span>Mission Control</span><span class="count">2</span></div>
+                <div class="list-row"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="list-row-name">Maintenance</span><span class="muted tabular">9 items</span><button class="row-action" aria-label="Remove Maintenance from group"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button></div>
+                <div class="list-row"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="list-row-name">Errands</span><span class="muted tabular">5 items</span><button class="row-action" aria-label="Remove Errands from group"><svg class="icon icon-sm"><use href="#i-trash"></use></svg></button></div>
+              </div>
+            </div>
+
+            <div class="pane inbox-pane">
+              <div class="pane-head"><p class="section-label">Not in a group</p><span class="count">70</span></div>
+              <p class="inbox-copy">Optional to organize. These lists still appear under their source in navigation.</p>
+              <div class="inbox-card searchable" data-search="gifts todo"><div><strong>Gifts</strong><small>Microsoft To Do · 4 items</small></div><button class="assign-button"><svg class="icon icon-sm"><use href="#i-plus"></use></svg>Add</button></div>
+              <div class="inbox-card searchable" data-search="work todo"><div><strong>Work</strong><small>Microsoft To Do · 31 items</small></div><button class="assign-button"><svg class="icon icon-sm"><use href="#i-plus"></use></svg>Add</button></div>
+              <div class="inbox-card searchable" data-search="copilot cli github"><div><strong>copilot-cli</strong><small>GitHub · 12 open</small></div><button class="assign-button"><svg class="icon icon-sm"><use href="#i-plus"></use></svg>Add</button></div>
+              <div class="inbox-card searchable" data-search="personal todo"><div><strong>Personal</strong><small>Microsoft To Do · 18 items</small></div><button class="assign-button"><svg class="icon icon-sm"><use href="#i-plus"></use></svg>Add</button></div>
+              <div class="inbox-card searchable" data-search="quick capture local"><div><strong>Quick capture</strong><small>Mission Control · 7 items</small></div><button class="assign-button"><svg class="icon icon-sm"><use href="#i-plus"></use></svg>Add</button></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="concept-jobs" class="concept-view hidden" aria-label="Separate grouping and list details concept">
+          <div class="job-tabs" role="tablist" aria-label="List organization tasks">
+            <button class="job-tab active" role="tab" aria-selected="true" data-job="grouping">Grouping</button>
+            <button class="job-tab" role="tab" aria-selected="false" data-job="details">List details</button>
+          </div>
+
+          <div id="job-grouping" class="job-view">
+            <div class="split-layout">
+              <div class="flat-section">
+                <div class="flat-section-head"><div><h3>Navigation groups</h3><p>Drag to set navigation order. Open a group to manage its lists.</p></div><button class="button primary"><svg class="icon icon-sm"><use href="#i-plus"></use></svg>New group</button></div>
+                <div class="group-table-row searchable" data-search="home todo github local"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="table-label">Home</span><span class="source-stack"><span class="badge todo"><span class="source-dot"></span>To Do 3</span><span class="badge github"><span class="source-dot"></span>GitHub 2</span><span class="badge local"><span class="source-dot"></span>Local 2</span></span><span class="muted tabular">28 lists</span><button class="icon-button"><svg class="icon icon-sm"><use href="#i-arrow"></use></svg></button></div>
+                <div class="group-table-row searchable" data-search="cape house todo"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="table-label">Cape House</span><span class="source-stack"><span class="badge todo"><span class="source-dot"></span>To Do 11</span></span><span class="muted tabular">11 lists</span><button class="icon-button"><svg class="icon icon-sm"><use href="#i-arrow"></use></svg></button></div>
+                <div class="group-table-row searchable" data-search="tech todo github local"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="table-label">Tech</span><span class="source-stack"><span class="badge todo"><span class="source-dot"></span>To Do 4</span><span class="badge github"><span class="source-dot"></span>GitHub 12</span><span class="badge local"><span class="source-dot"></span>Local 3</span></span><span class="muted tabular">19 lists</span><button class="icon-button"><svg class="icon icon-sm"><use href="#i-arrow"></use></svg></button></div>
+                <div class="group-table-row searchable" data-search="money todo local"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="table-label">Money</span><span class="source-stack"><span class="badge todo"><span class="source-dot"></span>To Do 6</span><span class="badge local"><span class="source-dot"></span>Local 2</span></span><span class="muted tabular">8 lists</span><button class="icon-button"><svg class="icon icon-sm"><use href="#i-arrow"></use></svg></button></div>
+                <div class="group-table-row searchable" data-search="current trip todo local"><svg class="icon icon-sm muted"><use href="#i-grip"></use></svg><span class="table-label">Current trip</span><span class="source-stack"><span class="badge todo"><span class="source-dot"></span>To Do 5</span><span class="badge local"><span class="source-dot"></span>Local 1</span></span><span class="muted tabular">6 lists</span><button class="icon-button"><svg class="icon icon-sm"><use href="#i-arrow"></use></svg></button></div>
+              </div>
+              <aside class="flat-section side-help">
+                <h3>How grouping works</h3>
+                <p>Groups organize Mission Control navigation. They do not move or merge anything in the source system.</p>
+                <div class="behavior-list">
+                  <div class="behavior-item"><span class="check"><svg class="icon icon-sm"><use href="#i-check"></use></svg></span><span>A group can combine lists from multiple sources around one real-world context.</span></div>
+                  <div class="behavior-item"><span class="check"><svg class="icon icon-sm"><use href="#i-check"></use></svg></span><span>Each source still has its own section in navigation, so provenance stays visible.</span></div>
+                  <div class="behavior-item"><span class="check"><svg class="icon icon-sm"><use href="#i-check"></use></svg></span><span>Sources without native groups can still participate in Mission Control groups.</span></div>
+                </div>
+              </aside>
+            </div>
+          </div>
+
+          <div id="job-details" class="job-view hidden">
+            <div class="notice">
+              <svg class="icon icon-sm"><use href="#i-info"></use></svg>
+              <div><strong>This is list identity, not grouping.</strong> Display names, icons, visibility, and context appearance live together here so the grouping screen can stay focused.</div>
+            </div>
+            <div class="flat-section details-scroller">
+              <div class="flat-section-head"><div><h3>All lists</h3><p>Changes affect Mission Control only unless a source explicitly supports write-back.</p></div><span class="badge info">155 lists</span></div>
+              <table class="details-table">
+                <thead><tr><th>List</th><th>Source</th><th>Group</th><th>Visible</th><th>Appearance</th><th></th></tr></thead>
+                <tbody>
+                  <tr class="searchable" data-search="medical todo home"><td><span class="name-cell"><span class="tiny-color"></span>Medical</span></td><td><span class="source-key todo"><span class="source-dot"></span>Microsoft To Do</span></td><td>Home</td><td>Shown</td><td>Global style</td><td><button class="icon-button" aria-label="Edit Medical"><svg class="icon icon-sm"><use href="#i-edit"></use></svg></button></td></tr>
+                  <tr class="searchable" data-search="current trip todo"><td><span class="name-cell"><span class="tiny-color" style="background:#f59e0b"></span>Current Trip</span></td><td><span class="source-key todo"><span class="source-dot"></span>Microsoft To Do</span></td><td>Current trip</td><td>Shown</td><td>Amber</td><td><button class="icon-button" aria-label="Edit Current Trip"><svg class="icon icon-sm"><use href="#i-edit"></use></svg></button></td></tr>
+                  <tr class="searchable" data-search="mission control github tech"><td><span class="name-cell"><span class="tiny-color" style="background:#a855f7"></span>mission-control</span></td><td><span class="source-key github"><span class="source-dot"></span>GitHub</span></td><td>Tech</td><td>Shown</td><td>Global style</td><td><button class="icon-button" aria-label="Edit mission-control"><svg class="icon icon-sm"><use href="#i-edit"></use></svg></button></td></tr>
+                  <tr class="searchable" data-search="quick capture local"><td><span class="name-cell"><span class="tiny-color" style="background:#64748b"></span>Quick capture</span></td><td><span class="source-key local"><span class="source-dot"></span>Mission Control</span></td><td>Not grouped</td><td>Shown</td><td>Global style</td><td><button class="icon-button" aria-label="Edit Quick capture"><svg class="icon icon-sm"><use href="#i-edit"></use></svg></button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const concepts = {
+      "source-manager": {
+        title: "List organization",
+        description: "Choose a source, then create and manage the groups that organize only that source’s lists in Mission Control navigation.",
+        manageLabel: "List details"
+      },
+      matrix: {
+        title: "List organization",
+        description: "See how every group spans your sources. Lists stay connected to their source while Mission Control gives them one shared navigation structure.",
+        manageLabel: "List details"
+      },
+      workspace: {
+        title: "List organization",
+        description: "Work on one navigation group at a time, with source sections in the middle and an optional organization queue beside it.",
+        manageLabel: "List details"
+      },
+      jobs: {
+        title: "Lists",
+        description: "Separate the two jobs: organize navigation groups, then manage list names, icons, visibility, and appearance in a dedicated view.",
+        manageLabel: "Import groups"
+      }
+    };
+
+    const conceptButtons = [...document.querySelectorAll("[data-concept]")];
+    const description = document.getElementById("page-description");
+    const createGroup = document.getElementById("create-group");
+    const search = document.getElementById("list-search");
+    const globalSearchRow = document.getElementById("global-search-row");
+
+    function showConcept(name) {
+      conceptButtons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.concept === name)));
+      document.querySelectorAll(".concept-view").forEach((view) => view.classList.add("hidden"));
+      const next = document.getElementById(`concept-${name}`);
+      next.classList.remove("hidden");
+      next.style.animation = "none";
+      requestAnimationFrame(() => { next.style.animation = ""; });
+      description.textContent = concepts[name].description;
+      createGroup.classList.toggle("hidden", name === "jobs" || name === "source-manager");
+      globalSearchRow.classList.toggle("hidden", name === "source-manager");
+      search.value = "";
+      filterVisible("");
+    }
+
+    function activeConcept() {
+      return conceptButtons.find((button) => button.getAttribute("aria-pressed") === "true")?.dataset.concept || "source-manager";
+    }
+
+    function filterVisible(query) {
+      const active = document.getElementById(`concept-${activeConcept()}`);
+      if (active.id === "concept-matrix") {
+        const cells = [...active.querySelectorAll(".matrix-cell")].slice(4);
+        for (let index = 0; index < cells.length; index += 4) {
+          const row = cells.slice(index, index + 4);
+          const haystack = row.map((cell) => cell.textContent).join(" ").toLowerCase();
+          row.forEach((cell) => cell.classList.toggle("hidden", query && !haystack.includes(query)));
+        }
+        return;
+      }
+      active.querySelectorAll(".searchable").forEach((element) => {
+        const haystack = (element.dataset.search || element.textContent).toLowerCase();
+        element.classList.toggle("hidden", query && !haystack.includes(query));
+      });
+    }
+
+    conceptButtons.forEach((button) => button.addEventListener("click", () => showConcept(button.dataset.concept)));
+    search.addEventListener("input", () => filterVisible(search.value.trim().toLowerCase()));
+
+    document.querySelectorAll(".group-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".group-button").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        document.getElementById("workspace-group-name").textContent = button.dataset.group;
+      });
+    });
+
+    document.querySelectorAll(".assign-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        const card = button.closest(".inbox-card");
+        button.innerHTML = '<svg class="icon icon-sm"><use href="#i-check"></use></svg>Added';
+        button.style.color = "#6ee7b7";
+        setTimeout(() => card.remove(), 650);
+      });
+    });
+
+    document.querySelectorAll("[data-job]").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll("[data-job]").forEach((item) => {
+          item.classList.toggle("active", item === tab);
+          item.setAttribute("aria-selected", String(item === tab));
+        });
+        document.querySelectorAll(".job-view").forEach((view) => view.classList.add("hidden"));
+        document.getElementById(`job-${tab.dataset.job}`).classList.remove("hidden");
+      });
+    });
+
+    const managerData = {
+      todo: {
+        name: "Microsoft To Do", meta: "70 lists · 4 groups", icon: "i-list", tone: "todo",
+        groups: [
+          { name: "Home", lists: [{ name: "Outside", meta: "22 items" }, { name: "Medical", meta: "16 items" }, { name: "Cape Gardening", meta: "9 items" }] },
+          { name: "Cape House", lists: [{ name: "Cape House", meta: "11 items" }, { name: "Renovation ideas", meta: "7 items" }] },
+          { name: "Tech", lists: [{ name: "Work", meta: "31 items" }, { name: "Automation", meta: "8 items" }] },
+          { name: "Current trip", lists: [{ name: "Packing", meta: "14 items" }, { name: "Reservations", meta: "6 items" }] }
+        ],
+        ungrouped: [{ name: "Gifts", meta: "4 items" }, { name: "Personal", meta: "18 items" }, { name: "Jokes", meta: "3 items" }]
+      },
+      github: {
+        name: "GitHub", meta: "63 repositories · no groups", icon: "i-grid", tone: "github",
+        groups: [],
+        ungrouped: [
+          { name: "mission-control", meta: "34 open" }, { name: "copilot-cli", meta: "12 open" },
+          { name: "ideation", meta: "7 open" }, { name: "home-assistant", meta: "8 open" },
+          { name: "renovations", meta: "4 open" }, { name: "experiments", meta: "3 open" },
+          { name: "agent-tools", meta: "9 open" }, { name: "dotfiles", meta: "2 open" }
+        ]
+      },
+      local: {
+        name: "Mission Control", meta: "22 lists · 4 groups", icon: "i-orbit", tone: "local",
+        groups: [
+          { name: "Home", lists: [{ name: "Maintenance", meta: "9 items" }, { name: "Errands", meta: "5 items" }] },
+          { name: "Money", lists: [{ name: "Bills", meta: "6 items" }, { name: "Purchases", meta: "8 items" }] },
+          { name: "Tech", lists: [{ name: "Lab notes", meta: "13 items" }] },
+          { name: "Travel", lists: [{ name: "Trip ideas", meta: "10 items" }] }
+        ],
+        ungrouped: [{ name: "Quick capture", meta: "7 items" }, { name: "Someday", meta: "12 items" }]
+      }
+    };
+
+    let managerSource = "todo";
+    let managerGroup = "Home";
+    let managerScope = "group";
+    let managerQuery = "";
+
+    function escapeHTML(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function getAllManagerLists(data) {
+      const lists = data.groups.flatMap((group) => group.lists.map((list) => ({ ...list, group: group.name })));
+      return [...lists, ...data.ungrouped.map((list) => ({ ...list, group: "Not in a group" }))];
+    }
+
+    function getVisibleManagerLists(data) {
+      const lists = managerScope === "all"
+        ? getAllManagerLists(data)
+        : managerGroup === "Not in a group"
+          ? data.ungrouped.map((list) => ({ ...list, group: "Not in a group" }))
+          : (data.groups.find((group) => group.name === managerGroup)?.lists || []).map((list) => ({ ...list, group: managerGroup }));
+      return lists.filter((list) => `${list.name} ${list.meta} ${list.group}`.toLowerCase().includes(managerQuery));
+    }
+
+    function renderManager() {
+      const data = managerData[managerSource];
+      if (data.groups.length === 0) {
+        managerGroup = "Not in a group";
+        managerScope = "all";
+      }
+      if (managerGroup !== "Not in a group" && !data.groups.some((group) => group.name === managerGroup)) {
+        managerGroup = data.groups[0]?.name || "Not in a group";
+      }
+      const selectedGroup = data.groups.find((group) => group.name === managerGroup);
+      const viewTitle = managerScope === "all" ? "All lists" : managerGroup;
+      const editableGroup = managerScope === "group" && Boolean(selectedGroup);
+
+      document.getElementById("source-picker-name").textContent = data.name;
+      document.getElementById("source-picker-meta").textContent = data.meta;
+      document.getElementById("source-picker-emblem").className = `source-emblem ${data.tone}`;
+      document.getElementById("source-picker-emblem").innerHTML = `<svg class="icon"><use href="#${data.icon}"></use></svg>`;
+      document.getElementById("manager-notice-copy").innerHTML = data.groups.length
+        ? `<strong>${escapeHTML(data.name)} groups</strong> organize only lists from this source. Search stays within this source even when you switch to “All lists.”`
+        : `<strong>No groups are defined for ${escapeHTML(data.name)}.</strong> Its lists appear flat in navigation. Create a group only if that extra hierarchy would help.`;
+      document.getElementById("manager-source-caption").textContent = `${data.name} navigation`;
+      document.getElementById("manager-current-group").textContent = viewTitle;
+      document.getElementById("manager-current-group").disabled = !editableGroup;
+      document.getElementById("manager-view-source").textContent = data.name;
+      document.getElementById("current-group-scope").textContent = managerGroup === "Not in a group" ? "Other" : managerGroup;
+      document.getElementById("manager-member-count").textContent = `${getVisibleManagerLists(data).length} shown`;
+      document.getElementById("manager-delete-group").classList.toggle("hidden", !editableGroup);
+      document.getElementById("manager-group-icon").classList.toggle("hidden", !editableGroup);
+      document.getElementById("manager-group-icon").innerHTML = `<svg class="icon icon-sm"><use href="#${selectedGroup?.icon || "i-folder"}"></use></svg>`;
+
+      document.querySelectorAll("[data-manager-source]").forEach((item) => {
+        const selected = item.dataset.managerSource === managerSource;
+        item.classList.toggle("active", selected);
+        item.setAttribute("aria-selected", String(selected));
+      });
+      document.querySelectorAll("[data-list-scope]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.listScope === managerScope);
+      });
+      document.querySelector('[data-list-scope="group"]').classList.toggle("hidden", data.groups.length === 0);
+
+      document.getElementById("manager-group-list").innerHTML = data.groups.length ? `
+        ${data.groups.map((group) => `
+          <button class="manager-group ${managerScope === "group" && group.name === managerGroup ? "active" : ""}" draggable="true" data-manager-group="${escapeHTML(group.name)}">
+            <svg class="icon icon-sm"><use href="#${group.icon || "i-folder"}"></use></svg>
+            <span class="manager-group-name">${escapeHTML(group.name)}<span class="manager-group-meta">Drop lists here</span></span>
+            <span class="count">${group.lists.length}</span>
+          </button>
+        `).join("")}
+        <button class="manager-group unassigned-group ${managerScope === "group" && managerGroup === "Not in a group" ? "active" : ""}" data-manager-group="Not in a group">
+          <svg class="icon icon-sm"><use href="#i-list"></use></svg>
+          <span class="manager-group-name">Other <span class="manager-group-meta">Lists not in a group</span></span>
+          <span class="count">${data.ungrouped.length}</span>
+        </button>
+      ` : `<div class="no-groups"><strong>No groups defined.</strong><br>Lists from this source appear directly in navigation, without an extra group level.</div>`;
+
+      const targetSelect = document.getElementById("batch-target-group");
+      targetSelect.innerHTML = [
+        ...data.groups.map((group) => `<option ${group.name === managerGroup ? "selected" : ""}>${escapeHTML(group.name)}</option>`),
+        `<option ${managerGroup === "Not in a group" ? "selected" : ""}>Not in a group</option>`
+      ].join("");
+
+      renderManagerResults();
+      bindManagerGroupEvents();
+      filterManagerGroups();
+    }
+
+    function renderManagerResults() {
+      const data = managerData[managerSource];
+      const lists = getVisibleManagerLists(data);
+      const flatSource = data.groups.length === 0;
+      const canReorder = managerScope === "group" || flatSource;
+      const container = document.getElementById("manager-member-list");
+      document.getElementById("manager-member-count").textContent = `${lists.length} shown`;
+      document.getElementById("manager-batch-bar").classList.toggle("hidden", flatSource);
+      container.innerHTML = lists.length ? lists.map((list) => `
+        <div class="manager-result ${flatSource ? "flat-result" : ""}" draggable="${canReorder}" data-member-name="${escapeHTML(list.name)}">
+          ${flatSource ? "" : `<input type="checkbox" value="${escapeHTML(list.name)}" aria-label="Select ${escapeHTML(list.name)}">`}
+          <svg class="icon icon-sm muted"><use href="#i-grip"></use></svg>
+          <button class="icon-picker-trigger" data-list-icon="${escapeHTML(list.name)}" aria-label="Choose icon for ${escapeHTML(list.name)}"><svg class="icon icon-sm"><use href="#${list.icon || "i-list"}"></use></svg></button>
+          <button class="list-name-button" data-edit-list="${escapeHTML(list.name)}"><strong>${escapeHTML(list.name)}</strong><small>${escapeHTML(data.name)} · ${escapeHTML(list.meta)}</small></button>
+          ${flatSource ? "" : `<span class="current-group">In <b>${escapeHTML(list.group)}</b></span>
+          <select class="move-select" data-move-member="${escapeHTML(list.name)}" aria-label="Move ${escapeHTML(list.name)}">
+            ${data.groups.map((group) => `<option ${group.name === list.group ? "selected" : ""}>${escapeHTML(group.name)}</option>`).join("")}
+            <option ${list.group === "Not in a group" ? "selected" : ""}>Not in a group</option>
+          </select>`}
+        </div>
+      `).join("") : `<div class="results-empty">No lists match this search and scope.</div>`;
+
+      container.querySelectorAll("input").forEach((checkbox) => checkbox.addEventListener("change", updateBatchState));
+      container.querySelectorAll("[data-member-name]").forEach((item) => {
+        item.addEventListener("dragstart", (event) => {
+          if (!canReorder) return event.preventDefault();
+          event.dataTransfer.setData("text/plain", `list:${item.dataset.memberName}`);
+        });
+        item.addEventListener("dragover", (event) => {
+          if (canReorder) event.preventDefault();
+        });
+        item.addEventListener("drop", (event) => {
+          const payload = event.dataTransfer.getData("text/plain");
+          if (!payload.startsWith("list:")) return;
+          event.preventDefault();
+          reorderManagerList(payload.slice(5), item.dataset.memberName);
+          renderManager();
+        });
+      });
+      container.querySelectorAll("[data-move-member]").forEach((select) => {
+        select.addEventListener("change", () => {
+          moveManagerList(select.dataset.moveMember, select.value);
+          renderManager();
+        });
+      });
+      container.querySelectorAll("[data-edit-list]").forEach((button) => {
+        button.addEventListener("click", () => beginListRename(button.dataset.editList, button));
+      });
+      container.querySelectorAll("[data-list-icon]").forEach((button) => {
+        button.addEventListener("click", () => openIconPicker(button, { type: "list", name: button.dataset.listIcon }));
+      });
+      updateBatchState();
+    }
+
+    function bindManagerGroupEvents() {
+      document.querySelectorAll("[data-manager-group]").forEach((button) => {
+        button.addEventListener("click", () => {
+          managerGroup = button.dataset.managerGroup;
+          managerScope = "group";
+          managerQuery = "";
+          document.getElementById("manager-list-search").value = "";
+          renderManager();
+        });
+        button.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          button.classList.add("drop-ready");
+        });
+        button.addEventListener("dragstart", (event) => {
+          if (button.dataset.managerGroup === "Not in a group") return event.preventDefault();
+          event.dataTransfer.setData("text/plain", `group:${button.dataset.managerGroup}`);
+        });
+        button.addEventListener("dragleave", () => button.classList.remove("drop-ready"));
+        button.addEventListener("drop", (event) => {
+          event.preventDefault();
+          const payload = event.dataTransfer.getData("text/plain");
+          if (payload.startsWith("group:")) reorderManagerGroup(payload.slice(6), button.dataset.managerGroup);
+          if (payload.startsWith("list:")) moveManagerList(payload.slice(5), button.dataset.managerGroup);
+          renderManager();
+        });
+      });
+    }
+
+    function reorderManagerGroup(sourceName, targetName) {
+      const groups = managerData[managerSource].groups;
+      const sourceIndex = groups.findIndex((group) => group.name === sourceName);
+      const targetIndex = groups.findIndex((group) => group.name === targetName);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
+      const [group] = groups.splice(sourceIndex, 1);
+      groups.splice(targetIndex, 0, group);
+    }
+
+    function reorderManagerList(sourceName, targetName) {
+      const data = managerData[managerSource];
+      const lists = managerGroup === "Not in a group"
+        ? data.ungrouped
+        : data.groups.find((group) => group.name === managerGroup)?.lists;
+      if (!lists) return;
+      const sourceIndex = lists.findIndex((list) => list.name === sourceName);
+      const targetIndex = lists.findIndex((list) => list.name === targetName);
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return;
+      const [list] = lists.splice(sourceIndex, 1);
+      lists.splice(targetIndex, 0, list);
+    }
+
+    function moveManagerList(listName, targetName) {
+      const data = managerData[managerSource];
+      let list = null;
+      for (const group of data.groups) {
+        const index = group.lists.findIndex((item) => item.name === listName);
+        if (index >= 0) [list] = group.lists.splice(index, 1);
+      }
+      const ungroupedIndex = data.ungrouped.findIndex((item) => item.name === listName);
+      if (ungroupedIndex >= 0) [list] = data.ungrouped.splice(ungroupedIndex, 1);
+      if (!list) return;
+      if (targetName === "Not in a group") data.ungrouped.push(list);
+      else data.groups.find((group) => group.name === targetName)?.lists.push(list);
+    }
+
+    function findManagerList(name) {
+      const data = managerData[managerSource];
+      for (const group of data.groups) {
+        const list = group.lists.find((item) => item.name === name);
+        if (list) return list;
+      }
+      return data.ungrouped.find((item) => item.name === name);
+    }
+
+    function beginListRename(name, button) {
+      const list = findManagerList(name);
+      if (!list) return;
+      const input = document.createElement("input");
+      input.className = "list-name-editor";
+      input.value = list.name;
+      button.replaceWith(input);
+      input.focus();
+      input.select();
+      let settled = false;
+      const save = () => {
+        if (settled) return;
+        settled = true;
+        const nextName = input.value.trim();
+        if (nextName) list.name = nextName;
+        renderManagerResults();
+      };
+      input.addEventListener("blur", save);
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") save();
+        if (event.key === "Escape") {
+          settled = true;
+          renderManagerResults();
+        }
+      });
+    }
+
+    function updateBatchState() {
+      const selected = document.querySelectorAll("#manager-member-list input:checked").length;
+      document.getElementById("batch-selection-count").textContent = `${selected} list${selected === 1 ? "" : "s"} selected`;
+      document.getElementById("batch-move").disabled = selected === 0;
+    }
+
+    function filterManagerGroups() {
+      const query = document.getElementById("manager-group-search").value.trim().toLowerCase();
+      document.querySelectorAll("[data-manager-group]").forEach((button) => {
+        button.classList.toggle("hidden", query && !button.textContent.toLowerCase().includes(query));
+      });
+    }
+
+    const sourcePicker = document.getElementById("source-picker");
+    const sourceMenu = document.getElementById("source-menu");
+    sourcePicker.addEventListener("click", () => {
+      const open = sourceMenu.classList.toggle("open");
+      sourcePicker.setAttribute("aria-expanded", String(open));
+    });
+    document.querySelectorAll("[data-manager-source]").forEach((button) => {
+      button.addEventListener("click", () => {
+        managerSource = button.dataset.managerSource;
+        managerGroup = managerData[managerSource].groups[0]?.name || "Not in a group";
+        managerScope = managerData[managerSource].groups.length ? "group" : "all";
+        managerQuery = "";
+        document.getElementById("manager-list-search").value = "";
+        document.getElementById("manager-group-search").value = "";
+        sourceMenu.classList.remove("open");
+        sourcePicker.setAttribute("aria-expanded", "false");
+        renderManager();
+      });
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".source-picker-wrap")) {
+        sourceMenu.classList.remove("open");
+        sourcePicker.setAttribute("aria-expanded", "false");
+      }
+    });
+
+    document.getElementById("manager-group-search").addEventListener("input", filterManagerGroups);
+    document.getElementById("manager-list-search").addEventListener("input", (event) => {
+      managerQuery = event.target.value.trim().toLowerCase();
+      renderManagerResults();
+    });
+    document.querySelectorAll("[data-list-scope]").forEach((button) => {
+      button.addEventListener("click", () => {
+        managerScope = button.dataset.listScope;
+        managerQuery = "";
+        document.getElementById("manager-list-search").value = "";
+        renderManager();
+      });
+    });
+
+    document.getElementById("batch-move").addEventListener("click", () => {
+      const target = document.getElementById("batch-target-group").value;
+      const names = [...document.querySelectorAll("#manager-member-list input:checked")].map((checkbox) => checkbox.value);
+      names.forEach((name) => moveManagerList(name, target));
+      renderManager();
+    });
+
+    function beginGroupRename() {
+      if (managerScope !== "group" || managerGroup === "Not in a group") return;
+      const heading = document.getElementById("manager-current-group");
+      const input = document.getElementById("manager-group-name-input");
+      if (input.classList.contains("hidden")) {
+        input.value = managerGroup;
+        heading.classList.add("hidden");
+        input.classList.remove("hidden");
+        input.focus();
+        input.select();
+        return;
+      }
+      saveGroupRename();
+    }
+
+    function saveGroupRename() {
+      const heading = document.getElementById("manager-current-group");
+      const input = document.getElementById("manager-group-name-input");
+      const nextName = input.value.trim();
+      const data = managerData[managerSource];
+      if (nextName && !data.groups.some((group) => group.name === nextName && group.name !== managerGroup)) {
+        const group = data.groups.find((item) => item.name === managerGroup);
+        if (group) group.name = nextName;
+        managerGroup = nextName;
+      }
+      input.classList.add("hidden");
+      heading.classList.remove("hidden");
+      renderManager();
+    }
+
+    document.getElementById("manager-current-group").addEventListener("click", beginGroupRename);
+    document.getElementById("manager-group-name-input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") saveGroupRename();
+      if (event.key === "Escape") {
+        event.currentTarget.classList.add("hidden");
+        document.getElementById("manager-current-group").classList.remove("hidden");
+      }
+    });
+
+    let iconPickerTarget = null;
+    const iconPicker = document.getElementById("icon-picker-popover");
+
+    function openIconPicker(trigger, target) {
+      iconPickerTarget = target;
+      const rect = trigger.getBoundingClientRect();
+      iconPicker.style.top = `${Math.min(window.innerHeight - 60, rect.bottom + 6)}px`;
+      iconPicker.style.left = `${Math.min(window.innerWidth - 170, rect.left)}px`;
+      iconPicker.classList.remove("hidden");
+    }
+
+    document.getElementById("manager-group-icon").addEventListener("click", (event) => {
+      openIconPicker(event.currentTarget, { type: "group", name: managerGroup });
+    });
+    document.querySelectorAll("[data-icon-choice]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (!iconPickerTarget) return;
+        if (iconPickerTarget.type === "group") {
+          const group = managerData[managerSource].groups.find((item) => item.name === iconPickerTarget.name);
+          if (group) group.icon = button.dataset.iconChoice;
+        } else {
+          const list = findManagerList(iconPickerTarget.name);
+          if (list) list.icon = button.dataset.iconChoice;
+        }
+        iconPickerTarget = null;
+        iconPicker.classList.add("hidden");
+        renderManager();
+      });
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".icon-picker-trigger") && !event.target.closest("#icon-picker-popover")) {
+        iconPicker.classList.add("hidden");
+        iconPickerTarget = null;
+      }
+    });
+
+    document.getElementById("manager-delete-group").addEventListener("click", () => {
+      const data = managerData[managerSource];
+      const index = data.groups.findIndex((group) => group.name === managerGroup);
+      if (index < 0 || !window.confirm(`Delete "${managerGroup}"? Its lists will become ungrouped.`)) return;
+      data.ungrouped.push(...data.groups[index].lists);
+      data.groups.splice(index, 1);
+      managerGroup = data.groups[0]?.name || "Not in a group";
+      managerScope = data.groups.length ? "group" : "all";
+      renderManager();
+    });
+
+    document.getElementById("add-source-group").addEventListener("click", () => {
+      const input = document.getElementById("new-source-group");
+      const name = input.value.trim();
+      const data = managerData[managerSource];
+      if (!name || data.groups.some((group) => group.name === name)) return;
+      data.groups.push({ name, lists: [] });
+      managerGroup = name;
+      managerScope = "group";
+      input.value = "";
+      renderManager();
+    });
+
+    renderManager();
+  </script>
+</body>
+</html>

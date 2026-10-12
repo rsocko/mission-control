@@ -30,6 +30,9 @@ export async function deleteListGroup(groupId: string) {
   await (await repository()).deleteGroup(groupId);
 }
 
-export async function reorderListGroups(orderedIds: readonly string[]) {
-  await (await repository()).reorderGroups(orderedIds);
+export async function reorderListGroups(
+  connectorInstanceId: string,
+  orderedIds: readonly string[],
+) {
+  await (await repository()).reorderGroups(connectorInstanceId, orderedIds);
 }

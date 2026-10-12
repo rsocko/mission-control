@@ -246,106 +246,126 @@ function ConnectorsSection({
           <p className="text-sm text-[var(--text-muted)]">Click &quot;Add Connector&quot; to get started.</p>
         </motion.div>
       ) : (
-        <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-3">
-          {connectors.map(conn => {
-           const isSyncing = syncingConnectorIds.has(conn.id);
-           const isQueued = queuedSyncConnectorIds.has(conn.id);
-           const connSourceLists = sourceLists.filter(sl => sl.connectorInstanceId === conn.id);
-           const healthState = getHealthState(conn);
-           const syncLabel = isQueued
-             ? `${getConnectorDisplayName(conn)} sync queued`
-             : isSyncing
-               ? `${getConnectorDisplayName(conn)} sync in progress`
-               : `Sync ${getConnectorDisplayName(conn)}`;
+        <div className="@container">
+          <motion.div
+            variants={staggerContainer}
+            initial="hidden"
+            animate="show"
+            className="grid grid-cols-1 gap-3 @min-[720px]:grid-cols-2"
+            role="list"
+            aria-label="Configured connectors"
+          >
+            {connectors.map(conn => {
+              const isSyncing = syncingConnectorIds.has(conn.id);
+              const isQueued = queuedSyncConnectorIds.has(conn.id);
+              const connSourceLists = sourceLists.filter(sl => sl.connectorInstanceId === conn.id);
+              const healthState = getHealthState(conn);
+              const displayName = getConnectorDisplayName(conn);
+              const syncLabel = isQueued
+                ? `${displayName} sync queued`
+                : isSyncing
+                  ? `${displayName} sync in progress`
+                  : `Sync ${displayName}`;
 
-           return (
-             <motion.div
-               key={conn.id}
-               variants={fadeSlideUp}
-               layout
-               className={`bg-[var(--surface-1)] border rounded-xl overflow-hidden transition-colors ${
-                 !conn.enabled ? 'opacity-60 border-[var(--border)]' :
-                 selectedConnector === conn.id ? 'border-blue-500/40 ring-1 ring-blue-500/20' : 'border-[var(--border)] hover:border-[var(--border-strong)]'
-               }`}
-             >
-               {/* Header */}
-               <div className="px-4 py-3 flex items-center gap-3">
-                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                   conn.enabled ? 'bg-[var(--surface-2)]' : 'bg-[var(--surface-2)] opacity-50'
-                 }`}>
-                   <ConnectorBrandIcon type={conn.type} size={20} />
-                 </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-[var(--text-primary)] truncate">{getConnectorDisplayName(conn)}</span>
-                      <ConnectionStatus connector={conn} healthState={healthState} />
-                      <ConnectorClassificationBadge
-                        classification={
-                          conn.dataClassification?.effective
-                          ?? connectorBaselineClassification(conn.type)
-                        }
-                      />
+              return (
+                <motion.div
+                  key={conn.id}
+                  variants={fadeSlideUp}
+                  layout
+                  role="listitem"
+                  className={`flex min-h-36 flex-col overflow-hidden rounded-xl border bg-[var(--surface-1)] transition-colors ${
+                    !conn.enabled ? 'border-[var(--border)] opacity-60' :
+                    selectedConnector === conn.id ? 'border-blue-500/40 ring-1 ring-blue-500/20' : 'border-[var(--border)] hover:border-[var(--border-strong)]'
+                  }`}
+                >
+                  <div className="flex flex-1 items-start gap-3 px-4 py-4">
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                      conn.enabled ? 'bg-[var(--surface-2)]' : 'bg-[var(--surface-2)] opacity-50'
+                    }`}>
+                      <ConnectorBrandIcon type={conn.type} size={20} />
                     </div>
-                    <div className="flex items-center gap-3 mt-0.5 text-xs text-[var(--text-muted)]">
-                      {conn.enabled ? (
-                        conn.type === 'scout' ? (
-                          <>
-                            <span className="flex items-center gap-1"><Zap size={10} /> MCP push</span>
-                            <span>{connSourceLists.length} source{connSourceLists.length !== 1 ? 's' : ''}</span>
-                          </>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="min-w-0 truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</span>
+                        <ConnectionStatus connector={conn} healthState={healthState} />
+                        <ConnectorClassificationBadge
+                          classification={
+                            conn.dataClassification?.effective
+                            ?? connectorBaselineClassification(conn.type)
+                          }
+                        />
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-muted)]">
+                        {conn.enabled ? (
+                          conn.type === 'scout' ? (
+                            <>
+                              <span className="flex items-center gap-1"><Zap size={10} /> MCP push</span>
+                              <span>{connSourceLists.length} source{connSourceLists.length !== 1 ? 's' : ''}</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="flex items-center gap-1"><Clock size={10} /> {conn.syncMode}</span>
+                              {conn.pollIntervalMinutes && <span>Every {conn.pollIntervalMinutes}min</span>}
+                              <span>{connSourceLists.length} source{connSourceLists.length !== 1 ? 's' : ''}</span>
+                            </>
+                          )
                         ) : (
-                          <>
-                            <span className="flex items-center gap-1"><Clock size={10} /> {conn.syncMode}</span>
-                            {conn.pollIntervalMinutes && <span>Every {conn.pollIntervalMinutes}min</span>}
-                            <span>{connSourceLists.length} source{connSourceLists.length !== 1 ? 's' : ''}</span>
-                          </>
-                        )
-                      ) : (
-                        <span>Paused -- enable to {conn.type === 'scout' ? 'accept pushes' : 'activate syncing'}</span>
-                      )}
+                          <span>Paused -- enable to {conn.type === 'scout' ? 'accept pushes' : 'activate syncing'}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] px-3 py-2.5">
                     <button
                       type="button"
                       onClick={() => onSelect(conn.id)}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                     >
                       <Settings2 size={13} />
                       Configure
                     </button>
-                    <Link
-                      href={`/settings/sync-history?source=${encodeURIComponent(conn.id)}`}
-                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                      title={`View ${getConnectorDisplayName(conn)} sync history`}
-                      aria-label={`View ${getConnectorDisplayName(conn)} sync history`}
-                    >
-                      <History size={12} />
-                    </Link>
-                    {conn.enabled && conn.type !== 'scout' && (
-                      <button onClick={() => onSync(conn.id)}
-                        disabled={isSyncing || isQueued}
-                        className="p-1.5 border border-[var(--border)] rounded-md hover:bg-[var(--surface-2)] disabled:opacity-50 transition-colors"
-                        title={syncLabel}
-                        aria-label={syncLabel}>
-                        {isQueued ? (
-                          <Clock size={12} className="text-amber-400" />
-                        ) : (
-                          <RefreshCw size={12} className={isSyncing ? 'animate-spin text-blue-400' : 'text-[var(--text-muted)]'} />
-                        )}
-                      </button>
-                    )}
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" checked={conn.enabled} onChange={e => onToggle(conn.id, e.target.checked)}
-                        className="sr-only peer" />
-                      <div className="w-9 h-5 bg-[var(--surface-3)] rounded-full peer peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-transform peer-checked:after:translate-x-full"></div>
-                    </label>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/settings/sync-history?source=${encodeURIComponent(conn.id)}`}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        title={`View ${displayName} sync history`}
+                        aria-label={`View ${displayName} sync history`}
+                      >
+                        <History size={13} />
+                      </Link>
+                      {conn.enabled && conn.type !== 'scout' && (
+                        <button
+                          type="button"
+                          onClick={() => onSync(conn.id)}
+                          disabled={isSyncing || isQueued}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] transition-colors hover:bg-[var(--surface-2)] disabled:opacity-50"
+                          title={syncLabel}
+                          aria-label={syncLabel}
+                        >
+                          {isQueued ? (
+                            <Clock size={13} className="text-amber-400" />
+                          ) : (
+                            <RefreshCw size={13} className={isSyncing ? 'animate-spin text-blue-400' : 'text-[var(--text-muted)]'} />
+                          )}
+                        </button>
+                      )}
+                      <label className="relative inline-flex h-9 cursor-pointer items-center">
+                        <input
+                          type="checkbox"
+                          checked={conn.enabled}
+                          onChange={e => onToggle(conn.id, e.target.checked)}
+                          className="peer sr-only"
+                          aria-label={`${conn.enabled ? 'Disable' : 'Enable'} ${displayName} connector`}
+                        />
+                        <span className="h-5 w-9 rounded-full bg-[var(--surface-3)] after:absolute after:left-[2px] after:top-[10px] after:h-4 after:w-4 after:rounded-full after:bg-white after:content-[''] after:transition-transform peer-checked:bg-blue-600 peer-checked:after:translate-x-full" />
+                      </label>
+                    </div>
                   </div>
-                </div>
-              </motion.div>
-            );
-          })}
-        </motion.div>
+                </motion.div>
+              );
+            })}
+          </motion.div>
+        </div>
       )}
 
       {/* Recently Deleted */}

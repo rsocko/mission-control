@@ -516,7 +516,8 @@ export function createSqliteConnectorExecutionRepositories(
         return immediate(database, () => {
           const existing = database.prepare(`
             SELECT id, name, source_id AS sourceId FROM list_groups
-          `).all() as Array<{ id: string; name: string; sourceId: string | null }>;
+            WHERE connector_instance_id = ?
+          `).all(input.connectorId) as Array<{ id: string; name: string; sourceId: string | null }>;
           const bySource = new Map(existing.flatMap((row) => (
             row.sourceId ? [[row.sourceId, row.id] as const] : []
           )));
@@ -533,9 +534,10 @@ export function createSqliteConnectorExecutionRepositories(
               } else {
                 id = `lg-${randomUUID().slice(0, 8)}`;
                 database.prepare(`
-                  INSERT INTO list_groups (id, name, source_id, sort_order, created_at)
-                  VALUES (?, ?, ?, ?, ?)
-                `).run(id, group.name, group.sourceId, sortOrder++, input.now);
+                  INSERT INTO list_groups (
+                    id, connector_instance_id, name, source_id, sort_order, created_at
+                  ) VALUES (?, ?, ?, ?, ?, ?)
+                `).run(id, input.connectorId, group.name, group.sourceId, sortOrder++, input.now);
                 byName.set(group.name, id);
               }
               bySource.set(group.sourceId, id);
@@ -548,8 +550,8 @@ export function createSqliteConnectorExecutionRepositories(
             assigned += database.prepare(`
               UPDATE source_lists
               SET group_id = ?
-              WHERE source_id = ? AND group_id IS NULL
-            `).run(groupId, list.sourceId).changes;
+              WHERE connector_instance_id = ? AND source_id = ? AND group_id IS NULL
+            `).run(groupId, input.connectorId, list.sourceId).changes;
           }
           return assigned;
         });

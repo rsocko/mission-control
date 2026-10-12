@@ -108,6 +108,7 @@ export function describeConnectorExecutionRepositoriesContract(
         stale: [],
       });
       await expect(harness.repositories.lists.assignFolderGroups({
+        connectorId: 'portable-connector',
         groups: [{ sourceId: 'folder-1', name: 'Folder' }],
         lists: [{ sourceId: 'remote-list', parentFolderGroupId: 'folder-1' }],
         now: NOW,

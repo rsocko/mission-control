@@ -198,6 +198,7 @@ export async function autoAssignFolderGroups(
     const folderGroups = await (connector as { fetchFolderGroups: () => Promise<Array<{ id: string; name: string; orderDateTime?: string }>> }).fetchFolderGroups();
     if (folderGroups.length === 0) return;
     const assigned = await execution.lists.assignFolderGroups({
+      connectorId: connector.id,
       groups: folderGroups.map((group) => ({ sourceId: group.id, name: group.name })),
       lists: listsWithGroup.map((list) => ({
         sourceId: list.sourceId,

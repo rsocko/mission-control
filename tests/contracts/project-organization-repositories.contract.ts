@@ -6,6 +6,7 @@ import type {
 } from '@/db/persistence/project-organization';
 
 export const ORGANIZATION_FIXTURE = {
+  connectorId: 'organization-connector',
   projectId: 'organization-contract-project',
   hiddenProjectId: 'organization-contract-hidden',
   otherProjectId: 'organization-contract-other',
@@ -65,6 +66,7 @@ function project(
 function group(id: string, name: string): ListOrganizationGroup {
   return {
     id,
+    connectorInstanceId: ORGANIZATION_FIXTURE.connectorId,
     name,
     icon: null,
     iconColor: null,
@@ -358,7 +360,10 @@ export function projectOrganizationRepositoriesContract(
         ],
       ];
       await Promise.all(orders.map((orderedIds) => (
-        repository.listOrganization.reorderGroups(orderedIds)
+        repository.listOrganization.reorderGroups(
+          ORGANIZATION_FIXTURE.connectorId,
+          orderedIds,
+        )
       )));
       const reordered = await repository.listOrganization.getSnapshot();
       expect(orders).toContainEqual(reordered.groups.map(({ id }) => id));

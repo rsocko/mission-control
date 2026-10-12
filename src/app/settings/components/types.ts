@@ -65,6 +65,7 @@ export interface SourceList {
 
 export interface ListGroup {
   id: string;
+  connectorInstanceId: string;
   name: string;
   icon: string | null;
   iconColor: string | null;

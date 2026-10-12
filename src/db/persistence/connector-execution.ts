@@ -121,6 +121,7 @@ export interface SourceListPersistence {
     }[];
   }): Promise<void>;
   assignFolderGroups(input: {
+    connectorId: string;
     groups: readonly RemoteFolderGroup[];
     lists: readonly { sourceId: string; parentFolderGroupId: string }[];
     now: string;

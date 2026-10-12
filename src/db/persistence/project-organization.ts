@@ -150,6 +150,7 @@ export interface ProjectAdministrationPersistence {
 
 export interface ListOrganizationGroup {
   id: string;
+  connectorInstanceId: string;
   name: string;
   icon: string | null;
   iconColor: string | null;
@@ -194,5 +195,5 @@ export interface ListOrganizationPersistence {
   createGroup(group: ListOrganizationGroup): Promise<void>;
   updateGroup(groupId: string, updates: ListOrganizationGroupUpdate): Promise<void>;
   deleteGroup(groupId: string): Promise<void>;
-  reorderGroups(orderedIds: readonly string[]): Promise<void>;
+  reorderGroups(connectorInstanceId: string, orderedIds: readonly string[]): Promise<void>;
 }

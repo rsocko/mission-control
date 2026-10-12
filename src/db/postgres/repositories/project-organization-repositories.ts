@@ -502,9 +502,11 @@ async function loadListOrganizationSnapshot(
   client: PoolClient,
 ): Promise<ListOrganizationSnapshot> {
   const groups = await query<ListOrganizationGroup>(client, `
-    SELECT id, name, icon, icon_color AS "iconColor", source_id AS "sourceId",
+    SELECT id, connector_instance_id AS "connectorInstanceId",
+           name, icon, icon_color AS "iconColor", source_id AS "sourceId",
            sort_order AS "sortOrder", created_at AS "createdAt"
     FROM list_groups
+    WHERE connector_instance_id IS NOT NULL
     ORDER BY sort_order ASC, name COLLATE "C" ASC, id COLLATE "C" ASC
   `);
   const lists = await query<SourceListRow>(client, `
@@ -561,13 +563,15 @@ export function createPostgresListOrganizationRepository(
       await withMutationTransaction(pool, [LIST_ORGANIZATION_LOCK], async (client) => {
         const [maximum] = await query<{ value: number }>(client, `
           SELECT coalesce(max(sort_order), -1) AS value FROM list_groups
-        `);
+          WHERE connector_instance_id = $1
+        `, [group.connectorInstanceId]);
         await client.query(`
           INSERT INTO list_groups (
-            id, name, icon, icon_color, source_id, sort_order, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            id, connector_instance_id, name, icon, icon_color, source_id, sort_order, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         `, [
           group.id,
+          group.connectorInstanceId,
           group.name,
           group.icon,
           group.iconColor,
@@ -588,10 +592,13 @@ export function createPostgresListOrganizationRepository(
         await client.query('DELETE FROM list_groups WHERE id = $1', [groupId]);
       });
     },
-    async reorderGroups(orderedIds) {
+    async reorderGroups(connectorInstanceId, orderedIds) {
       await withMutationTransaction(pool, [LIST_ORGANIZATION_LOCK], async (client) => {
         for (const [index, id] of orderedIds.entries()) {
-          await client.query('UPDATE list_groups SET sort_order = $1 WHERE id = $2', [index, id]);
+          await client.query(`
+            UPDATE list_groups SET sort_order = $1
+            WHERE id = $2 AND connector_instance_id = $3
+          `, [index, id, connectorInstanceId]);
         }
       });
     },

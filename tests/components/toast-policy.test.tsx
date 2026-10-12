@@ -147,6 +147,13 @@ describe('toast preferences', () => {
     expect(getToastPreferences()).toMatchObject({ mode: 'errors-only', mutedUntil: 0 });
   });
 
+  it('keeps notification visibility controls on mobile without showing desktop placement', () => {
+    render(<ToastSettingsCard mobile />);
+    expect(screen.queryByText('Desktop position')).not.toBeInTheDocument();
+    expect(screen.getByText('Toast volume')).toBeInTheDocument();
+    expect(screen.getByText('Temporarily mute routine confirmations without changing your volume preference.')).toBeInTheDocument();
+  });
+
   it('shows an inline error if preferences cannot be saved', () => {
     render(<ToastSettingsCard />);
     vi.spyOn(console, 'error').mockImplementation(() => {});

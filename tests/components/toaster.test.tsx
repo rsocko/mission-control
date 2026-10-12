@@ -68,6 +68,22 @@ describe('Toaster', () => {
     expect(list).toHaveAttribute('data-y-position', 'top');
   });
 
+  it('applies errors-only mode on mobile', async () => {
+    vi.mocked(window.matchMedia).mockReturnValue({
+      matches: true, media: '', onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    });
+    setToastPreferences({ mode: 'errors-only' });
+    render(<Toaster />);
+    act(() => {
+      toast.success('Routine mobile confirmation');
+      toast.error('Important mobile error');
+    });
+    await advance();
+    expect(screen.queryByText('Routine mobile confirmation')).not.toBeInTheDocument();
+    expect(screen.getByText('Important mobile error')).toBeInTheDocument();
+  });
+
   it('dismisses with the desktop close button', async () => {
     render(<Toaster />);
     act(() => { toast.success('Close me'); });

@@ -9,7 +9,7 @@ import {
 } from '@/lib/toast-preferences';
 import { settingsLogger } from '@/lib/client-logger';
 
-export function ToastSettingsCard() {
+export function ToastSettingsCard({ mobile = false }: { mobile?: boolean }) {
   const { preferences, muted } = useToastPreferences();
   const [error, setError] = useState('');
 
@@ -27,22 +27,25 @@ export function ToastSettingsCard() {
     <section className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-5" aria-labelledby="toast-settings-heading">
       <h3 id="toast-settings-heading" className="text-sm font-medium text-[var(--text-primary)]">Toast notifications</h3>
       <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-        Preferences apply to this browser, not push notifications. Mobile toasts stay at the top.
-        Errors, warnings, progress, and actions such as Undo remain visible in quiet modes.
+        Preferences apply to this browser, not push notifications.
+        {!mobile && ' Mobile toasts stay at the top.'}
+        {' '}Errors, warnings, progress, and actions such as Undo remain visible in quiet modes.
       </p>
       <div className="mt-4 space-y-4">
-        <div>
-          <label id="toast-position-label" className="mb-1 block text-sm">Desktop position</label>
-          <Select value={preferences.desktopPosition} onValueChange={(value) => {
-            if (value === 'bottom-left' || value === 'top-right') update({ desktopPosition: value });
-          }}>
-            <SelectTrigger aria-labelledby="toast-position-label"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="bottom-left">Bottom-left (clear of navigation)</SelectItem>
-              <SelectItem value="top-right">Top-right</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        {!mobile && (
+          <div>
+            <label id="toast-position-label" className="mb-1 block text-sm">Desktop position</label>
+            <Select value={preferences.desktopPosition} onValueChange={(value) => {
+              if (value === 'bottom-left' || value === 'top-right') update({ desktopPosition: value });
+            }}>
+              <SelectTrigger aria-labelledby="toast-position-label"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bottom-left">Bottom-left (clear of navigation)</SelectItem>
+                <SelectItem value="top-right">Top-right</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div>
           <label id="toast-mode-label" className="mb-1 block text-sm">Toast volume</label>
           <Select value={preferences.mode} onValueChange={(value) => {

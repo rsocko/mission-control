@@ -20,7 +20,7 @@ import {
   extractRecurrenceLocalTime,
 } from '@/lib/recurrence/canonical';
 import { applyRecurrenceEditorOptions } from '@/lib/recurrence/editor';
-import type { TaskPriority } from '@/types';
+import type { NotificationItem, TaskPriority } from '@/types';
 import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 import type { ConnectorCapabilities } from '@/types';
 import { resolveConnectorCapabilities } from '@/lib/connectors/task-source-profiles';
@@ -393,6 +393,18 @@ export async function POST(request: Request) {
     const triageItemId = typeof body.triageItemId === 'string' && body.triageItemId
       ? body.triageItemId
       : null;
+    const sourceNotificationId = typeof body.sourceNotificationId === 'string'
+      && body.sourceNotificationId.trim()
+      ? body.sourceNotificationId.trim()
+      : null;
+    let sourceNotification: NotificationItem | null = null;
+    if (sourceNotificationId) {
+      sourceNotification = await getCorePersistenceRepositories()
+        .notifications.get(sourceNotificationId);
+      if (!sourceNotification) {
+        return ApiErrors.badRequest('Source notification not found');
+      }
+    }
     const idempotencyKey = typeof body.idempotencyKey === 'string'
       ? body.idempotencyKey
       : null;
@@ -429,6 +441,11 @@ export async function POST(request: Request) {
     const metadata: Record<string, unknown> = {};
     if (recurrence) metadata.recurrence = recurrence;
     if (triageItemId) metadata.triageItemId = triageItemId;
+    if (sourceNotification) {
+      metadata.sourceNotificationId = sourceNotificationId;
+      metadata.sourceNotificationConnectorType = sourceNotification.connectorType;
+      metadata.sourceNotificationTitle = sourceNotification.title;
+    }
     if (idempotencyKey) {
       metadata.creationIdempotencyKey = idempotencyKey;
       if (body.rymessagePromotion && typeof body.rymessagePromotion === 'object') {
@@ -754,6 +771,30 @@ export async function POST(request: Request) {
       await evaluateRulesForTasks([id]);
     } catch (error) {
       logger.error({ err: error, taskId: id }, 'Project auto-include evaluation failed after task creation');
+    }
+
+    if (sourceNotification) {
+      const existingRelatedTasks = Array.isArray(sourceNotification.metadata.relatedTasks)
+        ? sourceNotification.metadata.relatedTasks.filter((item): item is Record<string, unknown> => (
+            item !== null && typeof item === 'object' && !Array.isArray(item)
+          ))
+        : [];
+      const relatedTasks = [
+        ...existingRelatedTasks.filter(item => item.id !== id),
+        { id, title: committedTask.title, createdAt: now },
+      ];
+      await getCorePersistenceRepositories().notifications.upsert({
+        ...sourceNotification,
+        relatedTaskId: sourceNotification.relatedTaskId || id,
+        relatedEntityType: sourceNotification.relatedEntityType || 'task',
+        relatedEntityId: sourceNotification.relatedEntityId || id,
+        navigationTarget: sourceNotification.navigationTarget
+          || `/tasks?selected=${encodeURIComponent(id)}`,
+        metadata: {
+          ...sourceNotification.metadata,
+          relatedTasks,
+        },
+      });
     }
 
     const [editPolicy] = (await resolveTaskEditPolicies([committedTask])).values();

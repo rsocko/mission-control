@@ -1079,7 +1079,12 @@ export function TaskDetailPanel({
             onUpdate={() => onUpdate?.()}
             touch={mode === 'mobile'}
           />
-          <LinkedSourcesSection taskId={taskId} />
+          <LinkedSourcesSection
+            taskId={taskId}
+            sourceNotificationId={parsedMetadata.sourceNotificationId}
+            sourceNotificationConnectorType={parsedMetadata.sourceNotificationConnectorType}
+            sourceNotificationTitle={parsedMetadata.sourceNotificationTitle}
+          />
         </div>
 
         {task.status !== 'done' && task.status !== 'cancelled' && (

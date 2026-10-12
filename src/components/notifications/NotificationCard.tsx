@@ -46,6 +46,57 @@ interface NotificationActionExecutionResult {
   };
 }
 
+interface RelatedNotificationTask {
+  id: string;
+  title: string;
+}
+
+function getRelatedTasks(notification: NotificationItem): RelatedNotificationTask[] {
+  const value = notification.metadata?.relatedTasks;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (
+      item
+      && typeof item === 'object'
+      && !Array.isArray(item)
+      && typeof item.id === 'string'
+      && typeof item.title === 'string'
+    ) {
+      return [{ id: item.id, title: item.title }];
+    }
+    return [];
+  });
+}
+
+function RelatedTasks({ notification, compact = false }: {
+  notification: NotificationItem;
+  compact?: boolean;
+}) {
+  const tasks = getRelatedTasks(notification);
+  if (tasks.length === 0) return null;
+  return (
+    <div
+      className={`pointer-events-auto flex flex-wrap items-center gap-1.5 ${compact ? 'mt-1.5' : 'mt-4'}`}
+      aria-label="Tasks created from this notification"
+    >
+      <CheckSquare size={13} className="shrink-0 text-emerald-400" aria-hidden="true" />
+      <span className="text-xs font-medium text-[var(--text-secondary)]">
+        {tasks.length === 1 ? 'Created task' : `${tasks.length} created tasks`}
+      </span>
+      {tasks.map(task => (
+        <a
+          key={task.id}
+          href={`/tasks?selected=${encodeURIComponent(task.id)}`}
+          title={task.title}
+          className="max-w-48 truncate rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50"
+        >
+          {task.title}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 function promotionSeed(
   result: NotificationActionExecutionResult,
 ): React.ComponentProps<typeof RyMessagePromotionDialog>['seed'] | null {
@@ -833,6 +884,7 @@ export function NotificationCard({
               Related task is no longer available
             </div>
           )}
+          {!compact && <RelatedTasks notification={notification} compact />}
 
           {/* Actions row — severity-colored buttons */}
           {!compact && (primaryAction || (!panel && secondaryActions.length > 0)) && (
@@ -1224,6 +1276,7 @@ export function NotificationDetail({
             </span>
           </div>
         )}
+        <RelatedTasks notification={notification} />
 
         <HomeAssistantReleaseNotes notification={notification} />
 

@@ -110,6 +110,25 @@ describe('NotificationCard — DI Rich Cards', () => {
       expect(screen.getByText(/This notification remains for history/)).toBeDefined();
     });
 
+    it('shows every task created from a notification', () => {
+      const notification = makeNotification({
+        metadata: {
+          relatedTasks: [
+            { id: 'task-1', title: 'Replace water filter' },
+            { id: 'task-2', title: 'Order spare filters' },
+          ],
+        },
+      });
+
+      render(<NotificationCard notification={notification} />);
+
+      expect(screen.getByText('2 created tasks')).toBeDefined();
+      expect(screen.getByRole('link', { name: 'Replace water filter' }))
+        .toHaveAttribute('href', '/tasks?selected=task-1');
+      expect(screen.getByRole('link', { name: 'Order spare filters' }))
+        .toHaveAttribute('href', '/tasks?selected=task-2');
+    });
+
     it('shows a human-friendly source name and accessible brand identity', () => {
       const notification = makeNotification({
         connectorType: 'github-issues',

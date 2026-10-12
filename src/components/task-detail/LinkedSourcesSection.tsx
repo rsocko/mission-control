@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { ArrowLeftRight, Globe } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowLeftRight, Bell, Globe } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
@@ -31,7 +32,17 @@ interface LinkedSource {
   metadata: Record<string, unknown>;
 }
 
-export function LinkedSourcesSection({ taskId }: { taskId: string }) {
+export function LinkedSourcesSection({
+  taskId,
+  sourceNotificationId,
+  sourceNotificationConnectorType,
+  sourceNotificationTitle,
+}: {
+  taskId: string;
+  sourceNotificationId?: string;
+  sourceNotificationConnectorType?: string;
+  sourceNotificationTitle?: string;
+}) {
   const [linkedSources, setLinkedSources] = useState<LinkedSource[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -46,7 +57,7 @@ export function LinkedSourcesSection({ taskId }: { taskId: string }) {
       .finally(() => setLoading(false));
   }, [taskId]);
 
-  if (loading || linkedSources.length === 0) return null;
+  if (loading || (linkedSources.length === 0 && !sourceNotificationId)) return null;
 
   return (
     <div className="border-t border-[var(--border-subtle)] pt-3 mt-4">
@@ -57,6 +68,24 @@ export function LinkedSourcesSection({ taskId }: { taskId: string }) {
         </span>
       </div>
       <div className="space-y-1.5">
+        {sourceNotificationId && (
+          <Link
+            href={`/notifications?id=${encodeURIComponent(sourceNotificationId)}`}
+            className="flex items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-0)] px-2 py-1.5 transition-colors hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          >
+            <Bell size={14} className="shrink-0 text-cyan-400" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-medium text-[var(--text-primary)]">
+                {sourceNotificationTitle || 'Source notification'}
+              </span>
+              <span className="block truncate text-[10px] text-[var(--text-muted)]">
+                {sourceNotificationConnectorType === 'home-assistant'
+                  ? 'Home Assistant notification'
+                  : 'Mission Control notification'}
+              </span>
+            </div>
+          </Link>
+        )}
         {linkedSources.map((source) => (
           <div
             key={source.id}

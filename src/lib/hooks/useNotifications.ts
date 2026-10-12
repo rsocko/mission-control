@@ -188,6 +188,9 @@ function openTaskDraft(taskData: Record<string, unknown>) {
         title: taskData.title.trim(),
         description: typeof taskData.body === 'string' ? taskData.body : undefined,
         priority,
+        sourceNotificationId: typeof taskData.sourceNotificationId === 'string'
+          ? taskData.sourceNotificationId
+          : undefined,
       },
     },
   }));

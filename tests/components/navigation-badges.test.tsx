@@ -63,9 +63,16 @@ describe('navigation badges', () => {
     );
   });
 
-  it('optically centers the expanded badge label', () => {
+  it('centers the expanded badge label on both axes', () => {
     render(<NavigationRailMorph count={2} tone="red" expanded morphId="notifications" />);
-    expect(screen.getByText('2')).toHaveClass('relative', 'top-px');
+    expect(screen.getByText('2')).toHaveClass(
+      'absolute',
+      'inset-0',
+      'flex',
+      'items-center',
+      'justify-center',
+      'text-center',
+    );
   });
 
   it('uses discrete pressure levels for the collapsed rail', () => {

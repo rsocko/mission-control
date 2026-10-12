@@ -70,6 +70,12 @@ describe('finance quick review write sequence', () => {
     expect(merchantNameForRank(' Invented Market ')).toBe('Invented Market');
   });
 
+  it('normalizes live Monarch merchant names to the Tyrion contract bound', () => {
+    expect(merchantNameForRank(' Invented\u0000 \n Market ')).toBe('Invented Market');
+    expect(merchantNameForRank('M'.repeat(121))).toBe('M'.repeat(120));
+    expect(merchantNameForRank(`${'M'.repeat(119)}😀`)).toBe('M'.repeat(119));
+  });
+
   it('rejects unsupported removal of an existing Monarch category', () => {
     expect(() => assertQuickReviewCategoryCorrectionSupported(
       null,

@@ -135,7 +135,16 @@ function signalsFor(
 }
 
 export function merchantNameForRank(merchantName: string): string {
-  return merchantName.trim() || 'Unknown merchant';
+  const normalized = merchantName
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  let bounded = '';
+  for (const character of normalized) {
+    if (bounded.length + character.length > 120) break;
+    bounded += character;
+  }
+  return bounded.trimEnd() || 'Unknown merchant';
 }
 
 export function assertQuickReviewCategoryCorrectionSupported(

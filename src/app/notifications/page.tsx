@@ -344,7 +344,11 @@ function DesktopNotificationsPage() {
     params?: Record<string, unknown>,
   ) => {
     const result = await executeAction(notificationId, actionId, params);
-    if (result.success && selectedIdRef.current === notificationId) {
+    if (
+      result.success
+      && result.result?.type !== 'create_task'
+      && selectedIdRef.current === notificationId
+    ) {
       setSelectedId(null);
       setSelectedSnapshot(null);
     }

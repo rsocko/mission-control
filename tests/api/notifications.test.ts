@@ -710,6 +710,7 @@ describe('POST /api/notifications/[id]/actions/[actionId]', () => {
           body: 'The kitchen filter is due for replacement.',
           priority: 'high',
           sourceNotificationId: 'n1',
+          sourceNotificationConnectorType: 'home-assistant',
         },
       },
     });

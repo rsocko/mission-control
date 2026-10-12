@@ -16,8 +16,9 @@ import { PlanningHorizonFieldLabel, PlanningHorizonOption } from '@/components/P
 import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { getTagPillStyle, CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { modalOverlay, modalContent } from '@/lib/motion';
-import { ParsedTask, getDateSuggestions, parseTaskInputForSubmission } from '@/lib/parse-task-input';
+import { ParsedTask, parseTaskInputForSubmission } from '@/lib/parse-task-input';
 import RecurrencePicker from '@/components/ui/RecurrencePicker';
+import { DatePicker } from '@/components/ui/date-picker';
 import { taskLogger } from '@/lib/client-logger';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { EFFORT_TO_DURATION, durationToEffort } from '@/lib/constants/task-formatting';
@@ -81,6 +82,7 @@ export interface TaskPrefill {
   description?: string;
   tags?: string[];
   sourceUrl?: string;
+  sourceNotificationId?: string;
   priority?: ParsedTask['priority'];
   dueDate?: string;
   planningHorizon?: PlanningHorizon;
@@ -151,7 +153,6 @@ export function AddTaskModal({
   const [title, setTitle] = useState(prefill?.title || initialParsed?.title || initialInput);
   const [description, setDescription] = useState(prefill?.description || '');
   const [dueDate, setDueDate] = useState(prefill?.dueDate || initialParsed?.dueDate || '');
-  const [dueDateText, setDueDateText] = useState(initialParsed?.dueDateLabel || '');
   const [priority, setPriority] = useState(prefill?.priority || initialParsed?.priority || 'none');
   const [planningHorizon, setPlanningHorizon] = useState<PlanningHorizon | null>(
     prefill?.planningHorizon ?? initialParsed?.planningHorizon ?? null,
@@ -166,7 +167,6 @@ export function AddTaskModal({
   const [selectedProjectId, setSelectedProjectId] = useState<string>(prefill?.projectId || initialProjectId || '');
   const [addToMyDay, setAddToMyDay] = useState(initialAddToMyDay ?? false);
   const [addAnother, setAddAnother] = useState(false);
-  const [showDateSuggestions, setShowDateSuggestions] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [subtasks, setSubtasks] = useState<string[]>([]);
@@ -406,6 +406,7 @@ export function AddTaskModal({
           recurrenceSkipDates: recurrence !== 'none' ? recurrenceOptions.skipDates : undefined,
           recurrenceCatchUp: recurrence !== 'none' ? recurrenceOptions.catchUp : undefined,
           triageItemId,
+          sourceNotificationId: prefill?.sourceNotificationId,
         }),
       });
 
@@ -428,13 +429,15 @@ export function AddTaskModal({
 
       // Notify caller of the new task ID
       onTaskCreated?.(newTaskId);
+      if (prefill?.sourceNotificationId) {
+        window.dispatchEvent(new Event('mission-control:sync-complete'));
+      }
 
       if (addAnother) {
         // Keep batch-level organization: destination, list, project, and tags.
         setTitle('');
         setDescription('');
         setDueDate('');
-        setDueDateText('');
         setPriority('none');
         setPlanningHorizon(null);
         setSubtasks([]);
@@ -487,8 +490,6 @@ export function AddTaskModal({
   }
 
   const isGitHub = activeDestination.connectorType === 'github-issues';
-  const dateSuggestions = getDateSuggestions();
-
   return (
     <motion.div
       className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center pt-[10vh] z-50"
@@ -796,42 +797,15 @@ export function AddTaskModal({
           {/* Details grid */}
           <div className="grid grid-cols-2 gap-3">
             {/* Due date */}
-            <div className="relative">
+            <div>
               <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Due date</label>
-              <input
-                type="text"
-                value={dueDateText || dueDate}
-                onChange={(e) => {
-                  setDueDateText(e.target.value);
-                  // Try to parse as ISO date
-                  if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) {
-                    setDueDate(e.target.value);
-                  }
-                }}
-                onFocus={() => setShowDateSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowDateSuggestions(false), 200)}
-                placeholder="Tomorrow, next Friday, Jun 25..."
-                className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none"
+              <DatePicker
+                value={dueDate || null}
+                onChange={setDueDate}
+                placeholder="Choose or type a date"
+                aria-label="Choose task due date"
+                className="min-h-9 rounded-lg border-[var(--border)] text-xs"
               />
-              {showDateSuggestions && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface-1)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] z-10 overflow-hidden">
-                  {dateSuggestions.map((s) => (
-                    <button
-                      key={s.label}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        setDueDate(s.value);
-                        setDueDateText(s.label);
-                        setShowDateSuggestions(false);
-                      }}
-                      className="w-full flex items-center justify-between px-3 py-2 text-xs hover:bg-[var(--surface-0)] text-left"
-                    >
-                      <span className="text-[var(--text-secondary)]">{s.label}</span>
-                      <span className="text-[var(--text-muted)]">{s.computed}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* Priority and horizon */}

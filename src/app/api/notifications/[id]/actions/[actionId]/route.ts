@@ -299,6 +299,7 @@ export async function POST(
               body: payload.taskBody || notification.body,
               priority: payload.priority || 'medium',
               sourceNotificationId: id,
+              sourceNotificationConnectorType: notification.connectorType,
               ...(body.overrides || {}),
             },
           },

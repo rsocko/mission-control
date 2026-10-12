@@ -153,6 +153,9 @@ export interface MicroStatusSuggestion {
 
 /** Metadata fields the panel reads out of a task's JSON metadata blob. */
 export interface TaskDetailMetadata {
+  sourceNotificationId?: string;
+  sourceNotificationConnectorType?: string;
+  sourceNotificationTitle?: string;
   previewUrl?: string;
   previewType?: 'pdf' | 'iframe' | 'external' | 'image';
   previewLabel?: string;

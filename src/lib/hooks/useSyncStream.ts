@@ -45,8 +45,8 @@ export interface SyncStreamContextValue {
   activeProgresses: SyncProgress[];
   /** Connector sync requests accepted by the client but not started yet. */
   queuedConnectorIds: string[];
-  /** Trigger an incremental sync, optionally scoped to one connector. */
-  triggerSync: (connectorId?: string) => void;
+  /** Trigger a sync, optionally scoped to one connector or forced to refresh all data. */
+  triggerSync: (connectorId?: string, options?: { full?: boolean }) => void;
 }
 
 const initialProgress: SyncProgress = {
@@ -218,6 +218,7 @@ export function useSyncStreamConnection() {
       if (!isSyncing) {
         activeProgressesRef.current = {};
         setActiveProgresses([]);
+        setQueuedConnectorIds([]);
       }
       setProgress((previous) => ({
         ...previous,
@@ -388,6 +389,7 @@ export function useSyncStreamConnection() {
         }));
       } else {
         knownSyncingRef.current = false;
+        setQueuedConnectorIds([]);
         // All syncs done — reset and trigger refetch
         setProgress((prev) => ({
           ...initialProgress,
@@ -470,6 +472,7 @@ export function useSyncStreamConnection() {
         }));
       } else {
         knownSyncingRef.current = false;
+        setQueuedConnectorIds([]);
         setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
         window.dispatchEvent(new CustomEvent('mission-control:sync-complete'));
       }
@@ -542,7 +545,10 @@ export function useSyncStreamConnection() {
     };
   }, [connect, stopFallbackPolling]);
 
-  const triggerSync = useCallback(async (connectorId?: string) => {
+  const triggerSync = useCallback(async (
+    connectorId?: string,
+    options?: { full?: boolean },
+  ) => {
     const requestKey = connectorId ?? '__all__';
     const joiningExistingSync = knownSyncingRef.current;
     if (
@@ -582,7 +588,10 @@ export function useSyncStreamConnection() {
       const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(connectorId ? { connectorId } : {}),
+        body: JSON.stringify({
+          ...(connectorId ? { connectorId } : {}),
+          ...(options?.full ? { full: true } : {}),
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -590,6 +599,11 @@ export function useSyncStreamConnection() {
         if (!joiningExistingSync) {
           knownSyncingRef.current = false;
           setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
+        }
+        if (connectorId) {
+          setQueuedConnectorIds((previous) => (
+            previous.filter((queuedConnectorId) => queuedConnectorId !== connectorId)
+          ));
         }
         return;
       }
@@ -603,6 +617,11 @@ export function useSyncStreamConnection() {
           knownSyncingRef.current = false;
           setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
         }
+        if (connectorId) {
+          setQueuedConnectorIds((previous) => (
+            previous.filter((queuedConnectorId) => queuedConnectorId !== connectorId)
+          ));
+        }
         return;
       }
       // SSE stream handles per-connector progress and the final toast via
@@ -614,13 +633,13 @@ export function useSyncStreamConnection() {
         knownSyncingRef.current = false;
         setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
       }
-    } finally {
-      pendingManualSyncsRef.current.delete(requestKey);
       if (connectorId) {
         setQueuedConnectorIds((previous) => (
           previous.filter((queuedConnectorId) => queuedConnectorId !== connectorId)
         ));
       }
+    } finally {
+      pendingManualSyncsRef.current.delete(requestKey);
     }
     // Note: isSyncing is reset by the SSE sync:complete / sync:error handler,
     // not here — the POST resolving doesn't mean the SSE stream is done.

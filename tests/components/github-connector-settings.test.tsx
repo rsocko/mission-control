@@ -58,7 +58,8 @@ describe('GitHub connector settings', () => {
         connectors={[connector]}
         sourceLists={[]}
         loading={false}
-        syncing={null}
+        syncingConnectorIds={new Set()}
+        queuedSyncConnectorIds={new Set()}
         onToggle={vi.fn()}
         onSync={vi.fn()}
         onDelete={vi.fn()}
@@ -79,6 +80,43 @@ describe('GitHub connector settings', () => {
     expect(screen.getByRole('checkbox', { name: 'Disable GitHub connector' })).toBeChecked();
   });
 
+  it('keeps concurrent connector sync states independent', () => {
+    const todoConnector: ConnectorConfig = {
+      ...connector,
+      id: 'todo-1',
+      type: 'microsoft-todo',
+      name: 'Work tasks',
+    };
+
+    render(
+      <ConnectorsSection
+        connectors={[connector, todoConnector]}
+        sourceLists={[]}
+        loading={false}
+        syncingConnectorIds={new Set(['github-1', 'todo-1'])}
+        queuedSyncConnectorIds={new Set()}
+        onToggle={vi.fn()}
+        onSync={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        onPurgeSourceList={vi.fn()}
+        onAdd={vi.fn()}
+        selectedConnector={null}
+        onSelect={vi.fn()}
+        deletedConnectors={[]}
+        onRestore={vi.fn()}
+        onPermanentDelete={vi.fn()}
+      />,
+    );
+
+    const githubSync = screen.getByRole('button', { name: 'GitHub sync in progress' });
+    const todoSync = screen.getByRole('button', { name: 'Work tasks sync in progress' });
+    expect(githubSync).toBeDisabled();
+    expect(todoSync).toBeDisabled();
+    expect(githubSync.querySelector('svg')).toHaveClass('animate-spin');
+    expect(todoSync.querySelector('svg')).toHaveClass('animate-spin');
+  });
+
   it('opens connector configuration in a tabbed modal without empty tabs', async () => {
     const todoConnector: ConnectorConfig = {
       ...connector,
@@ -97,7 +135,8 @@ describe('GitHub connector settings', () => {
           connectors={[connector, todoConnector]}
           sourceLists={[]}
           loading={false}
-          syncing={null}
+          syncingConnectorIds={new Set()}
+          queuedSyncConnectorIds={new Set()}
           onToggle={vi.fn()}
           onSync={vi.fn()}
           onDelete={vi.fn()}
@@ -161,7 +200,8 @@ describe('GitHub connector settings', () => {
         connectors={[connector]}
         sourceLists={[]}
         loading={false}
-        syncing={null}
+        syncingConnectorIds={new Set()}
+        queuedSyncConnectorIds={new Set()}
         onToggle={vi.fn()}
         onSync={vi.fn()}
         onDelete={vi.fn()}

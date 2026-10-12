@@ -161,13 +161,14 @@ function asSettingsRecord(settings: unknown): Record<string, unknown> {
 // --- Connectors Section ----------------------------------------------------
 
 function ConnectorsSection({
-  connectors, sourceLists, loading, syncing, onToggle, onSync, onDelete, onUpdate, onPurgeSourceList, onAdd, selectedConnector, onSelect,
+  connectors, sourceLists, loading, syncingConnectorIds, queuedSyncConnectorIds, onToggle, onSync, onDelete, onUpdate, onPurgeSourceList, onAdd, selectedConnector, onSelect,
   selectedTab = 'general', onTabChange, deletedConnectors, onRestore, onPermanentDelete, onTested,
 }: {
   connectors: ConnectorConfig[];
   sourceLists: SourceList[];
   loading: boolean;
-  syncing: string | null;
+  syncingConnectorIds: ReadonlySet<string>;
+  queuedSyncConnectorIds: ReadonlySet<string>;
   onToggle: (id: string, enabled: boolean) => void;
   onSync: (id?: string) => void;
   onDelete: (id: string) => void;
@@ -255,10 +256,16 @@ function ConnectorsSection({
             aria-label="Configured connectors"
           >
             {connectors.map(conn => {
-              const isSyncing = syncing === conn.id;
+              const isSyncing = syncingConnectorIds.has(conn.id);
+              const isQueued = queuedSyncConnectorIds.has(conn.id);
               const connSourceLists = sourceLists.filter(sl => sl.connectorInstanceId === conn.id);
               const healthState = getHealthState(conn);
               const displayName = getConnectorDisplayName(conn);
+              const syncLabel = isQueued
+                ? `${displayName} sync queued`
+                : isSyncing
+                  ? `${displayName} sync in progress`
+                  : `Sync ${displayName}`;
 
               return (
                 <motion.div
@@ -330,12 +337,16 @@ function ConnectorsSection({
                         <button
                           type="button"
                           onClick={() => onSync(conn.id)}
-                          disabled={!!isSyncing}
+                          disabled={isSyncing || isQueued}
                           className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border)] transition-colors hover:bg-[var(--surface-2)] disabled:opacity-50"
-                          title={`Sync ${displayName} now`}
-                          aria-label={`Sync ${displayName} now`}
+                          title={syncLabel}
+                          aria-label={syncLabel}
                         >
-                          <RefreshCw size={13} className={isSyncing ? 'animate-spin text-blue-400' : 'text-[var(--text-muted)]'} />
+                          {isQueued ? (
+                            <Clock size={13} className="text-amber-400" />
+                          ) : (
+                            <RefreshCw size={13} className={isSyncing ? 'animate-spin text-blue-400' : 'text-[var(--text-muted)]'} />
+                          )}
                         </button>
                       )}
                       <label className="relative inline-flex h-9 cursor-pointer items-center">
@@ -476,11 +487,19 @@ function ConnectorsSection({
                     <button
                       type="button"
                       onClick={() => onSync(selected.id)}
-                      disabled={syncing === selected.id}
+                      disabled={syncingConnectorIds.has(selected.id) || queuedSyncConnectorIds.has(selected.id)}
                       className="hidden h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50 sm:inline-flex"
                     >
-                      <RefreshCw size={13} className={syncing === selected.id ? 'animate-spin' : ''} />
-                      Sync now
+                      {queuedSyncConnectorIds.has(selected.id) ? (
+                        <Clock size={13} className="text-amber-400" />
+                      ) : (
+                        <RefreshCw size={13} className={syncingConnectorIds.has(selected.id) ? 'animate-spin' : ''} />
+                      )}
+                      {queuedSyncConnectorIds.has(selected.id)
+                        ? 'Queued'
+                        : syncingConnectorIds.has(selected.id)
+                          ? 'Syncing...'
+                          : 'Sync now'}
                     </button>
                   )}
                   <label className="relative inline-flex cursor-pointer items-center gap-2 text-xs text-[var(--text-secondary)]">

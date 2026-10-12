@@ -1,2 +1,2 @@
-import { n as e, t } from "./chunks/IconPickerButton-BjUqdo6t.js";
+import { n as e, t } from "./chunks/IconPickerButton-5VFx_PZY.js";
 export { e as IconPicker, t as IconPickerButton };

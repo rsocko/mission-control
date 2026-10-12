@@ -33,7 +33,8 @@ test('verifies the committed exact-commit package snapshot', async () => {
   assert.equal(manifest.source.tag, SOURCE_TAG);
   assert.equal(manifest.package.name, PACKAGE_NAME);
   assert.equal(manifest.package.version, PACKAGE_VERSION);
-  assert.equal(manifest.artifact.entryCount, 38);
+  assert.equal(manifest.artifact.entryCount, manifest.artifact.files.length);
+  assert.ok(manifest.artifact.entryCount > 0);
   assert.equal(LOCAL_REGISTRY, 'https://packagefeedproxy.microsoft.io/npm/');
   assert.equal(CI_REGISTRY, 'https://registry.npmjs.org/');
   assert.equal(

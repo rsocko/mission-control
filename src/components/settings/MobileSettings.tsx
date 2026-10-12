@@ -289,7 +289,7 @@ export function MobileSettings({ onAddConnector }: { onAddConnector: () => void 
       </SectionCard>
 
       <CompletionSoundSettingsCard />
-      <ToastSettingsCard />
+      <ToastSettingsCard mobile />
       <SectionLabel>Capture</SectionLabel>
       <CaptureDestinationSection mobile />
 

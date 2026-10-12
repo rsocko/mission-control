@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import * as Popover from '@radix-ui/react-popover';
 import {
   DndContext,
   KeyboardSensor,
@@ -20,12 +21,14 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Check,
+  ChevronDown,
   Eye,
   EyeOff,
   FolderOpen,
   FolderPlus,
   GripVertical,
   Loader2,
+  List,
   Palette,
   Plus,
   Search,
@@ -38,6 +41,8 @@ import { toast } from '@/lib/toast';
 import { settingsLogger } from '@/lib/client-logger';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ContextAppearancePicker } from '@/components/context-theme/ContextAppearancePicker';
+import { ConnectorIcon } from '@/components/sources/SourceIcons';
+import { Tooltip, TooltipProvider } from '@/components/ui/Tooltip';
 import {
   Select,
   SelectContent,
@@ -165,7 +170,7 @@ export function ListGroupsSection(props: ListGroupsSectionProps) {
   const scopeTitle = selectedGroupId === null
     ? ''
     : selectedGroupId === 'other'
-      ? 'Other'
+      ? 'Not in a group'
       : activeGroup?.name ?? '';
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -297,7 +302,8 @@ export function ListGroupsSection(props: ListGroupsSectionProps) {
       .filter((list): list is SourceList & { selectedForSync: boolean } => Boolean(list));
 
   return (
-    <div className="space-y-5">
+    <TooltipProvider>
+      <div className="space-y-5">
       <div className="max-w-3xl">
         <h2 className="text-xl font-semibold text-[var(--text-primary)] [text-wrap:balance]">
           List organization
@@ -318,10 +324,15 @@ export function ListGroupsSection(props: ListGroupsSectionProps) {
               const count = sourceLists.filter((list) => list.connectorInstanceId === item.id).length;
               return (
                 <SelectItem key={item.id} value={item.id} className="py-3">
-                  <span className="flex min-w-0 flex-col text-left">
-                    <span className="truncate">{getConnectorDisplayName(item)}</span>
-                    <span className="text-xs font-normal text-[var(--text-muted)]">
-                      {item.type} · {count} {count === 1 ? 'list' : 'lists'}
+                  <span className="flex min-w-0 items-center gap-3 text-left">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)]">
+                      <ConnectorIcon connectorType={item.type} size={18} />
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate">{getConnectorDisplayName(item)}</span>
+                      <span className="text-xs font-normal text-[var(--text-muted)]">
+                        {item.type} · {count} {count === 1 ? 'list' : 'lists'}
+                      </span>
                     </span>
                   </span>
                 </SelectItem>
@@ -371,6 +382,14 @@ export function ListGroupsSection(props: ListGroupsSectionProps) {
                 compact
               />
             </div>
+            <ScopeNavItem
+              icon={<List size={16} />}
+              label="All lists"
+              count={connectorLists.length}
+              selected={selectedGroupId === null}
+              onSelect={() => selectGroup(null)}
+              className="mt-3"
+            />
 
             {creatingGroup && (
               <div className="mt-3 rounded-xl border border-[var(--accent-500)]/35 bg-[var(--surface-1)] p-3">
@@ -444,19 +463,15 @@ export function ListGroupsSection(props: ListGroupsSectionProps) {
             ) : null}
 
             {connectorGroups.length > 0 && (
-              <button
-                type="button"
-                onClick={() => selectGroup('other')}
-                className={`mt-3 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
-                  selectedGroupId === 'other'
-                    ? 'bg-[var(--surface-2)] font-medium text-[var(--text-primary)]'
-                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-1)]'
-                }`}
-              >
-                <FolderOpen size={16} className="text-[var(--text-muted)]" />
-                <span className="min-w-0 flex-1 truncate">Other</span>
-                <span className="text-xs tabular-nums text-[var(--text-muted)]">{ungroupedCount}</span>
-              </button>
+              <div className="mt-3 border-t border-[var(--border-subtle)] pt-3">
+                <ScopeNavItem
+                  icon={<FolderOpen size={16} />}
+                  label="Not in a group"
+                  count={ungroupedCount}
+                  selected={selectedGroupId === 'other'}
+                  onSelect={() => selectGroup('other')}
+                />
+              </div>
             )}
           </aside>
 
@@ -475,24 +490,13 @@ export function ListGroupsSection(props: ListGroupsSectionProps) {
                   />
                 ) : (
                   <div>
-                    <h3 className="text-lg font-semibold text-[var(--text-primary)]">Other</h3>
+                    <h3 className="text-lg font-semibold text-[var(--text-primary)]">Not in a group</h3>
                     <p className="mt-1 text-xs text-[var(--text-muted)]">
                       Lists outside a group appear after grouped navigation.
                     </p>
                   </div>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => selectGroup(null)}
-                className={`shrink-0 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-                  selectedGroupId === null
-                    ? 'border-[var(--accent-500)]/40 bg-[var(--accent-500)]/10 text-[var(--accent-500)]'
-                    : 'border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]'
-                }`}
-              >
-                All lists in source
-              </button>
             </div>
 
             {selectedListIds.size > 0 && (
@@ -500,22 +504,16 @@ export function ListGroupsSection(props: ListGroupsSectionProps) {
                 <span className="mr-auto text-xs font-medium text-[var(--text-secondary)]">
                   {selectedListIds.size} selected
                 </span>
-                <Select
-                  onValueChange={(value) => void moveLists(
+                <GroupPicker
+                  groups={connectorGroups}
+                  value={null}
+                  placeholder="Move selected…"
+                  onChange={(value) => void moveLists(
                     [...selectedListIds],
-                    value === 'other' ? null : value,
+                    value,
                   )}
-                >
-                  <SelectTrigger className="h-8 min-h-0 w-[180px] text-xs" aria-label="Move selected lists">
-                    <SelectValue placeholder="Move to…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {connectorGroups.map((group) => (
-                      <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
-                    ))}
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+                  ariaLabel="Move selected lists"
+                />
                 <button
                   type="button"
                   onClick={() => setSelectedListIds(new Set())}
@@ -542,36 +540,73 @@ export function ListGroupsSection(props: ListGroupsSectionProps) {
               <SortableContext items={orderedListIds} strategy={verticalListSortingStrategy}>
                 <div className="mt-2 divide-y divide-[var(--border-subtle)]">
                   {displayedLists.map((list) => (
-                    <ListRow
-                      key={list.id}
-                      list={list}
-                      groups={connectorGroups}
-                      selected={selectedListIds.has(list.id)}
-                      sortable={selectedGroupId !== null && !listQuery}
-                      saving={saving}
-                      onSelect={(selected) => setSelectedListIds((current) => {
-                        const next = new Set(current);
-                        if (selected) next.add(list.id);
-                        else next.delete(list.id);
-                        return next;
-                      })}
-                      onMove={(groupId) => void moveLists([list.id], groupId)}
-                      onRename={renameList}
-                      onToggleHidden={async () => {
-                        try {
-                          const response = await fetch(`/api/source-lists/${encodeURIComponent(list.id)}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ hidden: !list.hidden }),
-                          });
-                          if (!response.ok) throw new Error('Failed to update list visibility');
-                          await onRefresh();
-                        } catch {
-                          toast.error('Failed to update list visibility');
-                        }
-                      }}
-                      onAppearance={onUpdateAppearance ? () => setAppearanceListId(list.id) : undefined}
-                    />
+                    <React.Fragment key={list.id}>
+                      <ListRow
+                        list={list}
+                        groups={connectorGroups}
+                        selected={selectedListIds.has(list.id)}
+                        sortable={selectedGroupId !== null && !listQuery}
+                        saving={saving}
+                        appearanceOpen={appearanceListId === list.id}
+                        onSelect={(selected) => setSelectedListIds((current) => {
+                          const next = new Set(current);
+                          if (selected) next.add(list.id);
+                          else next.delete(list.id);
+                          return next;
+                        })}
+                        onMove={(groupId) => void moveLists([list.id], groupId)}
+                        onRename={renameList}
+                        onToggleHidden={async () => {
+                          try {
+                            const response = await fetch(`/api/source-lists/${encodeURIComponent(list.id)}`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ hidden: !list.hidden }),
+                            });
+                            if (!response.ok) throw new Error('Failed to update list visibility');
+                            await onRefresh();
+                          } catch {
+                            toast.error('Failed to update list visibility');
+                          }
+                        }}
+                        onAppearance={onUpdateAppearance
+                          ? () => setAppearanceListId((current) => current === list.id ? null : list.id)
+                          : undefined}
+                      />
+                      {appearanceListId === list.id && onUpdateAppearance ? (
+                        <div className="mb-3 ml-9 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-4">
+                          <div className="mb-4 flex items-start justify-between gap-3">
+                            <div>
+                              <h4 className="text-sm font-semibold text-[var(--text-primary)]">
+                                {list.name} appearance
+                              </h4>
+                              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                                Used when this list is the only active dashboard context.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setAppearanceListId(null)}
+                              aria-label="Close appearance editor"
+                              className="flex size-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+                            >
+                              <X size={15} />
+                            </button>
+                          </div>
+                          <ContextAppearancePicker
+                            value={list.appearance ?? null}
+                            kind="list"
+                            fallbackAccent={list.iconColor || '#3b82f6'}
+                            inheritLabel="Use global list style"
+                            onChange={(appearance) => {
+                              void onUpdateAppearance(list.id, appearance)
+                                .then(() => toast.success('List appearance updated'))
+                                .catch(() => toast.error('Failed to update list appearance'));
+                            }}
+                          />
+                        </div>
+                      ) : null}
+                    </React.Fragment>
                   ))}
                 </div>
               </SortableContext>
@@ -592,48 +627,10 @@ export function ListGroupsSection(props: ListGroupsSectionProps) {
         </div>
       )}
 
-      {appearanceListId && onUpdateAppearance ? (() => {
-        const list = sourceLists.find((candidate) => candidate.id === appearanceListId);
-        if (!list) return null;
-        return (
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-5">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-                  {list.name} appearance
-                </h3>
-                <p className="mt-1 text-xs text-[var(--text-muted)]">
-                  Used when this list is the only active dashboard context.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setAppearanceListId(null)}
-                aria-label="Close appearance editor"
-                className="flex size-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
-              >
-                <X size={15} />
-              </button>
-            </div>
-            <ContextAppearancePicker
-              value={list.appearance ?? null}
-              kind="list"
-              fallbackAccent={list.iconColor || '#3b82f6'}
-              inheritLabel="Use global list style"
-              onChange={(appearance) => {
-                void onUpdateAppearance(list.id, appearance)
-                  .then(() => toast.success('List appearance updated'))
-                  .catch(() => toast.error('Failed to update list appearance'));
-              }}
-            />
-          </div>
-        );
-      })() : null}
-
       <ConfirmDialog
         open={Boolean(deleteGroup)}
         title="Delete group?"
-        message={`Lists in ${deleteGroup?.name ?? 'this group'} will move to Other. The lists themselves will not be deleted.`}
+        message={`Lists in ${deleteGroup?.name ?? 'this group'} will move to Not in a group. The lists themselves will not be deleted.`}
         confirmLabel="Delete group"
         confirmVariant="danger"
         onCancel={() => setDeleteGroup(null)}
@@ -648,7 +645,8 @@ export function ListGroupsSection(props: ListGroupsSectionProps) {
             .catch(() => toast.error('Failed to delete group'));
         }}
       />
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -689,6 +687,139 @@ function SearchField({
         </button>
       ) : null}
     </label>
+  );
+}
+
+function ScopeNavItem({
+  icon,
+  label,
+  count,
+  selected,
+  onSelect,
+  className = '',
+}: {
+  icon: React.ReactNode;
+  label: string;
+  count: number;
+  selected: boolean;
+  onSelect: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`${className} flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
+        selected
+          ? 'bg-[var(--surface-2)] font-medium text-[var(--text-primary)]'
+          : 'text-[var(--text-secondary)] hover:bg-[var(--surface-1)]'
+      }`}
+    >
+      <span className="flex size-5 shrink-0 items-center justify-center text-[var(--text-muted)]">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="text-xs tabular-nums text-[var(--text-muted)]">{count}</span>
+    </button>
+  );
+}
+
+function GroupPicker({
+  groups,
+  value,
+  placeholder,
+  onChange,
+  ariaLabel,
+  disabled = false,
+}: {
+  groups: ListGroup[];
+  value: string | null;
+  placeholder?: string;
+  onChange: (groupId: string | null) => void;
+  ariaLabel: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const sortedGroups = [...groups]
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
+    .filter((group) => group.name.toLocaleLowerCase().includes(normalizedQuery));
+  const selectedGroup = groups.find((group) => group.id === value);
+
+  function select(groupId: string | null) {
+    onChange(groupId);
+    setOpen(false);
+    setQuery('');
+  }
+
+  return (
+    <Popover.Root open={open} onOpenChange={(nextOpen) => {
+      setOpen(nextOpen);
+      if (!nextOpen) setQuery('');
+    }}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label={ariaLabel}
+          aria-expanded={open}
+          className="hidden h-8 max-w-44 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] disabled:opacity-50 sm:flex"
+        >
+          <span className="truncate">{selectedGroup?.name ?? (value === null && !placeholder ? 'Not in a group' : placeholder)}</span>
+          <ChevronDown size={13} className="ml-auto shrink-0 text-[var(--text-muted)]" />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={6}
+          className="z-50 w-64 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-2 shadow-[var(--shadow-lg)]"
+        >
+          <div className="relative">
+            <Search
+              aria-hidden="true"
+              size={14}
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
+            />
+            <input
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Find group"
+              aria-label="Find destination group"
+              className="h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] pl-8 pr-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent-500)]"
+            />
+          </div>
+          <div className="mt-2 max-h-56 overflow-y-auto">
+            {sortedGroups.map((group) => (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => select(group.id)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              >
+                <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                {value === group.id ? <Check size={14} className="shrink-0 text-[var(--accent-500)]" /> : null}
+              </button>
+            ))}
+            {sortedGroups.length === 0 ? (
+              <p className="px-2.5 py-4 text-center text-xs text-[var(--text-muted)]">No groups found.</p>
+            ) : null}
+          </div>
+          <div className="mt-1 border-t border-[var(--border-subtle)] pt-1">
+            <button
+              type="button"
+              onClick={() => select(null)}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+            >
+              <span className="min-w-0 flex-1 truncate">Not in a group</span>
+              {value === null && !placeholder ? <Check size={14} className="shrink-0 text-[var(--accent-500)]" /> : null}
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
@@ -859,6 +990,7 @@ function ListRow({
   selected,
   sortable,
   saving,
+  appearanceOpen,
   onSelect,
   onMove,
   onRename,
@@ -870,6 +1002,7 @@ function ListRow({
   selected: boolean;
   sortable: boolean;
   saving: boolean;
+  appearanceOpen: boolean;
   onSelect: (selected: boolean) => void;
   onMove: (groupId: string | null) => void;
   onRename: (id: string, name: string, icon?: string, iconColor?: string) => Promise<void>;
@@ -1004,39 +1137,42 @@ function ListRow({
               </span>
             </span>
           </button>
-          <Select
-            value={list.groupId ?? 'other'}
-            onValueChange={(value) => onMove(value === 'other' ? null : value)}
+          <GroupPicker
+            groups={groups}
+            value={list.groupId}
+            onChange={onMove}
             disabled={saving}
-          >
-            <SelectTrigger variant="inline" className="hidden max-w-36 sm:flex" aria-label={`Move ${list.name}`}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {groups.map((group) => (
-                <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
-              ))}
-              <SelectItem value="other">Other</SelectItem>
-            </SelectContent>
-          </Select>
+            ariaLabel={`Move ${list.name}`}
+          />
           {onAppearance ? (
+            <Tooltip content={appearanceOpen ? 'Close appearance editor' : 'Customize list appearance'}>
+              <button
+                type="button"
+                onClick={onAppearance}
+                aria-label={appearanceOpen ? `Close ${list.name} appearance editor` : `Customize ${list.name} appearance`}
+                aria-expanded={appearanceOpen}
+                className={`flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] ${
+                  appearanceOpen
+                    ? 'bg-[var(--surface-2)] text-[var(--accent-500)]'
+                    : 'text-[var(--text-muted)] opacity-0 group-hover/row:opacity-100 focus:opacity-100'
+                }`}
+              >
+                <Palette size={14} />
+              </button>
+            </Tooltip>
+          ) : null}
+          <Tooltip content={list.hidden ? 'Show in navigation' : 'Hide from navigation'}>
             <button
               type="button"
-              onClick={onAppearance}
-              aria-label={`Customize ${list.name} appearance`}
-              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 transition-opacity hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] group-hover/row:opacity-100 focus:opacity-100"
+              onClick={onToggleHidden}
+              aria-label={list.hidden ? `Show ${list.name} in navigation` : `Hide ${list.name} from navigation`}
+              className={`flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] ${
+                list.hidden ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'
+              }`}
             >
-              <Palette size={14} />
+              {list.hidden ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onToggleHidden}
-            aria-label={list.hidden ? `Show ${list.name}` : `Hide ${list.name}`}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 transition-opacity hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] group-hover/row:opacity-100 focus:opacity-100"
-          >
-            {list.hidden ? <Eye size={14} /> : <EyeOff size={14} />}
-          </button>
+          </Tooltip>
         </>
       )}
     </div>

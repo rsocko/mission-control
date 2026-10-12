@@ -422,15 +422,26 @@ describe('GitHub connector settings', () => {
       <ListGroupsSection
         connectors={[connector, alphaConnector]}
         sourceLists={sourceLists}
-        listGroups={[{
-          id: 'group-1',
-          connectorInstanceId: connector.id,
-          name: 'Engineering',
-          icon: null,
-          iconColor: null,
-          sortOrder: 0,
-          createdAt: '2026-08-08T00:00:00.000Z',
-        }]}
+        listGroups={[
+          {
+            id: 'group-1',
+            connectorInstanceId: connector.id,
+            name: 'Zebra',
+            icon: null,
+            iconColor: null,
+            sortOrder: 0,
+            createdAt: '2026-08-08T00:00:00.000Z',
+          },
+          {
+            id: 'group-2',
+            connectorInstanceId: connector.id,
+            name: 'Alpha group',
+            icon: null,
+            iconColor: null,
+            sortOrder: 1,
+            createdAt: '2026-08-08T00:00:00.000Z',
+          },
+        ]}
         loading={false}
         onCreateGroup={vi.fn()}
         onUpdateGroup={vi.fn()}
@@ -438,6 +449,7 @@ describe('GitHub connector settings', () => {
         onAssignList={vi.fn()}
         onRefresh={vi.fn()}
         onRenameList={vi.fn(() => vi.fn().mockResolvedValue(undefined))}
+        onUpdateAppearance={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -447,6 +459,23 @@ describe('GitHub connector settings', () => {
       .map((element) => element.textContent);
 
     expect(visibleNames()).toEqual(['Gamma', 'Alpha']);
+    expect(screen.getByRole('button', { name: /^All lists/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Not in a group/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide Gamma from navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Customize Gamma appearance' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Gamma' }));
+    const destinationSearch = screen.getByRole('textbox', { name: 'Find destination group' });
+    const picker = destinationSearch.closest('[data-radix-popper-content-wrapper]');
+    expect(picker).not.toBeNull();
+    const destinationButtons = within(picker as HTMLElement).getAllByRole('button')
+      .filter((button) => ['Alpha group', 'Zebra'].includes(button.textContent ?? ''))
+      .map((button) => button.textContent);
+    expect(destinationButtons).toEqual(['Alpha group', 'Zebra']);
+    fireEvent.change(destinationSearch, { target: { value: 'zeb' } });
+    expect(screen.getByRole('button', { name: 'Zebra' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Alpha group' })).not.toBeInTheDocument();
+    fireEvent.keyDown(destinationSearch, { key: 'Escape' });
 
     fireEvent.change(screen.getByRole('searchbox', { name: 'Find list' }), {
       target: { value: 'gamma' },

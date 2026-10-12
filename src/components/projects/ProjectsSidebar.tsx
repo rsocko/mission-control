@@ -21,7 +21,7 @@ import { IconRenderer } from '@rsocko/icon-picker/renderer';
 import { ProjectModal } from '@/components/projects/ProjectModal';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { SearchInput } from '@/components/ui/SearchInput';
-import type { ProjectHealth, ProjectProgress, ProjectPulse } from '@/types';
+import type { ProjectHealth, ProjectPhase, ProjectProgress, ProjectPulse } from '@/types';
 import { cn } from '@/lib/utils';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
@@ -38,6 +38,12 @@ interface SidebarProject {
   progress: ProjectProgress;
   phaseCount?: number;
   metadata?: Record<string, unknown>;
+}
+
+type SidebarPhase = Pick<ProjectPhase, 'id' | 'name' | 'projectId' | 'color' | 'status' | 'sortOrder'>;
+
+interface FilteredSidebarProject extends SidebarProject {
+  matchingPhases: SidebarPhase[];
 }
 
 interface CategoryGroup {
@@ -166,7 +172,15 @@ function StatusFilterPills({
   );
 }
 
-function ProjectItem({ project, isActive }: { project: SidebarProject; isActive: boolean }) {
+function ProjectItem({
+  project,
+  isActive,
+  matchingPhases = [],
+}: {
+  project: SidebarProject;
+  isActive: boolean;
+  matchingPhases?: SidebarPhase[];
+}) {
   const phaseLabel = project.phaseCount !== undefined
     ? `${project.phaseCount} phase${project.phaseCount !== 1 ? 's' : ''} · `
     : '';
@@ -174,55 +188,81 @@ function ProjectItem({ project, isActive }: { project: SidebarProject; isActive:
   const isCompleted = project.status === 'completed';
 
   return (
-    <Link
-      href={`/projects/${project.id}`}
-      className={cn(
-        'flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors duration-150',
-        isActive
-          ? 'bg-[var(--accent-500)]/10 border border-[var(--accent-500)]/20'
-          : isCompleted
-            ? 'border border-sky-500/10 bg-sky-500/[0.04] hover:bg-sky-500/[0.08]'
-            : 'hover:bg-[var(--surface-2)] border border-transparent',
-      )}
-    >
-      {isSyncManaged ? (
-        <Image src="/icons/connectors/github.svg" alt="GitHub" width={12} height={12} className="flex-shrink-0 opacity-80" />
-      ) : project.icon ? (
-        <IconRenderer value={project.icon} size={16} color={project.color} />
-      ) : (
-        <span
-          className="h-2.5 w-2.5 rounded-full flex-shrink-0"
-          style={{ backgroundColor: project.color }}
-        />
-      )}
-      <div className="flex-1 min-w-0">
-        <span
-          className={cn(
-            'block truncate text-sm font-medium',
-            isActive ? 'text-[var(--accent-400)]' : 'text-[var(--text-primary)]',
-          )}
-        >
-          {project.name}
-        </span>
-        <div
-          className="my-1 h-px overflow-hidden rounded-full bg-[var(--surface-3)]"
-          aria-hidden="true"
-        >
-          <div
-            className="h-full rounded-full transition-[width] duration-300"
-            style={{
-              width: `${Math.min(100, Math.max(0, project.progress.percentComplete))}%`,
-              backgroundColor: isCompleted ? 'rgb(56 189 248)' : project.color,
-              opacity: isActive ? 0.9 : 0.55,
-            }}
+    <div>
+      <Link
+        href={`/projects/${project.id}`}
+        className={cn(
+          'flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors duration-150',
+          isActive
+            ? 'bg-[var(--accent-500)]/10 border border-[var(--accent-500)]/20'
+            : isCompleted
+              ? 'border border-sky-500/10 bg-sky-500/[0.04] hover:bg-sky-500/[0.08]'
+              : 'hover:bg-[var(--surface-2)] border border-transparent',
+        )}
+      >
+        {isSyncManaged ? (
+          <Image src="/icons/connectors/github.svg" alt="GitHub" width={12} height={12} className="flex-shrink-0 opacity-80" />
+        ) : project.icon ? (
+          <IconRenderer value={project.icon} size={16} color={project.color} />
+        ) : (
+          <span
+            className="h-2.5 w-2.5 rounded-full flex-shrink-0"
+            style={{ backgroundColor: project.color }}
           />
+        )}
+        <div className="flex-1 min-w-0">
+          <span
+            className={cn(
+              'block truncate text-sm font-medium',
+              isActive ? 'text-[var(--accent-400)]' : 'text-[var(--text-primary)]',
+            )}
+          >
+            {project.name}
+          </span>
+          <div
+            className="my-1 h-px overflow-hidden rounded-full bg-[var(--surface-3)]"
+            aria-hidden="true"
+          >
+            <div
+              className="h-full rounded-full transition-[width] duration-300"
+              style={{
+                width: `${Math.min(100, Math.max(0, project.progress.percentComplete))}%`,
+                backgroundColor: isCompleted ? 'rgb(56 189 248)' : project.color,
+                opacity: isActive ? 0.9 : 0.55,
+              }}
+            />
+          </div>
+          <span className="text-[12px] text-[var(--text-muted)]">
+            {phaseLabel}{project.progress.totalTasks} tasks · {project.progress.percentComplete}%
+          </span>
         </div>
-        <span className="text-[12px] text-[var(--text-muted)]">
-          {phaseLabel}{project.progress.totalTasks} tasks · {project.progress.percentComplete}%
-        </span>
-      </div>
-      <HealthDot health={project.progress.health} pulse={project.progress.pulse} status={project.status} />
-    </Link>
+        <HealthDot health={project.progress.health} pulse={project.progress.pulse} status={project.status} />
+      </Link>
+      {matchingPhases.length > 0 && (
+        <div className="ml-5 border-l border-[var(--border)] py-0.5 pl-2" aria-label={`Matching phases in ${project.name}`}>
+          {matchingPhases.map((phase) => (
+            <Link
+              key={phase.id}
+              href={`/projects/${project.id}?tab=phases&phase=${encodeURIComponent(phase.id)}`}
+              className="group flex min-h-8 items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
+              aria-label={`Open ${phase.name} phase in ${project.name}`}
+            >
+              <span
+                className="h-2 w-2 flex-shrink-0 rounded-full"
+                style={{ backgroundColor: phase.color || project.color }}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 flex-1 truncate">{phase.name}</span>
+              <ChevronRight
+                size={12}
+                className="flex-shrink-0 text-[var(--text-muted)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                aria-hidden="true"
+              />
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -252,7 +292,7 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
   const router = useRouter();
   const activeProjectId = params?.id as string | undefined;
   const [data, setData] = useState<ProjectsOverviewData | null>(null);
-  const [phaseCounts, setPhaseCounts] = useState<Record<string, number>>({});
+  const [phases, setPhases] = useState<SidebarPhase[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -273,14 +313,8 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
       }
 
       if (phasesRes.ok) {
-        const phasesData = await phasesRes.json();
-        const counts: Record<string, number> = {};
-        for (const phase of phasesData.phases || []) {
-          if (phase.projectId) {
-            counts[phase.projectId] = (counts[phase.projectId] || 0) + 1;
-          }
-        }
-        setPhaseCounts(counts);
+        const phasesData = await phasesRes.json() as { phases?: SidebarPhase[] };
+        setPhases(phasesData.phases || []);
       }
     } catch {
       // Silently fail — sidebar is non-critical
@@ -336,6 +370,12 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
   const enrichedData = useMemo(() => {
     if (!data) return null;
 
+    const phaseCounts: Record<string, number> = {};
+    for (const phase of phases) {
+      if (phase.projectId) {
+        phaseCounts[phase.projectId] = (phaseCounts[phase.projectId] || 0) + 1;
+      }
+    }
     const enrich = (projects: SidebarProject[]) =>
       projects.map((p) => ({ ...p, phaseCount: phaseCounts[p.id] || 0 }));
 
@@ -344,22 +384,36 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
       categories: data.categories.map((cat) => ({ ...cat, projects: enrich(cat.projects) })),
       uncategorized: enrich(data.uncategorized),
     };
-  }, [data, phaseCounts]);
+  }, [data, phases]);
 
   const filteredCategories = useMemo(() => {
     if (!enrichedData) return { categories: [], uncategorized: [] };
 
     const query = search.toLowerCase().trim();
     const hasStatusFilter = statusFilter.size > 0;
-    const filterProjects = (projects: SidebarProject[]) => {
-      let filtered = projects;
-      if (query) {
-        filtered = filtered.filter((p) => p.name.toLowerCase().includes(query));
-      }
-      if (hasStatusFilter) {
-        filtered = filtered.filter((p) => statusFilter.has(p.status as ProjectStatusValue));
-      }
-      return filtered;
+    const phasesByProject = new Map<string, SidebarPhase[]>();
+    for (const phase of phases) {
+      if (!phase.projectId) continue;
+      const projectPhases = phasesByProject.get(phase.projectId) || [];
+      projectPhases.push(phase);
+      phasesByProject.set(phase.projectId, projectPhases);
+    }
+
+    const filterProjects = (projects: SidebarProject[]): FilteredSidebarProject[] => {
+      return projects.flatMap((project) => {
+        if (hasStatusFilter && !statusFilter.has(project.status as ProjectStatusValue)) return [];
+
+        const matchingPhases = query
+          ? (phasesByProject.get(project.id) || [])
+              .filter((phase) => phase.name.toLowerCase().includes(query))
+              .sort((a, b) => a.sortOrder - b.sortOrder)
+          : [];
+        const projectMatches = !query || project.name.toLowerCase().includes(query);
+
+        return projectMatches || matchingPhases.length > 0
+          ? [{ ...project, matchingPhases }]
+          : [];
+      });
     };
 
     return {
@@ -368,7 +422,7 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
         .filter((cat) => cat.projects.length > 0),
       uncategorized: filterProjects(enrichedData.uncategorized),
     };
-  }, [enrichedData, search, statusFilter]);
+  }, [enrichedData, phases, search, statusFilter]);
 
   // ─── Keyboard shortcuts ─────────────────────────────────────────────────────
 
@@ -500,7 +554,7 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
             ref={searchRef}
             value={search}
             onChange={setSearch}
-            placeholder="Filter projects... (press /)"
+            placeholder="Projects or phases... (press /)"
             ariaLabel="Search projects"
             clearLabel="Clear project search"
             className="py-1.5"
@@ -511,25 +565,27 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
         {/* Project list */}
         <div className="flex-1 overflow-y-auto p-2 space-y-3">
           {/* All Projects overview link */}
-          <Link
-            href="/projects"
-            className={cn(
-              'flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors duration-150',
-              !activeProjectId
-                ? 'bg-[var(--accent-500)]/10 border border-[var(--accent-500)]/20'
-                : 'hover:bg-[var(--surface-2)] border border-transparent',
-            )}
-          >
-            <span className="flex h-2.5 w-2.5 items-center justify-center">
-              <span className="h-2 w-2 rounded-sm bg-[var(--text-muted)]" />
-            </span>
-            <span className={cn(
-              'text-sm font-medium',
-              !activeProjectId ? 'text-[var(--accent-400)]' : 'text-[var(--text-primary)]',
-            )}>
-              All Projects
-            </span>
-          </Link>
+          {!search.trim() && (
+            <Link
+              href="/projects"
+              className={cn(
+                'flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors duration-150',
+                !activeProjectId
+                  ? 'bg-[var(--accent-500)]/10 border border-[var(--accent-500)]/20'
+                  : 'hover:bg-[var(--surface-2)] border border-transparent',
+              )}
+            >
+              <span className="flex h-2.5 w-2.5 items-center justify-center">
+                <span className="h-2 w-2 rounded-sm bg-[var(--text-muted)]" />
+              </span>
+              <span className={cn(
+                'text-sm font-medium',
+                !activeProjectId ? 'text-[var(--accent-400)]' : 'text-[var(--text-primary)]',
+              )}>
+                All Projects
+              </span>
+            </Link>
+          )}
 
           {filteredCategories.categories.map((cat) => (
             <div key={cat.category}>
@@ -560,6 +616,7 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
                       key={project.id}
                       project={project}
                       isActive={project.id === activeProjectId}
+                      matchingPhases={project.matchingPhases}
                     />
                   ))}
                 </div>
@@ -598,12 +655,23 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
                       key={project.id}
                       project={project}
                       isActive={project.id === activeProjectId}
+                      matchingPhases={project.matchingPhases}
                     />
                   ))}
                 </div>
               )}
             </div>
           )}
+
+          {search.trim()
+            && filteredCategories.categories.length === 0
+            && filteredCategories.uncategorized.length === 0 && (
+              <div className="px-3 py-6 text-center">
+                <Search size={18} className="mx-auto mb-2 text-[var(--text-muted)]" aria-hidden="true" />
+                <p className="text-sm font-medium text-[var(--text-secondary)]">No projects or phases found</p>
+                <p className="mt-1 text-[12px] text-[var(--text-muted)]">Try a different name.</p>
+              </div>
+            )}
         </div>
 
         {/* Footer stats */}

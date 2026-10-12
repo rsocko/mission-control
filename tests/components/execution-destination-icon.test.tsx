@@ -28,7 +28,7 @@ describe('ExecutionDestinationIcon', () => {
 
     expect(container.querySelector('img')).toHaveAttribute(
       'src',
-      '/icons/connectors/paperclip.svg',
+      '/icons/connectors/paperclip-mark.svg',
     );
   });
 });

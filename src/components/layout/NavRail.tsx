@@ -43,6 +43,7 @@ import {
   resolveSyncIconVariant,
 } from '@/lib/hooks/useSyncIconPreference';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
+import { getConnectorIconPath } from '@/lib/constants/colors';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 import { getShortcutPage } from '@/lib/navigation/shortcut-catalog';
 import { RecentProjectsNavItem } from '@/components/layout/RecentProjectsNavItem';
@@ -575,12 +576,14 @@ export function NavRail({
             const isThisConnectorSyncing = isSyncing
               && displayedSyncProgresses.some((item) => item.connectorId === status.id);
             const isThisConnectorQueued = queuedSyncConnectorIds.includes(status.id);
+            const connectorIcon = getConnectorIconPath(status.type, 12)
+              ?? CONNECTOR_ICONS[status.type];
             return (
               <div key={status.id} className="flex items-center justify-between gap-2 text-xs">
                 <div className="flex min-w-0 items-center gap-1.5">
-                  {CONNECTOR_ICONS[status.type] && (
+                  {connectorIcon && (
                     <Image
-                      src={CONNECTOR_ICONS[status.type]}
+                      src={connectorIcon}
                       alt={status.name}
                       width={12}
                       height={12}

@@ -32,7 +32,7 @@ describe('ExecutionDestinationsSection', () => {
     const paperclipButton = screen.getByRole('button', { name: 'Paperclip route' });
     expect(paperclipButton.querySelector('img')).toHaveAttribute(
       'src',
-      '/icons/connectors/paperclip.svg',
+      '/icons/connectors/paperclip-mark.svg',
     );
 
     const githubButton = screen.getByRole('button', { name: 'GitHub Copilot Cloud' });

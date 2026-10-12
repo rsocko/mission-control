@@ -4,9 +4,12 @@ import Image from 'next/image';
 import { Plug } from 'lucide-react';
 import { CONNECTOR_ICONS } from './types';
 import { IconRenderer } from '@rsocko/icon-picker/renderer';
+import { getConnectorIconPath } from '@/lib/constants/colors';
 
 export function ConnectorBrandIcon({ type, size = 18 }: { type: string; size?: number }) {
-  const src = CONNECTOR_ICONS[type];
+  const src = type === 'paperclip'
+    ? getConnectorIconPath(type, size)
+    : CONNECTOR_ICONS[type];
   if (!src) return <Plug size={size} className="text-[var(--text-muted)]" />;
   if (src.includes(':')) {
     return (

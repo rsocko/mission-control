@@ -26,7 +26,10 @@ export const CONNECTOR_COLORS: Record<string, string> = {
 };
 
 export const LOCAL_CONNECTOR_ICON_PATH = '/icons/connectors/local.svg';
+// Official Paperclip brand favicon and standalone app favicon, respectively.
 export const PAPERCLIP_CONNECTOR_ICON_PATH = '/icons/connectors/paperclip.svg';
+export const PAPERCLIP_COMPACT_CONNECTOR_ICON_PATH = '/icons/connectors/paperclip-mark.svg';
+export const PAPERCLIP_COMPACT_ICON_MAX_SIZE = 18;
 
 /** Icon paths for connector logos */
 export const CONNECTOR_ICON_PATHS: Record<string, string> = {
@@ -48,6 +51,13 @@ export const CONNECTOR_ICON_PATHS: Record<string, string> = {
   'monarch-money': '/icons/connectors/tyrion.svg',
   'custom-rest': '/icons/connectors/custom-rest.svg',
 };
+
+export function getConnectorIconPath(connectorType: string, size: number): string | undefined {
+  if (connectorType === 'paperclip' && size <= PAPERCLIP_COMPACT_ICON_MAX_SIZE) {
+    return PAPERCLIP_COMPACT_CONNECTOR_ICON_PATH;
+  }
+  return CONNECTOR_ICON_PATHS[connectorType];
+}
 
 /** Human-friendly connector names for accessibility (alt text, aria-labels) */
 export const CONNECTOR_LABELS: Record<string, string> = {

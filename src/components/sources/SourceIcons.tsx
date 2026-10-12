@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { Globe, List } from 'lucide-react';
 import { IconRenderer } from '@rsocko/icon-picker/renderer';
-import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
+import { CONNECTOR_ICON_PATHS, getConnectorIconPath } from '@/lib/constants/colors';
 import { canonicalTaskSourceType } from '@/lib/tasks/source-hierarchy';
 import { cn } from '@/lib/utils';
 import type { SourceList } from '@/types/dashboard';
@@ -19,7 +19,7 @@ export function ConnectorIcon({
   size = 14,
   className,
 }: ConnectorIconProps) {
-  const iconPath = CONNECTOR_ICON_PATHS[canonicalTaskSourceType(connectorType)];
+  const iconPath = getConnectorIconPath(canonicalTaskSourceType(connectorType), size);
   if (!iconPath) {
     return <Globe aria-hidden="true" size={size} className={cn('shrink-0', className)} />;
   }

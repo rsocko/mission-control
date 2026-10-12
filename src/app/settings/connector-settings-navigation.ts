@@ -37,3 +37,16 @@ export function buildConnectorSettingsHref(
   }
   return `${url.pathname}${url.search}${url.hash}`;
 }
+
+export function updateConnectorSettingsHistory(
+  history: Pick<History, 'state' | 'pushState' | 'replaceState'>,
+  currentHref: string,
+  connectorId: string | null,
+  tab: ConnectorSettingsTab = 'general',
+  replace = false,
+): string {
+  const href = buildConnectorSettingsHref(currentHref, connectorId, tab);
+  const method = replace ? history.replaceState : history.pushState;
+  method.call(history, history.state, '', href);
+  return href;
+}

@@ -12,6 +12,7 @@ import {
   PACKAGE_VERSION,
   SOURCE_COMMIT,
   SOURCE_TAG,
+  validatePackageExports,
   verifySnapshot,
 } from './icon-picker-vendor.mjs';
 
@@ -145,4 +146,84 @@ test('requires an explicit reviewable pin update for a different exact commit', 
   );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /pass --update-pin true only when generating a reviewable update/i);
+});
+
+test('accepts safe additive package exports while preserving required mappings', () => {
+  assert.doesNotThrow(() => validatePackageExports({
+    '.': {
+      types: './dist/index.d.ts',
+      import: './dist/index.js',
+    },
+    './core': {
+      types: './dist/core.d.ts',
+      import: './dist/core.js',
+    },
+    './export': {
+      types: './dist/export.d.ts',
+      import: './dist/export.js',
+    },
+    './renderer': {
+      types: './dist/renderer.d.ts',
+      import: './dist/renderer.js',
+    },
+    './picker': {
+      types: './dist/picker.d.ts',
+      import: './dist/picker.js',
+    },
+    './styles.css': './dist/styles.css',
+    './package.json': './package.json',
+  }));
+});
+
+test('rejects changed required or unsafe additive package exports', () => {
+  const required = {
+    '.': {
+      types: './dist/index.d.ts',
+      import: './dist/index.js',
+    },
+    './core': {
+      types: './dist/core.d.ts',
+      import: './dist/core.js',
+    },
+    './renderer': {
+      types: './dist/renderer.d.ts',
+      import: './dist/renderer.js',
+    },
+    './picker': {
+      types: './dist/picker.d.ts',
+      import: './dist/picker.js',
+    },
+    './styles.css': './dist/styles.css',
+    './package.json': './package.json',
+  };
+  assert.throws(
+    () => validatePackageExports({
+      ...required,
+      './core': {
+        types: './dist/core.d.ts',
+        import: './dist/other.js',
+      },
+    }),
+    /required mapping/i,
+  );
+  assert.throws(
+    () => validatePackageExports({
+      ...required,
+      './../secret': {
+        types: './dist/secret.d.ts',
+        import: './dist/secret.js',
+      },
+    }),
+    /unsafe entry point/i,
+  );
+  assert.throws(
+    () => validatePackageExports({
+      ...required,
+      './export': {
+        types: './dist/export.d.ts',
+        import: './dist/other.js',
+      },
+    }),
+    /matching dist/i,
+  );
 });

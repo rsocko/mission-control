@@ -36,13 +36,16 @@ export const connectorConfigs = sqliteTable('connector_configs', {
 
 export const listGroups = sqliteTable('list_groups', {
   id: text('id').primaryKey(),
+  connectorInstanceId: text('connector_instance_id'),
   name: text('name').notNull(),
   icon: text('icon'),
   iconColor: text('icon_color'),
   sourceId: text('source_id'),
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: text('created_at').notNull(),
-});
+}, (table) => [
+  index('list_groups_connector_idx').on(table.connectorInstanceId),
+]);
 
 // ─── SOURCE LISTS ───────────────────────────────────────────────────────────
 

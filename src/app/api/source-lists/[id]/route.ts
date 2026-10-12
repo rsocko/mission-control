@@ -33,8 +33,15 @@ export async function PATCH(
           : null;
 
       if (nextGroupId) {
-        if (!(await persistence.listGroupExists(nextGroupId))) {
+        const groupOwner = await persistence.getListGroupOwner(nextGroupId);
+        if (!groupOwner) {
           return NextResponse.json({ error: 'List group not found' }, { status: 404 });
+        }
+        if (groupOwner !== sourceList.connectorInstanceId) {
+          return NextResponse.json(
+            { error: 'Lists can only be assigned to groups from the same source' },
+            { status: 409 },
+          );
         }
       }
 

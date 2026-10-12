@@ -1679,7 +1679,9 @@ export function createPostgresConnectorExecutionRepositories(
         return transaction(pool, async (client) => {
           const rows = await query<{ id: string; name: string; sourceId: string | null }>(
             client,
-            'SELECT id, name, source_id AS "sourceId" FROM list_groups FOR UPDATE',
+            `SELECT id, name, source_id AS "sourceId" FROM list_groups
+             WHERE connector_instance_id = $1 FOR UPDATE`,
+            [input.connectorId],
           );
           const bySource = new Map(rows.flatMap((row) => (
             row.sourceId ? [[row.sourceId, row.id] as const] : []
@@ -1699,10 +1701,11 @@ export function createPostgresConnectorExecutionRepositories(
                 id = `lg-${randomUUID().slice(0, 8)}`;
                 await client.query(
                   `
-                    INSERT INTO list_groups (id, name, source_id, sort_order, created_at)
-                    VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO list_groups (
+                      id, connector_instance_id, name, source_id, sort_order, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6)
                   `,
-                  [id, group.name, group.sourceId, sortOrder++, input.now],
+                  [id, input.connectorId, group.name, group.sourceId, sortOrder++, input.now],
                 );
                 byName.set(group.name, id);
               }
@@ -1716,9 +1719,9 @@ export function createPostgresConnectorExecutionRepositories(
             const result = await client.query(
               `
                 UPDATE source_lists SET group_id = $1
-                WHERE source_id = $2 AND group_id IS NULL
+                WHERE connector_instance_id = $2 AND source_id = $3 AND group_id IS NULL
               `,
-              [groupId, list.sourceId],
+              [groupId, input.connectorId, list.sourceId],
             );
             assigned += result.rowCount ?? 0;
           }

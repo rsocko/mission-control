@@ -740,11 +740,13 @@ export function createPostgresConnectorManagementRepository(
       ))[0] ?? null;
     },
 
-    async listGroupExists(groupId) {
-      return (await pool.query(
-        'SELECT 1 FROM list_groups WHERE id = $1 LIMIT 1',
+    async getListGroupOwner(groupId) {
+      const result = await pool.query<{ connectorInstanceId: string | null }>(
+        `SELECT connector_instance_id AS "connectorInstanceId"
+         FROM list_groups WHERE id = $1 LIMIT 1`,
         [groupId],
-      )).rowCount === 1;
+      );
+      return result.rows[0]?.connectorInstanceId ?? null;
     },
 
     async patchSourceList(input) {

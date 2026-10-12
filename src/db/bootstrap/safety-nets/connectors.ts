@@ -29,6 +29,9 @@ export function applyConnectorSourceListColumnSafetyNets(_sqlite: Database.Datab
   if (listGroupColumns.length > 0 && !listGroupColumns.some((column) => column.name === 'icon_color')) {
     _sqlite.exec('ALTER TABLE list_groups ADD COLUMN icon_color TEXT');
   }
+  if (listGroupColumns.length > 0 && !listGroupColumns.some((column) => column.name === 'connector_instance_id')) {
+    _sqlite.exec('ALTER TABLE list_groups ADD COLUMN connector_instance_id TEXT');
+  }
 
   const sourceListColumns = _sqlite.prepare("PRAGMA table_info('source_lists')").all() as Array<{ name: string }>;
   if (sourceListColumns.length > 0 && !sourceListColumns.some((column) => column.name === 'group_id')) {

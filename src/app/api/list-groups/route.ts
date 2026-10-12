@@ -6,6 +6,7 @@ import {
   createListGroup,
   getListOrganizationSnapshot,
 } from '@/lib/list-groups/service';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 export async function GET() {
   try {
@@ -21,9 +22,18 @@ export async function POST(request: Request) {
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     const icon = typeof body.icon === 'string' ? body.icon.trim() : '';
     const iconColor = typeof body.iconColor === 'string' ? body.iconColor.trim() : '';
+    const connectorInstanceId = typeof body.connectorInstanceId === 'string'
+      ? body.connectorInstanceId.trim()
+      : '';
 
     if (!name) {
       return ApiErrors.badRequest('Group name is required');
+    }
+    if (!connectorInstanceId) {
+      return ApiErrors.badRequest('Source is required');
+    }
+    if (!(await (await getConnectorManagementPersistence()).getConnector(connectorInstanceId))) {
+      return NextResponse.json({ error: 'Source not found' }, { status: 404 });
     }
 
     // Validate emoji safety — icon+name combined is what gets synced
@@ -37,6 +47,7 @@ export async function POST(request: Request) {
     const createdAt = new Date().toISOString();
     await createListGroup({
       id,
+      connectorInstanceId,
       name,
       icon: icon || null,
       iconColor: iconColor || null,

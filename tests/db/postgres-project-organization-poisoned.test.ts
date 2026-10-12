@@ -11,6 +11,7 @@ const NOW = '2026-01-01T00:00:00.000Z';
 const PROJECT_ID = 'poisoned-organization-project';
 const PHASE_ID = 'poisoned-organization-phase';
 const GROUP_ID = 'poisoned-organization-group';
+const CONNECTOR_ID = 'poisoned-organization-connector';
 
 const project = {
   id: PROJECT_ID,
@@ -120,6 +121,11 @@ const listOrganization = {
 vi.mock('@/lib/persistence/worker-runtime', () => ({
   getWorkerPersistenceRepositories: async () => ({
     projectAutomation: { projectAdministration, listOrganization },
+    execution: {
+      management: {
+        getConnector: async (id: string) => id === CONNECTOR_ID ? { id } : null,
+      },
+    },
   }),
 }));
 vi.mock('@/lib/rules', () => ({
@@ -210,7 +216,10 @@ describe('poisoned-SQLite project-organization web surface', () => {
     expect((await groups.GET()).status).toBe(200);
     expect((await groups.POST(new Request(`${BASE}/api/list-groups`, {
       method: 'POST',
-      body: JSON.stringify({ name: 'Created group' }),
+      body: JSON.stringify({
+        connectorInstanceId: CONNECTOR_ID,
+        name: 'Created group',
+      }),
     }))).status).toBe(201);
     const groupParams = { params: Promise.resolve({ id: GROUP_ID }) };
     expect((await groupItem.PATCH(new Request(
@@ -223,7 +232,10 @@ describe('poisoned-SQLite project-organization web surface', () => {
     ), groupParams)).status).toBe(200);
     expect((await reorder.PUT(new Request(`${BASE}/api/list-groups/reorder`, {
       method: 'PUT',
-      body: JSON.stringify({ orderedIds: [GROUP_ID] }),
+      body: JSON.stringify({
+        connectorInstanceId: CONNECTOR_ID,
+        orderedIds: [GROUP_ID],
+      }),
     }))).status).toBe(200);
   });
 

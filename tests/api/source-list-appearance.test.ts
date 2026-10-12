@@ -13,8 +13,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   patchSourceList.mockResolvedValue(undefined);
   getConnectorManagementPersistence.mockResolvedValue({
-    getSourceList: vi.fn().mockResolvedValue({ id: 'list-1' }),
-    listGroupExists: vi.fn(),
+    getSourceList: vi.fn().mockResolvedValue({
+      id: 'list-1',
+      connectorInstanceId: 'connector-a',
+    }),
+    getListGroupOwner: vi.fn().mockResolvedValue('connector-a'),
     patchSourceList,
   });
 });
@@ -32,6 +35,25 @@ async function patch(body: unknown) {
 }
 
 describe('source list appearance route', () => {
+  it('rejects assigning a list to a group from another source', async () => {
+    getConnectorManagementPersistence.mockResolvedValue({
+      getSourceList: vi.fn().mockResolvedValue({
+        id: 'list-1',
+        connectorInstanceId: 'connector-a',
+      }),
+      getListGroupOwner: vi.fn().mockResolvedValue('connector-b'),
+      patchSourceList,
+    });
+
+    const response = await patch({ groupId: 'group-b' });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'Lists can only be assigned to groups from the same source',
+    });
+    expect(patchSourceList).not.toHaveBeenCalled();
+  });
+
   it('persists a validated appearance override', async () => {
     const appearance = {
       strength: 'canvas',

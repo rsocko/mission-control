@@ -378,9 +378,11 @@ function loadListOrganizationSnapshot(
   sqlite: Database.Database,
 ): ListOrganizationSnapshot {
   const groups = sqlite.prepare(`
-    SELECT id, name, icon, icon_color AS iconColor, source_id AS sourceId,
+    SELECT id, connector_instance_id AS connectorInstanceId,
+           name, icon, icon_color AS iconColor, source_id AS sourceId,
            sort_order AS sortOrder, created_at AS createdAt
     FROM list_groups
+    WHERE connector_instance_id IS NOT NULL
     ORDER BY sort_order ASC, name COLLATE BINARY ASC, id COLLATE BINARY ASC
   `).all() as ListOrganizationGroup[];
   const lists = (sqlite.prepare(`
@@ -437,13 +439,15 @@ export function createSqliteListOrganizationRepository(
       sqlite.transaction(() => {
         const max = sqlite.prepare(`
           SELECT coalesce(max(sort_order), -1) AS value FROM list_groups
-        `).get() as { value: number };
+          WHERE connector_instance_id = ?
+        `).get(group.connectorInstanceId) as { value: number };
         sqlite.prepare(`
           INSERT INTO list_groups (
-            id, name, icon, icon_color, source_id, sort_order, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            id, connector_instance_id, name, icon, icon_color, source_id, sort_order, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           group.id,
+          group.connectorInstanceId,
           group.name,
           group.icon,
           group.iconColor,
@@ -465,10 +469,13 @@ export function createSqliteListOrganizationRepository(
         sqlite.prepare('DELETE FROM list_groups WHERE id = ?').run(groupId);
       }).immediate();
     },
-    async reorderGroups(orderedIds) {
+    async reorderGroups(connectorInstanceId, orderedIds) {
       sqlite.transaction(() => {
-        const update = sqlite.prepare('UPDATE list_groups SET sort_order = ? WHERE id = ?');
-        orderedIds.forEach((id, index) => update.run(index, id));
+        const update = sqlite.prepare(`
+          UPDATE list_groups SET sort_order = ?
+          WHERE id = ? AND connector_instance_id = ?
+        `);
+        orderedIds.forEach((id, index) => update.run(index, id, connectorInstanceId));
       }).immediate();
     },
   };

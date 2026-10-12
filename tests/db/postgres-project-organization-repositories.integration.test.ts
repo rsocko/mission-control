@@ -132,10 +132,12 @@ describe.skipIf(!connectionString)('PostgreSQL project-organization adapters', (
         ]);
 
         await pool.query(`
-          INSERT INTO list_groups (id, name, sort_order, created_at)
+          INSERT INTO list_groups (
+            id, connector_instance_id, name, sort_order, created_at
+          )
           VALUES
-            ($1, 'Zulu group', 1, $3),
-            ($2, 'Alpha group', 0, $3)
+            ($1, 'organization-connector', 'Zulu group', 1, $3),
+            ($2, 'organization-connector', 'Alpha group', 0, $3)
         `, [
           ORGANIZATION_FIXTURE.groupA,
           ORGANIZATION_FIXTURE.groupB,

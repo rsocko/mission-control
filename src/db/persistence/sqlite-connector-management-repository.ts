@@ -649,9 +649,12 @@ export function createSqliteConnectorManagementRepository(
       return row ? mapSourceList(row) : null;
     },
 
-    async listGroupExists(groupId) {
-      return database.prepare('SELECT 1 FROM list_groups WHERE id = ? LIMIT 1')
-        .get(groupId) !== undefined;
+    async getListGroupOwner(groupId) {
+      const row = database.prepare(`
+        SELECT connector_instance_id AS connectorInstanceId
+        FROM list_groups WHERE id = ? LIMIT 1
+      `).get(groupId) as { connectorInstanceId: string | null } | undefined;
+      return row?.connectorInstanceId ?? null;
     },
 
     async patchSourceList(input) {

@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   softDeleteConnector: vi.fn(async () => ({ affectedTasks: 2, affectedLists: 1 })),
   hardDeleteConnector: vi.fn(async () => undefined),
   getSourceList: vi.fn(),
-  listGroupExists: vi.fn(async () => true),
+  getListGroupOwner: vi.fn(async () => 'connector-1'),
   patchSourceList: vi.fn(async () => undefined),
   reorderSourceLists: vi.fn(async () => undefined),
   listSourceRankings: vi.fn(async () => []),
@@ -96,7 +96,7 @@ describe('connector management API routes', () => {
       }],
     });
     mocks.getSourceList.mockResolvedValue(sourceList);
-    mocks.listGroupExists.mockResolvedValue(true);
+    mocks.getListGroupOwner.mockResolvedValue('connector-1');
   });
 
   it('builds the connector response entirely from the management port', async () => {
@@ -249,7 +249,7 @@ describe('connector management API routes', () => {
     }), { params: Promise.resolve({ id: 'list-1' }) });
 
     expect(response.status).toBe(200);
-    expect(mocks.listGroupExists).toHaveBeenCalledWith('group-1');
+    expect(mocks.getListGroupOwner).toHaveBeenCalledWith('group-1');
     expect(mocks.patchSourceList).toHaveBeenCalledWith({
       sourceListId: 'list-1',
       groupId: 'group-1',

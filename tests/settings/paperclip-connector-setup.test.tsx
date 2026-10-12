@@ -9,10 +9,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('renders the vendored upstream Paperclip logo', () => {
+it('uses the official Paperclip mark appropriate to the rendered size', () => {
   expect(CONNECTOR_ICONS.paperclip).toBe('/icons/connectors/paperclip.svg');
 
-  const { container } = render(<ConnectorBrandIcon type="paperclip" />);
+  const { container, rerender } = render(<ConnectorBrandIcon type="paperclip" />);
+
+  expect(container.querySelector('img')).toHaveAttribute(
+    'src',
+    '/icons/connectors/paperclip-mark.svg',
+  );
+
+  rerender(<ConnectorBrandIcon type="paperclip" size={20} />);
 
   expect(container.querySelector('img')).toHaveAttribute(
     'src',

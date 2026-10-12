@@ -479,7 +479,7 @@ describe('NavRail', () => {
     expect(screen.getByText('Local')).toBeInTheDocument();
     expect(screen.getByAltText('Paperclip — All companies')).toHaveAttribute(
       'src',
-      '/icons/connectors/paperclip.svg',
+      '/icons/connectors/paperclip-mark.svg',
     );
     expect(screen.getAllByText('Never')).toHaveLength(2);
 

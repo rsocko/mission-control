@@ -3,7 +3,9 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CONNECTOR_ICON_PATHS,
+  getConnectorIconPath,
   LOCAL_CONNECTOR_ICON_PATH,
+  PAPERCLIP_COMPACT_CONNECTOR_ICON_PATH,
   PAPERCLIP_CONNECTOR_ICON_PATH,
 } from '@/lib/constants/colors';
 import { CONNECTOR_ICONS as SETTINGS_CONNECTOR_ICONS } from '@/app/settings/components/types';
@@ -44,6 +46,21 @@ describe('connector icon mappings', () => {
     expect(icon).toContain('viewBox="0 0 48 48"');
     expect(icon).toContain('<rect width="48" height="48" rx="10" fill="#0A0A0A"/>');
     expect(icon).toContain('stroke="#FFFFFF"');
+    expect(icon).toContain('d="m16 6-8.414 8.586');
+  });
+
+  it('uses Paperclip official standalone mark at compact sizes', () => {
+    expect(getConnectorIconPath('paperclip', 18)).toBe(PAPERCLIP_COMPACT_CONNECTOR_ICON_PATH);
+    expect(getConnectorIconPath('paperclip', 19)).toBe(PAPERCLIP_CONNECTOR_ICON_PATH);
+    expect(getConnectorIconPath('github-issues', 14)).toBe('/icons/connectors/github.svg');
+
+    const icon = readFileSync(
+      resolve(process.cwd(), 'public/icons/connectors/paperclip-mark.svg'),
+      'utf8',
+    );
+    expect(icon).toContain('viewBox="0 0 24 24"');
+    expect(icon).toContain('@media (prefers-color-scheme: dark)');
+    expect(icon).not.toContain('<rect');
     expect(icon).toContain('d="m16 6-8.414 8.586');
   });
 

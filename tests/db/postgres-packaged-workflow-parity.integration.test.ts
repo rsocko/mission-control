@@ -1066,10 +1066,8 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
             ORDER BY event.sequence
             LIMIT 1) AS outbox_attempts,
            (SELECT job.attempt_count
-            FROM notifications notification
-            INNER JOIN notification_enrichment_jobs job
-              ON job.notification_id = notification.id
-            WHERE notification.id = $2) AS enrichment_attempts,
+            FROM notification_enrichment_jobs job
+            WHERE job.id = $10) AS enrichment_attempts,
            (SELECT attempt FROM ai_runs WHERE id = $3) AS ai_attempts,
            (SELECT (execution_state ->> 'revision')::int
             FROM ai_runs WHERE id = $3) AS ai_lifecycle_revision,
@@ -1142,6 +1140,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           `${prefix}:planning`,
           syncJob.id,
           `${prefix}:connector:${prefix}:alert`,
+          prioritizedClaimIds.enrichment,
         ],
       );
       expect(evidence.rows[0]).toMatchObject({

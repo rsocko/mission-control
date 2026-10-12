@@ -10,7 +10,9 @@ import {
   RotateCcw,
   Sparkles,
   Zap,
+  ListChecks,
 } from 'lucide-react';
+import Link from 'next/link';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from '@/lib/toast';
 import ModeSelector from './ModeSelector';
@@ -45,6 +47,7 @@ import {
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
+import { TYRION_FINANCE_TASK_SOURCE_TYPE } from '@/lib/tasks/source-hierarchy';
 import type { LocalDisposition, PlanningHorizon, TaskField } from '@/types';
 
 const MODE_LABELS: Record<QuickSortQueueMode, string> = {
@@ -977,6 +980,19 @@ export default function QuickSortMode() {
             <h1 className="text-xl font-bold text-[var(--text-primary)]">Quick Sort</h1>
           </div>
           <ScopeFilter filter={scopeFilter} onChange={setScopeFilter} />
+          {scopeFilter.source === TYRION_FINANCE_TASK_SOURCE_TYPE && (
+            <div className="-mt-1 px-4 pb-4">
+              <Link
+                href={scopeFilter.connectorId
+                  ? `/finance/quick-review?connectorId=${encodeURIComponent(scopeFilter.connectorId)}`
+                  : '/finance/quick-review'}
+                className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]"
+              >
+                <ListChecks size={16} aria-hidden="true" />
+                Quick Review Money
+              </Link>
+            </div>
+          )}
           <div className="mt-1">
             <ActivityBanner key={statsKey} />
           </div>

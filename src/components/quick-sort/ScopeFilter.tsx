@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Filter, Search, X } from 'lucide-react';
 import { ConnectorIcon, SourceListIcon } from '@/components/sources/SourceIcons';
 import { getConnectorLabel } from '@/lib/constants/colors';
+import { TYRION_FINANCE_TASK_SOURCE_TYPE } from '@/lib/tasks/source-hierarchy';
 import { cn } from '@/lib/utils';
 import type { QuickSortScopeFilter } from '@/lib/hooks/useQuickSortData';
 import type { QuickSortSourceData } from '@/lib/quick-sort/source-options';
@@ -73,8 +74,11 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
     setExpanded(false);
   };
 
-  const selectSource = (connectorType: string) => {
-    onChange({ source: connectorType });
+  const selectSource = (connectorType: string, connectorId: string) => {
+    onChange({
+      source: connectorType,
+      ...(connectorType === TYRION_FINANCE_TASK_SOURCE_TYPE ? { connectorId } : {}),
+    });
     setExpanded(false);
   };
 
@@ -216,7 +220,7 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
                       <div className="flex items-center">
                         <button
                           type="button"
-                          onClick={() => selectSource(connectorType)}
+                          onClick={() => selectSource(connectorType, data.connectorId)}
                           className={cn(
                             'flex min-h-11 min-w-0 flex-1 items-center gap-2 px-4 text-left text-sm font-medium transition-colors hover:bg-[var(--surface-2)] active:bg-[var(--surface-3)]',
                             filter.source === connectorType && !filter.sourceList

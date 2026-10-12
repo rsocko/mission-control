@@ -18,6 +18,8 @@ import {
   type TyrionQuickReviewRuleRequest,
   type TyrionQuickReviewRuleResponse,
 } from '@/lib/finance/quick-review-contract';
+import { getPersistedFinanceManagerServiceToken } from './client';
+import type { ConnectorConfig } from '@/types';
 
 const TYRION_INTERNAL_ORIGIN = 'http://tyrion-operations-ui:3000';
 const TYRION_INTERNAL_AUTHORITY = 'tyrion-operations-ui:3000';
@@ -39,7 +41,7 @@ export class TyrionFinanceReviewError extends Error {
 }
 
 function configuredToken(environment: Readonly<Record<string, string | undefined>>): string {
-  const token = environment.BRIDGE_API_TOKEN?.trim() ?? '';
+  const token = environment.FINANCE_MANAGER_API_TOKEN?.trim() ?? '';
   if (token.length < 32) {
     throw new TyrionFinanceReviewError(
       'attribution_auth_not_configured',
@@ -49,6 +51,16 @@ function configuredToken(environment: Readonly<Record<string, string | undefined
     );
   }
   return token;
+}
+
+export function resolveTyrionQuickReviewToken(
+  config: Pick<ConnectorConfig, 'credentials'>,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const persistedToken = getPersistedFinanceManagerServiceToken(config);
+  return persistedToken.length >= 32
+    ? persistedToken
+    : configuredToken(environment);
 }
 
 async function boundedJson(response: Response): Promise<unknown> {

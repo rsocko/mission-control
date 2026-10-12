@@ -73,7 +73,13 @@ vi.mock('@/components/quick-sort/ModeSelector', () => ({
   ),
 }));
 vi.mock('@/components/quick-sort/OrderSelector', () => ({ default: () => null }));
-vi.mock('@/components/quick-sort/ScopeFilter', () => ({ default: () => null }));
+vi.mock('@/components/quick-sort/ScopeFilter', () => ({
+  default: ({ onChange }: { onChange: (filter: { source: string; connectorId: string }) => void }) => (
+    <button onClick={() => onChange({ source: 'finance-manager', connectorId: 'money-1' })}>
+      Select Money source
+    </button>
+  ),
+}));
 vi.mock('@/components/quick-sort/ActivityBanner', () => ({ default: () => null }));
 vi.mock('@/components/ui/AnimatedCounter', () => ({
   AnimatedCounter: ({ value }: { value: number }) => (
@@ -133,6 +139,17 @@ describe('QuickSortMode task drawer', () => {
 
     expect(mocks.refreshCounts).toHaveBeenCalledOnce();
     expect(mocks.refreshQueue).toHaveBeenCalledOnce();
+  });
+
+  it('offers Money Quick Review for the selected Money source', () => {
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select Money source' }));
+
+    expect(screen.getByRole('link', { name: 'Quick Review Money' })).toHaveAttribute(
+      'href',
+      '/finance/quick-review?connectorId=money-1',
+    );
   });
 
   it('keeps the icon-only undo control at a 44px touch target on mobile', () => {

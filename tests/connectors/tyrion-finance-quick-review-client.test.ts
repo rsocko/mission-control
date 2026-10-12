@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  resolveTyrionQuickReviewToken,
   TyrionFinanceReviewClient,
 } from '@/lib/connectors/monarch-money/quick-review-client';
 import type {
@@ -29,6 +30,22 @@ afterEach(() => {
 });
 
 describe('TyrionFinanceReviewClient', () => {
+  it('uses the persisted connector token before the server fallback', () => {
+    expect(resolveTyrionQuickReviewToken(
+      { credentials: { serviceToken: TOKEN } },
+      { FINANCE_MANAGER_API_TOKEN: 'fallback-private-token-at-least-32-characters' },
+    )).toBe(TOKEN);
+  });
+
+  it('uses the documented server fallback when the connector has no token', () => {
+    const fallback = 'fallback-private-token-at-least-32-characters';
+
+    expect(resolveTyrionQuickReviewToken(
+      { credentials: {} },
+      { FINANCE_MANAGER_API_TOKEN: fallback },
+    )).toBe(fallback);
+  });
+
   it('uses the exact private transport and never puts the token in the body', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       contractVersion: '1.0',

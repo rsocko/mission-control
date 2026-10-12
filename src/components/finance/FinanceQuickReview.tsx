@@ -155,7 +155,7 @@ function subscribeToConnectivity(onChange: () => void) {
   };
 }
 
-export function FinanceQuickReview() {
+export function FinanceQuickReview({ connectorId = null }: { connectorId?: string | null }) {
   const [viewState, setViewState] = useState<ViewState>('loading');
   const [session, setSession] = useState<FinanceReviewSession | null>(null);
   const [mode, setMode] = useState<'ranked' | 'period'>('ranked');
@@ -209,6 +209,7 @@ export function FinanceQuickReview() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contractVersion: FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
+          ...(connectorId ? { connectorId } : {}),
           mode: nextMode,
           filters: nextFilters,
           resumeToken: resume ? loadResumeToken() : null,
@@ -248,7 +249,7 @@ export function FinanceQuickReview() {
       });
       setViewState('error');
     }
-  }, []);
+  }, [connectorId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

@@ -161,13 +161,14 @@ function asSettingsRecord(settings: unknown): Record<string, unknown> {
 // --- Connectors Section ----------------------------------------------------
 
 function ConnectorsSection({
-  connectors, sourceLists, loading, syncing, onToggle, onSync, onDelete, onUpdate, onPurgeSourceList, onAdd, selectedConnector, onSelect,
+  connectors, sourceLists, loading, syncingConnectorIds, queuedSyncConnectorIds, onToggle, onSync, onDelete, onUpdate, onPurgeSourceList, onAdd, selectedConnector, onSelect,
   selectedTab = 'general', onTabChange, deletedConnectors, onRestore, onPermanentDelete, onTested,
 }: {
   connectors: ConnectorConfig[];
   sourceLists: SourceList[];
   loading: boolean;
-  syncing: string | null;
+  syncingConnectorIds: ReadonlySet<string>;
+  queuedSyncConnectorIds: ReadonlySet<string>;
   onToggle: (id: string, enabled: boolean) => void;
   onSync: (id?: string) => void;
   onDelete: (id: string) => void;
@@ -247,9 +248,15 @@ function ConnectorsSection({
       ) : (
         <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-3">
           {connectors.map(conn => {
-           const isSyncing = syncing === conn.id;
+           const isSyncing = syncingConnectorIds.has(conn.id);
+           const isQueued = queuedSyncConnectorIds.has(conn.id);
            const connSourceLists = sourceLists.filter(sl => sl.connectorInstanceId === conn.id);
            const healthState = getHealthState(conn);
+           const syncLabel = isQueued
+             ? `${getConnectorDisplayName(conn)} sync queued`
+             : isSyncing
+               ? `${getConnectorDisplayName(conn)} sync in progress`
+               : `Sync ${getConnectorDisplayName(conn)}`;
 
            return (
              <motion.div
@@ -317,10 +324,15 @@ function ConnectorsSection({
                     </Link>
                     {conn.enabled && conn.type !== 'scout' && (
                       <button onClick={() => onSync(conn.id)}
-                        disabled={!!isSyncing}
+                        disabled={isSyncing || isQueued}
                         className="p-1.5 border border-[var(--border)] rounded-md hover:bg-[var(--surface-2)] disabled:opacity-50 transition-colors"
-                        title="Sync now">
-                        <RefreshCw size={12} className={isSyncing ? 'animate-spin text-blue-400' : 'text-[var(--text-muted)]'} />
+                        title={syncLabel}
+                        aria-label={syncLabel}>
+                        {isQueued ? (
+                          <Clock size={12} className="text-amber-400" />
+                        ) : (
+                          <RefreshCw size={12} className={isSyncing ? 'animate-spin text-blue-400' : 'text-[var(--text-muted)]'} />
+                        )}
                       </button>
                     )}
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -455,11 +467,19 @@ function ConnectorsSection({
                     <button
                       type="button"
                       onClick={() => onSync(selected.id)}
-                      disabled={syncing === selected.id}
+                      disabled={syncingConnectorIds.has(selected.id) || queuedSyncConnectorIds.has(selected.id)}
                       className="hidden h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50 sm:inline-flex"
                     >
-                      <RefreshCw size={13} className={syncing === selected.id ? 'animate-spin' : ''} />
-                      Sync now
+                      {queuedSyncConnectorIds.has(selected.id) ? (
+                        <Clock size={13} className="text-amber-400" />
+                      ) : (
+                        <RefreshCw size={13} className={syncingConnectorIds.has(selected.id) ? 'animate-spin' : ''} />
+                      )}
+                      {queuedSyncConnectorIds.has(selected.id)
+                        ? 'Queued'
+                        : syncingConnectorIds.has(selected.id)
+                          ? 'Syncing...'
+                          : 'Sync now'}
                     </button>
                   )}
                   <label className="relative inline-flex cursor-pointer items-center gap-2 text-xs text-[var(--text-secondary)]">

@@ -109,6 +109,7 @@ export function NavigationRailMorph({
       aria-label={`${count} items need attention`}
     >
       <motion.span
+        className="relative top-px"
         aria-hidden={!expanded}
         initial={false}
         animate={{ opacity: expanded ? 1 : 0 }}

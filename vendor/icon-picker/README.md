@@ -18,7 +18,7 @@ source and can deploy before the npm package is published.
 The companion
 [full-page explorer](https://rsocko.github.io/icon-picker/explorer/) provides a
 dense icon-finder workspace with provider filters, copy formats, colors, sizes,
-keyboard shortcuts, and live multi-provider search.
+keyboard shortcuts, complete provider browsing, and live multi-provider search.
 
 ## Install
 
@@ -165,13 +165,15 @@ Important props:
 ### `IconPicker`
 
 `IconPicker` supports source filtering, a local emoji keyword search, remote
-Iconify search, provider catalog filtering, color selection, loading and empty
-states, provider error notices, retries, keyboard activation, and an
-`aria-live` result count. Iconify results are resolved in batched icon-set
+Iconify search, complete provider browsing, color selection, loading and empty
+states, provider error notices, retries, keyboard activation, and an `aria-live`
+result count. Complete catalogs are revealed progressively in 96-icon batches;
+provider-supplied categories appear when available, while emoji uses its
+dedicated categorized browser. Iconify results are resolved in batched icon-set
 requests, including aliases, then rendered as CSS masks so uncolored icons
-inherit the consumer's current text color. Set `modal` only when embedding it
-in your own modal surface; `IconPickerButton` does this automatically.
-It accepts the same `theme` and typed `style` theming props as the button.
+inherit the consumer's current text color. Set `modal` only when embedding it in
+your own modal surface; `IconPickerButton` does this automatically. It accepts
+the same `theme` and typed `style` theming props as the button.
 
 ### `IconRenderer`
 
@@ -256,9 +258,9 @@ Emoji search is local. The other providers use public network services:
 
 | Purpose | Origin |
 | --- | --- |
-| Lucide, MDI, and Phosphor search/rendering | `https://api.iconify.design` |
+| Lucide, MDI, and Phosphor search/catalog/rendering | `https://api.iconify.design` |
 | Dashboard Icons catalog/rendering | `https://cdn.jsdelivr.net` |
-| Simple Icons catalog | `https://cdn.jsdelivr.net` |
+| Simple Icons catalog | `https://api.iconify.design` |
 | Simple Icons rendering | `https://cdn.simpleicons.org` |
 
 A strict Content Security Policy generally needs:

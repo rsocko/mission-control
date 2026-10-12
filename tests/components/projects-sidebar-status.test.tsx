@@ -70,7 +70,29 @@ describe('ProjectsSidebar project status indicators', () => {
         } as Response;
       }
       if (url === '/api/project-phases') {
-        return { ok: true, json: async () => ({ phases: [] }) } as Response;
+        return {
+          ok: true,
+          json: async () => ({
+            phases: [
+              {
+                id: 'phase-discovery',
+                projectId: 'active-project',
+                name: 'Discovery',
+                color: '#3b82f6',
+                status: 'in_progress',
+                sortOrder: 0,
+              },
+              {
+                id: 'phase-delivery',
+                projectId: 'active-project',
+                name: 'Delivery',
+                color: '#3b82f6',
+                status: 'pending',
+                sortOrder: 1,
+              },
+            ],
+          }),
+        } as Response;
       }
       throw new Error(`Unexpected fetch: ${url}`);
     }));
@@ -113,6 +135,7 @@ describe('ProjectsSidebar project status indicators', () => {
     await waitFor(() => expect(screen.getByText('Completed Project')).toBeInTheDocument());
 
     const searchInput = screen.getByRole('searchbox', { name: 'Search projects' });
+    expect(searchInput).toHaveAttribute('placeholder', 'Projects or phases... (press /)');
     fireEvent.change(searchInput, { target: { value: 'Healthy' } });
 
     const clearButton = screen.getByRole('button', { name: 'Clear project search' });
@@ -121,5 +144,33 @@ describe('ProjectsSidebar project status indicators', () => {
     expect(searchInput).toHaveValue('');
     expect(searchInput).toHaveFocus();
     expect(screen.queryByRole('button', { name: 'Clear project search' })).not.toBeInTheDocument();
+  });
+
+  it('shows phase matches beneath their project and links directly to the phase', async () => {
+    render(<ProjectsSidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('Healthy Project')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search projects' }), {
+      target: { value: 'discov' },
+    });
+
+    expect(screen.getByRole('link', { name: /^Healthy Project/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Discovery phase in Healthy Project' }))
+      .toHaveAttribute('href', '/projects/active-project?tab=phases&phase=phase-discovery');
+    expect(screen.queryByText('Delivery')).not.toBeInTheDocument();
+    expect(screen.queryByText('Completed Project')).not.toBeInTheDocument();
+    expect(screen.queryByText('All Projects')).not.toBeInTheDocument();
+  });
+
+  it('shows an empty state when neither projects nor phases match', async () => {
+    render(<ProjectsSidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('Healthy Project')).toBeInTheDocument());
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search projects' }), {
+      target: { value: 'not-a-project-or-phase' },
+    });
+
+    expect(screen.getByText('No projects or phases found')).toBeInTheDocument();
   });
 });

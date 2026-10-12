@@ -2,7 +2,10 @@ import 'server-only';
 
 import { randomUUID } from 'node:crypto';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
-import { getPersistedFinanceConnectorConfig } from '@/lib/connectors/monarch-money/config';
+import {
+  getPersistedFinanceConnectorConfig,
+  getPersistedFinanceConnectorConfigById,
+} from '@/lib/connectors/monarch-money/config';
 import {
   MonarchBridgeClient,
   type MonarchCategory,
@@ -10,7 +13,10 @@ import {
 } from '@/lib/connectors/monarch-money/client';
 import { applyManualAttributionDecision } from '@/lib/connectors/monarch-money/attribution-service';
 import { FinanceManagerConnector } from '@/lib/connectors/monarch-money';
-import { TyrionFinanceReviewClient } from '@/lib/connectors/monarch-money/quick-review-client';
+import {
+  resolveTyrionQuickReviewToken,
+  TyrionFinanceReviewClient,
+} from '@/lib/connectors/monarch-money/quick-review-client';
 import { resolveTyrionHouseholdCurrency } from '@/lib/connectors/monarch-money/attribution-client';
 import {
   FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
@@ -315,7 +321,7 @@ export async function startQuickReviewSession(
     };
   });
   const ranked = [];
-  const tyrion = new TyrionFinanceReviewClient();
+  const tyrion = new TyrionFinanceReviewClient(resolveTyrionQuickReviewToken(config));
   for (let index = 0; index < rankInput.length; index += 100) {
     const result = await tyrion.rank({
       contractVersion: FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
@@ -597,7 +603,7 @@ export async function previewQuickReviewMerchantRule(
   request: FinanceQuickReviewRuleSuggestionRequest,
   signal?: AbortSignal,
 ): Promise<TyrionQuickReviewRuleResponse> {
-  const { target } = requireCurrentTarget(request);
+  const { session, target } = requireCurrentTarget(request);
   if (!target.item.corrections.kids.some((kid) => kid.id === request.kidId)) {
     throw new QuickReviewSessionError(
       'invalid_rule_kid',
@@ -605,7 +611,10 @@ export async function previewQuickReviewMerchantRule(
       400,
     );
   }
-  const suggestion = await new TyrionFinanceReviewClient().suggestRule(
+  const config = await getPersistedFinanceConnectorConfigById(session.connectorId);
+  const suggestion = await new TyrionFinanceReviewClient(
+    resolveTyrionQuickReviewToken(config),
+  ).suggestRule(
     buildQuickReviewRuleSuggestionRequest({
       merchantName: request.merchantName,
       businessEntityName: target.transaction.businessEntityName,
@@ -639,7 +648,7 @@ export async function createQuickReviewMerchantRule(
   request: FinanceMerchantRuleCreateRequest,
   signal?: AbortSignal,
 ): Promise<FinanceMerchantRuleCreateResponse> {
-  const { target } = requireCurrentTarget(request);
+  const { session, target } = requireCurrentTarget(request);
   const preview = target.ruleSuggestion;
   if (!preview?.suggestion) {
     throw new QuickReviewSessionError(
@@ -677,7 +686,10 @@ export async function createQuickReviewMerchantRule(
       422,
     );
   }
-  const result = await new TyrionFinanceReviewClient().createMerchantRule(
+  const config = await getPersistedFinanceConnectorConfigById(session.connectorId);
+  const result = await new TyrionFinanceReviewClient(
+    resolveTyrionQuickReviewToken(config),
+  ).createMerchantRule(
     buildQuickReviewMerchantRuleRequest(request, preview, target.transaction.account.id),
     signal,
   );

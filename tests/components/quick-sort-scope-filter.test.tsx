@@ -35,6 +35,11 @@ const sources = {
     lists: [],
     count: 2,
   },
+  'finance-manager': {
+    connectorId: 'money-1',
+    lists: [],
+    count: 3,
+  },
 };
 
 describe('Quick Sort source filter', () => {
@@ -64,6 +69,17 @@ describe('Quick Sort source filter', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Microsoft To Do' }));
 
     expect(onChange).toHaveBeenCalledWith({ source: 'microsoft-todo' });
+  });
+
+  it('preserves the selected connector for Money Quick Review', async () => {
+    const onChange = renderFilter();
+    fireEvent.click(screen.getByRole('button', { name: 'All sources' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Tyrion' }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      source: 'finance-manager',
+      connectorId: 'money-1',
+    });
   });
 
   it('formats known and custom source identifiers as display labels', async () => {

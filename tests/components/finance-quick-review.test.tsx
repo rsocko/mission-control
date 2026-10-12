@@ -65,6 +65,18 @@ afterEach(() => {
 });
 
 describe('FinanceQuickReview', () => {
+  it('starts the review with the Money connector selected in Quick Sort', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(session));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<FinanceQuickReview connectorId="money-1" />);
+
+    expect(await screen.findByRole('heading', { name: 'Invented Market' })).toBeInTheDocument();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+      connectorId: 'money-1',
+    });
+  });
+
   it('renders ranked context and confirms through Tyrion with Monarch review semantics', async () => {
     const completed = {
       ...session,

@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/lib/toast';
 import { settingsLogger } from '@/lib/client-logger';
-import { loadConnectorData, requestConnectorSync } from '@/lib/connectors/client';
+import { loadConnectorData } from '@/lib/connectors/client';
+import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import type { ConnectorConfig, ListGroup, SourceList } from './components/types';
 import { resolveSourceListRefresh } from './source-list-renames';
 import type { ContextAppearance } from '@/types';
@@ -12,6 +13,12 @@ import type { SensitivityClass } from '@/lib/ai/types';
 
 export function useSettingsAdministration() {
   const queryClient = useQueryClient();
+  const {
+    progress: syncProgress,
+    activeProgresses,
+    queuedConnectorIds,
+    triggerSync: triggerStreamSync,
+  } = useSyncStream();
   const [connectors, setConnectors] = useState<ConnectorConfig[]>([]);
   const [sourceLists, setSourceLists] = useState<SourceList[]>([]);
   const [classificationDefaults, setClassificationDefaults] =
@@ -23,32 +30,26 @@ export function useSettingsAdministration() {
     if (typeof window === 'undefined') return null;
     return new URLSearchParams(window.location.search).get('connector');
   });
-  const [syncing, setSyncing] = useState<string | null>(null);
   const pendingRenamesRef = useRef<Map<string, string>>(new Map());
   const sourceListVersionRef = useRef(0);
+  const syncRefetchKeyRef = useRef(syncProgress.refetchKey);
 
-  const refreshConnectorLists = useCallback(async (connectorId: string) => {
-    const startedVersion = sourceListVersionRef.current;
-    try {
-      const response = await fetch(`/api/connectors/${connectorId}/lists`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      const nextLists = Array.isArray(data.sourceLists) ? data.sourceLists as SourceList[] : [];
-      setSourceLists(previousLists => (
-        resolveSourceListRefresh(
-          [
-            ...previousLists.filter(sourceList => sourceList.connectorInstanceId !== connectorId),
-            ...nextLists,
-          ],
-          pendingRenamesRef.current,
-          startedVersion,
-          sourceListVersionRef.current,
-        ) ?? previousLists
-      ));
-    } catch (error) {
-      settingsLogger.error(`Failed to refresh source lists for connector ${connectorId}`, { err: error });
+  const syncingConnectorIds = useMemo(() => {
+    const connectorIds = new Set(
+      activeProgresses
+        .map(activeProgress => activeProgress.connectorId)
+        .filter((connectorId): connectorId is string => connectorId !== null),
+    );
+    if (syncProgress.isSyncing && syncProgress.connectorId) {
+      connectorIds.add(syncProgress.connectorId);
     }
-  }, []);
+    return connectorIds;
+  }, [activeProgresses, syncProgress.connectorId, syncProgress.isSyncing]);
+
+  const queuedSyncConnectorIds = useMemo(
+    () => new Set(queuedConnectorIds),
+    [queuedConnectorIds],
+  );
 
   const fetchData = useCallback(async () => {
     const startedVersion = sourceListVersionRef.current;
@@ -82,6 +83,12 @@ export function useSettingsAdministration() {
     }, 0);
     return () => window.clearTimeout(timeoutId);
   }, [fetchData]);
+
+  useEffect(() => {
+    if (syncRefetchKeyRef.current === syncProgress.refetchKey) return;
+    syncRefetchKeyRef.current = syncProgress.refetchKey;
+    void fetchData();
+  }, [fetchData, syncProgress.refetchKey]);
 
   const toggleConnector = useCallback(async (id: string, enabled: boolean) => {
     setConnectors(previous => previous.map(connector => (
@@ -177,19 +184,9 @@ export function useSettingsAdministration() {
     };
   }, [queryClient]);
 
-  const triggerSync = useCallback(async (connectorId?: string, options?: { full?: boolean }) => {
-    const syncTarget = connectorId || 'all';
-    setSyncing(syncTarget);
-    try {
-      await requestConnectorSync({ connectorId, full: options?.full });
-      await fetchData();
-      if (connectorId) await refreshConnectorLists(connectorId);
-    } catch (error) {
-      settingsLogger.error('Failed to trigger sync', { err: error });
-    } finally {
-      setSyncing(null);
-    }
-  }, [fetchData, refreshConnectorLists]);
+  const triggerSync = useCallback((connectorId?: string, options?: { full?: boolean }) => {
+    triggerStreamSync(connectorId, options);
+  }, [triggerStreamSync]);
 
   const createListGroup = useCallback(async (
     connectorInstanceId: string,
@@ -271,7 +268,9 @@ export function useSettingsAdministration() {
     setShowAddModal,
     selectedConnector,
     setSelectedConnector,
-    syncing,
+    isSyncing: syncProgress.isSyncing,
+    syncingConnectorIds,
+    queuedSyncConnectorIds,
     fetchData,
     toggleConnector,
     deleteConnector,

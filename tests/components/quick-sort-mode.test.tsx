@@ -141,9 +141,15 @@ describe('QuickSortMode task drawer', () => {
     expect(mocks.refreshQueue).toHaveBeenCalledOnce();
   });
 
-  it('offers Money Quick Review for the selected Money source', () => {
+  it('offers Money Quick Review from the mobile queue selector', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
     render(<QuickSortMode />);
 
+    expect(screen.getByRole('complementary', { name: 'Quick Sort queues' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Select Money source' }));
 
     expect(screen.getByRole('link', { name: 'Quick Review Money' })).toHaveAttribute(

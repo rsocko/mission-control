@@ -50,6 +50,35 @@ function fail(message) {
   throw new Error(message);
 }
 
+function validatePackageExports(packageExports) {
+  if (!packageExports || typeof packageExports !== 'object' || Array.isArray(packageExports)) {
+    fail('Package exports must be an object');
+  }
+  for (const [key, expected] of Object.entries(PACKAGE_EXPORTS)) {
+    if (JSON.stringify(packageExports[key]) !== JSON.stringify(expected)) {
+      fail(`Package export ${key} does not match the required mapping`);
+    }
+  }
+  for (const [key, value] of Object.entries(packageExports)) {
+    if (PACKAGE_EXPORTS[key] !== undefined) continue;
+    const exportPath = key.slice(2);
+    if (
+      !/^\.\/[A-Za-z0-9._/-]+$/u.test(key)
+      || exportPath.split('/').some((part) => !part || part === '.' || part === '..')
+    ) {
+      fail(`Package export contains an unsafe entry point: ${key}`);
+    }
+    assertExactKeys(value, ['import', 'types'], `Package export ${key}`);
+    const expectedStem = `./dist/${exportPath}`;
+    if (
+      value.import !== `${expectedStem}.js`
+      || value.types !== `${expectedStem}.d.ts`
+    ) {
+      fail(`Package export ${key} must map to matching dist JavaScript and type files`);
+    }
+  }
+}
+
 async function loadPin(path = PIN_PATH) {
   const bytes = await readFile(path);
   const pin = parseJson(bytes, 'Icon picker vendor pin');
@@ -286,10 +315,10 @@ function validatePackageManifest(packageManifest, pin) {
     || packageManifest.version !== pin.packageVersion
     || packageManifest.private === true
     || packageManifest.type !== 'module'
-    || JSON.stringify(packageManifest.exports) !== JSON.stringify(PACKAGE_EXPORTS)
   ) {
-    fail('Vendored package.json does not match the pinned package identity and exports');
+    fail('Vendored package.json does not match the pinned package identity');
   }
+  validatePackageExports(packageManifest.exports);
 }
 
 async function createSnapshotManifest(snapshotRoot, upstream) {
@@ -523,10 +552,10 @@ async function syncSnapshot(options) {
       || upstreamPackage.type !== 'module'
       || typeof upstreamPackage.version !== 'string'
       || !packageManager
-      || JSON.stringify(upstreamPackage.exports) !== JSON.stringify(PACKAGE_EXPORTS)
     ) {
-      fail('Upstream package does not match the required package identity and exports');
+      fail('Upstream package does not match the required package identity');
     }
+    validatePackageExports(upstreamPackage.exports);
     const npmVersion = packageManager[1];
     const registry = runNpm(['config', 'get', 'registry'], { cwd: repository }).trim();
     if (registry !== APPROVED_REGISTRY) {
@@ -645,4 +674,5 @@ export {
   SOURCE_TAG,
   CI_REGISTRY,
   LOCAL_REGISTRY,
+  validatePackageExports,
 };

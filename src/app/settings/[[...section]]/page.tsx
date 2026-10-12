@@ -58,8 +58,8 @@ import {
   MobileSettingsSubsectionJump,
 } from '../components/SettingsSubsectionNavigation';
 import {
-  buildConnectorSettingsHref,
   readConnectorSettingsState,
+  updateConnectorSettingsHistory,
 } from '../connector-settings-navigation';
 
 type ActiveSection = SettingsSection;
@@ -170,13 +170,14 @@ export default function SettingsPage() {
     replace = false,
   ) => {
     if (typeof window === 'undefined') return;
-    const href = buildConnectorSettingsHref(window.location.href, connectorId, tab);
-    if (replace) {
-      router.replace(href, { scroll: false });
-    } else {
-      router.push(href, { scroll: false });
-    }
-  }, [router]);
+    updateConnectorSettingsHistory(
+      window.history,
+      window.location.href,
+      connectorId,
+      tab,
+      replace,
+    );
+  }, []);
 
   const selectConnector = useCallback((connectorId: string | null) => {
     setSelectedConnector(connectorId);

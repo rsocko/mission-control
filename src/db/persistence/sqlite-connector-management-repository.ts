@@ -959,7 +959,8 @@ export function createSqliteConnectorManagementRepository(
               FROM json_each(${safeActivity}, '$.groups') AS activity_group
               JOIN json_each(activity_group.value, '$.metrics') AS activity_metric
               WHERE COALESCE(json_extract(activity_metric.value, '$.value'), 0) > 0
-                AND COALESCE(json_extract(activity_metric.value, '$.kind'), '') <> 'snapshot'
+                AND COALESCE(json_extract(activity_metric.value, '$.kind'), '')
+                  NOT IN ('processed', 'snapshot')
             )
           )`;
           const hasChanges = `(

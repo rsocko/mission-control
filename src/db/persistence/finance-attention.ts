@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { canonicalJson } from './value-codecs';
 import {
   materializeNotificationActions,
   registerDefaultNotificationProviders,
@@ -128,6 +129,7 @@ export interface FinanceAttentionRoutingResult {
   evaluated: number;
   notificationsCreated: number;
   notificationsUpdated: number;
+  notificationsSettled: number;
   tasksCreated: number;
   tasksUpdated: number;
   tasksSettled: number;
@@ -484,6 +486,32 @@ export function financeAttentionMetadata(
       ...(signal.accountSummary ? { accountSummary: signal.accountSummary } : {}),
     },
   };
+}
+
+export function financeAttentionMateriallyChanged(
+  signal: FinanceAttentionSignal,
+  route: FinanceAttentionRoute,
+  existingMetadata: unknown,
+): boolean {
+  const previous = financeAttentionRecord(
+    financeAttentionRecord(existingMetadata).financeAttention,
+  );
+  if (
+    previous.route !== route
+    || previous.signalKind !== signal.signalKind
+    || previous.sourceLifecycle !== signal.sourceLifecycle
+    || previous.conditionSince !== signal.conditionSince
+    || previous.settlementReason !== signal.settlementReason
+  ) {
+    return true;
+  }
+  if (signal.accountSummary) {
+    return canonicalJson(previous.accountSummary ?? null)
+      !== canonicalJson(signal.accountSummary);
+  }
+  return previous.activityKey !== signal.activityKey
+    || canonicalJson(previous.details ?? {})
+      !== canonicalJson(signal.details ?? {});
 }
 
 export function financeAttentionAccountMateriallyWorsened(

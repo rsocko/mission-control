@@ -6,10 +6,10 @@
   },
   "source": {
     "repository": "git+https://github.com/rsocko/icon-picker.git",
-    "commit": "87079346141c7d91c9e65830dcd83b9f3860abc6",
-    "tag": "v0.1.0-rc.2"
+    "commit": "f8e4398f9d9eafd9c896d0825b28e83693f1dbfc",
+    "tag": null
   },
-  "artifactSha256": "6494359674d85fe8b4469893fee4bf28070d7ef5e3db3734095aadd97d0fa346",
+  "artifactSha256": "9885b0cfd24302cf62aca52da80726eaa1c2df63ffc7f52a9db47304c05018c4",
   "files": [
     {
       "path": "LICENSE",
@@ -17,7 +17,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "fcada515194833a46a4161808968163edcd596f955c6d07b5e18fc0db23d2b37"
+      "sha256": "54d20b4284085da1cf3f810202b79f96b57c964bf328a8f257e9d6c18499019c"
     },
     {
       "path": "THIRD_PARTY_NOTICES.md",
@@ -29,7 +29,7 @@
     },
     {
       "path": "dist/IconPicker.d.ts.map",
-      "sha256": "c5339babf08398d8ba8b75851b18f0475ac2354d6e5d7aa6b5dcde343e7a5dbb"
+      "sha256": "f85c6827652d3e925e00cf5a2a6bf0c88fbf95c6cec70d770e8dc397456392a3"
     },
     {
       "path": "dist/IconPickerButton.d.ts",
@@ -48,12 +48,20 @@
       "sha256": "28992ba46855ab09cff7bf4cb6a348369d6054c03b9d8796936f0156322ebdf3"
     },
     {
-      "path": "dist/chunks/IconPickerButton-BjUqdo6t.js",
-      "sha256": "0c59918f2954788808805d97601cbfe8a4bede41ec2dc5cb95e9a616f597af31"
+      "path": "dist/catalogs.d.ts",
+      "sha256": "1215a9b082b5cd6a817949d2d34f39986c0bf28af381c866596087cb70c84f32"
     },
     {
-      "path": "dist/chunks/IconPickerButton-BjUqdo6t.js.map",
-      "sha256": "1e5d9ebafd4e71ee32f7a413205f76e00019d77bfa0b6963c2faa0768791e3ae"
+      "path": "dist/catalogs.d.ts.map",
+      "sha256": "0d1702671e304937ddb02dcd7af2a34ecc5da26a29f7a453a97c1c74d2e0c459"
+    },
+    {
+      "path": "dist/chunks/IconPickerButton-5VFx_PZY.js",
+      "sha256": "69aebe97ca0e4e284f604c75a7c1e1a4b461ac6eebae5a7d09f413acf619377d"
+    },
+    {
+      "path": "dist/chunks/IconPickerButton-5VFx_PZY.js.map",
+      "sha256": "95dcfe6f60aa4c8f67e680ec4edbd92075430eda6d79c9a320ea14c1ad8772a4"
     },
     {
       "path": "dist/chunks/IconRenderer-86b851bX.js",
@@ -113,7 +121,7 @@
     },
     {
       "path": "dist/index.js",
-      "sha256": "06b53d6c2e27dcaefbe1c58ac1e8bdc7d4ed2c5f275b64a7afe0228f347af161"
+      "sha256": "fa2202d06f3667fa8c2b0814291a3d1b60117f930dabcd5ebfa23f0656f8c04d"
     },
     {
       "path": "dist/picker.d.ts",
@@ -125,7 +133,7 @@
     },
     {
       "path": "dist/picker.js",
-      "sha256": "1830de88827afc2d6cb68b5905993a3858543a276116e77872ba2c3774525a44"
+      "sha256": "f6f7bda24a566563eb763645cef58396858c9860cf8161a1ebf6bd9bbcdddd7b"
     },
     {
       "path": "dist/renderer.d.ts",
@@ -141,7 +149,7 @@
     },
     {
       "path": "dist/styles.css",
-      "sha256": "c17cd2eb392e9257114bee6b3a29dac6ad6d5460645a9f8e31e3267ddd36bf05"
+      "sha256": "24f72dd820defdd6f1536f5c83e6cc57d1972c23a473434413bdd9781ffbf3fa"
     },
     {
       "path": "dist/theme.d.ts",

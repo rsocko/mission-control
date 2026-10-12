@@ -31,7 +31,7 @@ import {
   type RetentionResolutionStatus,
 } from '@/lib/sync/retention';
 import {
-  hasSyncActivity,
+  hasSyncChanges,
   normalizeSyncActivity,
   type SyncActivityPayload,
 } from '@/lib/sync/activity';
@@ -196,12 +196,19 @@ function ActivityDetails({ activity }: { activity: SyncActivityPayload }) {
             <div className="text-xs font-medium text-[var(--text-secondary)]">{group.label}</div>
             <dl className="mt-2 space-y-1.5">
               {group.metrics.map(metric => (
-                <div key={metric.key} className="flex items-baseline justify-between gap-3 text-xs">
+                <div
+                  key={metric.key}
+                  className={`flex items-baseline justify-between gap-3 text-xs ${
+                    metric.kind === 'processed' || metric.kind === 'snapshot'
+                      ? 'opacity-70'
+                      : ''
+                  }`}
+                >
                   <dt className="min-w-0 text-[var(--text-muted)]">
                     {metric.label}
-                    {metric.kind === 'snapshot' && (
+                    {(metric.kind === 'processed' || metric.kind === 'snapshot') && (
                       <span className="ml-1 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
-                        total
+                        {metric.kind === 'processed' ? 'processed' : 'current total'}
                       </span>
                     )}
                   </dt>
@@ -1361,12 +1368,15 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
             const protectedFromDetails = auditDetails.filter(d => d.action === 'protected').length;
             const protectedCount = Math.max(entry.localOnlyProtected || 0, protectedFromDetails);
             const activity = parseActivity(entry.activity);
-            const domainActivity = hasSyncActivity(activity);
+            const domainChanges = hasSyncChanges(activity);
             const activityMetrics = activity?.groups.flatMap(group => group.metrics.map(metric => ({
               ...metric,
               groupKey: group.key,
             })))
-              .filter(metric => metric.kind !== 'snapshot' && metric.value > 0) ?? [];
+              .filter(metric => metric.kind !== 'snapshot' && metric.value > 0)
+              .sort((left, right) => (
+                Number(left.kind === 'processed') - Number(right.kind === 'processed')
+              )) ?? [];
 
             return (
               <div key={entry.id}
@@ -1413,7 +1423,12 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-variant-numeric tabular-nums text-[var(--text-muted)]">
                       {activityMetrics.map(metric => (
-                        <span key={`${metric.groupKey}:${metric.key}`}>{fmt(metric.value)} {metric.label}</span>
+                        <span
+                          key={`${metric.groupKey}:${metric.key}`}
+                          className={metric.kind === 'processed' ? 'opacity-70' : undefined}
+                        >
+                          {fmt(metric.value)} {metric.label}
+                        </span>
                       ))}
                       {entry.tasksAdded > 0 && <span className="text-emerald-400">+{fmt(entry.tasksAdded)} added</span>}
                       {entry.tasksUpdated > 0 && <span className="text-blue-400">~{fmt(entry.tasksUpdated)} updated</span>}
@@ -1425,7 +1440,7 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
                           {fmt(entry.notificationsAdded)} new {entry.notificationsAdded === 1 ? 'notification' : 'notifications'}
                         </span>
                       )}
-                      {domainActivity
+                      {domainChanges
                         && totalChanges === 0
                         && pushed === 0
                         && protectedCount === 0
@@ -1435,7 +1450,7 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
                         && pushed === 0
                         && protectedCount === 0
                         && entry.notificationsAdded === 0
-                        && !domainActivity
+                        && !domainChanges
                         && entry.success
                         && <span>No changes</span>}
                       {!entry.success && errors.length > 0 && <span className="text-red-400 truncate max-w-[200px]">{errors[0]?.slice(0, 60)}</span>}

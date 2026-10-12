@@ -52,26 +52,32 @@ export function financeAttentionSyncActivity(
       metrics: [
         {
           key: 'attention-evaluated',
-          label: 'review items evaluated',
+          label: 'review signals checked',
           value: result.evaluated,
           kind: 'processed',
         },
         {
           key: 'attention-created',
-          label: 'attention summaries created',
+          label: 'review summaries opened',
           value: result.notificationsCreated,
           kind: 'created',
         },
         {
           key: 'attention-updated',
-          label: 'attention summaries updated',
+          label: 'review summaries materially changed',
           value: result.notificationsUpdated,
           kind: 'updated',
         },
         {
           key: 'attention-resolved',
-          label: 'review items resolved',
+          label: 'review signals resolved',
           value: result.settled,
+          kind: 'resolved',
+        },
+        {
+          key: 'attention-summaries-closed',
+          label: 'review summaries closed',
+          value: result.notificationsSettled,
           kind: 'resolved',
         },
       ],
@@ -88,7 +94,7 @@ export function financeAttentionSyncActivity(
         },
         {
           key: 'attention-tasks-updated',
-          label: 'Tasks updated',
+          label: 'Tasks materially changed',
           value: result.tasksUpdated,
           kind: 'updated',
         },

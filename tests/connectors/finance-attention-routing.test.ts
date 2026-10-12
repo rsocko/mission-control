@@ -306,7 +306,12 @@ describe.sequential('finance attention routing', () => {
     expect(replay).toMatchObject({
       evaluated: 1,
       notificationsCreated: 0,
+      notificationsUpdated: 0,
+      notificationsSettled: 0,
       tasksCreated: 0,
+      tasksUpdated: 0,
+      tasksSettled: 0,
+      settled: 0,
     });
     expect(count('notifications')).toBe(1);
     expect(count('tasks')).toBe(0);
@@ -619,8 +624,17 @@ describe.sequential('finance attention routing', () => {
     `).run(now.toISOString(), now.toISOString(), now.toISOString(), connectorId);
 
     const result = await reconcileFinanceAttention({ connectorId, now });
+    const replay = await reconcileFinanceAttention({ connectorId, now });
 
-    expect(result.tasksSettled).toBe(1);
+    expect(result).toMatchObject({
+      tasksSettled: 1,
+      settled: 1,
+    });
+    expect(replay).toMatchObject({
+      tasksSettled: 0,
+      notificationsSettled: 0,
+      settled: 0,
+    });
     expect(sqlite.prepare(`SELECT status FROM tasks`).get()).toEqual({ status: 'done' });
     expect(count('my_day_items')).toBe(0);
   });
@@ -951,8 +965,17 @@ describe.sequential('finance attention routing', () => {
     `).run(now.toISOString(), now.toISOString(), connectorId);
 
     const result = await reconcileFinanceAttention({ connectorId, now });
+    const replay = await reconcileFinanceAttention({ connectorId, now });
 
-    expect(result.tasksSettled).toBe(1);
+    expect(result).toMatchObject({
+      tasksSettled: 1,
+      settled: 1,
+    });
+    expect(replay).toMatchObject({
+      tasksSettled: 0,
+      notificationsSettled: 0,
+      settled: 0,
+    });
     expect(sqlite.prepare(`SELECT status FROM tasks`).get()).toEqual({ status: 'done' });
     expect(count('my_day_items')).toBe(0);
   });

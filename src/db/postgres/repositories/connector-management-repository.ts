@@ -1083,7 +1083,7 @@ export function createPostgresConnectorManagementRepository(
             activity @> '{"version":1}'::jsonb
             AND jsonb_path_exists(
               activity,
-              '$.groups[*].metrics[*] ? (@.value > 0 && @.kind != "snapshot")'
+              '$.groups[*].metrics[*] ? (@.value > 0 && @.kind != "processed" && @.kind != "snapshot")'
             )
           ), FALSE)`;
           const hasChanges = `(

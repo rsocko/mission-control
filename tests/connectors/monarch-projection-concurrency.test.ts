@@ -113,6 +113,7 @@ vi.mock('@/lib/finance/attention-routing', () => ({
       evaluated: 0,
       notificationsCreated: controls.attentionNotificationsCreated,
       notificationsUpdated: 0,
+      notificationsSettled: 0,
       tasksCreated: 0,
       tasksUpdated: 0,
       tasksSettled: 0,

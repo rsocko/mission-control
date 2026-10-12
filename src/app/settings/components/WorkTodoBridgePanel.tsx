@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, Save } from 'lucide-react';
 import type { ConnectorConfig, SourceList } from './types';
+import { ConnectorActionFooter } from './ConnectorModalFooter';
 
 interface BridgeStatus {
   initialized: boolean;
@@ -114,22 +115,12 @@ export function WorkTodoBridgePanel({
             >
               Display Name
             </label>
-            <div className="flex gap-2">
-              <input
-                id={`work-todo-name-${connector.id}`}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                className="flex-1 px-3 py-1.5 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={saveName}
-                disabled={working || name === connector.name}
-                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-40 flex items-center gap-1.5"
-              >
-                <Save size={13} /> Save
-              </button>
-            </div>
+            <input
+              id={`work-todo-name-${connector.id}`}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className="w-full px-3 py-1.5 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none"
+            />
           </div>
 
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 text-sm">
@@ -214,15 +205,26 @@ export function WorkTodoBridgePanel({
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={() => onDelete(connector.id)}
-            className="text-xs text-red-400 hover:text-red-300"
-          >
-            Remove connector
-          </button>
         </div>
       </div>
+      <ConnectorActionFooter>
+        <button
+          type="button"
+          onClick={() => onDelete(connector.id)}
+          className="text-xs text-red-400 hover:text-red-300"
+        >
+          Remove connector
+        </button>
+        <button
+          type="button"
+          onClick={saveName}
+          disabled={working || name === connector.name}
+          className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-40"
+        >
+          {working ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          Save changes
+        </button>
+      </ConnectorActionFooter>
     </div>
   );
 }

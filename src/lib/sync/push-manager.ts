@@ -693,10 +693,6 @@ async function pushPendingChangesWithLease(
       }
       const errMsg = err instanceof Error ? err.message : String(err);
       const msg = `Push failed for task "${task.title}": ${errMsg}`;
-      errors.push(msg);
-      if (err instanceof GitHubWriteFenceError) cycleOutcome.blocked++;
-      else if (err instanceof GitHubUnknownWriteOutcomeError) cycleOutcome.unknown++;
-      else cycleOutcome.failed++;
 
       // Detect 404/410 — the task was deleted or transferred on the remote.
       // Remove it locally rather than retrying forever.
@@ -707,18 +703,66 @@ async function pushPendingChangesWithLease(
         && options?.deleteGhostsOnNotFound !== false
       ) {
         const reason = 'Remote returned 404/410 — task deleted or transferred';
-        const archived = await archiveAndDeleteTask(task.id, reason);
+        const identityState = connector.type === 'github-issues'
+          ? (await execution.deletions.listIdentityStates(connectorId))
+            .find((candidate) => candidate.localId === task.id)
+          : undefined;
+        const githubFence = connector.type === 'github-issues'
+          && options?.identityRuntime
+          && options.identityMode
+          && identityState?.externalEntityId
+          && identityState.repositoryEntityId
+          && identityState.locatorRevision !== null
+          && (identityState.bindingState === 'active' || identityState.bindingState === 'shadow')
+          && identityState.bindingRevision
+          ? {
+              identityMode: 'stable' as const,
+              identityModeRevision: options.identityMode.modeRevision,
+              issueEntityId: identityState.externalEntityId,
+              repositoryEntityId: identityState.repositoryEntityId,
+              hostKey: identityState.hostKey,
+              locatorRevision: identityState.locatorRevision,
+              bindingState: identityState.bindingState,
+              bindingRevision: identityState.bindingRevision,
+              sourceId: task.sourceId,
+            }
+          : undefined;
+
+        if (connector.type !== 'github-issues' || githubFence) {
+          await options?.identityRuntime?.assertCurrentMode();
+          const archived = await archiveAndDeleteTask(task.id, reason, githubFence);
+          if (archived) {
+            audit.push({
+              action: 'removed',
+              taskTitle: task.title,
+              taskSourceId: task.sourceId,
+              taskId: task.id,
+              deletionSnapshotId: archived.snapshotId,
+              reason,
+            });
+            syncLogger.info(
+              { taskId: task.id, title: task.title },
+              'Removed ghost task after 404/410 from remote',
+            );
+            continue;
+          }
+        }
+
         audit.push({
-          action: 'removed',
+          action: 'protected',
           taskTitle: task.title,
           taskSourceId: task.sourceId,
           taskId: task.id,
-          deletionSnapshotId: archived?.snapshotId,
-          reason,
+          reason: connector.type === 'github-issues'
+            ? 'Remote returned 404/410, but stable identity evidence could not authorize local deletion'
+            : 'Remote returned 404/410, but the local task changed before deletion',
         });
-        syncLogger.info({ taskId: task.id, title: task.title }, 'Removed ghost task after 404/410 from remote');
-        continue;
       }
+
+      errors.push(msg);
+      if (err instanceof GitHubWriteFenceError) cycleOutcome.blocked++;
+      else if (err instanceof GitHubUnknownWriteOutcomeError) cycleOutcome.unknown++;
+      else cycleOutcome.failed++;
 
       audit.push({ action: 'push_failed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: errMsg });
 

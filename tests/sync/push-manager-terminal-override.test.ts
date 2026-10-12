@@ -18,11 +18,14 @@ const mockPendingTasks: unknown[] = [];
 const mockUpdateSets: Array<{ data: unknown; id: string }> = [];
 let mockCapabilities: import('@/types').ConnectorCapabilities | null = null;
 const {
+  mockArchiveAndDeleteTask,
   mockCompleteTaskPush,
   mockDelete,
   mockFailTaskPush,
+  mockIdentityStates,
   mockLoadClaimedTask,
 } = vi.hoisted(() => ({
+  mockArchiveAndDeleteTask: vi.fn(),
   mockCompleteTaskPush: vi.fn((
     _taskId: string,
     _leaseToken: string,
@@ -43,6 +46,7 @@ const {
     void [_taskId, _leaseToken, _syncStatus, _pushRetryCount];
     return Promise.resolve(true);
   }),
+  mockIdentityStates: [] as Array<Record<string, unknown>>,
   mockLoadClaimedTask: vi.fn(),
 }));
 
@@ -107,6 +111,9 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
           return true;
         }),
       },
+      deletions: {
+        listIdentityStates: vi.fn(async () => [...mockIdentityStates]),
+      },
     },
   })),
 }));
@@ -139,6 +146,9 @@ vi.mock('@/lib/sync/push-lease', () => ({
   heartbeatTaskPush: vi.fn(() => Promise.resolve('renewed-lease-token')),
   loadClaimedTaskForPush: mockLoadClaimedTask,
   releaseTaskPush: vi.fn(() => Promise.resolve(true)),
+}));
+vi.mock('@/lib/sync/deletion-recovery', () => ({
+  archiveAndDeleteTask: mockArchiveAndDeleteTask,
 }));
 
 vi.mock('@/lib/external-identities/github-write-fence', () => {
@@ -181,6 +191,7 @@ describe('push-manager terminal status override', () => {
   beforeEach(() => {
     mockPendingTasks.length = 0;
     mockUpdateSets.length = 0;
+    mockIdentityStates.length = 0;
     mockCapabilities = null;
     vi.clearAllMocks();
     mockCompleteTaskPush.mockImplementation((
@@ -212,6 +223,7 @@ describe('push-manager terminal status override', () => {
       Promise.resolve(mockPendingTasks.find(
         (task) => (task as { id: string }).id === taskId,
       ) ?? null));
+    mockArchiveAndDeleteTask.mockResolvedValue(null);
   });
 
   it('retries creation for create-only connectors without update support', async () => {
@@ -364,6 +376,156 @@ describe('push-manager terminal status override', () => {
     expect(result.errors).toHaveLength(1);
     expect(mockDelete).not.toHaveBeenCalled();
     expect(mockUpdateSets.at(-1)?.data).toMatchObject({ syncStatus: 'push_error' });
+  });
+
+  it('fences and archives a GitHub task whose remote update returns 404', async () => {
+    const bindingRevision = '2026-10-11T20:00:00.000Z';
+    mockPendingTasks.push({
+      id: 'task-github-ghost',
+      sourceId: 'rsocko/icon-picker:15',
+      title: 'Missing GitHub issue',
+      description: '',
+      status: 'in_progress',
+      priority: 'low',
+      effort: null,
+      dueDate: null,
+      syncStatus: 'pending_push',
+      isChecklistItem: false,
+      parentId: null,
+      sourceListId: 'rsocko/icon-picker',
+      sourceListName: 'icon-picker',
+      connectorInstanceId: 'github-connector',
+      metadata: '{}',
+      pushRetryCount: 0,
+    });
+    mockIdentityStates.push({
+      localId: 'task-github-ghost',
+      externalEntityId: 'issue-node-id',
+      stableId: 'github.com:issue-node-id',
+      bindingState: 'active',
+      backfillState: 'resolved',
+      locatorRevision: 2,
+      repositoryEntityId: 'repository-node-id',
+      hostKey: 'github.com',
+      bindingRevision,
+    });
+    mockArchiveAndDeleteTask.mockResolvedValue({
+      snapshotId: 'snapshot-1',
+      taskTitle: 'Missing GitHub issue',
+      sourceId: 'rsocko/icon-picker:15',
+    });
+    const identityRuntime = {
+      modeSnapshot: {
+        connectorInstanceId: 'github-connector',
+        effectiveMode: 'stable',
+        modeRevision: 7,
+        capturedAt: '2026-10-11T23:00:00.000Z',
+      },
+      assertCurrentMode: vi.fn(async () => undefined),
+    } as unknown as GitHubStableIdentityRuntime;
+
+    const result = await pushPendingChanges(
+      'github-connector',
+      {
+        type: 'github-issues',
+        updateTask: vi.fn().mockRejectedValue(new Error('404 not found')),
+        preflightWriteRoute: vi.fn(async () => ({ state: 'verified' })),
+        runAuthorizedWrite: vi.fn(async (
+          _authorization: unknown,
+          write: () => Promise<TaskItem>,
+        ) => write()),
+      } as Partial<IConnector> as IConnector,
+      [],
+      undefined,
+      {
+        identityRuntime,
+        identityMode: { modeRevision: 7 },
+        connectorOperationLeaseHeld: true,
+      },
+    );
+
+    expect(result).toEqual({ pushed: 0, errors: [] });
+    expect(mockArchiveAndDeleteTask).toHaveBeenCalledWith(
+      'task-github-ghost',
+      'Remote returned 404/410 — task deleted or transferred',
+      {
+        identityMode: 'stable',
+        identityModeRevision: 7,
+        issueEntityId: 'issue-node-id',
+        repositoryEntityId: 'repository-node-id',
+        hostKey: 'github.com',
+        locatorRevision: 2,
+        bindingState: 'active',
+        bindingRevision,
+        sourceId: 'rsocko/icon-picker:15',
+      },
+    );
+    expect(mockFailTaskPush).not.toHaveBeenCalled();
+  });
+
+  it('retains a missing GitHub task when stable identity evidence is incomplete', async () => {
+    mockPendingTasks.push({
+      id: 'task-unfenced-ghost',
+      sourceId: 'rsocko/icon-picker:15',
+      title: 'Unfenced missing issue',
+      description: '',
+      status: 'in_progress',
+      priority: 'low',
+      effort: null,
+      dueDate: null,
+      syncStatus: 'pending_push',
+      isChecklistItem: false,
+      parentId: null,
+      sourceListId: 'rsocko/icon-picker',
+      sourceListName: 'icon-picker',
+      connectorInstanceId: 'github-connector',
+      metadata: '{}',
+      pushRetryCount: 0,
+    });
+    mockIdentityStates.push({
+      localId: 'task-unfenced-ghost',
+      externalEntityId: 'issue-node-id',
+      repositoryEntityId: null,
+      bindingState: 'active',
+      locatorRevision: 2,
+      hostKey: 'github.com',
+      bindingRevision: '2026-10-11T20:00:00.000Z',
+    });
+    const identityRuntime = {
+      assertCurrentMode: vi.fn(async () => undefined),
+    } as unknown as GitHubStableIdentityRuntime;
+
+    const result = await pushPendingChanges(
+      'github-connector',
+      {
+        type: 'github-issues',
+        updateTask: vi.fn().mockRejectedValue(new Error('404 not found')),
+        preflightWriteRoute: vi.fn(async () => ({ state: 'verified' })),
+        runAuthorizedWrite: vi.fn(async (
+          _authorization: unknown,
+          write: () => Promise<TaskItem>,
+        ) => write()),
+      } as Partial<IConnector> as IConnector,
+      [],
+      undefined,
+      {
+        identityRuntime,
+        identityMode: { modeRevision: 7 },
+        connectorOperationLeaseHeld: true,
+      },
+    );
+
+    expect(result.errors).toEqual([
+      'Push failed for task "Unfenced missing issue": 404 not found',
+    ]);
+    expect(mockArchiveAndDeleteTask).not.toHaveBeenCalled();
+    expect(mockFailTaskPush).toHaveBeenCalledWith(
+      'task-unfenced-ghost',
+      'lease-token',
+      'push_error',
+      1,
+      undefined,
+    );
   });
 
   it('preserves an explicit description clear in the remote update payload', async () => {

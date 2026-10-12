@@ -35,6 +35,11 @@ const sources = {
     lists: [],
     count: 2,
   },
+  'document-intelligence': {
+    connectorId: 'owl-1',
+    lists: [],
+    count: 4,
+  },
   'finance-manager': {
     connectorId: 'money-1',
     lists: [],
@@ -80,6 +85,15 @@ describe('Quick Sort source filter', () => {
       source: 'finance-manager',
       connectorId: 'money-1',
     });
+  });
+
+  it('offers transaction and document sources with mobile touch targets', async () => {
+    renderFilter();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All sources' }));
+
+    expect(await screen.findByRole('button', { name: 'Tyrion' })).toHaveClass('min-h-11');
+    expect(screen.getByRole('button', { name: 'OWL' })).toHaveClass('min-h-11');
   });
 
   it('formats known and custom source identifiers as display labels', async () => {

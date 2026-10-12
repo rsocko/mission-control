@@ -79,6 +79,32 @@ describe('useSyncStreamConnection history refresh', () => {
     unmount();
   });
 
+  it('passes full sync requests through the shared sync lifecycle', async () => {
+    vi.stubGlobal('EventSource', MockEventSource);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ results: [{ connectorId: 'github-1', success: true }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result, unmount } = renderHook(() => useSyncStreamConnection(), {
+      wrapper: createQueryWrapper(),
+    });
+
+    act(() => {
+      result.current.triggerSync(undefined, { full: true });
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full: true }),
+      });
+    });
+    expect(result.current.progress.isSyncing).toBe(true);
+    unmount();
+  });
+
   it('queues a different connector while a sync is already active', async () => {
     vi.stubGlobal('EventSource', MockEventSource);
     const pendingResponse = new Promise<never>(() => {});

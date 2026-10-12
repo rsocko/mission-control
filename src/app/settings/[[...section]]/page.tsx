@@ -58,8 +58,8 @@ import {
   MobileSettingsSubsectionJump,
 } from '../components/SettingsSubsectionNavigation';
 import {
-  buildConnectorSettingsHref,
   readConnectorSettingsState,
+  updateConnectorSettingsHistory,
 } from '../connector-settings-navigation';
 
 type ActiveSection = SettingsSection;
@@ -150,7 +150,8 @@ export default function SettingsPage() {
   const {
     connectors, sourceLists, classificationDefaults, listGroups, loading,
     showAddModal, setShowAddModal,
-    selectedConnector, setSelectedConnector, syncing,
+    selectedConnector, setSelectedConnector, isSyncing,
+    syncingConnectorIds, queuedSyncConnectorIds,
     fetchData, toggleConnector, deleteConnector, restoreConnector,
     permanentlyDeleteConnector, updateConnector, purgeRetainedSourceList,
     handleRenameList, triggerSync, createListGroup, updateListGroup,
@@ -169,13 +170,14 @@ export default function SettingsPage() {
     replace = false,
   ) => {
     if (typeof window === 'undefined') return;
-    const href = buildConnectorSettingsHref(window.location.href, connectorId, tab);
-    if (replace) {
-      router.replace(href, { scroll: false });
-    } else {
-      router.push(href, { scroll: false });
-    }
-  }, [router]);
+    updateConnectorSettingsHistory(
+      window.history,
+      window.location.href,
+      connectorId,
+      tab,
+      replace,
+    );
+  }, []);
 
   const selectConnector = useCallback((connectorId: string | null) => {
     setSelectedConnector(connectorId);
@@ -354,12 +356,12 @@ export default function SettingsPage() {
 
           <div className="mt-6 pt-4 border-t border-[var(--border)]">
           <h4 className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-1 px-3">Quick Actions</h4>
-          <button onClick={() => triggerSync()} disabled={syncing === 'all'}
+          <button onClick={() => triggerSync()} disabled={isSyncing}
             className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)] rounded-md disabled:opacity-50">
-            <RefreshCw size={14} className={syncing === 'all' ? 'animate-spin text-blue-400' : 'text-[var(--text-muted)]'} />
-            {syncing === 'all' ? 'Syncing...' : 'Sync All Now'}
+            <RefreshCw size={14} className={isSyncing ? 'animate-spin text-blue-400' : 'text-[var(--text-muted)]'} />
+            {isSyncing ? 'Syncing...' : 'Sync All Now'}
           </button>
-          <button onClick={() => triggerSync(undefined, { full: true })} disabled={syncing === 'all'}
+          <button onClick={() => triggerSync(undefined, { full: true })} disabled={isSyncing}
             className="w-full text-left flex items-center gap-2.5 px-3 py-2 text-sm text-[var(--text-tertiary)] hover:bg-[var(--surface-2)] rounded-md disabled:opacity-50">
             <RefreshCw size={14} className="text-[var(--text-muted)]" />
             Force Full Sync
@@ -404,7 +406,8 @@ export default function SettingsPage() {
                   connectors={connectors.filter(c => !c.deletedAt)}
                   sourceLists={sourceLists}
                   loading={loading}
-                  syncing={syncing}
+                  syncingConnectorIds={syncingConnectorIds}
+                  queuedSyncConnectorIds={queuedSyncConnectorIds}
                   onToggle={toggleConnector}
                   onSync={triggerSync}
                   onDelete={(id) => {

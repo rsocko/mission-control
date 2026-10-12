@@ -75,6 +75,8 @@ describe('GitHub connector settings', () => {
 
     expect(screen.getByRole('link', { name: 'View GitHub sync history' }))
       .toHaveAttribute('href', '/settings/sync-history?source=github-1');
+    expect(screen.getByRole('list', { name: 'Configured connectors' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Disable GitHub connector' })).toBeChecked();
   });
 
   it('opens connector configuration in a tabbed modal without empty tabs', async () => {

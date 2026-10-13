@@ -131,7 +131,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     progress,
     project,
     tasks,
-    unassignedTasks,
+    unassignedActiveTasks,
   } = useProjectPageData();
   const {
     loadProjectDetail,
@@ -573,12 +573,12 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
                   )}
                 >
                   <span>{tab.label}{count !== null ? ` (${count})` : ''}</span>
-                  {tab.id === 'phases' && unassignedTasks.length > 0 ? (
+                  {tab.id === 'phases' && unassignedActiveTasks.length > 0 ? (
                     <span
-                      aria-label={`${unassignedTasks.length} unphased ${unassignedTasks.length === 1 ? 'task' : 'tasks'}`}
+                      aria-label={`${unassignedActiveTasks.length} unphased ${unassignedActiveTasks.length === 1 ? 'task' : 'tasks'}`}
                       className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--warning)]/15 px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums text-[var(--warning)]"
                     >
-                      {unassignedTasks.length}
+                      {unassignedActiveTasks.length}
                     </span>
                   ) : null}
                 </button>

@@ -79,6 +79,56 @@ function validatePackageExports(packageExports) {
   }
 }
 
+function normalizePackageLockRegistryUrls(packageLock, registry) {
+  if (!packageLock || typeof packageLock !== 'object' || Array.isArray(packageLock)) {
+    fail('Upstream package-lock.json must be an object');
+  }
+  if (typeof registry !== 'string' || !registry.endsWith('/')) {
+    fail('Approved package registry must be an absolute URL ending in /');
+  }
+  const registryUrl = new URL(registry);
+  if (registryUrl.protocol !== 'https:') {
+    fail('Approved package registry must use HTTPS');
+  }
+
+  let replacements = 0;
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry);
+      return;
+    }
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === 'resolved' && typeof entry === 'string') {
+        let resolvedUrl;
+        try {
+          resolvedUrl = new URL(entry);
+        } catch {
+          continue;
+        }
+        if (resolvedUrl.protocol !== 'https:') continue;
+        const registryMarker = '/npm/registry/';
+        const markerIndex = resolvedUrl.pathname.indexOf(registryMarker);
+        const tarballPath = (
+          markerIndex === -1
+            ? resolvedUrl.pathname.slice(1)
+            : resolvedUrl.pathname.slice(markerIndex + registryMarker.length)
+        );
+        if (!/^(?:@[^/]+\/)?[^/]+\/-\/[^/]+\.tgz$/u.test(tarballPath)) continue;
+        const normalized = `${registry}${tarballPath}`;
+        if (entry !== normalized) {
+          value[key] = normalized;
+          replacements += 1;
+        }
+        continue;
+      }
+      visit(entry);
+    }
+  };
+  visit(packageLock);
+  return replacements;
+}
+
 async function loadPin(path = PIN_PATH) {
   const bytes = await readFile(path);
   const pin = parseJson(bytes, 'Icon picker vendor pin');
@@ -561,6 +611,13 @@ async function syncSnapshot(options) {
     if (registry !== APPROVED_REGISTRY) {
       fail(`Upstream build registry must be ${APPROVED_REGISTRY}; received ${registry}`);
     }
+    const upstreamLockPath = join(repository, 'package-lock.json');
+    const upstreamLock = parseJson(
+      await readFile(upstreamLockPath),
+      'Upstream package-lock.json',
+    );
+    normalizePackageLockRegistryUrls(upstreamLock, APPROVED_REGISTRY);
+    await writeFile(upstreamLockPath, `${JSON.stringify(upstreamLock, null, 2)}\n`);
     const buildEnvironment = {
       ...process.env,
       NPM_CONFIG_REGISTRY: APPROVED_REGISTRY,
@@ -674,5 +731,6 @@ export {
   SOURCE_TAG,
   CI_REGISTRY,
   LOCAL_REGISTRY,
+  normalizePackageLockRegistryUrls,
   validatePackageExports,
 };

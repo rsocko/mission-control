@@ -57,6 +57,7 @@ import {
   type RunProjectHierarchyCommand,
 } from '../useProjectTaskActions';
 import { notifyTaskChanged } from '@/lib/task-change-events';
+import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 
 function hierarchyCommandTaskIds(command: ProjectHierarchyCommand): string[] {
   switch (command.type) {
@@ -89,6 +90,7 @@ interface ProjectPageDataContextValue {
   phaseEntries: Record<string, PhaseTaskEntry[]>;
   taskToPhase: Map<string, ProjectPhase>;
   unassignedTasks: ProjectTask[];
+  unassignedActiveTasks: ProjectTask[];
   phaseMenuItems: Array<{ id: string; name: string }>;
   reportRefreshKey: string;
 }
@@ -519,6 +521,10 @@ export function ProjectPageProvider({
       : [],
     [phases.length, taskToPhase, tasks],
   );
+  const unassignedActiveTasks = useMemo(
+    () => unassignedTasks.filter((task) => !isInactiveTaskStatus(task.status)),
+    [unassignedTasks],
+  );
   const phaseMenuItems = useMemo(
     () => phases.map((phase) => ({ id: phase.id, name: phase.name })),
     [phases],
@@ -546,6 +552,7 @@ export function ProjectPageProvider({
     phaseEntries,
     taskToPhase,
     unassignedTasks,
+    unassignedActiveTasks,
     phaseMenuItems,
     reportRefreshKey,
   }), [
@@ -561,6 +568,7 @@ export function ProjectPageProvider({
     reportRefreshKey,
     taskToPhase,
     tasks,
+    unassignedActiveTasks,
     unassignedTasks,
   ]);
 

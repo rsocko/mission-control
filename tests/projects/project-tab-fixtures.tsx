@@ -648,8 +648,8 @@ export interface ProjectPageHarness {
   hold(pattern: RegExp | string): () => void;
   /** Holds only the next matching request until the returned release function runs. */
   holdOnce(pattern: RegExp | string): () => void;
-  /** Forces the next hierarchy command to answer with a revision conflict. */
-  conflictNextCommand(): void;
+  /** Forces the next hierarchy commands to answer with revision conflicts. */
+  conflictNextCommand(count?: number): void;
 }
 
 class TestResizeObserver {
@@ -690,7 +690,7 @@ export function installProjectPageHarness(
   const tasks = [...(scenario.tasks ?? [])];
   const ruleMatches = [...(scenario.ruleMatches ?? [])];
   let revision = scenario.revision ?? 1;
-  let conflictNext = false;
+  let hierarchyConflictsRemaining = 0;
   const failures: FailureRule[] = [];
   const holds: HoldRule[] = [];
   const requests: RecordedRequest[] = [];
@@ -911,8 +911,8 @@ export function installProjectPageHarness(
           expectedRevision: number;
           command: ProjectHierarchyCommand;
         };
-        if (conflictNext || request.expectedRevision !== revision) {
-          conflictNext = false;
+        if (hierarchyConflictsRemaining > 0 || request.expectedRevision !== revision) {
+          hierarchyConflictsRemaining = Math.max(0, hierarchyConflictsRemaining - 1);
           revision += 1;
           return jsonResponse({
             error: 'Hierarchy revision conflict',
@@ -1072,8 +1072,8 @@ export function installProjectPageHarness(
         once: false,
       });
     },
-    conflictNextCommand() {
-      conflictNext = true;
+    conflictNextCommand(count = 1) {
+      hierarchyConflictsRemaining = count;
     },
     hold(pattern) {
       let release!: () => void;

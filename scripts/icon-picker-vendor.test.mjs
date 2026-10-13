@@ -12,6 +12,7 @@ import {
   PACKAGE_VERSION,
   SOURCE_COMMIT,
   SOURCE_TAG,
+  normalizePackageLockRegistryUrls,
   validatePackageExports,
   verifySnapshot,
 } from './icon-picker-vendor.mjs';
@@ -225,5 +226,48 @@ test('rejects changed required or unsafe additive package exports', () => {
       },
     }),
     /matching dist/i,
+  );
+});
+
+test('normalizes upstream package lock tarballs to the environment-approved registry', () => {
+  const packageLock = {
+    packages: {
+      'node_modules/chalk': {
+        version: '4.1.2',
+        resolved: 'https://ms-feed-12.pkgs.visualstudio.com/1es-public/'
+          + '_packaging/npm-public/npm/registry/chalk/-/chalk-4.1.2.tgz',
+      },
+      'node_modules/@babel/core': {
+        version: '7.29.7',
+        resolved: 'https://registry.npmjs.org/@babel/core/-/core-7.29.7.tgz',
+      },
+      'node_modules/example-git-package': {
+        resolved: 'git+https://github.com/example/package.git#abcdef',
+      },
+    },
+  };
+
+  assert.equal(normalizePackageLockRegistryUrls(packageLock, CI_REGISTRY), 1);
+  assert.equal(
+    packageLock.packages['node_modules/chalk'].resolved,
+    'https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz',
+  );
+  assert.equal(
+    packageLock.packages['node_modules/@babel/core'].resolved,
+    'https://registry.npmjs.org/@babel/core/-/core-7.29.7.tgz',
+  );
+  assert.equal(
+    packageLock.packages['node_modules/example-git-package'].resolved,
+    'git+https://github.com/example/package.git#abcdef',
+  );
+
+  assert.equal(normalizePackageLockRegistryUrls(packageLock, LOCAL_REGISTRY), 2);
+  assert.equal(
+    packageLock.packages['node_modules/chalk'].resolved,
+    'https://packagefeedproxy.microsoft.io/npm/chalk/-/chalk-4.1.2.tgz',
+  );
+  assert.equal(
+    packageLock.packages['node_modules/@babel/core'].resolved,
+    'https://packagefeedproxy.microsoft.io/npm/@babel/core/-/core-7.29.7.tgz',
   );
 });

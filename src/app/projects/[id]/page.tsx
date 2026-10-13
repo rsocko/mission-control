@@ -414,7 +414,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       const targetName = phaseId
         ? phases.find((phase) => phase.id === phaseId)?.name ?? 'phase'
         : 'the project';
-      const command: ProjectHierarchyCommand = {
+      let command: ProjectHierarchyCommand = {
         type: 'assign_tasks',
         taskIds: [taskId],
         toPhaseId: phaseId ?? undefined,
@@ -424,24 +424,23 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         undoLabel: 'Added new task',
         announcement: `Added new task to ${targetName}`,
       };
-      try {
-        await runHierarchyCommand(command, options);
-      } catch (error) {
-        if (
-          error instanceof ProjectHierarchyClientError
-          && error.code === 'HIERARCHY_REVISION_CONFLICT'
-        ) {
-          await runHierarchyCommand(
-            phaseId && error.current
-              ? {
-                  ...command,
-                  toIndex: error.current.phaseItemsByPhase[phaseId]?.length ?? 0,
-                }
-              : command,
-            options,
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await runHierarchyCommand(command, options);
+          break;
+        } catch (error) {
+          const canRetry = (
+            attempt < 2
+            && error instanceof ProjectHierarchyClientError
+            && error.code === 'HIERARCHY_REVISION_CONFLICT'
           );
-        } else {
-          throw error;
+          if (!canRetry) throw error;
+          if (phaseId && error.current) {
+            command = {
+              ...command,
+              toIndex: error.current.phaseItemsByPhase[phaseId]?.length ?? 0,
+            };
+          }
         }
       }
       void loadProjectDetail({ background: true });

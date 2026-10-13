@@ -748,6 +748,31 @@ describe('project phases (Plan) tab', () => {
     });
   });
 
+  it('retries consecutive hierarchy conflicts when creating a task in a phase', async () => {
+    await renderProjectTab('Plan');
+    const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
+    harness.conflictNextCommand(2);
+
+    fireEvent.pointerDown(within(discovery).getByRole('button', { name: 'Add task' }));
+    fireEvent.click(within(screen.getByRole('menu', { name: 'Add task' }))
+      .getByRole('menuitem', { name: 'Create new task' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Create task' }))
+      .getByRole('button', { name: 'Confirm new task' }));
+
+    await waitFor(() => {
+      expect(harness.hierarchyCommands()).toContainEqual({
+        type: 'assign_tasks',
+        taskIds: ['task-new'],
+        toPhaseId: 'phase-discovery',
+        toIndex: 1,
+      });
+    });
+    expect(toasts).not.toContainEqual({
+      level: 'error',
+      message: 'Hierarchy revision conflict',
+    });
+  });
+
   it('offers an add-task entry point for an empty phase', async () => {
     harness = installProjectPageHarness({
       project: { name: 'Plan Project' },

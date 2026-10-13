@@ -123,6 +123,18 @@ describe('project detail shell', () => {
     expect(within(planTab).getByLabelText('1 unphased task')).toHaveTextContent('1');
   });
 
+  it('does not warn about completed unphased tasks', async () => {
+    harness = installProjectPageHarness({
+      project: { name: 'Completed Planning' },
+      phases: [makePhase('phase-discovery', { name: 'Discovery' })],
+      tasks: [makeTask('task-done', { status: 'done' })],
+    });
+    await renderProjectPage();
+
+    const planTab = await screen.findByRole('button', { name: 'Plan (1)' });
+    expect(within(planTab).queryByLabelText(/unphased/)).not.toBeInTheDocument();
+  });
+
   it('keeps the header usable for an unknown tab query and recovers on selection', async () => {
     navigationState.search = 'tab=not-a-tab';
     await renderProjectPage();

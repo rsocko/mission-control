@@ -8,6 +8,7 @@ import type {
   ExternalIdentityObservation,
   ExternalIdentityWrite,
 } from '@/lib/external-identities';
+import { GitHubHttpError } from '@/lib/connectors/github-issues/github-client';
 import type { GitHubRepositoryRepointRemote } from '@/lib/connectors/github-issues/repoint-service';
 
 vi.unmock('drizzle-orm');
@@ -82,6 +83,27 @@ describe('GitHub repository repoint service', () => {
       'I_issue',
       'R_target',
     )).rejects.toThrow('invalid destination');
+  });
+
+  it('preserves a GraphQL transfer rejection returned with an HTTP error', async () => {
+    const graphqlFetch = vi.fn(async () => {
+      throw new GitHubHttpError('GraphQL request failed: 422', 422, null, {
+        responseBody: JSON.stringify({
+          errors: [{
+            message: 'Old issue cannot be transferred from private repository to public repository',
+          }],
+        }),
+      });
+    });
+
+    await expect(service.transferGitHubIssueByStableIdentity(
+      { graphqlFetch },
+      'I_issue',
+      'R_target',
+    )).rejects.toMatchObject({
+      name: 'GitHubIssueTransferError',
+      reason: 'Old issue cannot be transferred from private repository to public repository',
+    });
   });
 
   it('proves backup readability, integrity, recency, and digest', async () => {

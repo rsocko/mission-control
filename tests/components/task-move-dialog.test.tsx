@@ -198,7 +198,7 @@ describe('TaskMoveDialog errors', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Move Task/i }));
 
     expect(await screen.findByText(
-      /GitHub could not transfer this issue: Old issue cannot be transferred from private repository to public repository/i,
+      /GitHub does not allow moving an issue from a private repository to a public repository\. Choose Copy to create it in the public repository and keep the private original\./i,
     )).toBeInTheDocument();
     expect(screen.queryByText(/Move failed\. Please try again\./i)).not.toBeInTheDocument();
   });

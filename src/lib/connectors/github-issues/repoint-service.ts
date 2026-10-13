@@ -24,6 +24,7 @@ import type {
 } from '@/lib/external-identities/types';
 import {
   createGitHubClient,
+  GitHubHttpError,
   type GitHubClient,
   type GitHubRestIssue,
   type GitHubRestRepository,
@@ -535,10 +536,17 @@ export async function transferGitHubIssueByStableIdentity(
       }
     }
   `;
-  const response = await client.graphqlFetch(mutation, {
-    issueId: issueStableId,
-    repositoryId: targetRepositoryStableId,
-  });
+  let response;
+  try {
+    response = await client.graphqlFetch(mutation, {
+      issueId: issueStableId,
+      repositoryId: targetRepositoryStableId,
+    });
+  } catch (error) {
+    const reason = githubGraphQLErrorReason(error);
+    if (reason) throw new GitHubIssueTransferError(reason);
+    throw error;
+  }
   if (response.errors?.length) {
     throw new GitHubIssueTransferError(response.errors[0].message);
   }
@@ -551,6 +559,20 @@ export async function transferGitHubIssueByStableIdentity(
     throw new Error('GitHub issue transfer returned an invalid destination');
   }
   return transferred.number!;
+}
+
+function githubGraphQLErrorReason(error: unknown): string | null {
+  if (!(error instanceof GitHubHttpError) || !error.responseBody) return null;
+
+  try {
+    const body = JSON.parse(error.responseBody) as {
+      errors?: Array<{ message?: unknown }>;
+    };
+    const message = body.errors?.[0]?.message;
+    return typeof message === 'string' && message.trim() ? message.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function transferGitHubIssueWithLease(

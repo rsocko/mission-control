@@ -126,6 +126,55 @@ describe('Sync History retained items', () => {
     expect(screen.queryByText('No changes')).not.toBeInTheDocument();
   });
 
+  it('shows conflict-resolved audit rows when filtering the Updated total', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      history: [{
+        id: 'log-conflict',
+        connectorId: 'github-1',
+        success: false,
+        tasksAdded: 0,
+        tasksUpdated: 1,
+        tasksRemoved: 0,
+        tasksPushed: 0,
+        localOnlyProtected: 0,
+        notificationsAdded: 0,
+        errors: ['A separate item was retained'],
+        details: [{
+          action: 'conflict_resolved',
+          taskId: 'task-1',
+          taskTitle: 'Cleanup Images in GHCR',
+          taskSourceId: 'rsocko/homelab-config:714',
+          reason: 'Concurrent task insert reconciled by source identity',
+        }],
+        syncedAt: '2026-10-13T02:19:28.841Z',
+        durationMs: 120,
+      }],
+      hasMore: false,
+    }), { status: 200 }));
+
+    render(<SyncHistorySection connectors={[{
+      id: 'github-1',
+      type: 'github-issues',
+      name: 'GitHub',
+      enabled: true,
+      syncMode: 'poll',
+      pollIntervalMinutes: 5,
+      capabilities: { read: true, write: true },
+      credentials: {},
+      settings: {},
+      syncedLists: [],
+      createdAt: '',
+      updatedAt: '',
+      deletedAt: null,
+    }]} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /GitHub/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Updated\s+1/i }));
+
+    expect(await screen.findByText('Updated items (1)')).toBeInTheDocument();
+    expect(screen.getByText('Cleanup Images in GHCR')).toBeInTheDocument();
+  });
+
   it('renders connector-supplied domain activity with zero task and notification deltas', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       history: [{

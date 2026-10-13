@@ -104,6 +104,7 @@ export function matchingMetadataIdentityRecoveryWrite(
   remoteTask: TaskItem,
   localTask: ConnectorTaskRecord | undefined,
   decision: GitHubIdentityResolutionDecision,
+  localParent?: ConnectorTaskRecord,
 ): ExternalIdentityWrite | null {
   if (
     decision.outcome !== 'unbound_local_row'
@@ -115,10 +116,20 @@ export function matchingMetadataIdentityRecoveryWrite(
   const metadataNodeId = typeof localTask.metadata?.nodeId === 'string'
     ? localTask.metadata.nodeId
     : null;
-  if (
-    !metadataNodeId
-    || metadataNodeId !== remoteTask.externalIdentity.entity.identity.stableId
-  ) {
+  const directNodeIdMatch = metadataNodeId
+    === remoteTask.externalIdentity.entity.identity.stableId;
+  const remoteParent = remoteTask.metadata?.githubParent;
+  const parentNodeIdMatch = localTask.isChecklistItem
+    && !!localTask.parentId
+    && localParent?.id === localTask.parentId
+    && typeof localParent.metadata?.nodeId === 'string'
+    && localParent.metadata.nodeId
+      === remoteTask.githubParentIdentity?.entity.identity.stableId
+    && !!remoteParent
+    && typeof remoteParent === 'object'
+    && !Array.isArray(remoteParent)
+    && Reflect.get(remoteParent, 'sourceId') === localParent.sourceId;
+  if (!directNodeIdMatch && !parentNodeIdMatch) {
     return null;
   }
   return {
@@ -383,11 +394,15 @@ export async function upsertTasks(
           const localTask = candidate.localTaskId
             ? existingById.get(candidate.localTaskId)
             : undefined;
+          const localParent = localTask?.parentId
+            ? existingById.get(localTask.parentId)
+            : undefined;
           const write = matchingMetadataIdentityRecoveryWrite(
             connectorId,
             remoteTask,
             localTask,
             decision,
+            localParent,
           );
           return write ? [write] : [];
         });

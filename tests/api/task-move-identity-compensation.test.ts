@@ -16,6 +16,7 @@ const CREATED_SOURCE_ID = 'acme/repo-b:42';
 
 const mocks = vi.hoisted(() => ({
   createTask: vi.fn(),
+  createSubTask: vi.fn(),
   deleteTask: vi.fn(async () => {}),
   persistCreatedTaskIdentity: vi.fn(async () => {}),
   reconcileTransferIdentity: vi.fn(async () => {}),
@@ -27,6 +28,7 @@ vi.mock('@/lib/connectors', () => ({
       ? {
           type: 'github-issues',
           createTask: mocks.createTask,
+          createSubTask: mocks.createSubTask,
           deleteTask: mocks.deleteTask,
         }
       : undefined)),
@@ -126,6 +128,7 @@ const discardMaterializedDestination = vi.fn(async (_taskId: string) => {});
 const materializeDestination = vi.fn(async () => {});
 const releaseTaskMoveClaim = vi.fn(async () => {});
 const finalizeMove = vi.fn(async () => ({ kind: 'finalized' as const }));
+let childTasks: Array<Omit<typeof sourceTask, 'parentId'> & { parentId: string | null }> = [];
 
 function registerMoves(): void {
   registerTaskCorePersistence({
@@ -142,7 +145,7 @@ function registerMoves(): void {
         sourceId: 'acme/repo-b',
       }),
       listTaskTagRefs: async () => [],
-      listChildTasks: async () => [],
+      listChildTasks: async () => childTasks,
       listAttachmentMetadata: async () => [],
       getTaskSchedule: async () => null,
       listAttachmentContents: async () => [],
@@ -178,7 +181,19 @@ beforeEach(() => {
     },
   });
   mocks.deleteTask.mockResolvedValue(undefined);
+  mocks.createSubTask.mockResolvedValue({
+    sourceId: 'acme/repo-b:43',
+    title: 'Child',
+    metadata: { issueNumber: 43 },
+    externalIdentity: {
+      entity: {
+        identity: { stableId: 'I_created_child' },
+        locator: { webUrl: 'https://github.com/acme/repo-b/issues/43' },
+      },
+    },
+  });
   mocks.persistCreatedTaskIdentity.mockResolvedValue(undefined);
+  childTasks = [];
   registerMoves();
 });
 
@@ -235,5 +250,44 @@ describe('write-through move compensation around created-identity persistence', 
     expect(discardMaterializedDestination).not.toHaveBeenCalled();
     expect(materializeDestination).toHaveBeenCalledTimes(1);
     expect(finalizeMove).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists GitHub sub-issue identity and metadata before repointing the child', async () => {
+    childTasks = [{
+      ...sourceTask,
+      id: 'child-1',
+      sourceId: 'local:child-1',
+      title: 'Child',
+      parentId: sourceTask.id,
+      depth: 1,
+      isChecklistItem: true,
+      metadata: { checklistItemId: 'checklist-1' },
+    }];
+    const { executeWriteThroughTaskMove } = await import('@/lib/tasks/task-move-write-through');
+
+    const result = await executeWriteThroughTaskMove(moveInput);
+
+    expect(result.status).toBe(201);
+    expect(mocks.persistCreatedTaskIdentity).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      taskId: 'child-1',
+      sourceId: 'acme/repo-b:43',
+      evidence: expect.objectContaining({
+        entity: expect.objectContaining({
+          identity: { stableId: 'I_created_child' },
+        }),
+      }),
+    }));
+    expect(finalizeMove).toHaveBeenCalledWith(expect.objectContaining({
+      subtaskRepoints: [expect.objectContaining({
+        taskId: 'child-1',
+        sourceId: 'acme/repo-b:43',
+        metadata: expect.objectContaining({
+          checklistItemId: 'checklist-1',
+          issueNumber: 43,
+          nodeId: 'I_created_child',
+          url: 'https://github.com/acme/repo-b/issues/43',
+        }),
+      })],
+    }));
   });
 });

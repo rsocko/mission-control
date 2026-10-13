@@ -4298,6 +4298,7 @@ class SqliteWriteThroughTaskMoveRepository implements WriteThroughTaskMoveReposi
             updatedAt: repoint.updatedAt,
             syncStatus: repoint.syncStatus,
             lastSyncedAt: repoint.lastSyncedAt,
+            metadata: JSON.stringify(repoint.metadata),
           }).where(eq(tasks.id, repoint.taskId)).run();
           tx.delete(taskAttachments)
             .where(eq(taskAttachments.taskId, repoint.taskId)).run();

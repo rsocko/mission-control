@@ -429,7 +429,22 @@ const mockTransferTask = vi.fn(async () => ({
 const mockCanTransferTask = vi.fn(() => true);
 const mockRefreshTransferIdentity = vi.fn();
 const mockReconcileTransferIdentity = vi.fn();
-const mockCreateSubTask = vi.fn(async () => ({ sourceId: 'sub-1', title: 'Sub' }));
+const mockPersistCreatedTaskIdentity = vi.fn(async () => {});
+const mockCreateSubTask = vi.fn(async (parentSourceId: string) => {
+  if (!parentSourceId.includes('/')) return { sourceId: 'sub-1', title: 'Sub' };
+  const issueNumber = 123 + mockCreateSubTask.mock.calls.length;
+  return {
+    sourceId: `acme/repo:${issueNumber}`,
+    title: 'Sub',
+    metadata: { issueNumber },
+    externalIdentity: {
+      entity: {
+        identity: { stableId: `I_created_subtask_${issueNumber}` },
+        locator: { webUrl: `https://github.com/acme/repo/issues/${issueNumber}` },
+      },
+    },
+  };
+});
 const mockListAttachments = vi.fn(async (): Promise<Array<{
   id: string;
   name: string;
@@ -477,6 +492,7 @@ vi.mock('@/lib/connectors', () => ({
 }));
 
 vi.mock('@/lib/connectors/transfer-identity', () => ({
+  persistCreatedTaskIdentity: mockPersistCreatedTaskIdentity,
   reconcileTransferIdentity: mockReconcileTransferIdentity,
 }));
 
@@ -1728,9 +1744,13 @@ describe('POST /api/tasks/move/execute', () => {
       subtaskRepoints: expect.arrayContaining([
         expect.objectContaining({
           taskId: 'sub-1',
-          sourceId: 'sub-1',
+          sourceId: 'acme/repo:124',
           connectorType: 'github-issues',
           parentId: expect.any(String),
+          metadata: expect.objectContaining({
+            issueNumber: 124,
+            nodeId: 'I_created_subtask_124',
+          }),
         }),
       ]),
     }));
@@ -1830,7 +1850,11 @@ describe('POST /api/tasks/move/execute', () => {
     expect(subtaskCopy.task).toMatchObject({
       title: 'Subtask',
       parentId: expect.any(String),
-      sourceId: 'sub-1',
+      sourceId: 'acme/repo:124',
+      metadata: expect.objectContaining({
+        issueNumber: 124,
+        nodeId: 'I_created_subtask_124',
+      }),
     });
     expect(subtaskCopy.attachments).toEqual([
       expect.objectContaining({

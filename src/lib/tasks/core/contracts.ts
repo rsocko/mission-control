@@ -1577,6 +1577,7 @@ export interface TaskMoveSubtaskRepoint {
   readonly updatedAt: string;
   readonly syncStatus: string;
   readonly lastSyncedAt: string;
+  readonly metadata: Record<string, unknown>;
   /** Replaces the subtask's attachments wholesale. */
   readonly attachments: readonly TaskAttachmentInsert[];
 }

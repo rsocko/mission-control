@@ -369,6 +369,11 @@ function DetailPanel({ entry, auditDetails, connectorCapabilities, pushed, forma
   // Filtered list based on active KPI filter
   const filteredDetails = useMemo(() => {
     if (!activeFilter) return changedDetails;
+    if (activeFilter === 'updated') {
+      return changedDetails.filter(({ detail }) => (
+        detail.action === 'updated' || detail.action === 'conflict_resolved'
+      ));
+    }
     return changedDetails.filter(({ detail }) => detail.action === activeFilter);
   }, [changedDetails, activeFilter]);
 

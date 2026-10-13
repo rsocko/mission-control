@@ -454,7 +454,7 @@ describe('permanent GitHub NodeID identity', () => {
       id: 'task-unbound',
       sourceId: 'acme/app:3',
       metadata: { nodeId: 'I_unbound' },
-    } as import('@/db/persistence/connector-execution').ConnectorTaskRecord;
+    } as unknown as import('@/db/persistence/connector-execution').ConnectorTaskRecord;
     const decision = {
       outcome: 'unbound_local_row',
     } as import('@/lib/external-identities/stable-identity-types').GitHubIdentityResolutionDecision;
@@ -478,6 +478,72 @@ describe('permanent GitHub NodeID identity', () => {
       remoteTask,
       { ...localTask, metadata: { nodeId: 'I_other' } },
       decision,
+    )).toBeNull();
+  });
+
+  it('recovers an unbound GitHub sub-issue when its verified parent identity matches', async () => {
+    const { matchingMetadataIdentityRecoveryWrite } = await import('@/lib/sync/pull-manager');
+    const parentEvidence = githubIssueEvidence({
+      issueStableId: 'I_parent',
+      repositoryStableId: 'R_app',
+      owner: 'acme',
+      repository: 'app',
+      issueNumber: 2,
+    });
+    const remoteTask = {
+      id: 'remote-child',
+      sourceId: 'acme/app:3',
+      metadata: {
+        githubParent: {
+          sourceId: 'acme/app:2',
+        },
+      },
+      externalIdentity: githubIssueEvidence({
+        issueStableId: 'I_child',
+        repositoryStableId: 'R_app',
+        owner: 'acme',
+        repository: 'app',
+        issueNumber: 3,
+      }),
+      githubParentIdentity: parentEvidence,
+    } as unknown as import('@/types').TaskItem;
+    const localTask = {
+      id: 'task-child',
+      sourceId: 'acme/app:3',
+      parentId: 'task-parent',
+      isChecklistItem: true,
+      metadata: { checklistItemId: 'legacy-checklist-child' },
+    } as unknown as import('@/db/persistence/connector-execution').ConnectorTaskRecord;
+    const localParent = {
+      id: 'task-parent',
+      sourceId: 'acme/app:2',
+      metadata: { nodeId: 'I_parent' },
+    } as unknown as import('@/db/persistence/connector-execution').ConnectorTaskRecord;
+    const decision = {
+      outcome: 'unbound_local_row',
+    } as import('@/lib/external-identities/stable-identity-types').GitHubIdentityResolutionDecision;
+
+    expect(matchingMetadataIdentityRecoveryWrite(
+      'github-permanent',
+      remoteTask,
+      localTask,
+      decision,
+      localParent,
+    )).toEqual({
+      target: {
+        connectorInstanceId: 'github-permanent',
+        bindingType: 'task',
+        localId: 'task-child',
+        legacyIdentity: 'acme/app:3',
+      },
+      evidence: remoteTask.externalIdentity,
+    });
+    expect(matchingMetadataIdentityRecoveryWrite(
+      'github-permanent',
+      remoteTask,
+      localTask,
+      decision,
+      { ...localParent, metadata: { nodeId: 'I_other_parent' } },
     )).toBeNull();
   });
 

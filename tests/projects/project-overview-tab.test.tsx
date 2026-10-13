@@ -123,7 +123,7 @@ describe('project overview tab', () => {
     await renderProjectTab('Overview');
 
     const alert = await screen.findByRole('status');
-    expect(within(alert).getByText('2 tasks need a phase')).toBeInTheDocument();
+    expect(within(alert).getByText('1 task needs a phase')).toBeInTheDocument();
     expect(within(alert).getByText(
       'Auto-include rules can add project tasks without placing them in the plan.',
     ))
@@ -133,6 +133,8 @@ describe('project overview tab', () => {
 
     expect(await screen.findByRole('heading', { name: 'Plan' })).toBeInTheDocument();
     expect(screen.getByText('Unassigned Tasks')).toBeInTheDocument();
+    expect(screen.getByText('Delta task')).toBeInTheDocument();
+    expect(screen.getByText('Epsilon task')).toBeInTheDocument();
   });
 
   it('shares task selection with the task detail panel from activity and reports', async () => {

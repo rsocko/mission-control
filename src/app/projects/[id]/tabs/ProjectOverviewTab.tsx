@@ -43,7 +43,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
     projectId,
     reportRefreshKey,
     tasks,
-    unassignedTasks,
+    unassignedActiveTasks,
   } = useProjectPageData();
   const {
     handleGraphTaskSelect,
@@ -77,7 +77,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
 
   return (
     <motion.section variants={fadeSlideUp} className="space-y-6">
-      {unassignedTasks.length > 0 ? (
+      {unassignedActiveTasks.length > 0 ? (
         <div
           role="status"
           className="flex flex-col gap-4 rounded-[var(--radius-lg)] border border-[var(--warning)]/35 bg-[var(--warning)]/10 p-4 sm:flex-row sm:items-center sm:justify-between"
@@ -90,7 +90,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
             />
             <div>
               <p className="text-sm font-semibold text-[var(--text-primary)]">
-                {unassignedTasks.length} {unassignedTasks.length === 1 ? 'task needs' : 'tasks need'} a phase
+                {unassignedActiveTasks.length} {unassignedActiveTasks.length === 1 ? 'task needs' : 'tasks need'} a phase
               </p>
               <p className="mt-1 text-sm text-[var(--text-secondary)]">
                 {project.autoIncludeRules.length > 0

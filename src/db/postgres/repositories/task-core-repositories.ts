@@ -4431,6 +4431,7 @@ class PostgresWriteThroughTaskMoveRepository implements WriteThroughTaskMoveRepo
             updatedAt: repoint.updatedAt,
             syncStatus: repoint.syncStatus,
             lastSyncedAt: repoint.lastSyncedAt,
+            metadata: repoint.metadata,
           }).where(eq(tasks.id, repoint.taskId));
           await tx.delete(taskAttachments)
             .where(eq(taskAttachments.taskId, repoint.taskId));

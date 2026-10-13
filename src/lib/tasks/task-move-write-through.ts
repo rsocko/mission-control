@@ -626,7 +626,12 @@ export async function executeWriteThroughTaskMove(
     const warnings: string[] = [];
     const destinationAttachments: TaskAttachmentInsert[] = [];
     const destinationSubtaskAttachments = new Map<string, TaskAttachmentInsert[]>();
-    const createdSubtasks: Array<{ sourceTaskId: string; created: TaskItem }> = [];
+    const createdSubtasks: Array<{
+      sourceTaskId: string;
+      destinationTaskId: string;
+      created: TaskItem;
+      metadata: Record<string, unknown>;
+    }> = [];
     const createdRemoteSourceIds: string[] = [];
     let destinationMetadata: Record<string, unknown> = {};
     const newMcTaskId = crypto.randomUUID();
@@ -832,6 +837,7 @@ export async function executeWriteThroughTaskMove(
         targetConnector.createSubTask
       ) {
         for (const sub of subtasks) {
+          const destinationTaskId = sourceAction === 'copy' ? crypto.randomUUID() : sub.id;
           const createdSubtask = await targetConnector.createSubTask(newSourceId, {
             title: sub.title,
             description: sub.description ?? undefined,
@@ -843,7 +849,33 @@ export async function executeWriteThroughTaskMove(
             microStatus: (sub.microStatus ?? undefined) as TaskItem['microStatus'],
             metadata: sub.metadata,
           });
-          createdSubtasks.push({ sourceTaskId: sub.id, created: createdSubtask });
+          let createdMetadata = parseMetadata(createdSubtask.metadata);
+          if (targetConnectorRow.type === 'github-issues') {
+            if (!createdSubtask.externalIdentity) {
+              throw new GitHubWriteFenceError('created_subtask_identity_evidence_missing');
+            }
+            createdMetadata = refreshGitHubIssueMetadata(
+              createdSubtask.metadata,
+              createdSubtask.sourceId,
+              createdSubtask.externalIdentity,
+            );
+            await persistCreatedTaskIdentity({
+              taskId: destinationTaskId,
+              connectorInstanceId: targetConnectorInstanceId,
+              sourceId: createdSubtask.sourceId,
+              sourceListId: targetSourceListId,
+              evidence: createdSubtask.externalIdentity,
+            });
+          }
+          createdSubtasks.push({
+            sourceTaskId: sub.id,
+            destinationTaskId,
+            created: createdSubtask,
+            metadata: {
+              ...parseMetadata(sub.metadata),
+              ...createdMetadata,
+            },
+          });
           createdRemoteSourceIds.push(createdSubtask.sourceId);
 
           const preservedAttachments: TaskAttachmentInsert[] = [];
@@ -930,12 +962,13 @@ export async function executeWriteThroughTaskMove(
       const subtaskCopies: TaskMoveSubtaskCopy[] = [];
       if (sourceAction === 'copy' && subtasks.length > 0) {
         const createdBySourceId = new Map(
-          createdSubtasks.map(({ sourceTaskId, created }) => [sourceTaskId, created]),
+          createdSubtasks.map((created) => [created.sourceTaskId, created]),
         );
 
         for (const subtask of subtasks) {
-          const created = createdBySourceId.get(subtask.id);
-          const destinationSubtaskId = crypto.randomUUID();
+          const createdSubtask = createdBySourceId.get(subtask.id);
+          const created = createdSubtask?.created;
+          const destinationSubtaskId = createdSubtask?.destinationTaskId ?? crypto.randomUUID();
           const subtaskAttachments = destinationSubtaskAttachments.get(subtask.id)
             ?? (storedSubtaskAttachments.get(subtask.id) ?? []).map((attachment) => ({
               id: crypto.randomUUID(),
@@ -961,7 +994,7 @@ export async function executeWriteThroughTaskMove(
               sourceListName: created ? targetListName : null,
               updatedAt: now,
               metadata: {
-                ...subtask.metadata,
+                ...(createdSubtask?.metadata ?? parseMetadata(subtask.metadata)),
                 copiedFrom: {
                   taskId: subtask.id,
                   sourceId: subtask.sourceId,
@@ -1052,7 +1085,7 @@ export async function executeWriteThroughTaskMove(
       const activeMoveClaim = moveClaim;
 
       const subtaskRepoints: TaskMoveSubtaskRepoint[] = createdSubtasks.length > 0
-        ? createdSubtasks.map(({ sourceTaskId, created }) => ({
+        ? createdSubtasks.map(({ sourceTaskId, created, metadata }) => ({
             taskId: sourceTaskId,
             sourceId: created.sourceId,
             connectorType: targetConnectorRow.type,
@@ -1063,6 +1096,7 @@ export async function executeWriteThroughTaskMove(
             updatedAt: now,
             syncStatus: 'synced',
             lastSyncedAt: now,
+            metadata,
             attachments: (destinationSubtaskAttachments.get(sourceTaskId) ?? []).map(
               (attachment) => ({ ...attachment, taskId: sourceTaskId }),
             ),
@@ -1078,6 +1112,7 @@ export async function executeWriteThroughTaskMove(
             updatedAt: now,
             syncStatus: 'synced',
             lastSyncedAt: now,
+            metadata: parseMetadata(subtask.metadata),
             attachments: (storedSubtaskAttachments.get(subtask.id) ?? []).map((attachment) => ({
               id: crypto.randomUUID(),
               taskId: subtask.id,

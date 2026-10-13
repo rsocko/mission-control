@@ -2951,6 +2951,7 @@ export function describeTaskCoreContract(
           updatedAt: MOVE_NOW,
           syncStatus: 'synced',
           lastSyncedAt: MOVE_NOW,
+          metadata: { origin: 'repointed' },
           attachments: [],
         }],
         sourceDisposition: {
@@ -3004,6 +3005,7 @@ export function describeTaskCoreContract(
           connectorInstanceId: 'target-1',
           parentId: 'wt-successor',
           syncStatus: 'synced',
+          metadata: { origin: 'repointed' },
         });
       });
 
@@ -3080,6 +3082,7 @@ export function describeTaskCoreContract(
             updatedAt: MOVE_NOW,
             syncStatus: 'synced',
             lastSyncedAt: MOVE_NOW,
+            metadata: { origin: 'repointed' },
             attachments: [],
           }],
         }))).rejects.toThrow();

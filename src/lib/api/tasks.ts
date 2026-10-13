@@ -24,12 +24,15 @@ export class ApiRequestError extends Error {
 
 export function getSafeTaskMoveErrorMessage(error: unknown): string | null {
   if (!(error instanceof ApiRequestError)) return null;
-  if (
-    error.code === 'GITHUB_NATIVE_TRANSFER_REJECTED'
-    || error.code === 'GITHUB_NATIVE_TRANSFER_UNAVAILABLE'
-  ) {
+  if (error.code === 'GITHUB_NATIVE_TRANSFER_REJECTED') {
+    if (error.message.toLowerCase().includes(
+      'private repository to public repository',
+    )) {
+      return 'GitHub does not allow moving an issue from a private repository to a public repository. Choose Copy to create it in the public repository and keep the private original.';
+    }
     return error.message;
   }
+  if (error.code === 'GITHUB_NATIVE_TRANSFER_UNAVAILABLE') return error.message;
   return null;
 }
 

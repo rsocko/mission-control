@@ -1051,6 +1051,13 @@ async function writeThrough(
     });
   } catch (error) {
     logger.error({ err: error, taskId }, 'Write-through task update failed');
+    if (pushLeaseToken) {
+      if (error instanceof GitHubUnknownWriteOutcomeError) {
+        await failTaskPush(taskId, pushLeaseToken, 'push_failed', 5, expectedTaskVersion);
+      } else {
+        await releaseTaskPush(taskId, pushLeaseToken, 'pending_push', expectedTaskVersion);
+      }
+    }
     await logWriteThroughFailure({
       connectorId: currentTask.connectorInstanceId,
       taskId,
@@ -1058,12 +1065,6 @@ async function writeThrough(
       taskSourceId: currentTask.sourceId,
       error,
     });
-    if (!pushLeaseToken) return;
-    if (error instanceof GitHubUnknownWriteOutcomeError) {
-      await failTaskPush(taskId, pushLeaseToken, 'push_failed', 5, expectedTaskVersion);
-    } else {
-      await releaseTaskPush(taskId, pushLeaseToken, 'pending_push', expectedTaskVersion);
-    }
   }
 }
 

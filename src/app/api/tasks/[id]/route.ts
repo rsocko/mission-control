@@ -3,7 +3,7 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { resolveOutboundPriority } from '@/lib/priority';
 import { randomUUID } from 'crypto';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
-import { logWriteThrough } from '@/lib/sync/write-through-log';
+import { logWriteThrough, logWriteThroughFailure } from '@/lib/sync/write-through-log';
 import { ApiErrors } from '@/lib/api-error';
 import { getConnectorCapabilities, isConnectorEnabled } from '@/lib/connectors/capabilities';
 import { getLocalToday } from '@/lib/utils/date';
@@ -57,6 +57,7 @@ import type {
   TaskCoreTaskPatch,
   TaskCoreTaskRow,
   TaskMutationRequest,
+  TaskWriteContext,
 } from '@/lib/tasks/core/contracts';
 import {
   claimTaskForPush,
@@ -112,6 +113,73 @@ function enqueueTaskWriteThrough(taskId: string, write: () => Promise<void>): Pr
   return queued;
 }
 
+const MAX_TASK_REVISION_RETRY_ATTEMPTS = 3;
+
+function capturePatchRetryState(
+  context: TaskWriteContext,
+  fields: readonly TaskField[],
+): string {
+  const { task, schedule } = context;
+  const state: Record<string, unknown> = {};
+  for (const field of [...fields].sort()) {
+    switch (field) {
+      case 'tags':
+        state.tags = [...context.tagIds].sort();
+        break;
+      case 'recurrence':
+        state.recurrence = {
+          recurrence: schedule?.recurrence ?? null,
+          recurrenceMode: schedule?.recurrenceMode ?? 'schedule',
+          metadata: task.metadata,
+        };
+        break;
+      case 'estimatedDuration':
+        state.estimatedDuration = schedule?.estimatedDuration ?? null;
+        break;
+      case 'kanbanPlacement':
+        state.kanbanPlacement = {
+          column: task.kanbanColumn,
+          order: task.kanbanOrder,
+        };
+        break;
+      case 'status':
+      case 'statusReason':
+        state.status = {
+          status: task.status,
+          statusReason: task.statusReason,
+          completedAt: task.completedAt,
+          recurrence: schedule?.recurrence ?? null,
+          recurrenceMode: schedule?.recurrenceMode ?? 'schedule',
+        };
+        break;
+      case 'reminderAt':
+        state.reminder = {
+          dueDate: task.dueDate,
+          reminderAt: task.reminderAt,
+          reminderRelative: task.reminderRelative,
+          reminderDueTime: task.reminderDueTime,
+          reminderNagInterval: task.reminderNagInterval ?? null,
+          reminderNagStopAt: task.reminderNagStopAt ?? null,
+        };
+        break;
+      default:
+        state[field] = task[field as keyof TaskCoreTaskRow];
+        break;
+    }
+  }
+  state.fieldStates = context.fieldStates
+    .filter((fieldState) => fields.includes(fieldState.fieldName as TaskField))
+    .map((fieldState) => ({
+      fieldName: fieldState.fieldName,
+      sourceValue: fieldState.sourceValue,
+      locallyOverridden: fieldState.locallyOverridden,
+      sourceObservedAt: fieldState.sourceObservedAt,
+      localEditedAt: fieldState.localEditedAt,
+    }))
+    .sort((left, right) => left.fieldName.localeCompare(right.fieldName));
+  return JSON.stringify(state);
+}
+
 /**
  * PATCH /api/tasks/[id] — Update a task (title, status, priority, tags, etc.)
  * Immediate write-through: updates local DB optimistically, then pushes to source.
@@ -120,9 +188,23 @@ function enqueueTaskWriteThrough(taskId: string, write: () => Promise<void>): Pr
  */
 export async function PATCH(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> },
+) {
+  return patchTask(request, context, 0, null);
+}
+
+async function patchTask(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+  revisionRetryAttempts: number,
+  retryBaseline: string | null,
 ) {
   const { id } = await params;
+  const requestedVersion = request.headers.get('x-expected-task-updated-at');
+  const retryRequest = !requestedVersion
+    && revisionRetryAttempts < MAX_TASK_REVISION_RETRY_ATTEMPTS
+    ? request.clone()
+    : null;
 
   try {
     const parsed = parseTaskPatchInput(await request.json());
@@ -133,9 +215,15 @@ export async function PATCH(
     if (!writeContext) return ApiErrors.notFound('Task');
     const currentTask = writeContext.task;
     const currentSchedule = writeContext.schedule;
+    const currentRetryState = capturePatchRetryState(writeContext, parsed.fields);
+    if (retryBaseline !== null && currentRetryState !== retryBaseline) {
+      return NextResponse.json({
+        error: 'Task changed in a field included in this update',
+        code: 'TASK_REVISION_CONFLICT',
+      }, { status: 409 });
+    }
     const parsedCurrentMetadata = parseTaskMetadataCompat(currentTask.metadata);
     const currentCanonical = readRecurrenceMetadata(parsedCurrentMetadata.metadata);
-    const requestedVersion = request.headers.get('x-expected-task-updated-at');
     if (requestedVersion && currentTask.updatedAt !== requestedVersion) {
       return NextResponse.json({
         error: 'Task changed before this update could be applied',
@@ -678,6 +766,14 @@ export async function PATCH(
     });
     if (mutation.kind === 'not-found') return ApiErrors.notFound('Task');
     if (mutation.kind === 'revision-conflict') {
+      if (retryRequest && !shouldReturnCompletionOccurrence) {
+        return patchTask(
+          retryRequest,
+          { params: Promise.resolve({ id }) },
+          revisionRetryAttempts + 1,
+          retryBaseline ?? currentRetryState,
+        );
+      }
       return NextResponse.json({
         error: 'Task changed during update',
         code: 'TASK_REVISION_CONFLICT',
@@ -1030,12 +1126,32 @@ async function writeThrough(
     });
   } catch (error) {
     logger.error({ err: error, taskId }, 'Write-through task update failed');
-    if (!pushLeaseToken) return;
-    if (error instanceof GitHubUnknownWriteOutcomeError) {
-      await failTaskPush(taskId, pushLeaseToken, 'push_failed', 5, expectedTaskVersion);
-    } else {
-      await releaseTaskPush(taskId, pushLeaseToken, 'pending_push', expectedTaskVersion);
+    if (pushLeaseToken) {
+      try {
+        if (error instanceof GitHubUnknownWriteOutcomeError) {
+          await failTaskPush(taskId, pushLeaseToken, 'push_failed', 5, expectedTaskVersion);
+        } else {
+          await releaseTaskPush(taskId, pushLeaseToken, 'pending_push', expectedTaskVersion);
+        }
+      } catch (settlementError) {
+        logger.error(
+          { err: settlementError, taskId },
+          'Failed to settle task push lease after write-through failure',
+        );
+      }
     }
+    await logWriteThroughFailure({
+      connectorId: currentTask.connectorInstanceId,
+      taskId,
+      taskTitle: currentTask.title,
+      taskSourceId: currentTask.sourceId,
+      error,
+    }).catch((auditError) => {
+      logger.warn(
+        { err: auditError, taskId },
+        'Failed to log write-through failure to sync history',
+      );
+    });
   }
 }
 
@@ -1045,14 +1161,44 @@ function isConnectorCloseReason(
   return reason === 'completed' || reason === 'not_planned' || reason === 'duplicate';
 }
 
+function taskRevisionConflict(error: string) {
+  return NextResponse.json({
+    error,
+    code: 'TASK_REVISION_CONFLICT',
+  }, { status: 409 });
+}
+
+function retryTaskDeletion(
+  request: Request,
+  id: string,
+  revisionRetryAttempts: number,
+): Promise<Response> {
+  if (revisionRetryAttempts < MAX_TASK_REVISION_RETRY_ATTEMPTS) {
+    return deleteTask(
+      request,
+      { params: Promise.resolve({ id }) },
+      revisionRetryAttempts + 1,
+    );
+  }
+  return Promise.resolve(taskRevisionConflict('Task changed during deletion'));
+}
+
 /**
  * DELETE /api/tasks/[id] — Remove a task according to its source authority.
  * Ingested tasks are cancelled locally so pull-based sources can observe the change.
  * Remote-managed tasks retain write-through deletion, while local tasks are deleted.
  */
 export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  return deleteTask(request, context, 0);
+}
+
+async function deleteTask(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+  revisionRetryAttempts: number,
 ) {
   const { id } = await params;
 
@@ -1091,10 +1237,7 @@ export async function DELETE(
       });
       if (outcome.kind === 'not-found') return ApiErrors.notFound('Task');
       if (outcome.kind === 'revision-conflict') {
-        return NextResponse.json({
-          error: 'Task changed during deletion',
-          code: 'TASK_REVISION_CONFLICT',
-        }, { status: 409 });
+        return retryTaskDeletion(request, id, revisionRetryAttempts);
       }
       await publishTaskSemanticUpdate(id);
       return NextResponse.json({
@@ -1119,10 +1262,7 @@ export async function DELETE(
       });
       if (outcome.kind === 'not-found') return ApiErrors.notFound('Task');
       if (outcome.kind === 'revision-conflict') {
-        return NextResponse.json({
-          error: 'Task changed during deletion',
-          code: 'TASK_REVISION_CONFLICT',
-        }, { status: 409 });
+        return retryTaskDeletion(request, id, revisionRetryAttempts);
       }
       await publishTaskSemanticUpdate(id);
       return NextResponse.json({
@@ -1148,10 +1288,7 @@ export async function DELETE(
       });
       if (outcome.kind === 'not-found') return ApiErrors.notFound('Task');
       if (outcome.kind === 'revision-conflict') {
-        return NextResponse.json({
-          error: 'Task changed during deletion',
-          code: 'TASK_REVISION_CONFLICT',
-        }, { status: 409 });
+        return retryTaskDeletion(request, id, revisionRetryAttempts);
       }
       await publishTaskSemanticUpdate(id);
       void writeThroughDelete(
@@ -1177,10 +1314,7 @@ export async function DELETE(
     });
     if (outcome.kind === 'not-found') return ApiErrors.notFound('Task');
     if (outcome.kind === 'revision-conflict') {
-      return NextResponse.json({
-        error: 'Task changed during deletion',
-        code: 'TASK_REVISION_CONFLICT',
-      }, { status: 409 });
+      return retryTaskDeletion(request, id, revisionRetryAttempts);
     }
     await removeTaskSearch(id);
     return NextResponse.json({ success: true, action: 'deleted', restorable: true });

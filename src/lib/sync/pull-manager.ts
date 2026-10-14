@@ -1250,11 +1250,17 @@ async function applyRemoteUpdate(
   const applied = await persistence.applyRemoteUpdate({
     taskId: existingTask.id,
     expectedSyncStatus: existingTask.syncStatus,
+    expectedUpdatedAt: existingTask.updatedAt,
     values: taskUpdate,
     sourceTags: canSyncTags ? remote.tags || [] : undefined,
   });
 
-  return applied ? indexedTask : null;
+  if (!applied) {
+    throw new Error(
+      `Concurrent local update prevented remote task ${remote.sourceId} from being applied`,
+    );
+  }
+  return indexedTask;
 }
 
 function parseTaskMetadata(metadata: unknown): Record<string, unknown> {

@@ -46,10 +46,7 @@ const mocks = vi.hoisted(() => ({
   finalizeUndo: vi.fn(),
   assignTasksToProject: vi.fn(),
   removeTasksFromProject: vi.fn(),
-  patchTask: vi.fn(async (
-    _request: Request,
-    _context: { params: Promise<{ id: string }> },
-  ) => Response.json({ success: true })),
+  patchTask: vi.fn(async () => Response.json({ success: true })),
 }));
 
 vi.mock('@/lib/tasks/core/runtime', () => ({
@@ -98,6 +95,145 @@ beforeEach(() => {
 });
 
 describe('Quick Sort operation apply route', () => {
+  it('finalizes a replay when the task mutation landed before a crash', async () => {
+    const after = {
+      ...snapshot,
+      updatedAt: '2026-08-16T12:01:00.000Z',
+      priority: 'high',
+    };
+    const applying = {
+      ...operation,
+      state: 'applying' as const,
+      beforeSnapshot: { ...snapshot, originalPatch: { priority: 'high' } },
+      afterSnapshot: snapshot,
+    };
+    mocks.getOperation.mockResolvedValue(applying);
+    mocks.captureTask.mockResolvedValue(after);
+    mocks.finalizeOperation.mockResolvedValue({
+      ...applying,
+      state: 'applied',
+      afterSnapshot: after,
+    });
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: operation.id,
+          taskId: operation.taskId,
+          mode: operation.mode,
+          action: operation.action,
+          label: operation.label,
+          contextKey: operation.contextKey,
+          queueIndex: operation.queueIndex,
+          patch: { priority: 'high' },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.patchTask).not.toHaveBeenCalled();
+    expect(mocks.finalizeOperation).toHaveBeenCalledWith(
+      operation.id,
+      after,
+      [expect.objectContaining({ operationId: operation.id, mode: operation.mode })],
+    );
+  });
+
+  it('resumes a stale applying operation when its target fields are unchanged', async () => {
+    const applying = {
+      ...operation,
+      state: 'applying' as const,
+      createdAt: '2000-01-01T00:00:00.000Z',
+      beforeSnapshot: { ...snapshot, originalPatch: { priority: 'high' } },
+      afterSnapshot: snapshot,
+    };
+    const after = {
+      ...snapshot,
+      updatedAt: '2026-08-16T12:01:00.000Z',
+      priority: 'high',
+    };
+    mocks.getOperation.mockResolvedValue(applying);
+    mocks.captureTask
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(after);
+    mocks.finalizeOperation.mockResolvedValue({
+      ...applying,
+      state: 'applied',
+      afterSnapshot: after,
+    });
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: operation.id,
+          taskId: operation.taskId,
+          mode: operation.mode,
+          action: operation.action,
+          label: operation.label,
+          contextKey: operation.contextKey,
+          queueIndex: operation.queueIndex,
+          patch: { priority: 'high' },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.discardApplyingOperation).toHaveBeenCalledWith(operation.id);
+    expect(mocks.reserveOperation).toHaveBeenCalled();
+    expect(mocks.patchTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects stale operation recovery over a newer edit to the target field', async () => {
+    const applying = {
+      ...operation,
+      state: 'applying' as const,
+      createdAt: '2000-01-01T00:00:00.000Z',
+      beforeSnapshot: { ...snapshot, originalPatch: { priority: 'high' } },
+      afterSnapshot: snapshot,
+    };
+    mocks.getOperation.mockResolvedValue(applying);
+    mocks.captureTask.mockResolvedValue({
+      ...snapshot,
+      updatedAt: '2026-08-16T12:01:00.000Z',
+      priority: 'critical',
+    });
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: operation.id,
+          taskId: operation.taskId,
+          mode: operation.mode,
+          action: operation.action,
+          label: operation.label,
+          contextKey: operation.contextKey,
+          queueIndex: operation.queueIndex,
+          patch: { priority: 'high' },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'TASK_REVISION_CONFLICT',
+    });
+    expect(mocks.discardApplyingOperation).toHaveBeenCalledWith(operation.id);
+    expect(mocks.patchTask).not.toHaveBeenCalled();
+  });
+
   it('reserves before delegating mutation through the task PATCH revision CAS', async () => {
     const after = {
       ...snapshot,
@@ -197,6 +333,120 @@ describe('Quick Sort operation apply route', () => {
       originalPatch: { priority: 'high' },
     });
     expect(mocks.discardApplyingOperation).not.toHaveBeenCalled();
+  });
+
+  it('rebases repeatedly when overlapping syncs advance the task revision', async () => {
+    const firstSync = {
+      ...snapshot,
+      updatedAt: '2026-08-16T12:00:20.000Z',
+      dueDate: '2026-08-20T12:00:00.000Z',
+    };
+    const secondSync = {
+      ...firstSync,
+      updatedAt: '2026-08-16T12:00:40.000Z',
+      status: 'done' as const,
+      completedAt: '2026-08-16T12:00:35.000Z',
+    };
+    const after = {
+      ...secondSync,
+      updatedAt: '2026-08-16T12:01:00.000Z',
+      priority: 'high',
+    };
+    const conflict = () => Response.json({
+      error: 'Task changed before this update could be applied',
+      code: 'TASK_REVISION_CONFLICT',
+    }, { status: 409 });
+    mocks.getOperation.mockResolvedValue(null);
+    mocks.captureTask
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(firstSync)
+      .mockResolvedValueOnce(secondSync)
+      .mockResolvedValueOnce(after);
+    mocks.patchTask
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(Response.json({ success: true }));
+    mocks.finalizeOperation.mockResolvedValue({
+      ...operation,
+      beforeSnapshot: { ...secondSync, originalPatch: { priority: 'high' } },
+      afterSnapshot: after,
+    });
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: operation.id,
+          taskId: operation.taskId,
+          mode: operation.mode,
+          action: operation.action,
+          label: operation.label,
+          contextKey: operation.contextKey,
+          queueIndex: operation.queueIndex,
+          patch: { priority: 'high' },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.patchTask).toHaveBeenCalledTimes(3);
+    expect(mocks.rebaseApplyingOperation).toHaveBeenNthCalledWith(1, operation.id, {
+      ...firstSync,
+      originalPatch: { priority: 'high' },
+    });
+    expect(mocks.rebaseApplyingOperation).toHaveBeenNthCalledWith(2, operation.id, {
+      ...secondSync,
+      originalPatch: { priority: 'high' },
+    });
+    expect(mocks.discardApplyingOperation).not.toHaveBeenCalled();
+  });
+
+  it('stops rebasing after repeated revision conflicts', async () => {
+    const conflict = () => Response.json({
+      error: 'Task changed before this update could be applied',
+      code: 'TASK_REVISION_CONFLICT',
+    }, { status: 409 });
+    mocks.getOperation.mockResolvedValue(null);
+    mocks.captureTask
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:10.000Z' })
+      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:20.000Z' })
+      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:30.000Z' });
+    mocks.patchTask
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict());
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: operation.id,
+          taskId: operation.taskId,
+          mode: operation.mode,
+          action: operation.action,
+          label: operation.label,
+          contextKey: operation.contextKey,
+          queueIndex: operation.queueIndex,
+          patch: { priority: 'high' },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'TASK_REVISION_CONFLICT',
+    });
+    expect(mocks.patchTask).toHaveBeenCalledTimes(4);
+    expect(mocks.rebaseApplyingOperation).toHaveBeenCalledTimes(3);
+    expect(mocks.discardApplyingOperation).toHaveBeenCalledWith(operation.id);
   });
 
   it('assigns a project and phase as an undoable Quick Sort operation', async () => {

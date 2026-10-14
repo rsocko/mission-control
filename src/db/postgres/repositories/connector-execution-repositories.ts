@@ -2119,8 +2119,8 @@ export function createPostgresConnectorExecutionRepositories(
             client,
             input.taskId,
             input.values,
-            'AND sync_status = ?1',
-            [input.expectedSyncStatus],
+            'AND sync_status = ?1 AND updated_at = ?2',
+            [input.expectedSyncStatus, input.expectedUpdatedAt],
           );
           if (changed !== 1) return false;
           if (input.sourceTags) await replaceSourceTags(client, input.taskId, input.sourceTags);

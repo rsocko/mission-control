@@ -4791,6 +4791,22 @@ class SqliteTaskQuickSortRepository implements TaskQuickSortPersistenceRepositor
     });
   }
 
+  async rebaseApplyingOperation(
+    id: string,
+    beforeSnapshot: TaskQuickSortOperation['beforeSnapshot'],
+  ): Promise<boolean> {
+    const afterSnapshot = { ...beforeSnapshot };
+    Reflect.deleteProperty(afterSnapshot, 'originalPatch');
+    const changed = this.database.update(quickSortOperations).set({
+      beforeSnapshot,
+      afterSnapshot,
+    }).where(and(
+      eq(quickSortOperations.id, id),
+      eq(quickSortOperations.state, 'applying'),
+    )).run();
+    return changed.changes === 1;
+  }
+
   async discardApplyingOperation(id: string): Promise<boolean> {
     const deleted = this.database.delete(quickSortOperations).where(and(
       eq(quickSortOperations.id, id),

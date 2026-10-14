@@ -72,6 +72,31 @@ function replayOperation(
   return NextResponse.json({ error: 'Operation is still being applied' }, { status: 409 });
 }
 
+function patchTaskAtVersion(
+  request: Request,
+  taskId: string,
+  patch: Record<string, unknown>,
+  updatedAt: string,
+) {
+  return patchTask(
+    new Request(new URL(`/api/tasks/${taskId}`, request.url), {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-expected-task-updated-at': updatedAt,
+      },
+      body: JSON.stringify(patch),
+    }),
+    { params: Promise.resolve({ id: taskId }) },
+  );
+}
+
+async function isTaskRevisionConflict(response: Response) {
+  if (response.status !== 409) return false;
+  const body = await response.clone().json().catch(() => null) as { code?: unknown } | null;
+  return body?.code === 'TASK_REVISION_CONFLICT';
+}
+
 export async function POST(request: Request) {
   let body: ApplyOperationBody;
   try {
@@ -133,8 +158,11 @@ export async function POST(request: Request) {
     return replayOperation(existing, taskId, contextKey);
   }
 
-  const before = await captureQuickSortTask(taskId);
+  let before = await captureQuickSortTask(taskId);
   if (!before) return NextResponse.json({ error: 'Task not found' }, { status: 404 });
+  const originalPatch = hasAssignment
+    ? { projectAssignment: assignment }
+    : mutatesTask ? patch : {};
   const now = new Date().toISOString();
   const reservation = await quickSort.reserveOperation({
     id: operationId,
@@ -146,9 +174,7 @@ export async function POST(request: Request) {
     queueIndex,
     beforeSnapshot: {
       ...before,
-      originalPatch: hasAssignment
-        ? { projectAssignment: assignment }
-        : mutatesTask ? patch : {},
+      originalPatch,
     },
     afterSnapshot: before,
     aiAccepted,
@@ -184,17 +210,23 @@ export async function POST(request: Request) {
     }
     after = capturedAfter;
   } else if (mutatesTask) {
-    const patchResponse = await patchTask(
-      new Request(new URL(`/api/tasks/${taskId}`, request.url), {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-expected-task-updated-at': before.updatedAt,
-        },
-        body: JSON.stringify(patch),
-      }),
-      { params: Promise.resolve({ id: taskId }) },
-    );
+    let patchResponse = await patchTaskAtVersion(request, taskId, patch!, before.updatedAt);
+    if (await isTaskRevisionConflict(patchResponse)) {
+      const rebasedBefore = await captureQuickSortTask(taskId);
+      if (!rebasedBefore) {
+        await quickSort.discardApplyingOperation(operationId);
+        return NextResponse.json({ error: 'Task not found' }, { status: 404 });
+      }
+      const rebased = await quickSort.rebaseApplyingOperation(operationId, {
+        ...rebasedBefore,
+        originalPatch,
+      });
+      if (!rebased) {
+        return NextResponse.json({ error: 'Operation is still being applied' }, { status: 409 });
+      }
+      before = rebasedBefore;
+      patchResponse = await patchTaskAtVersion(request, taskId, patch!, before.updatedAt);
+    }
     if (!patchResponse.ok) {
       await quickSort.discardApplyingOperation(operationId);
       return new NextResponse(await patchResponse.text(), {

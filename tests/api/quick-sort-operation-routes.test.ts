@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   getOperation: vi.fn(),
   captureTask: vi.fn(),
   reserveOperation: vi.fn(),
+  rebaseApplyingOperation: vi.fn(),
   discardApplyingOperation: vi.fn(),
   finalizeOperation: vi.fn(),
   claimUndo: vi.fn(),
@@ -57,6 +58,7 @@ vi.mock('@/lib/tasks/core/runtime', () => ({
       getOperation: mocks.getOperation,
       captureTask: mocks.captureTask,
       reserveOperation: mocks.reserveOperation,
+      rebaseApplyingOperation: mocks.rebaseApplyingOperation,
       discardApplyingOperation: mocks.discardApplyingOperation,
       finalizeOperation: mocks.finalizeOperation,
       claimUndo: mocks.claimUndo,
@@ -84,6 +86,7 @@ beforeEach(() => {
     kind: 'reserved',
     operation: { ...operation, state: 'applying' },
   });
+  mocks.rebaseApplyingOperation.mockResolvedValue(true);
   mocks.discardApplyingOperation.mockResolvedValue(true);
   mocks.finalizeOperation.mockResolvedValue(operation);
   mocks.claimUndo.mockResolvedValue(true);
@@ -134,6 +137,66 @@ describe('Quick Sort operation apply route', () => {
       .toBeLessThan(mocks.patchTask.mock.invocationCallOrder[0]);
     expect(mocks.patchTask.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.finalizeOperation.mock.invocationCallOrder[0]);
+  });
+
+  it('rebases and retries when sync advances the task revision', async () => {
+    const synced = {
+      ...snapshot,
+      updatedAt: '2026-08-16T12:00:30.000Z',
+      dueDate: '2026-08-20T12:00:00.000Z',
+    };
+    const after = {
+      ...synced,
+      updatedAt: '2026-08-16T12:01:00.000Z',
+      priority: 'high',
+    };
+    mocks.getOperation.mockResolvedValue(null);
+    mocks.captureTask
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(synced)
+      .mockResolvedValueOnce(after);
+    mocks.patchTask
+      .mockResolvedValueOnce(Response.json({
+        error: 'Task changed before this update could be applied',
+        code: 'TASK_REVISION_CONFLICT',
+      }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ success: true }));
+    mocks.finalizeOperation.mockResolvedValue({
+      ...operation,
+      beforeSnapshot: { ...synced, originalPatch: { priority: 'high' } },
+      afterSnapshot: after,
+    });
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: operation.id,
+          taskId: operation.taskId,
+          mode: operation.mode,
+          action: operation.action,
+          label: operation.label,
+          contextKey: operation.contextKey,
+          queueIndex: operation.queueIndex,
+          patch: { priority: 'high' },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.patchTask).toHaveBeenCalledTimes(2);
+    const [firstRequest] = mocks.patchTask.mock.calls[0];
+    const [retryRequest] = mocks.patchTask.mock.calls[1];
+    expect(firstRequest.headers.get('x-expected-task-updated-at')).toBe(snapshot.updatedAt);
+    expect(retryRequest.headers.get('x-expected-task-updated-at')).toBe(synced.updatedAt);
+    expect(mocks.rebaseApplyingOperation).toHaveBeenCalledWith(operation.id, {
+      ...synced,
+      originalPatch: { priority: 'high' },
+    });
+    expect(mocks.discardApplyingOperation).not.toHaveBeenCalled();
   });
 
   it('assigns a project and phase as an undoable Quick Sort operation', async () => {

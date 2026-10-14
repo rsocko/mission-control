@@ -4893,6 +4893,22 @@ class PostgresTaskQuickSortRepository implements TaskQuickSortPersistenceReposit
     });
   }
 
+  async rebaseApplyingOperation(
+    id: string,
+    beforeSnapshot: TaskQuickSortOperation['beforeSnapshot'],
+  ): Promise<boolean> {
+    const afterSnapshot = { ...beforeSnapshot };
+    Reflect.deleteProperty(afterSnapshot, 'originalPatch');
+    const changed = await this.db.update(quickSortOperations).set({
+      beforeSnapshot,
+      afterSnapshot,
+    }).where(and(
+      eq(quickSortOperations.id, id),
+      eq(quickSortOperations.state, 'applying'),
+    )).returning({ id: quickSortOperations.id });
+    return changed.length === 1;
+  }
+
   async discardApplyingOperation(id: string): Promise<boolean> {
     const deleted = await this.db.delete(quickSortOperations).where(and(
       eq(quickSortOperations.id, id),

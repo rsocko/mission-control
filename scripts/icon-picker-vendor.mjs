@@ -21,9 +21,6 @@ const UPSTREAM_MANIFEST = 'UPSTREAM.json';
 const SNAPSHOT_MANIFEST = 'icon-picker.snapshot.json';
 const PIN_PATH = join(ROOT, 'scripts', 'icon-picker-vendor-pin.json');
 const SOURCE_REPOSITORY = 'https://github.com/rsocko/icon-picker.git';
-const LOCAL_REGISTRY = 'https://packagefeedproxy.microsoft.io/npm/';
-const CI_REGISTRY = 'https://registry.npmjs.org/';
-const APPROVED_REGISTRY = process.env.GITHUB_ACTIONS === 'true' ? CI_REGISTRY : LOCAL_REGISTRY;
 const PACKAGE_NAME = '@rsocko/icon-picker';
 const PACKAGE_EXPORTS = Object.freeze({
   '.': {
@@ -84,11 +81,16 @@ function normalizePackageLockRegistryUrls(packageLock, registry) {
     fail('Upstream package-lock.json must be an object');
   }
   if (typeof registry !== 'string' || !registry.endsWith('/')) {
-    fail('Approved package registry must be an absolute URL ending in /');
+    fail('Configured npm registry must be an absolute URL ending in /');
   }
-  const registryUrl = new URL(registry);
+  let registryUrl;
+  try {
+    registryUrl = new URL(registry);
+  } catch {
+    fail('Configured npm registry must be an absolute URL ending in /');
+  }
   if (registryUrl.protocol !== 'https:') {
-    fail('Approved package registry must use HTTPS');
+    fail('Configured npm registry must use HTTPS');
   }
 
   let replacements = 0;
@@ -127,6 +129,20 @@ function normalizePackageLockRegistryUrls(packageLock, registry) {
   };
   visit(packageLock);
   return replacements;
+}
+
+async function withNormalizedPackageLock(path, registry, operation) {
+  const originalBytes = await readFile(path);
+  const packageLock = parseJson(originalBytes, 'Upstream package-lock.json');
+  const replacements = normalizePackageLockRegistryUrls(packageLock, registry);
+  if (replacements > 0) {
+    await writeFile(path, `${JSON.stringify(packageLock, null, 2)}\n`);
+  }
+  try {
+    return await operation();
+  } finally {
+    await writeFile(path, originalBytes);
+  }
 }
 
 async function loadPin(path = PIN_PATH) {
@@ -608,33 +624,26 @@ async function syncSnapshot(options) {
     validatePackageExports(upstreamPackage.exports);
     const npmVersion = packageManager[1];
     const registry = runNpm(['config', 'get', 'registry'], { cwd: repository }).trim();
-    if (registry !== APPROVED_REGISTRY) {
-      fail(`Upstream build registry must be ${APPROVED_REGISTRY}; received ${registry}`);
-    }
     const upstreamLockPath = join(repository, 'package-lock.json');
-    const upstreamLock = parseJson(
-      await readFile(upstreamLockPath),
-      'Upstream package-lock.json',
-    );
-    normalizePackageLockRegistryUrls(upstreamLock, APPROVED_REGISTRY);
-    await writeFile(upstreamLockPath, `${JSON.stringify(upstreamLock, null, 2)}\n`);
     const buildEnvironment = {
       ...process.env,
-      NPM_CONFIG_REGISTRY: APPROVED_REGISTRY,
+      NPM_CONFIG_REGISTRY: registry,
       SOURCE_COMMIT: requestedCommit,
     };
-    runPinnedNpm(
-      npmVersion,
-      [
-        'ci',
-        '--prefer-offline',
-        '--no-audit',
-        '--no-fund',
-        '--fetch-retries=0',
-        '--fetch-timeout=15000',
-      ],
-      { cwd: repository, env: buildEnvironment },
-    );
+    await withNormalizedPackageLock(upstreamLockPath, registry, () => {
+      runPinnedNpm(
+        npmVersion,
+        [
+          'ci',
+          '--prefer-offline',
+          '--no-audit',
+          '--no-fund',
+          '--fetch-retries=0',
+          '--fetch-timeout=15000',
+        ],
+        { cwd: repository, env: buildEnvironment },
+      );
+    });
     await mkdir(artifacts);
     runPinnedNpm(npmVersion, ['run', 'package:artifact', '--', artifacts], {
       cwd: repository,
@@ -724,13 +733,11 @@ if (executedPath === fileURLToPath(import.meta.url)) {
 }
 
 export {
-  APPROVED_REGISTRY,
   PACKAGE_NAME,
   PACKAGE_VERSION,
   SOURCE_COMMIT,
   SOURCE_TAG,
-  CI_REGISTRY,
-  LOCAL_REGISTRY,
   normalizePackageLockRegistryUrls,
   validatePackageExports,
+  withNormalizedPackageLock,
 };

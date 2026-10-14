@@ -45,15 +45,15 @@ The aggregate command verifies every vendored integration:
 npm run vendor:verify
 ```
 
-## Automated synchronization
+## Manual synchronization
 
-The **Sync icon picker vendor** GitHub Actions workflow checks upstream every
-day at 09:17 UTC. When the latest merged `main` commit changes the deterministic
+The **Sync icon picker vendor** GitHub Actions workflow runs only when manually
+dispatched. When the selected merged `main` commit changes the deterministic
 snapshot, it creates or updates the single
 `automation/icon-picker-vendor-sync` review branch and pull request. It does
-not auto-merge, publish, tag, or release anything. Repeated runs replace that
-branch from current Mission Control `main`, so they do not create duplicate
-pull requests.
+not run during normal builds and does not auto-merge, publish, tag, or release
+anything. Repeated runs replace that branch from current Mission Control
+`main`, so they do not create duplicate pull requests.
 
 To run it on demand, open **Actions**, select **Sync icon picker vendor**, and
 choose **Run workflow**. Leave `commit` empty to use the latest upstream
@@ -75,10 +75,11 @@ The command:
    checks out the exact immutable commit.
 2. Refuses a commit that differs from Mission Control's reviewed pin unless
    the automation explicitly requests a reviewable pin update.
-3. Requires the corporate npm registry locally and the public npm registry in
-   GitHub Actions.
-4. Uses the upstream-pinned npm version from the approved registry and restores
-   the locked upstream dependencies with the approved-registry policy.
+3. Uses the npm registry already configured for the environment. GitHub Actions
+   explicitly uses the public npm registry; local runs use normal npm settings.
+4. Temporarily normalizes lockfile tarball URLs to that registry, installs with
+   the upstream-pinned npm version, and restores the exact upstream lockfile
+   before building the artifact.
 5. Runs upstream `package:artifact` from the clean exact commit using that npm
    version.
 6. Checks package identity, exports, file allowlist, artifact metadata, hashes,
@@ -88,8 +89,8 @@ The command:
 
 To advance upstream without the workflow, run the synchronization command with
 `--update-pin true`, refresh `package-lock.json`, and submit the complete
-generated diff for review. The automation is preferred because it performs
-those steps consistently.
+generated diff for review. The manually dispatched workflow is preferred
+because it performs those steps consistently.
 
 ## Mission Control boundary
 

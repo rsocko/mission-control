@@ -5,9 +5,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import {
-  APPROVED_REGISTRY,
-  CI_REGISTRY,
-  LOCAL_REGISTRY,
   PACKAGE_NAME,
   PACKAGE_VERSION,
   SOURCE_COMMIT,
@@ -15,9 +12,11 @@ import {
   normalizePackageLockRegistryUrls,
   validatePackageExports,
   verifySnapshot,
+  withNormalizedPackageLock,
 } from './icon-picker-vendor.mjs';
 
 const source = resolve('vendor', 'icon-picker');
+const PUBLIC_REGISTRY = 'https://registry.npmjs.org/';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'mc-icon-picker-'));
@@ -37,12 +36,6 @@ test('verifies the committed exact-commit package snapshot', async () => {
   assert.equal(manifest.package.version, PACKAGE_VERSION);
   assert.equal(manifest.artifact.entryCount, manifest.artifact.files.length);
   assert.ok(manifest.artifact.entryCount > 0);
-  assert.equal(LOCAL_REGISTRY, 'https://packagefeedproxy.microsoft.io/npm/');
-  assert.equal(CI_REGISTRY, 'https://registry.npmjs.org/');
-  assert.equal(
-    APPROVED_REGISTRY,
-    process.env.GITHUB_ACTIONS === 'true' ? CI_REGISTRY : LOCAL_REGISTRY,
-  );
 });
 
 test('ignores dependencies installed into the linked vendor package', async () => {
@@ -229,7 +222,7 @@ test('rejects changed required or unsafe additive package exports', () => {
   );
 });
 
-test('normalizes upstream package lock tarballs to the environment-approved registry', () => {
+test('normalizes upstream package lock tarballs to the configured registry', () => {
   const packageLock = {
     packages: {
       'node_modules/chalk': {
@@ -247,7 +240,7 @@ test('normalizes upstream package lock tarballs to the environment-approved regi
     },
   };
 
-  assert.equal(normalizePackageLockRegistryUrls(packageLock, CI_REGISTRY), 1);
+  assert.equal(normalizePackageLockRegistryUrls(packageLock, PUBLIC_REGISTRY), 1);
   assert.equal(
     packageLock.packages['node_modules/chalk'].resolved,
     'https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz',
@@ -261,13 +254,47 @@ test('normalizes upstream package lock tarballs to the environment-approved regi
     'git+https://github.com/example/package.git#abcdef',
   );
 
-  assert.equal(normalizePackageLockRegistryUrls(packageLock, LOCAL_REGISTRY), 2);
+  const mirrorRegistry = 'https://registry.example.test/npm/';
+  assert.equal(normalizePackageLockRegistryUrls(packageLock, mirrorRegistry), 2);
   assert.equal(
     packageLock.packages['node_modules/chalk'].resolved,
-    'https://packagefeedproxy.microsoft.io/npm/chalk/-/chalk-4.1.2.tgz',
+    'https://registry.example.test/npm/chalk/-/chalk-4.1.2.tgz',
   );
   assert.equal(
     packageLock.packages['node_modules/@babel/core'].resolved,
-    'https://packagefeedproxy.microsoft.io/npm/@babel/core/-/core-7.29.7.tgz',
+    'https://registry.example.test/npm/@babel/core/-/core-7.29.7.tgz',
   );
+});
+
+test('restores the exact upstream lockfile after dependency installation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mc-icon-picker-lock-'));
+  const lockPath = join(root, 'package-lock.json');
+  const original = JSON.stringify({
+    packages: {
+      'node_modules/chalk': {
+        version: '4.1.2',
+        resolved: 'https://ms-feed-12.pkgs.visualstudio.com/1es-public/'
+          + '_packaging/npm-public/npm/registry/chalk/-/chalk-4.1.2.tgz',
+      },
+    },
+  });
+  await writeFile(lockPath, original);
+
+  try {
+    await assert.rejects(
+      () => withNormalizedPackageLock(lockPath, PUBLIC_REGISTRY, async () => {
+        const temporaryLock = JSON.parse(await readFile(lockPath, 'utf8'));
+        assert.equal(
+          temporaryLock.packages['node_modules/chalk'].resolved,
+          'https://registry.npmjs.org/chalk/-/chalk-4.1.2.tgz',
+        );
+        await writeFile(lockPath, 'installation changed the lockfile');
+        throw new Error('installation failed');
+      }),
+      /installation failed/,
+    );
+    assert.equal(await readFile(lockPath, 'utf8'), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

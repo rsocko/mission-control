@@ -57,6 +57,7 @@ import type {
   TaskCoreTaskPatch,
   TaskCoreTaskRow,
   TaskMutationRequest,
+  TaskWriteContext,
 } from '@/lib/tasks/core/contracts';
 import {
   claimTaskForPush,
@@ -114,6 +115,71 @@ function enqueueTaskWriteThrough(taskId: string, write: () => Promise<void>): Pr
 
 const MAX_TASK_REVISION_RETRY_ATTEMPTS = 3;
 
+function capturePatchRetryState(
+  context: TaskWriteContext,
+  fields: readonly TaskField[],
+): string {
+  const { task, schedule } = context;
+  const state: Record<string, unknown> = {};
+  for (const field of [...fields].sort()) {
+    switch (field) {
+      case 'tags':
+        state.tags = [...context.tagIds].sort();
+        break;
+      case 'recurrence':
+        state.recurrence = {
+          recurrence: schedule?.recurrence ?? null,
+          recurrenceMode: schedule?.recurrenceMode ?? 'schedule',
+          metadata: task.metadata,
+        };
+        break;
+      case 'estimatedDuration':
+        state.estimatedDuration = schedule?.estimatedDuration ?? null;
+        break;
+      case 'kanbanPlacement':
+        state.kanbanPlacement = {
+          column: task.kanbanColumn,
+          order: task.kanbanOrder,
+        };
+        break;
+      case 'status':
+      case 'statusReason':
+        state.status = {
+          status: task.status,
+          statusReason: task.statusReason,
+          completedAt: task.completedAt,
+          recurrence: schedule?.recurrence ?? null,
+          recurrenceMode: schedule?.recurrenceMode ?? 'schedule',
+        };
+        break;
+      case 'reminderAt':
+        state.reminder = {
+          dueDate: task.dueDate,
+          reminderAt: task.reminderAt,
+          reminderRelative: task.reminderRelative,
+          reminderDueTime: task.reminderDueTime,
+          reminderNagInterval: task.reminderNagInterval ?? null,
+          reminderNagStopAt: task.reminderNagStopAt ?? null,
+        };
+        break;
+      default:
+        state[field] = task[field as keyof TaskCoreTaskRow];
+        break;
+    }
+  }
+  state.fieldStates = context.fieldStates
+    .filter((fieldState) => fields.includes(fieldState.fieldName as TaskField))
+    .map((fieldState) => ({
+      fieldName: fieldState.fieldName,
+      sourceValue: fieldState.sourceValue,
+      locallyOverridden: fieldState.locallyOverridden,
+      sourceObservedAt: fieldState.sourceObservedAt,
+      localEditedAt: fieldState.localEditedAt,
+    }))
+    .sort((left, right) => left.fieldName.localeCompare(right.fieldName));
+  return JSON.stringify(state);
+}
+
 /**
  * PATCH /api/tasks/[id] — Update a task (title, status, priority, tags, etc.)
  * Immediate write-through: updates local DB optimistically, then pushes to source.
@@ -124,13 +190,14 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  return patchTask(request, context, 0);
+  return patchTask(request, context, 0, null);
 }
 
 async function patchTask(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
   revisionRetryAttempts: number,
+  retryBaseline: string | null,
 ) {
   const { id } = await params;
   const requestedVersion = request.headers.get('x-expected-task-updated-at');
@@ -148,6 +215,13 @@ async function patchTask(
     if (!writeContext) return ApiErrors.notFound('Task');
     const currentTask = writeContext.task;
     const currentSchedule = writeContext.schedule;
+    const currentRetryState = capturePatchRetryState(writeContext, parsed.fields);
+    if (retryBaseline !== null && currentRetryState !== retryBaseline) {
+      return NextResponse.json({
+        error: 'Task changed in a field included in this update',
+        code: 'TASK_REVISION_CONFLICT',
+      }, { status: 409 });
+    }
     const parsedCurrentMetadata = parseTaskMetadataCompat(currentTask.metadata);
     const currentCanonical = readRecurrenceMetadata(parsedCurrentMetadata.metadata);
     if (requestedVersion && currentTask.updatedAt !== requestedVersion) {
@@ -697,6 +771,7 @@ async function patchTask(
           retryRequest,
           { params: Promise.resolve({ id }) },
           revisionRetryAttempts + 1,
+          retryBaseline ?? currentRetryState,
         );
       }
       return NextResponse.json({
@@ -1052,10 +1127,17 @@ async function writeThrough(
   } catch (error) {
     logger.error({ err: error, taskId }, 'Write-through task update failed');
     if (pushLeaseToken) {
-      if (error instanceof GitHubUnknownWriteOutcomeError) {
-        await failTaskPush(taskId, pushLeaseToken, 'push_failed', 5, expectedTaskVersion);
-      } else {
-        await releaseTaskPush(taskId, pushLeaseToken, 'pending_push', expectedTaskVersion);
+      try {
+        if (error instanceof GitHubUnknownWriteOutcomeError) {
+          await failTaskPush(taskId, pushLeaseToken, 'push_failed', 5, expectedTaskVersion);
+        } else {
+          await releaseTaskPush(taskId, pushLeaseToken, 'pending_push', expectedTaskVersion);
+        }
+      } catch (settlementError) {
+        logger.error(
+          { err: settlementError, taskId },
+          'Failed to settle task push lease after write-through failure',
+        );
       }
     }
     await logWriteThroughFailure({
@@ -1064,6 +1146,11 @@ async function writeThrough(
       taskTitle: currentTask.title,
       taskSourceId: currentTask.sourceId,
       error,
+    }).catch((auditError) => {
+      logger.warn(
+        { err: auditError, taskId },
+        'Failed to log write-through failure to sync history',
+      );
     });
   }
 }

@@ -18,6 +18,7 @@ const mockIdentityWrites: unknown[] = [];
 let selectCallCount = 0;
 let mockCapabilities: ConnectorCapabilities | null = null;
 let mockConcurrentInsertRecord: Record<string, unknown> | null = null;
+let mockRemoteUpdateApplied = true;
 
 type AwaitableTagRows = unknown[] & {
   where: ReturnType<typeof vi.fn>;
@@ -193,6 +194,7 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
           expectedSyncStatus: string;
           values: Record<string, unknown>;
         }) => {
+          if (!mockRemoteUpdateApplied) return false;
           const task = mockExistingTasks.find(
             (candidate) => (candidate as { id: string }).id === input.taskId,
           ) as Record<string, unknown> | undefined;
@@ -262,6 +264,7 @@ describe('pull-manager terminal status sync', () => {
     selectCallCount = 0;
     mockCapabilities = null;
     mockConcurrentInsertRecord = null;
+    mockRemoteUpdateApplied = true;
   });
 
   function makeExistingTask(overrides: Record<string, unknown> = {}) {
@@ -356,6 +359,19 @@ describe('pull-manager terminal status sync', () => {
     expect(mockUpdateSets.every((update) =>
       !(update && typeof update === 'object' && 'localDisposition' in update),
     )).toBe(true);
+  });
+
+  it('aborts the pull when a concurrent local update rejects the remote CAS', async () => {
+    mockExistingTasks.push(makeExistingTask());
+    mockRemoteUpdateApplied = false;
+
+    await expect(upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask()],
+      false,
+      [],
+    )).rejects.toThrow('Concurrent local update prevented remote task org/repo:42');
   });
 
   it('preserves MC-local snoozes when a connector omits the field', async () => {

@@ -1255,7 +1255,12 @@ async function applyRemoteUpdate(
     sourceTags: canSyncTags ? remote.tags || [] : undefined,
   });
 
-  return applied ? indexedTask : null;
+  if (!applied) {
+    throw new Error(
+      `Concurrent local update prevented remote task ${remote.sourceId} from being applied`,
+    );
+  }
+  return indexedTask;
 }
 
 function parseTaskMetadata(metadata: unknown): Record<string, unknown> {

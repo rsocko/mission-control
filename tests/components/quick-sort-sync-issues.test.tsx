@@ -52,6 +52,33 @@ describe('Quick Sort sync issues', () => {
     }]);
   });
 
+  it('clears a failure when a later push succeeds for the same task', () => {
+    const issues = extractQuickSortSyncIssues([
+      {
+        id: 'recovery',
+        syncedAt: '2026-10-14T20:46:00.000Z',
+        details: [{
+          action: 'pushed',
+          taskId: 'task-1',
+          taskTitle: 'Picture in Toilet room',
+          reason: 'Updated on remote',
+        }],
+      },
+      {
+        id: 'failure',
+        syncedAt: '2026-10-14T20:45:25.000Z',
+        details: [{
+          action: 'push_failed',
+          taskId: 'task-1',
+          taskTitle: 'Picture in Toilet room',
+          reason: 'Write-through failed: Microsoft Graph returned 503',
+        }],
+      },
+    ], Date.parse('2026-10-14T21:00:00.000Z'));
+
+    expect(issues).toEqual([]);
+  });
+
   it('shows task context for recent failed source updates', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -72,6 +99,9 @@ describe('Quick Sort sync issues', () => {
     render(<QuickSortSyncIssues />);
 
     expect(await screen.findByText('1 recent update did not reach its source')).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/sync?result=errors&result=changes&limit=50',
+    );
     expect(screen.getByText('Picture in Toilet room')).toBeInTheDocument();
     expect(screen.getByText(/Microsoft Graph returned 503/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Open/ })).toHaveAttribute(

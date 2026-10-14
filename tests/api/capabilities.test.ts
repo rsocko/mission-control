@@ -30,6 +30,10 @@ const searchMocks = vi.hoisted(() => ({
   semanticUpsert: vi.fn(async () => undefined),
   semanticDelete: vi.fn(async () => undefined),
 }));
+const writeThroughLogMocks = vi.hoisted(() => ({
+  success: vi.fn(async () => undefined),
+  failure: vi.fn(async () => undefined),
+}));
 
 vi.mock('@/lib/connectors/capabilities', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/connectors/capabilities')>();
@@ -68,7 +72,10 @@ vi.mock('@/lib/external-identities', () => {
   };
 });
 vi.mock('@/lib/rules', () => ({ evaluateRulesForTasks: vi.fn(async () => undefined) }));
-vi.mock('@/lib/sync/write-through-log', () => ({ logWriteThrough: vi.fn(async () => undefined) }));
+vi.mock('@/lib/sync/write-through-log', () => ({
+  logWriteThrough: writeThroughLogMocks.success,
+  logWriteThroughFailure: writeThroughLogMocks.failure,
+}));
 vi.mock('@/lib/connectors/transfer-identity', () => ({
   persistCreatedTaskIdentity: vi.fn(async () => undefined),
 }));
@@ -157,11 +164,18 @@ const contextFor = (
   schedule: TaskScheduleRow | null = null,
   fieldStates: TaskFieldStateMutation[] = [],
   wasAutoCompletedByReconciliation = false,
+  tagIds: string[] = ['tag-old'],
 ) => ({
   task,
   schedule,
-  tagIds: ['tag-old'],
-  tagNamesById: { 'tag-old': 'Old label', 'tag-new': 'New label' },
+  tagIds,
+  tagNamesById: {
+    'tag-old': 'Old label',
+    'tag-new': 'New label',
+    'tag-1': 'Label 1',
+    'tag-2': 'Label 2',
+    'tag-3': 'Label 3',
+  },
   fieldStates,
   wasAutoCompletedByReconciliation,
 });
@@ -198,6 +212,7 @@ describe('task route capability enforcement', () => {
     leaseMocks.release.mockResolvedValue(true);
     leaseMocks.load.mockImplementation(async () => task);
     for (const mock of Object.values(searchMocks)) mock.mockClear();
+    for (const mock of Object.values(writeThroughLogMocks)) mock.mockClear();
     getWriteContext = vi.fn(async () => contextFor(
       task,
       schedule,
@@ -286,6 +301,55 @@ describe('task route capability enforcement', () => {
       dueDate: '2026-08-20T12:00:00.000Z',
       priority: 'high',
     });
+  });
+
+  it('does not retry an ordinary patch over a newer edit to the same field', async () => {
+    mutateTask.mockImplementationOnce(async (request: TaskMutationRequest) => {
+      mutations.push(request);
+      task = {
+        ...task,
+        priority: 'critical',
+        updatedAt: '2026-08-01T00:00:30.000Z',
+      };
+      return { kind: 'revision-conflict' as const, currentUpdatedAt: task.updatedAt };
+    });
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+
+    const response = await PATCH(
+      patchRequest({ priority: 'high' }),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'TASK_REVISION_CONFLICT',
+    });
+    expect(getWriteContext).toHaveBeenCalledTimes(2);
+    expect(mutateTask).toHaveBeenCalledTimes(1);
+    expect(task.priority).toBe('critical');
+  });
+
+  it('does not retry an ordinary tag replacement over a newer tag edit', async () => {
+    getWriteContext
+      .mockResolvedValueOnce(contextFor(task, schedule, fieldStates, false, ['tag-1']))
+      .mockResolvedValueOnce(contextFor(task, schedule, fieldStates, false, ['tag-2']));
+    mutateTask.mockResolvedValueOnce({
+      kind: 'revision-conflict' as const,
+      currentUpdatedAt: '2026-08-01T00:00:30.000Z',
+    });
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+
+    const response = await PATCH(
+      patchRequest({ tags: ['tag-3'] }),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'TASK_REVISION_CONFLICT',
+    });
+    expect(getWriteContext).toHaveBeenCalledTimes(2);
+    expect(mutateTask).toHaveBeenCalledTimes(1);
   });
 
   it('does not retry patches that require an explicit task revision', async () => {
@@ -604,6 +668,28 @@ describe('task route capability enforcement', () => {
       task.updatedAt,
     ));
     expect(leaseMocks.complete).not.toHaveBeenCalled();
+  });
+
+  it('records a write-through failure even when lease settlement fails', async () => {
+    connectorMocks.connector = {
+      updateTask: vi.fn(async () => {
+        throw new Error('source unavailable');
+      }),
+    };
+    leaseMocks.release.mockRejectedValueOnce(new Error('database unavailable'));
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+    const response = await PATCH(
+      patchRequest({ title: 'Retry me' }),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => expect(writeThroughLogMocks.failure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: task.id,
+        taskTitle: REMOTE_TASK.title,
+      }),
+    ));
   });
 
   it('rejects writes when the connector is disabled', async () => {

@@ -33,15 +33,19 @@ export function extractQuickSortSyncIssues(
   now = Date.now(),
 ): QuickSortSyncIssue[] {
   const cutoff = now - RECENT_ISSUE_MS;
-  const issues = history.flatMap((entry) => {
+  const events = history.flatMap((entry) => {
     const occurredAt = entry.syncedAt;
     if (!occurredAt || Date.parse(occurredAt) < cutoff) return [];
     return (entry.details ?? []).flatMap((detail, detailIndex) => {
-      if (detail.action !== 'push_failed' || !detail.taskTitle) return [];
+      if (
+        (detail.action !== 'push_failed' && detail.action !== 'pushed')
+        || !detail.taskTitle
+      ) return [];
       return [{
         id: `${entry.id ?? occurredAt}:${detailIndex}`,
         taskId: detail.taskId ?? null,
         taskTitle: detail.taskTitle,
+        action: detail.action,
         reason: detail.reason?.replace(/^Write-through failed:\s*/i, '')
           ?? 'The source rejected this update.',
         occurredAt,
@@ -49,12 +53,21 @@ export function extractQuickSortSyncIssues(
     });
   });
 
-  const latestByTask = new Map<string, QuickSortSyncIssue>();
-  for (const issue of issues.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))) {
-    const key = issue.taskId ?? issue.taskTitle;
-    if (!latestByTask.has(key)) latestByTask.set(key, issue);
+  const latestByTask = new Map<string, typeof events[number]>();
+  for (const event of events.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))) {
+    const key = event.taskId ?? event.taskTitle;
+    if (!latestByTask.has(key)) latestByTask.set(key, event);
   }
-  return [...latestByTask.values()].slice(0, 3);
+  return [...latestByTask.values()]
+    .filter((event) => event.action === 'push_failed')
+    .map((event) => ({
+      id: event.id,
+      taskId: event.taskId,
+      taskTitle: event.taskTitle,
+      reason: event.reason,
+      occurredAt: event.occurredAt,
+    }))
+    .slice(0, 3);
 }
 
 function formatIssueTime(value: string) {
@@ -71,7 +84,7 @@ export default function QuickSortSyncIssues({ refreshKey = 0 }: { refreshKey?: n
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/sync?result=errors&limit=20');
+      const response = await fetch('/api/sync?result=errors&result=changes&limit=50');
       if (!response.ok) return;
       const payload = await response.json() as { history?: SyncHistoryEntry[] };
       setIssues(extractQuickSortSyncIssues(payload.history ?? []));

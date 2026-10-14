@@ -34,6 +34,7 @@ interface ApplyOperationBody {
 }
 
 const MAX_REVISION_REBASE_ATTEMPTS = 3;
+const APPLYING_OPERATION_STALE_MS = 60_000;
 
 function operationResponse(operation: TaskQuickSortOperation) {
   return {
@@ -70,6 +71,97 @@ function replayOperation(
   }
   if (operation.state === 'applied' || operation.state === 'undone') {
     return NextResponse.json(operationResponse(operation));
+  }
+  return NextResponse.json({ error: 'Operation is still being applied' }, { status: 409 });
+}
+
+function snapshotValueMatches(left: unknown, right: unknown) {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+  }
+  return left === right;
+}
+
+function patchMatchesSnapshot(
+  snapshot: TaskQuickSortOperation['afterSnapshot'],
+  patch: Record<string, unknown>,
+) {
+  return Object.entries(patch).every(([field, value]) => {
+    if (field === 'tags') return snapshotValueMatches(snapshot.tagIds, value);
+    if (field === 'projectAssignment') {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+      const assignment = value as { projectId?: unknown; phaseId?: unknown };
+      if (
+        typeof assignment.projectId !== 'string'
+        || !snapshot.projectIds?.includes(assignment.projectId)
+      ) return false;
+      return typeof assignment.phaseId !== 'string'
+        || snapshot.phaseIds?.includes(assignment.phaseId) === true;
+    }
+    return snapshotValueMatches(
+      snapshot[field as keyof TaskQuickSortOperation['afterSnapshot']],
+      value,
+    );
+  });
+}
+
+function patchFieldsUnchanged(
+  current: TaskQuickSortOperation['afterSnapshot'],
+  operation: TaskQuickSortOperation,
+) {
+  const patch = operation.beforeSnapshot.originalPatch;
+  return Object.keys(patch).every((field) => {
+    if (field === 'tags') {
+      return snapshotValueMatches(current.tagIds, operation.beforeSnapshot.tagIds);
+    }
+    if (field === 'projectAssignment') {
+      return snapshotValueMatches(current.projectIds, operation.beforeSnapshot.projectIds)
+        && snapshotValueMatches(current.phaseIds, operation.beforeSnapshot.phaseIds);
+    }
+    return snapshotValueMatches(
+      current[field as keyof TaskQuickSortOperation['afterSnapshot']],
+      operation.beforeSnapshot[field as keyof TaskQuickSortOperation['afterSnapshot']],
+    );
+  });
+}
+
+async function recoverApplyingOperation(
+  operation: TaskQuickSortOperation,
+  taskId: string,
+  contextKey: string,
+): Promise<Response | null> {
+  if (operation.taskId !== taskId || operation.contextKey !== contextKey) {
+    return NextResponse.json({ error: 'Operation ID is already in use' }, { status: 409 });
+  }
+  const quickSort = (await getTaskCorePersistence()).quickSort;
+  const current = await captureQuickSortTask(taskId);
+  if (!current) return NextResponse.json({ error: 'Task not found' }, { status: 404 });
+  if (patchMatchesSnapshot(current, operation.beforeSnapshot.originalPatch)) {
+    const recovered = await quickSort.finalizeOperation(operation.id, current, [{
+      id: randomUUID(),
+      taskId,
+      operationId: operation.id,
+      mode: operation.mode,
+      action: operation.action,
+      triagedAt: new Date().toISOString(),
+    }]);
+    if (recovered) return NextResponse.json(operationResponse(recovered));
+    const replay = await quickSort.getOperation(operation.id);
+    return replay
+      ? replayOperation(replay, taskId, contextKey)
+      : NextResponse.json({ error: 'Operation recovery failed' }, { status: 409 });
+  }
+  const createdAt = Date.parse(operation.createdAt);
+  if (
+    Number.isFinite(createdAt)
+    && Date.now() - createdAt >= APPLYING_OPERATION_STALE_MS
+  ) {
+    await quickSort.discardApplyingOperation(operation.id);
+    if (patchFieldsUnchanged(current, operation)) return null;
+    return NextResponse.json({
+      error: 'Task changed while recovering this Quick Sort operation',
+      code: 'TASK_REVISION_CONFLICT',
+    }, { status: 409 });
   }
   return NextResponse.json({ error: 'Operation is still being applied' }, { status: 409 });
 }
@@ -157,7 +249,12 @@ export async function POST(request: Request) {
   const quickSort = (await getTaskCorePersistence()).quickSort;
   const existing = await quickSort.getOperation(operationId);
   if (existing) {
-    return replayOperation(existing, taskId, contextKey);
+    if (existing.state === 'applying') {
+      const recoveryResponse = await recoverApplyingOperation(existing, taskId, contextKey);
+      if (recoveryResponse) return recoveryResponse;
+    } else {
+      return replayOperation(existing, taskId, contextKey);
+    }
   }
 
   let before = await captureQuickSortTask(taskId);

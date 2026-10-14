@@ -137,11 +137,14 @@ const REMOTE_TASK: TaskCoreTaskRow = {
   isBulkImport: false,
 };
 
-function patchRequest(body: Record<string, unknown>) {
+function patchRequest(
+  body: Record<string, unknown>,
+  headers: Record<string, string> = {},
+) {
   return new Request('http://localhost:3099/api/tasks/task-1', {
     method: 'PATCH',
     body: JSON.stringify(body),
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
   });
 }
 
@@ -252,6 +255,113 @@ describe('task route capability enforcement', () => {
       pushRetryCount: 0,
     });
     await vi.waitFor(() => expect(leaseMocks.claim).toHaveBeenCalledWith(task.id));
+  });
+
+  it('retries ordinary task patches when a concurrent sync advances the revision', async () => {
+    mutateTask
+      .mockImplementationOnce(async (request: TaskMutationRequest) => {
+        mutations.push(request);
+        task = {
+          ...task,
+          dueDate: '2026-08-20T12:00:00.000Z',
+          updatedAt: '2026-08-01T00:00:30.000Z',
+        };
+        return { kind: 'revision-conflict' as const };
+      });
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+
+    const response = await PATCH(
+      patchRequest({ priority: 'high' }),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(getWriteContext).toHaveBeenCalledTimes(2);
+    expect(mutateTask).toHaveBeenCalledTimes(2);
+    expect(mutations.map((mutation) => mutation.expectedUpdatedAt)).toEqual([
+      REMOTE_TASK.updatedAt,
+      '2026-08-01T00:00:30.000Z',
+    ]);
+    expect(task).toMatchObject({
+      dueDate: '2026-08-20T12:00:00.000Z',
+      priority: 'high',
+    });
+  });
+
+  it('does not retry patches that require an explicit task revision', async () => {
+    mutateTask.mockResolvedValueOnce({ kind: 'revision-conflict' as const });
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+
+    const response = await PATCH(
+      patchRequest(
+        { priority: 'high' },
+        { 'x-expected-task-updated-at': task.updatedAt },
+      ),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'TASK_REVISION_CONFLICT',
+    });
+    expect(getWriteContext).toHaveBeenCalledTimes(1);
+    expect(mutateTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops retrying ordinary task patches after repeated revision conflicts', async () => {
+    mutateTask.mockImplementation(async (request: TaskMutationRequest) => {
+      mutations.push(request);
+      task = {
+        ...task,
+        updatedAt: new Date(Date.parse(task.updatedAt) + 1_000).toISOString(),
+      };
+      return { kind: 'revision-conflict' as const };
+    });
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+
+    const response = await PATCH(
+      patchRequest({ priority: 'high' }),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'TASK_REVISION_CONFLICT',
+    });
+    expect(getWriteContext).toHaveBeenCalledTimes(4);
+    expect(mutateTask).toHaveBeenCalledTimes(4);
+  });
+
+  it('retries task deletion when a concurrent sync advances the revision', async () => {
+    task = {
+      ...task,
+      sourceId: 'local:task-1',
+      connectorType: 'local',
+      connectorInstanceId: 'local',
+    };
+    applyTaskRemoval.mockImplementationOnce(async (request) => {
+      removals.push(request);
+      task = {
+        ...task,
+        dueDate: '2026-08-20T12:00:00.000Z',
+        updatedAt: '2026-08-01T00:00:30.000Z',
+      };
+      return { kind: 'revision-conflict' as const };
+    });
+    const { DELETE } = await import('@/app/api/tasks/[id]/route');
+
+    const response = await DELETE(
+      deleteRequest(),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(getRemovalContext).toHaveBeenCalledTimes(2);
+    expect(applyTaskRemoval).toHaveBeenCalledTimes(2);
+    expect(removals.map((removal) => removal.expectedUpdatedAt)).toEqual([
+      REMOTE_TASK.updatedAt,
+      '2026-08-01T00:00:30.000Z',
+    ]);
   });
 
   it.each([

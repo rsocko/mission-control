@@ -358,6 +358,7 @@ export interface NotificationWebPersistence {
     query: NotificationQuery;
     limit: number;
     cursor: string | null;
+    notificationId?: string | null;
   }): Promise<NotificationQueryResult>;
 
   recoverStaleActions(recoveryCutoff: string): Promise<void>;

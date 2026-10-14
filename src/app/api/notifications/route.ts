@@ -33,6 +33,10 @@ function hydratePresentation(item: NotificationRow): unknown {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+  const notificationId = searchParams.get('id')?.trim() || null;
+  if (notificationId && notificationId.length > 200) {
+    return ApiErrors.badRequest('id cannot exceed 200 characters');
+  }
   const queryError = notificationQueryValidationError(searchParams);
   if (queryError) return ApiErrors.badRequest(queryError);
   const query = parseNotificationQuery(searchParams);
@@ -49,7 +53,12 @@ export async function GET(request: Request) {
     const recoveryCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     await web.recoverStaleActions(recoveryCutoff);
 
-    const result = await web.queryNotifications({ query, limit, cursor });
+    const result = await web.queryNotifications({
+      query,
+      limit: notificationId ? 1 : limit,
+      cursor: notificationId ? null : cursor,
+      notificationId,
+    });
 
     const actionsByNotification = new Map<string, typeof result.actions>();
     for (const action of result.actions) {

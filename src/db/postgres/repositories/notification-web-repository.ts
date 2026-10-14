@@ -503,7 +503,7 @@ export function createPostgresNotificationWebRepository(
 
   return {
     async queryNotifications(input) {
-      const { query, limit, cursor } = input;
+      const { query, limit, cursor, notificationId } = input;
       const now = new Date().toISOString();
 
       // Merchant validation
@@ -606,6 +606,15 @@ export function createPostgresNotificationWebRepository(
           ? new Date(dateNow.getFullYear(), dateNow.getMonth(), dateNow.getDate())
           : new Date(dateNow.getTime() - (query.dateRange === 'week' ? 7 : 30) * 86_400_000);
         conditions.push(`received_at >= $${paramIdx}`); params.push(since.toISOString()); paramIdx += 1;
+      }
+      if (notificationId) {
+        conditions.length = 0;
+        params.length = 0;
+        paramIdx = 1;
+        conditions.push(`id = $${paramIdx}`);
+        params.push(notificationId);
+        paramIdx += 1;
+        conditions.push('connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)');
       }
       // Save unpaginated query for matching count
       const unpaginatedWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

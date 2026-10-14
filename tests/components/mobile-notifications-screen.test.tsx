@@ -305,6 +305,34 @@ describe('MobileNotificationsScreen', () => {
     expect(screen.getByText('Weekly digest')).toBeInTheDocument();
   });
 
+  it('opens a deep-linked notification that is outside the current inbox page', async () => {
+    const deepLinked = makeNotification({
+      id: 'archived-1',
+      title: 'Archived review request',
+      body: 'This item came from search.',
+      state: 'archived',
+      readState: 'read',
+      disposition: 'handled',
+    });
+    mockSearchParams = new URLSearchParams('id=archived-1');
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(url.includes('id=archived-1')
+          ? { notifications: [deepLinked] }
+          : { notifications: [], matchingCount: 0 }),
+      });
+    });
+
+    render(<MobileNotificationsScreen onBack={vi.fn()} />);
+
+    expect(await screen.findByRole('dialog', {
+      name: 'Notification: Archived review request',
+    })).toBeInTheDocument();
+    expect(screen.getByText('This item came from search.')).toBeInTheDocument();
+  });
+
   it('shows an unread dot and applies the desktop level and attribute filters together', async () => {
     mockNotificationsApi([
       makeNotification({

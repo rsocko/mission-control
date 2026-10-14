@@ -219,6 +219,20 @@ describe('NotificationsPage data states', () => {
     mockSearchParams = new URLSearchParams();
   });
 
+  it('opens a notification selected by a search-result deep link', async () => {
+    const notification = makeNotification('notification-1', 'Review requested');
+    const setSelectedId = vi.fn();
+    mockSearchParams = new URLSearchParams('id=notification-1');
+    hookState = makeHook({
+      notifications: [notification],
+      setSelectedId,
+    });
+
+    render(<NotificationsPage />);
+
+    await waitFor(() => expect(setSelectedId).toHaveBeenCalledWith('notification-1'));
+  });
+
   it('shows a loading state instead of an empty state during the initial fetch', () => {
     hookState = makeHook({ isLoading: true });
     render(<NotificationsPage />);

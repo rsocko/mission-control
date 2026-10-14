@@ -426,7 +426,7 @@ export function getSourceListResults(
     const listId = `${list.connectorInstanceId}:${list.sourceId}`;
     const params = new URLSearchParams({
       source: connector.type,
-      listId,
+      listId: list.sourceId,
     });
     results.push({
       type: 'list',

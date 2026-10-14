@@ -12,6 +12,7 @@ import {
   type NotificationWebContractSeed,
 } from '../contracts/notification-web-repository.contract';
 import type { NotificationWebPersistence } from '@/db/persistence/notification-web';
+import { DEFAULT_NOTIFICATION_QUERY } from '@/lib/notifications/query';
 
 const testDirectory = mkdtempSync(join(tmpdir(), 'mc-notification-web-'));
 process.env.MC_DB_PATH = join(testDirectory, 'notification-web.db');
@@ -77,6 +78,27 @@ describe('SQLite NotificationWebPersistence', () => {
   it('getNextScheduledWriteback returns null when no jobs', async () => {
     const result = await repo.getNextScheduledWriteback();
     expect(result).toBeNull();
+  });
+
+  it('loads an exact notification id outside the default inbox lifecycle', async () => {
+    const now = new Date().toISOString();
+    const handle = sqlite as unknown as SqliteHandle;
+    handle.prepare(`
+      INSERT INTO notifications (
+        id, source_id, connector_type, connector_instance_id, title,
+        read_state, disposition, received_at, sort_at
+      ) VALUES (?, ?, 'github-issues', 'github-work', ?, 'read', 'handled', ?, ?)
+    `).run('archived-search-result', 'review.archived', 'Archived review', now, now);
+
+    const result = await repo.queryNotifications({
+      query: DEFAULT_NOTIFICATION_QUERY,
+      limit: 1,
+      cursor: null,
+      notificationId: 'archived-search-result',
+    });
+
+    expect(result.items.map(item => item.id)).toEqual(['archived-search-result']);
+    expect(result.matchingCount).toBe(1);
   });
 
   it('returns named source instances and source-scoped notification types', async () => {

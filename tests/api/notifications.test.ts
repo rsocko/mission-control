@@ -231,6 +231,20 @@ describe('GET /api/notifications', () => {
     expect(data).toHaveProperty('notifications');
   });
 
+  it('loads one notification by id regardless of the default inbox query', async () => {
+    const { GET } = await import('@/app/api/notifications/route');
+    const response = await GET(new Request(
+      'http://localhost/api/notifications?id=archived-notification',
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mockWebPersistence.queryNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      notificationId: 'archived-notification',
+      limit: 1,
+      cursor: null,
+    }));
+  });
+
   it('hydrates notification-scoped icon URLs with the persisted notification id', async () => {
     const receivedAt = new Date().toISOString();
     mockWebPersistence.queryNotifications.mockResolvedValueOnce({

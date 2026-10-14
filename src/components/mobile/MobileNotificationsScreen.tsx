@@ -602,11 +602,14 @@ function NotificationRow({
 export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [requestedNotificationId] = useState(() => searchParams.get('id'));
   const backButtonRef = useRef<HTMLButtonElement>(null);
   const expectedUrlRef = useRef<string | null>(null);
   const applyingUrlRef = useRef(false);
+  const deepLinkHandledRef = useRef(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [deepLinkedNotification, setDeepLinkedNotification] = useState<NotificationItem | null>(null);
   const [filters, setFilters] = useState<NotificationQuery>(() => parseNotificationQuery(searchParams));
   const [facets, setFacets] = useState<NotificationFacets>({
     level: {},
@@ -718,6 +721,38 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
 
     return () => controller.abort();
   }, [fetchNotifications]);
+
+  useEffect(() => {
+    if (!requestedNotificationId || deepLinkHandledRef.current) return;
+
+    const controller = new AbortController();
+    void fetch(`/api/notifications?id=${encodeURIComponent(requestedNotificationId)}`, {
+      signal: controller.signal,
+    })
+      .then(async response => {
+        if (!response.ok) throw new Error(`Failed to load notification (${response.status})`);
+        return response.json() as Promise<{ notifications?: NotificationItem[] }>;
+      })
+      .then(data => {
+        const notification = data.notifications?.[0];
+        if (controller.signal.aborted) return;
+        deepLinkHandledRef.current = true;
+        if (!notification) {
+          setError('Notification is no longer available.');
+          return;
+        }
+        setDeepLinkedNotification(notification);
+        setSelectedId(notification.id);
+      })
+      .catch(fetchError => {
+        if ((fetchError as Error).name !== 'AbortError') {
+          deepLinkHandledRef.current = true;
+          setError('Could not open the selected notification.');
+        }
+      });
+
+    return () => controller.abort();
+  }, [requestedNotificationId]);
 
   const refresh = useCallback(async () => {
     setIsRefreshingList(true);
@@ -867,6 +902,7 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
 
   const handleOpenNotification = useCallback(
     async (notification: NotificationItem) => {
+      setDeepLinkedNotification(null);
       setSelectedId(notification.id);
 
       if (isNotificationUnread(notification)) {
@@ -895,8 +931,8 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
     actionId: string,
     params?: Record<string, unknown>,
   ) => {
-    const action = notifications
-      .find(notification => notification.id === notificationId)
+    const action = (notifications.find(notification => notification.id === notificationId)
+      ?? (deepLinkedNotification?.id === notificationId ? deepLinkedNotification : null))
       ?.actions?.find(candidate => candidate.id === actionId);
     const externalWindow = prepareExternalNavigation(action?.opensExternal === true);
     try {
@@ -939,7 +975,7 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
       console.error('Notification action failed:', error);
       return { success: false };
     }
-  }, [fetchNotifications, notifications, router]);
+  }, [deepLinkedNotification, fetchNotifications, notifications, router]);
 
   const snoozeNotification = useCallback(async (id: string, duration: string) => {
     const response = await fetch(`/api/notifications/${id}/snooze`, {
@@ -954,7 +990,8 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
     await fetchNotifications();
   }, [fetchNotifications]);
 
-  const selectedNotification = notifications.find(notification => notification.id === selectedId) || null;
+  const selectedNotification = notifications.find(notification => notification.id === selectedId)
+    || (deepLinkedNotification?.id === selectedId ? deepLinkedNotification : null);
 
   const hasActiveFilters = hasActiveNotificationFilters(filters);
   const emptyCopy = hasActiveFilters
@@ -1088,6 +1125,11 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
                     ? { ...notification, state: nextState, readState: nextState }
                     : notification
                 )));
+                setDeepLinkedNotification(current => (
+                  current?.id === selectedNotification.id
+                    ? { ...current, state: nextState, readState: nextState }
+                    : current
+                ));
                 setStats(current => adjustUnreadStats(
                   current,
                   [selectedNotification],

@@ -193,10 +193,10 @@ for (const file of workflowFiles) {
 
   if (file === 'sync-icon-picker-vendor.yml') {
     const sync = workflow.jobs?.sync;
-    assert.deepEqual(
+    assert.equal(
       workflow.on.schedule,
-      [{ cron: '17 9 * * *' }],
-      'icon picker synchronization must retain its low-noise daily cadence',
+      undefined,
+      'icon picker synchronization must remain manual-only',
     );
     assert.equal(
       workflow.on.workflow_dispatch?.inputs?.commit?.required,

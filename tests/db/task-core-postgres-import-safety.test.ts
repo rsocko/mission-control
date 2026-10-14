@@ -405,6 +405,7 @@ function fakePersistence(): TaskCorePersistence {
       reserveOperation: () => {
         throw new Error('reserveQuickSortOperation is not used by this proof');
       },
+      rebaseApplyingOperation: () => record('rebaseQuickSortOperation', false),
       discardApplyingOperation: () => record('discardQuickSortOperation', false),
       finalizeOperation: () => record('finalizeQuickSortOperation', null),
       claimUndo: () => record('claimQuickSortUndo', false),

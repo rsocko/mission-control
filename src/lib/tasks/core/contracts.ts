@@ -481,6 +481,10 @@ export interface TaskQuickSortPersistenceRepository {
   reserveOperation(
     input: TaskQuickSortOperationReservation,
   ): Promise<TaskQuickSortReservationOutcome>;
+  rebaseApplyingOperation(
+    id: string,
+    beforeSnapshot: QuickSortBeforeSnapshot,
+  ): Promise<boolean>;
   discardApplyingOperation(id: string): Promise<boolean>;
   finalizeOperation(
     id: string,

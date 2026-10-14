@@ -130,7 +130,7 @@ export default function QuickSortMode() {
     counts,
     suggestions,
     recentTagIds,
-    dismiss,
+    dismiss: dismissTask,
     restoreTask,
     updateTask,
     refreshQueue,
@@ -316,6 +316,16 @@ export default function QuickSortMode() {
   const topTask = stackTasks[0] ?? null;
   const remaining = tasks.length;
   const topSuggestion = topTask ? suggestions[topTask.id] : undefined;
+  const dismiss = useCallback((taskId: string) => {
+    dismissTask(taskId);
+    if (useCompactTaskDetails || selectedTaskId !== taskId) return;
+
+    const dismissedIndex = tasks.findIndex((task) => task.id === taskId);
+    const nextTask = tasks[dismissedIndex + 1]
+      ?? tasks.find((task) => task.id !== taskId)
+      ?? null;
+    setSelectedTaskId(nextTask?.id ?? null, { history: 'replace' });
+  }, [dismissTask, selectedTaskId, setSelectedTaskId, tasks, useCompactTaskDetails]);
   // Track initial total for progress (F-52) — reset when mode changes
   const [initialTotal, setInitialTotal] = useState(0);
   useEffect(() => {
@@ -668,7 +678,9 @@ export default function QuickSortMode() {
 
     if (resolvesCurrentQueue) {
       dismiss(selectedTaskId);
-      setSelectedTaskId(null, { history: 'replace' });
+      if (useCompactTaskDetails) {
+        setSelectedTaskId(null, { history: 'replace' });
+      }
       return;
     }
 
@@ -681,7 +693,16 @@ export default function QuickSortMode() {
       patch.planningHorizon = fields.planningHorizon;
     }
     updateTask(selectedTaskId, patch);
-  }, [dismiss, mode, refreshCounts, refreshQueue, selectedTaskId, updateTask]);
+  }, [
+    dismiss,
+    mode,
+    refreshCounts,
+    refreshQueue,
+    selectedTaskId,
+    setSelectedTaskId,
+    updateTask,
+    useCompactTaskDetails,
+  ]);
 
   /** Swipe-left: accept all AI suggestions for this task */
   const handleAcceptSuggestions = useCallback(

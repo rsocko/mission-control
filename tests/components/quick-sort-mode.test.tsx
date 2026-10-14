@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   taskPriority: 'none',
   taskEditPolicy: null as unknown as TaskEditPolicy,
   hasTasks: true,
+  taskIds: ['task-1'],
 }));
 
 vi.mock('@/lib/toast', () => ({
@@ -30,8 +31,8 @@ vi.mock('@/lib/toast', () => ({
 
 vi.mock('@/lib/hooks/useQuickSortData', () => ({
   useQuickSortData: () => ({
-    tasks: mocks.hasTasks ? [{
-      id: 'task-1',
+    tasks: mocks.hasTasks ? mocks.taskIds.map((id) => ({
+      id,
       title: 'Needs context',
       hasNotes: false,
       priority: mocks.taskPriority,
@@ -48,7 +49,7 @@ vi.mock('@/lib/hooks/useQuickSortData', () => ({
       phases: [],
       tags: [],
       editPolicy: mocks.taskEditPolicy,
-    }] : [],
+    })) : [],
     loading: false,
     counts: { no_priority: 1, quadrant: 1, no_effort: 1, no_tags: 1, no_planning_horizon: 0, no_project: 1 },
     suggestions: mocks.suggestions,
@@ -106,9 +107,18 @@ vi.mock('@/components/ui/MobileSheet', () => ({
   MobileSheet: ({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) => isOpen ? children : null,
 }));
 vi.mock('@/components/task-detail/TaskDetailPanel', () => ({
-  TaskDetailPanel: ({ mode, onUpdate }: { mode: string; onUpdate: () => void }) => (
-    <div data-testid="task-detail-panel" data-mode={mode}>
+  TaskDetailPanel: ({
+    taskId,
+    mode,
+    onUpdate,
+  }: {
+    taskId: string;
+    mode: string;
+    onUpdate: (fields?: { priority?: string }) => void;
+  }) => (
+    <div data-testid="task-detail-panel" data-mode={mode} data-task-id={taskId}>
       <button onClick={onUpdate}>Simulate tag update</button>
+      <button onClick={() => onUpdate({ priority: 'high' })}>Simulate priority update</button>
     </div>
   ),
 }));
@@ -128,6 +138,7 @@ describe('QuickSortMode task drawer', () => {
     mocks.taskPriority = 'none';
     mocks.taskEditPolicy = editableTaskPolicy;
     mocks.hasTasks = true;
+    mocks.taskIds = ['task-1'];
   });
 
   it('revalidates queue membership after fieldless drawer updates', () => {
@@ -181,6 +192,83 @@ describe('QuickSortMode task drawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View task' }));
 
     expect(screen.getByTestId('task-detail-panel')).toHaveAttribute('data-mode', 'panel');
+  });
+
+  it('keeps the desktop detail panel aligned with the active task', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ success: true }))));
+    mocks.taskIds = ['task-1', 'task-2'];
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open no-tags queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View task' }));
+    expect(screen.getByTestId('task-detail-panel')).toHaveAttribute('data-task-id', 'task-1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skip task' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-detail-panel')).toHaveAttribute('data-task-id', 'task-2');
+    });
+  });
+
+  it('advances desktop details when an edit resolves the active queue item', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    mocks.taskIds = ['task-1', 'task-2'];
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate priority update' }));
+
+    await waitFor(() => {
+      expect(mocks.dismiss).toHaveBeenCalledWith('task-1');
+      expect(screen.getByTestId('task-detail-panel')).toHaveAttribute('data-task-id', 'task-2');
+    });
+  });
+
+  it('closes desktop details after resolving the final queue item', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ success: true }))));
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open no-tags queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Skip task' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-detail-panel')).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not advance an open mobile task sheet when the queue changes', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    mocks.taskIds = ['task-1', 'task-2'];
+    const { rerender } = render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open no-tags queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View task' }));
+    expect(screen.getByTestId('task-detail-panel')).toHaveAttribute('data-task-id', 'task-1');
+
+    mocks.taskIds = ['task-2'];
+    rerender(<QuickSortMode />);
+
+    expect(screen.getByTestId('task-detail-panel')).toHaveAttribute('data-task-id', 'task-1');
   });
 
   it('mounts only the queue region appropriate for the responsive layout', () => {

@@ -3,7 +3,7 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { resolveOutboundPriority } from '@/lib/priority';
 import { randomUUID } from 'crypto';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
-import { logWriteThrough } from '@/lib/sync/write-through-log';
+import { logWriteThrough, logWriteThroughFailure } from '@/lib/sync/write-through-log';
 import { ApiErrors } from '@/lib/api-error';
 import { getConnectorCapabilities, isConnectorEnabled } from '@/lib/connectors/capabilities';
 import { getLocalToday } from '@/lib/utils/date';
@@ -1030,6 +1030,13 @@ async function writeThrough(
     });
   } catch (error) {
     logger.error({ err: error, taskId }, 'Write-through task update failed');
+    await logWriteThroughFailure({
+      connectorId: currentTask.connectorInstanceId,
+      taskId,
+      taskTitle: currentTask.title,
+      taskSourceId: currentTask.sourceId,
+      error,
+    });
     if (!pushLeaseToken) return;
     if (error instanceof GitHubUnknownWriteOutcomeError) {
       await failTaskPush(taskId, pushLeaseToken, 'push_failed', 5, expectedTaskVersion);

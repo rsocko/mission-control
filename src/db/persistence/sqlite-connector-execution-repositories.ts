@@ -861,8 +861,8 @@ export function createSqliteConnectorExecutionRepositories(
             database,
             input.taskId,
             input.values,
-            'AND sync_status = ?',
-            [input.expectedSyncStatus],
+            'AND sync_status = ? AND updated_at = ?',
+            [input.expectedSyncStatus, input.expectedUpdatedAt],
           );
           if (changed !== 1) return false;
           if (input.sourceTags) {

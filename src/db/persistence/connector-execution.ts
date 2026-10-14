@@ -234,6 +234,7 @@ export interface TaskPullPersistence {
   applyRemoteUpdate(input: {
     taskId: string;
     expectedSyncStatus: string;
+    expectedUpdatedAt: string;
     values: ConnectorTaskUpdate;
     sourceTags?: readonly PullTag[];
   }): Promise<boolean>;

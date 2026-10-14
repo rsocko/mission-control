@@ -339,9 +339,11 @@ describePostgres('PostgreSQL generic connector execution smoke', () => {
     expect(remoteEffects).toEqual([task.id]);
 
     const [remoteTask] = await inertConnector.fetchTasks();
+    const [pushedTask] = await execution.pulls.listTasks(connectorId);
     expect(await execution.pulls.applyRemoteUpdate({
       taskId: task.id,
       expectedSyncStatus: 'synced',
+      expectedUpdatedAt: pushedTask.updatedAt,
       values: {
         title: remoteTask.title,
         status: remoteTask.status,

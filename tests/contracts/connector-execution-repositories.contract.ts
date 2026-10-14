@@ -205,19 +205,22 @@ export function describeConnectorExecutionRepositoriesContract(
         now: '2026-08-29T20:02:00.000Z',
         expectedTaskVersion: NOW,
       })).resolves.toBe(true);
-      await expect(harness.repositories.pulls.listTasks('portable-connector'))
-        .resolves.toHaveLength(1);
+      const [pushedTask] = await harness.repositories.pulls.listTasks('portable-connector');
+      expect(pushedTask).toBeDefined();
 
       await expect(harness.repositories.pulls.applyRemoteUpdate({
         taskId: task.id,
         expectedSyncStatus: 'pending_push',
+        expectedUpdatedAt: pushedTask!.updatedAt,
         values: { title: 'must not win' },
       })).resolves.toBe(false);
       await expect(harness.repositories.pulls.applyRemoteUpdate({
         taskId: task.id,
         expectedSyncStatus: 'synced',
+        expectedUpdatedAt: pushedTask!.updatedAt,
         values: {
           title: 'remote title',
+          updatedAt: '2026-08-29T20:03:00.000Z',
           syncStatus: 'synced',
           lastSyncedAt: '2026-08-29T20:03:00.000Z',
         },
@@ -227,6 +230,13 @@ export function describeConnectorExecutionRepositoriesContract(
         .resolves.toEqual([
           expect.objectContaining({ title: 'remote title', sourceId: 'remote-task' }),
         ]);
+
+      await expect(harness.repositories.pulls.applyRemoteUpdate({
+        taskId: task.id,
+        expectedSyncStatus: 'synced',
+        expectedUpdatedAt: pushedTask!.updatedAt,
+        values: { title: 'stale remote title' },
+      })).resolves.toBe(false);
 
       const concurrentEdit = connectorExecutionTask({
         id: 'create-outcome-task',

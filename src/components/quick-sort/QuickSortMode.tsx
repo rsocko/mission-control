@@ -25,6 +25,7 @@ import QuickSortActions, {
   type TagOption,
 } from './QuickSortActions';
 import ActivityBanner from './ActivityBanner';
+import QuickSortSyncIssues from './QuickSortSyncIssues';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { TaskDetailPanel, type TaskFieldUpdate } from '@/components/task-detail/TaskDetailPanel';
 import { MobileSheet } from '@/components/ui/MobileSheet';
@@ -1107,6 +1108,8 @@ export default function QuickSortMode() {
                 <span>Ctrl+Z undo</span>
               </div>
             </div>
+
+            <QuickSortSyncIssues refreshKey={statsKey} />
 
             {sessionSorted > 0 && (
               <div className="mx-4 mb-3 flex-shrink-0 rounded-[22px] bg-white/[0.03] px-4 py-3 ring-1 ring-inset ring-white/[0.06] lg:mx-6">

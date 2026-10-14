@@ -87,6 +87,10 @@ vi.mock('@/components/ui/AnimatedCounter', () => ({
     <span data-testid="animated-counter">{value}</span>
   ),
 }));
+
+vi.mock('@/components/quick-sort/QuickSortSyncIssues', () => ({
+  default: () => null,
+}));
 vi.mock('@/components/quick-sort/QuickSortCard', () => ({
   default: ({ onSkip }: { onSkip: (taskId: string) => void }) => (
     <>

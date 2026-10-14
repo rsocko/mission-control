@@ -18,7 +18,10 @@ vi.mock('node:crypto', () => ({
   randomUUID: vi.fn(() => 'write-through-log-id'),
 }));
 
-import { logWriteThrough } from '@/lib/sync/write-through-log';
+import {
+  logWriteThrough,
+  logWriteThroughFailure,
+} from '@/lib/sync/write-through-log';
 
 describe('write-through sync logging', () => {
   beforeEach(() => {
@@ -68,5 +71,30 @@ describe('write-through sync logging', () => {
       { err: failure, ...params },
       'Failed to log write-through to sync_log',
     );
+  });
+
+  it('persists task context for failed source updates', async () => {
+    await logWriteThroughFailure({
+      connectorId: 'todo-1',
+      taskId: 'task-2',
+      taskTitle: 'Picture in Toilet room',
+      taskSourceId: 'list-1:source-2',
+      error: new Error('Microsoft Graph returned 503'),
+    });
+
+    expect(mocks.values).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'write-through-log-id',
+      connectorId: 'todo-1',
+      success: false,
+      tasksPushed: 0,
+      errors: ['Microsoft Graph returned 503'],
+      details: [{
+        action: 'push_failed',
+        taskId: 'task-2',
+        taskTitle: 'Picture in Toilet room',
+        taskSourceId: 'list-1:source-2',
+        reason: 'Write-through failed: Microsoft Graph returned 503',
+      }],
+    }));
   });
 });

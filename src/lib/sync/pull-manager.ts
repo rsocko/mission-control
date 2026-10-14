@@ -1250,6 +1250,7 @@ async function applyRemoteUpdate(
   const applied = await persistence.applyRemoteUpdate({
     taskId: existingTask.id,
     expectedSyncStatus: existingTask.syncStatus,
+    expectedUpdatedAt: existingTask.updatedAt,
     values: taskUpdate,
     sourceTags: canSyncTags ? remote.tags || [] : undefined,
   });

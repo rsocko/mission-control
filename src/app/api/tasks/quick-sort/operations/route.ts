@@ -33,6 +33,8 @@ interface ApplyOperationBody {
   };
 }
 
+const MAX_REVISION_REBASE_ATTEMPTS = 3;
+
 function operationResponse(operation: TaskQuickSortOperation) {
   return {
     operation: {
@@ -211,7 +213,11 @@ export async function POST(request: Request) {
     after = capturedAfter;
   } else if (mutatesTask) {
     let patchResponse = await patchTaskAtVersion(request, taskId, patch!, before.updatedAt);
-    if (await isTaskRevisionConflict(patchResponse)) {
+    let rebaseAttempts = 0;
+    while (
+      rebaseAttempts < MAX_REVISION_REBASE_ATTEMPTS
+      && await isTaskRevisionConflict(patchResponse)
+    ) {
       const rebasedBefore = await captureQuickSortTask(taskId);
       if (!rebasedBefore) {
         await quickSort.discardApplyingOperation(operationId);
@@ -225,6 +231,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Operation is still being applied' }, { status: 409 });
       }
       before = rebasedBefore;
+      rebaseAttempts++;
       patchResponse = await patchTaskAtVersion(request, taskId, patch!, before.updatedAt);
     }
     if (!patchResponse.ok) {

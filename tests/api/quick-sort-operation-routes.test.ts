@@ -199,6 +199,120 @@ describe('Quick Sort operation apply route', () => {
     expect(mocks.discardApplyingOperation).not.toHaveBeenCalled();
   });
 
+  it('rebases repeatedly when overlapping syncs advance the task revision', async () => {
+    const firstSync = {
+      ...snapshot,
+      updatedAt: '2026-08-16T12:00:20.000Z',
+      dueDate: '2026-08-20T12:00:00.000Z',
+    };
+    const secondSync = {
+      ...firstSync,
+      updatedAt: '2026-08-16T12:00:40.000Z',
+      status: 'done' as const,
+      completedAt: '2026-08-16T12:00:35.000Z',
+    };
+    const after = {
+      ...secondSync,
+      updatedAt: '2026-08-16T12:01:00.000Z',
+      priority: 'high',
+    };
+    const conflict = () => Response.json({
+      error: 'Task changed before this update could be applied',
+      code: 'TASK_REVISION_CONFLICT',
+    }, { status: 409 });
+    mocks.getOperation.mockResolvedValue(null);
+    mocks.captureTask
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(firstSync)
+      .mockResolvedValueOnce(secondSync)
+      .mockResolvedValueOnce(after);
+    mocks.patchTask
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(Response.json({ success: true }));
+    mocks.finalizeOperation.mockResolvedValue({
+      ...operation,
+      beforeSnapshot: { ...secondSync, originalPatch: { priority: 'high' } },
+      afterSnapshot: after,
+    });
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: operation.id,
+          taskId: operation.taskId,
+          mode: operation.mode,
+          action: operation.action,
+          label: operation.label,
+          contextKey: operation.contextKey,
+          queueIndex: operation.queueIndex,
+          patch: { priority: 'high' },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.patchTask).toHaveBeenCalledTimes(3);
+    expect(mocks.rebaseApplyingOperation).toHaveBeenNthCalledWith(1, operation.id, {
+      ...firstSync,
+      originalPatch: { priority: 'high' },
+    });
+    expect(mocks.rebaseApplyingOperation).toHaveBeenNthCalledWith(2, operation.id, {
+      ...secondSync,
+      originalPatch: { priority: 'high' },
+    });
+    expect(mocks.discardApplyingOperation).not.toHaveBeenCalled();
+  });
+
+  it('stops rebasing after repeated revision conflicts', async () => {
+    const conflict = () => Response.json({
+      error: 'Task changed before this update could be applied',
+      code: 'TASK_REVISION_CONFLICT',
+    }, { status: 409 });
+    mocks.getOperation.mockResolvedValue(null);
+    mocks.captureTask
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:10.000Z' })
+      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:20.000Z' })
+      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:30.000Z' });
+    mocks.patchTask
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict());
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: operation.id,
+          taskId: operation.taskId,
+          mode: operation.mode,
+          action: operation.action,
+          label: operation.label,
+          contextKey: operation.contextKey,
+          queueIndex: operation.queueIndex,
+          patch: { priority: 'high' },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'TASK_REVISION_CONFLICT',
+    });
+    expect(mocks.patchTask).toHaveBeenCalledTimes(4);
+    expect(mocks.rebaseApplyingOperation).toHaveBeenCalledTimes(3);
+    expect(mocks.discardApplyingOperation).toHaveBeenCalledWith(operation.id);
+  });
+
   it('assigns a project and phase as an undoable Quick Sort operation', async () => {
     const after = {
       ...snapshot,

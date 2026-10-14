@@ -178,7 +178,16 @@ function buildWhereClauses(
   query: NotificationQuery,
   cursor: string | null,
   params: unknown[],
+  notificationId?: string | null,
 ): string[] {
+  if (notificationId) {
+    params.push(notificationId);
+    return [
+      'id = ?',
+      'connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)',
+    ];
+  }
+
   const now = new Date().toISOString();
   const conditions: string[] = [];
 
@@ -583,7 +592,7 @@ export function createSqliteNotificationWebRepository(
 
   const repository: NotificationWebPersistence = {
     async queryNotifications(input) {
-      const { query, limit, cursor } = input;
+      const { query, limit, cursor, notificationId } = input;
       const now = new Date().toISOString();
 
       // Selected merchant facet (for the merchant query filter)
@@ -612,7 +621,12 @@ export function createSqliteNotificationWebRepository(
 
       // Paginated query
       const paginatedParams: unknown[] = [];
-      const paginatedConditions = buildWhereClauses(query, cursor, paginatedParams);
+      const paginatedConditions = buildWhereClauses(
+        query,
+        cursor,
+        paginatedParams,
+        notificationId,
+      );
       const orderDir = query.sort === 'oldest' ? 'ASC' : 'DESC';
       const paginatedWhere = paginatedConditions.length ? `WHERE ${paginatedConditions.join(' AND ')}` : '';
       const rows = (sqlite.prepare(`
@@ -732,7 +746,12 @@ export function createSqliteNotificationWebRepository(
 
       // Matching count
       const unpaginatedParams: unknown[] = [];
-      const unpaginatedConditions = buildWhereClauses(query, null, unpaginatedParams);
+      const unpaginatedConditions = buildWhereClauses(
+        query,
+        null,
+        unpaginatedParams,
+        notificationId,
+      );
       const unpaginatedWhere = unpaginatedConditions.length ? `WHERE ${unpaginatedConditions.join(' AND ')}` : '';
       const matchingRow = sqlite.prepare(`
         SELECT COUNT(*) AS count FROM notifications ${unpaginatedWhere}

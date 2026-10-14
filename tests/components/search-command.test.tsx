@@ -324,8 +324,40 @@ describe('SearchCommand', () => {
     });
     fireEvent.click(await screen.findByRole('option', { name: /home projects/i }));
     expect(navigation.push).toHaveBeenLastCalledWith(
-      '/all-tasks?source=microsoft-todo&listId=todo-work%3Ahome%2Flist',
+      '/all-tasks?source=microsoft-todo&listId=home%2Flist',
     );
+  });
+
+  it('navigates notification results to their detail deep link', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
+      if (url.includes('__status_check__')) {
+        return Promise.resolve(jsonResponse({
+          semanticEnabled: false,
+          semanticAvailable: false,
+          results: [],
+        }));
+      }
+      if (url.includes('mode=keyword')) {
+        return Promise.resolve(jsonResponse({
+          results: [result('notification-1', 'Review requested', {
+            type: 'notification',
+            href: '/notifications?id=notification-1',
+            metadata: { category: 'development', connectorType: 'github-issues' },
+          })],
+          durationMs: 2,
+        }));
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    render(<SearchCommand />);
+    fireEvent.change(openSearch(), { target: { value: 'review requested' } });
+    fireEvent.click(await screen.findByRole('option', { name: /review requested/i }));
+
+    expect(navigation.push).toHaveBeenCalledWith('/notifications?id=notification-1');
   });
 
   it('appends semantic results without disturbing keyword order, selection, or preview', async () => {

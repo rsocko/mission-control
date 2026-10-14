@@ -73,11 +73,13 @@ function NotificationsPageInner() {
 function DesktopNotificationsPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [requestedNotificationId] = useState(() => searchParams.get('id'));
   const [initialQuery] = useState(() => parseNotificationQuery(searchParams));
   const hook = useNotifications(initialQuery);
   const {
     executeAction,
     loadMore,
+    notifications,
     replaceFilters,
     setSelectedId,
   } = hook;
@@ -97,6 +99,7 @@ function DesktopNotificationsPage() {
   const expectedUrlRef = useRef<string | null>(null);
   const applyingUrlRef = useRef(false);
   const selectedIdRef = useRef(hook.selectedId);
+  const deepLinkHandledRef = useRef(false);
   const virtualizeNotifications = shouldVirtualizeList(hook.notifications.length);
   const notificationVirtualizer = useVirtualizer({
     count: virtualizeNotifications ? hook.notifications.length : 0,
@@ -108,6 +111,48 @@ function DesktopNotificationsPage() {
   useEffect(() => {
     selectedIdRef.current = hook.selectedId;
   }, [hook.selectedId]);
+
+  useEffect(() => {
+    if (!requestedNotificationId || deepLinkHandledRef.current) return;
+
+    const existing = notifications.find(item => item.id === requestedNotificationId);
+    if (existing) {
+      deepLinkHandledRef.current = true;
+      setSelectedSnapshot(existing);
+      setSelectedId(existing.id);
+      return;
+    }
+
+    const controller = new AbortController();
+    void fetch(`/api/notifications?id=${encodeURIComponent(requestedNotificationId)}`, {
+      signal: controller.signal,
+    })
+      .then(async response => {
+        if (!response.ok) throw new Error(`Failed to load notification (${response.status})`);
+        return response.json() as Promise<{ notifications?: typeof notifications }>;
+      })
+      .then(data => {
+        const notification = data.notifications?.[0];
+        if (!notification || controller.signal.aborted) {
+          if (!controller.signal.aborted) {
+            deepLinkHandledRef.current = true;
+            setAnnouncement('Notification is no longer available.');
+          }
+          return;
+        }
+        deepLinkHandledRef.current = true;
+        setSelectedSnapshot(notification);
+        setSelectedId(notification.id);
+      })
+      .catch(error => {
+        if ((error as Error).name !== 'AbortError') {
+          deepLinkHandledRef.current = true;
+          setAnnouncement('Could not open the selected notification.');
+        }
+      });
+
+    return () => controller.abort();
+  }, [notifications, requestedNotificationId, setSelectedId]);
 
   // ─── URL-based filter persistence ─────────────────────────────────────────
   useEffect(() => {

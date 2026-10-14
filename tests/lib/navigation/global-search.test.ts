@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  NAVIGATION_DESTINATIONS,
   getDestinationResults,
   getProjectResults,
   getSourceListResults,
@@ -22,6 +25,29 @@ describe('global navigation search', () => {
       title: 'Money',
       href: '/finance',
     });
+  });
+
+  it('only exposes application destinations backed by page routes', () => {
+    for (const destination of NAVIGATION_DESTINATIONS.filter(item => item.searchable !== false)) {
+      const routeFile = destination.pathname === '/'
+        ? path.join(process.cwd(), 'src', 'app', 'page.tsx')
+        : path.join(
+            process.cwd(),
+            'src',
+            'app',
+            ...destination.pathname.split('/').filter(Boolean),
+            'page.tsx',
+          );
+      const optionalCatchAllRouteFile = path.join(
+        path.dirname(routeFile),
+        '[[...section]]',
+        'page.tsx',
+      );
+      expect(
+        existsSync(routeFile) || existsSync(optionalCatchAllRouteFile),
+        `${destination.pathname} should resolve to an application page`,
+      ).toBe(true);
+    }
   });
 
   it('creates project results that navigate to encoded project routes', () => {
@@ -60,7 +86,8 @@ describe('global navigation search', () => {
       expect.objectContaining({
         type: 'list',
         title: 'Work queue',
-        href: '/all-tasks?source=microsoft-todo&listId=todo-work%3Awork%2Flist',
+        id: 'todo-work:work/list',
+        href: '/all-tasks?source=microsoft-todo&listId=work%2Flist',
       }),
       expect.objectContaining({
         type: 'source',

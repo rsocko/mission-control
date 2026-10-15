@@ -35,8 +35,17 @@ const SCORE: ScoredTask = {
 describe('what is next signal explanations', () => {
   it('describes deadline pressure and Horizon as separate signals', () => {
     expect(describeWhatsNextTask(TASK, SCORE, '2026-09-17', 'high')).toBe(
-      '- "Prepare launch" | importance: high | deadline: none (0/20) | '
+      '- [Prepare launch](/tasks/task-1) | importance: high | deadline: none (0/20) | '
       + 'Horizon: next (10/10) | effort: 2 | Smart Score: 40 | energy: high | source: local',
     );
+  });
+
+  it('escapes task titles before placing them in Markdown links', () => {
+    expect(describeWhatsNextTask(
+      { ...TASK, id: 'task/2', title: String.raw`Review [Q4]\plan` },
+      { ...SCORE, taskId: 'task/2' },
+      '2026-09-17',
+      undefined,
+    )).toContain(String.raw`[Review \[Q4\]\\plan](/tasks/task%2F2)`);
   });
 });

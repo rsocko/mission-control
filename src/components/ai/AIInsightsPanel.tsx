@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { AssistantMarkdown } from '@/components/ai/AssistantMarkdown';
 import {
   canEditTaskField,
   selectedTaskFieldBlockedReason,
@@ -642,8 +643,8 @@ export function AIInsightsPanel() {
                       <h3 className="text-sm font-medium text-[var(--text-primary)]">Recommendation</h3>
                       <span className="text-xs text-[var(--text-muted)]">{formatTimestamp(whatsNext.generatedAt)}</span>
                     </div>
-                    <div className="rounded-lg bg-[var(--surface-0)] p-4 text-sm text-[var(--text-secondary)] whitespace-pre-wrap">
-                      {whatsNext.recommendation}
+                    <div className="rounded-lg bg-[var(--surface-0)] p-4 text-[var(--text-secondary)]">
+                      <AssistantMarkdown>{whatsNext.recommendation}</AssistantMarkdown>
                     </div>
                   </div>
                 )}

@@ -42,6 +42,14 @@ function groupByTaskId<T extends { taskId: string }>(items: readonly T[]): Map<s
   return grouped;
 }
 
+function escapeMarkdownLinkText(value: string): string {
+  return value.replace(/([\\[\]])/g, '\\$1').replace(/\r?\n/g, ' ');
+}
+
+function taskMarkdownLink(task: Pick<ScoreInputTask, 'id' | 'title'>): string {
+  return `[${escapeMarkdownLinkText(task.title)}](/tasks/${encodeURIComponent(task.id)})`;
+}
+
 export function describeWhatsNextTask(
   task: ScoreInputTask,
   score: ScoredTask,
@@ -50,7 +58,7 @@ export function describeWhatsNextTask(
 ): string {
   const breakdown = score.score;
   return [
-    `- "${task.title}"`,
+    `- ${taskMarkdownLink(task)}`,
     `importance: ${task.priority}`,
     `deadline: ${deadlineDescription(task.dueDate ?? null, today)} (${breakdown.urgency}/20)`,
     `Horizon: ${task.planningHorizon ?? 'not set'} (${breakdown.planningHorizon}/10)`,
@@ -125,6 +133,7 @@ Overdue (${overdue.length}): ${overdue.slice(0, 3).map(task => `"${task.title}" 
 Critical (${critical.length}): ${critical.slice(0, 3).map(task => `"${task.title}"`).join(', ')}
 Open tasks: ${candidates.length} total
 Unread notifications: ${unreadNotifications.length}
+Notifications action: [Review unread notifications](/notifications)
 
 Top tasks by Smart Score:
 ${openTasks.slice(0, 10).map((task) => describeWhatsNextTask(
@@ -136,7 +145,7 @@ ${openTasks.slice(0, 10).map((task) => describeWhatsNextTask(
 `;
   const result = await generateText({
     model: route.model,
-    system: 'You are a "what\'s next" advisor. Given the user\'s context (time, energy, focus), recommend 1-3 specific next actions. Treat importance, deadline pressure, planning Horizon, effort, and Smart Score as distinct signals: Horizon expresses intent and must never be presented as a deadline. Match task energy demands to the user\'s current energy level. For each recommendation, briefly name the strongest signals that earned its place. Be direct and actionable. Format as a short numbered list.',
+    system: 'You are a "what\'s next" advisor. Given the user\'s context (time, energy, focus), recommend 1-3 specific next actions. Treat importance, deadline pressure, planning Horizon, effort, and Smart Score as distinct signals: Horizon expresses intent and must never be presented as a deadline. Match task energy demands to the user\'s current energy level. For each recommendation, briefly name the strongest signals that earned its place. Be direct and actionable. Format as a short numbered Markdown list. When recommending a supplied task, copy its Markdown link exactly so the user can open it. When recommending notification review, copy the supplied notifications action link exactly. Do not invent or alter URLs.',
     messages: [{ role: 'user', content: taskContext }],
   });
 

@@ -31,4 +31,19 @@ describe('AIRecommendation', () => {
 
     expect(onDismiss).toHaveBeenCalledOnce();
   });
+
+  it('renders suggested items as navigable links', () => {
+    render(
+      <AIRecommendation
+        recommendation={'1. **Complete [Shave](/tasks/task-1)**\n2. [Review unread notifications](/notifications)'}
+        onDismiss={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Shave' })).toHaveAttribute('href', '/tasks/task-1');
+    expect(screen.getByRole('link', { name: 'Review unread notifications' })).toHaveAttribute(
+      'href',
+      '/notifications',
+    );
+  });
 });

@@ -414,6 +414,12 @@ describe('recurring task reconciliation', () => {
       incomingRecurrence: 'daily',
       completedSiblingMetadata: {},
     })).toBe(false);
+    expect(isMatchingRecurringSuccessor({
+      incomingRecurrence: 'daily',
+      completedSiblingMetadata: { recurrence: 'daily' },
+      successorCreatedAt: '2026-08-02T14:59:00Z',
+      completedAt: '2026-08-02T15:00:00Z',
+    })).toBe(false);
   });
 
   it('resets checklist items only for a newly created recurring successor', () => {

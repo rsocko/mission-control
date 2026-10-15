@@ -329,10 +329,21 @@ export function shouldSuppressRecurringMyDaySuccessor(input: {
 export function isMatchingRecurringSuccessor(input: {
   incomingRecurrence: string | null;
   completedSiblingMetadata: unknown;
+  successorCreatedAt?: string;
+  completedAt?: string | null;
 }): boolean {
   if (!input.incomingRecurrence) return false;
   const completedRecurrence = parseMetadata(input.completedSiblingMetadata).recurrence;
-  return completedRecurrence === input.incomingRecurrence;
+  if (completedRecurrence !== input.incomingRecurrence) return false;
+
+  if (input.successorCreatedAt === undefined && input.completedAt === undefined) return true;
+  if (!input.successorCreatedAt || !input.completedAt) return false;
+
+  const successorCreatedAt = new Date(input.successorCreatedAt).getTime();
+  const completedAt = new Date(input.completedAt).getTime();
+  return Number.isFinite(successorCreatedAt)
+    && Number.isFinite(completedAt)
+    && successorCreatedAt >= completedAt;
 }
 
 export function resetRecurringSuccessorSubtasks<T extends {

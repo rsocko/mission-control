@@ -341,3 +341,48 @@ export function isMatchingRecurringSuccessor(input: {
     && Number.isFinite(completedAt)
     && successorCreatedAt >= completedAt;
 }
+
+export function resetRecurringSuccessorSubtasks<T extends {
+  id: string;
+  title: string;
+  status: string;
+  sourceListId?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
+  parentId?: string | null;
+  isChecklistItem?: boolean;
+  metadata: unknown;
+}>(tasks: readonly T[]): T[] {
+  const completedParents = tasks.filter(task => (
+    !task.parentId
+    && task.status === 'done'
+    && hasRecurrenceEvidence(task)
+  ));
+  const successorIds = new Set(
+    tasks
+      .filter(task => (
+        !task.parentId
+        && task.status !== 'done'
+        && hasRecurrenceEvidence(task)
+      ))
+      .filter(successor => completedParents.some(completed => (
+        getRecurringTitleKey(successor) === getRecurringTitleKey(completed)
+        && isMatchingRecurringSuccessor({
+          incomingRecurrence: getRecurrenceLabel(successor.metadata),
+          completedSiblingMetadata: completed.metadata,
+          successorCreatedAt: successor.createdAt,
+          completedAt: completed.completedAt ?? null,
+        })
+      )))
+      .map(task => task.id),
+  );
+
+  if (successorIds.size === 0) return [...tasks];
+  return tasks.map(task => (
+    task.isChecklistItem
+    && task.parentId
+    && successorIds.has(task.parentId)
+      ? { ...task, status: 'todo', completedAt: null }
+      : task
+  ));
+}

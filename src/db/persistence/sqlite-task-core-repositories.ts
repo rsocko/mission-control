@@ -3861,6 +3861,37 @@ class SqliteTaskMutationRepository implements TaskMutationRepository {
                 createdAt: request.now,
               }))).run();
             }
+            const subtasks = tx.select(MOVE_TASK_COLUMNS).from(tasks)
+              .where(eq(tasks.parentId, request.taskId)).all();
+            if (subtasks.length) {
+              tx.insert(tasks).values(subtasks.map((row) => {
+                const subtask = toMoveTaskRow(row);
+                const subtaskId = crypto.randomUUID();
+                return moveTaskInsertValues({
+                  ...subtask,
+                  id: subtaskId,
+                  sourceId: subtaskId,
+                  connectorType: 'local',
+                  connectorInstanceId: 'local',
+                  status: 'todo',
+                  localDisposition: 'active',
+                  createdAt: request.now,
+                  updatedAt: request.now,
+                  completedAt: null,
+                  recurrenceGeneratedFromTaskId: null,
+                  parentId: successor.id,
+                  syncStatus: 'synced',
+                  lastSyncedAt: request.now,
+                  pushRetryCount: 0,
+                  reminderAt: null,
+                  reminderNagInterval: null,
+                  reminderNagStopAt: null,
+                  reminderNagSeriesId: null,
+                  reminderNagSequence: 0,
+                  isBulkImport: false,
+                });
+              })).run();
+            }
           }
         }
       }

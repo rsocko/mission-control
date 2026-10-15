@@ -7,6 +7,7 @@ import {
   inferRecurringTitleKeys,
   isMissionControlOwnedRecurrence,
   isMatchingRecurringSuccessor,
+  resetRecurringSuccessorSubtasks,
   shouldSuppressNonRecurringDuplicate,
   shouldSuppressRecurringMyDaySuccessor,
 } from '@/lib/sync/recurring-task-reconciliation';
@@ -419,5 +420,76 @@ describe('recurring task reconciliation', () => {
       ...successor,
       completedSiblingMetadata: {},
     })).toBe(false);
+  });
+
+  it('resets checklist items only for a newly created recurring successor', () => {
+    const tasks = [
+      {
+        id: 'completed',
+        title: 'Morning routine',
+        status: 'done',
+        sourceListId: 'list',
+        createdAt: '2026-08-01T12:00:00Z',
+        completedAt: '2026-08-02T12:00:00Z',
+        parentId: null,
+        isChecklistItem: false,
+        metadata: { recurrence: 'daily' },
+      },
+      {
+        id: 'successor',
+        title: 'Morning routine',
+        status: 'todo',
+        sourceListId: 'list',
+        createdAt: '2026-08-02T12:00:01Z',
+        completedAt: null,
+        parentId: null,
+        isChecklistItem: false,
+        metadata: { recurrence: 'daily' },
+      },
+      {
+        id: 'successor-step',
+        title: 'Vitamins',
+        status: 'done',
+        sourceListId: 'list',
+        createdAt: '2026-08-02T12:00:01Z',
+        completedAt: '2026-08-02T12:00:01Z',
+        parentId: 'successor',
+        isChecklistItem: true,
+        metadata: {},
+      },
+      {
+        id: 'active',
+        title: 'Evening routine',
+        status: 'todo',
+        sourceListId: 'list',
+        createdAt: '2026-08-01T12:00:00Z',
+        completedAt: null,
+        parentId: null,
+        isChecklistItem: false,
+        metadata: { recurrence: 'daily' },
+      },
+      {
+        id: 'active-step',
+        title: 'Lock doors',
+        status: 'done',
+        sourceListId: 'list',
+        createdAt: '2026-08-01T12:00:00Z',
+        completedAt: '2026-08-02T11:00:00Z',
+        parentId: 'active',
+        isChecklistItem: true,
+        metadata: {},
+      },
+    ];
+
+    const reset = resetRecurringSuccessorSubtasks(tasks);
+
+    expect(reset.find(task => task.id === 'successor-step')).toMatchObject({
+      status: 'todo',
+      completedAt: null,
+    });
+    expect(reset.find(task => task.id === 'active-step')).toMatchObject({
+      status: 'done',
+      completedAt: '2026-08-02T11:00:00Z',
+    });
   });
 });

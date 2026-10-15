@@ -372,6 +372,39 @@ describe('task route capability enforcement', () => {
     expect(mutateTask).toHaveBeenCalledTimes(1);
   });
 
+  it('retries an explicit revision after its initial version is validated', async () => {
+    mutateTask
+      .mockImplementationOnce(async (request: TaskMutationRequest) => {
+        mutations.push(request);
+        task = {
+          ...task,
+          dueDate: '2026-08-20T12:00:00.000Z',
+          updatedAt: '2026-08-01T00:00:30.000Z',
+        };
+        return { kind: 'revision-conflict' as const };
+      });
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+
+    const response = await PATCH(
+      patchRequest(
+        { effort: 3 },
+        {
+          'x-expected-task-updated-at': task.updatedAt,
+          'x-retry-task-revision-conflicts': 'true',
+        },
+      ),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(getWriteContext).toHaveBeenCalledTimes(2);
+    expect(mutateTask).toHaveBeenCalledTimes(2);
+    expect(task).toMatchObject({
+      dueDate: '2026-08-20T12:00:00.000Z',
+      effort: 3,
+    });
+  });
+
   it('stops retrying ordinary task patches after repeated revision conflicts', async () => {
     mutateTask.mockImplementation(async (request: TaskMutationRequest) => {
       mutations.push(request);

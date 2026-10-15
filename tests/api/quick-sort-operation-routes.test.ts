@@ -234,7 +234,7 @@ describe('Quick Sort operation apply route', () => {
     expect(mocks.patchTask).not.toHaveBeenCalled();
   });
 
-  it('reserves before delegating mutation through the task PATCH revision CAS', async () => {
+  it('reserves before delegating mutation through the task PATCH field-aware CAS', async () => {
     const after = {
       ...snapshot,
       updatedAt: '2026-08-16T12:01:00.000Z',
@@ -268,6 +268,7 @@ describe('Quick Sort operation apply route', () => {
     expect(response.status).toBe(200);
     const [patchRequest] = mocks.patchTask.mock.calls[0];
     expect(patchRequest.headers.get('x-expected-task-updated-at')).toBe(snapshot.updatedAt);
+    expect(patchRequest.headers.get('x-retry-task-revision-conflicts')).toBe('true');
     await expect(patchRequest.json()).resolves.toEqual({ priority: 'high' });
     expect(mocks.reserveOperation.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.patchTask.mock.invocationCallOrder[0]);
@@ -328,6 +329,8 @@ describe('Quick Sort operation apply route', () => {
     const [retryRequest] = mocks.patchTask.mock.calls[1];
     expect(firstRequest.headers.get('x-expected-task-updated-at')).toBe(snapshot.updatedAt);
     expect(retryRequest.headers.get('x-expected-task-updated-at')).toBe(synced.updatedAt);
+    expect(firstRequest.headers.get('x-retry-task-revision-conflicts')).toBe('true');
+    expect(retryRequest.headers.get('x-retry-task-revision-conflicts')).toBe('true');
     expect(mocks.rebaseApplyingOperation).toHaveBeenCalledWith(operation.id, {
       ...synced,
       originalPatch: { priority: 'high' },
@@ -402,6 +405,60 @@ describe('Quick Sort operation apply route', () => {
       originalPatch: { priority: 'high' },
     });
     expect(mocks.discardApplyingOperation).not.toHaveBeenCalled();
+  });
+
+  it('does not rebase over a concurrent edit to the target field', async () => {
+    const effortOperation = {
+      ...operation,
+      mode: 'no_effort' as const,
+      label: 'Set effort',
+      beforeSnapshot: { ...snapshot, originalPatch: { effort: 3 } },
+    };
+    const conflict = Response.json({
+      error: 'Task changed in a field included in this update',
+      code: 'TASK_REVISION_CONFLICT',
+    }, { status: 409 });
+    mocks.getOperation.mockResolvedValue(null);
+    mocks.reserveOperation.mockResolvedValue({
+      kind: 'reserved',
+      operation: { ...effortOperation, state: 'applying' },
+    });
+    mocks.captureTask
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce({
+        ...snapshot,
+        updatedAt: '2026-08-16T12:00:30.000Z',
+        effort: 5,
+      });
+    mocks.patchTask.mockResolvedValueOnce(conflict);
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: effortOperation.id,
+          taskId: effortOperation.taskId,
+          mode: effortOperation.mode,
+          action: effortOperation.action,
+          label: effortOperation.label,
+          contextKey: effortOperation.contextKey,
+          queueIndex: effortOperation.queueIndex,
+          patch: { effort: 3 },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'Task changed in a field included in this update',
+      code: 'TASK_REVISION_CONFLICT',
+    });
+    expect(mocks.patchTask).toHaveBeenCalledTimes(1);
+    expect(mocks.rebaseApplyingOperation).not.toHaveBeenCalled();
+    expect(mocks.discardApplyingOperation).toHaveBeenCalledWith(effortOperation.id);
   });
 
   it('stops rebasing after repeated revision conflicts', async () => {

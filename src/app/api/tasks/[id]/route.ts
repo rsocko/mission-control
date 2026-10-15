@@ -201,7 +201,10 @@ async function patchTask(
 ) {
   const { id } = await params;
   const requestedVersion = request.headers.get('x-expected-task-updated-at');
-  const retryRequest = !requestedVersion
+  const retryExplicitRevision = (
+    request.headers.get('x-retry-task-revision-conflicts') === 'true'
+  );
+  const retryRequest = (!requestedVersion || retryExplicitRevision)
     && revisionRetryAttempts < MAX_TASK_REVISION_RETRY_ATTEMPTS
     ? request.clone()
     : null;
@@ -224,7 +227,11 @@ async function patchTask(
     }
     const parsedCurrentMetadata = parseTaskMetadataCompat(currentTask.metadata);
     const currentCanonical = readRecurrenceMetadata(parsedCurrentMetadata.metadata);
-    if (requestedVersion && currentTask.updatedAt !== requestedVersion) {
+    if (
+      requestedVersion
+      && revisionRetryAttempts === 0
+      && currentTask.updatedAt !== requestedVersion
+    ) {
       return NextResponse.json({
         error: 'Task changed before this update could be applied',
         code: 'TASK_REVISION_CONFLICT',

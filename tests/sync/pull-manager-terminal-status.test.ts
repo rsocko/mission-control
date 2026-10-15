@@ -18,7 +18,8 @@ const mockIdentityWrites: unknown[] = [];
 let selectCallCount = 0;
 let mockCapabilities: ConnectorCapabilities | null = null;
 let mockConcurrentInsertRecord: Record<string, unknown> | null = null;
-let mockRemoteUpdateApplied = true;
+let mockRemoteUpdateFailuresRemaining = 0;
+let mockRemoteUpdateFailureMutation: Record<string, unknown> | null = null;
 
 type AwaitableTagRows = unknown[] & {
   where: ReturnType<typeof vi.fn>;
@@ -192,13 +193,24 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
         applyRemoteUpdate: vi.fn(async (input: {
           taskId: string;
           expectedSyncStatus: string;
+          expectedUpdatedAt: string;
           values: Record<string, unknown>;
         }) => {
-          if (!mockRemoteUpdateApplied) return false;
           const task = mockExistingTasks.find(
             (candidate) => (candidate as { id: string }).id === input.taskId,
           ) as Record<string, unknown> | undefined;
-          if (!task || task.syncStatus !== input.expectedSyncStatus) return false;
+          if (mockRemoteUpdateFailuresRemaining > 0) {
+            mockRemoteUpdateFailuresRemaining--;
+            if (task && mockRemoteUpdateFailureMutation) {
+              Object.assign(task, mockRemoteUpdateFailureMutation);
+            }
+            return false;
+          }
+          if (
+            !task
+            || task.syncStatus !== input.expectedSyncStatus
+            || task.updatedAt !== input.expectedUpdatedAt
+          ) return false;
           Object.assign(task, input.values);
           mockUpdateSets.push(input.values);
           return true;
@@ -264,7 +276,8 @@ describe('pull-manager terminal status sync', () => {
     selectCallCount = 0;
     mockCapabilities = null;
     mockConcurrentInsertRecord = null;
-    mockRemoteUpdateApplied = true;
+    mockRemoteUpdateFailuresRemaining = 0;
+    mockRemoteUpdateFailureMutation = null;
   });
 
   function makeExistingTask(overrides: Record<string, unknown> = {}) {
@@ -363,7 +376,7 @@ describe('pull-manager terminal status sync', () => {
 
   it('aborts the pull when a concurrent local update rejects the remote CAS', async () => {
     mockExistingTasks.push(makeExistingTask());
-    mockRemoteUpdateApplied = false;
+    mockRemoteUpdateFailuresRemaining = Number.POSITIVE_INFINITY;
 
     await expect(upsertTasks(
       connectorId,
@@ -372,6 +385,61 @@ describe('pull-manager terminal status sync', () => {
       false,
       [],
     )).rejects.toThrow('Concurrent local update prevented remote task org/repo:42');
+  });
+
+  it.each(['pending_push', 'pushing'])(
+    'defers a remote update when Quick Sort advances the task to %s',
+    async (syncStatus) => {
+      mockExistingTasks.push(makeExistingTask());
+      mockRemoteUpdateFailuresRemaining = 1;
+      mockRemoteUpdateFailureMutation = {
+        priority: 'high',
+        syncStatus,
+        updatedAt: '2026-07-25T12:01:00Z',
+      };
+
+      const result = await upsertTasks(
+        connectorId,
+        mockConnector,
+        [makeRemoteTask({
+          status: 'todo',
+          priority: 'medium',
+          updatedAt: '2026-07-25T13:00:00Z',
+        })],
+        false,
+        [],
+      );
+
+      expect(result.updated).toBe(0);
+      expect(mockExistingTasks[0]).toEqual(expect.objectContaining({
+        priority: 'high',
+        syncStatus,
+      }));
+      expect(mockUpdateSets).toHaveLength(0);
+    },
+  );
+
+  it('retries a remote update after an unrelated concurrent local revision', async () => {
+    mockExistingTasks.push(makeExistingTask());
+    mockRemoteUpdateFailuresRemaining = 1;
+    mockRemoteUpdateFailureMutation = {
+      kanbanColumn: 'doing',
+      updatedAt: '2026-07-25T12:01:00Z',
+    };
+
+    const result = await upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask()],
+      false,
+      [],
+    );
+
+    expect(result.updated).toBe(1);
+    expect(mockExistingTasks[0]).toEqual(expect.objectContaining({
+      status: 'done',
+      kanbanColumn: 'doing',
+    }));
   });
 
   it('preserves MC-local snoozes when a connector omits the field', async () => {

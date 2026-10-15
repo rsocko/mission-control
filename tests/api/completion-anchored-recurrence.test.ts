@@ -76,6 +76,52 @@ describe('completion-anchored task recurrence', () => {
     sqlite.prepare(
       'UPDATE tasks SET reminder_relative = ?, reminder_due_time = ? WHERE id = ?',
     ).run('1_day_before', '09:00', id);
+    const completedSubtaskId = 'completed-subtask';
+    const openSubtaskId = 'open-subtask';
+    const parent = sqlite.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown>;
+    const insertSubtask = sqlite.prepare(`
+      INSERT INTO tasks (
+        id, source_id, connector_type, connector_instance_id, title, status,
+        priority, created_at, updated_at, completed_at, parent_id, depth,
+        is_checklist_item, sync_status, last_synced_at, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertSubtask.run(
+      completedSubtaskId,
+      completedSubtaskId,
+      parent.connector_type,
+      parent.connector_instance_id,
+      'Fill watering can',
+      'done',
+      'none',
+      now,
+      now,
+      now,
+      id,
+      1,
+      1,
+      'synced',
+      now,
+      '{}',
+    );
+    insertSubtask.run(
+      openSubtaskId,
+      openSubtaskId,
+      parent.connector_type,
+      parent.connector_instance_id,
+      'Check soil',
+      'todo',
+      'none',
+      now,
+      now,
+      null,
+      id,
+      1,
+      1,
+      'synced',
+      now,
+      '{}',
+    );
 
     const complete = () => patchTask(new Request(`http://localhost/api/tasks/${id}`, {
       method: 'PATCH',
@@ -97,7 +143,9 @@ describe('completion-anchored task recurrence', () => {
       recurrence_mode: 'completion',
     });
 
-    const occurrences = sqlite.prepare('SELECT * FROM tasks ORDER BY created_at').all() as Array<Record<string, unknown>>;
+    const occurrences = sqlite.prepare(
+      'SELECT * FROM tasks WHERE parent_id IS NULL ORDER BY created_at',
+    ).all() as Array<Record<string, unknown>>;
     expect(occurrences).toHaveLength(2);
     const completedOccurrence = occurrences.find((task) => task.id === id);
     const nextOccurrence = occurrences.find((task) => task.id === first.recurrenceNextTaskId);
@@ -162,6 +210,26 @@ describe('completion-anchored task recurrence', () => {
       .all(first.recurrenceNextTaskId)).toHaveLength(1);
     expect(sqlite.prepare('SELECT * FROM task_projects WHERE task_id = ?')
       .all(first.recurrenceNextTaskId)).toHaveLength(1);
+    const successorSubtasks = sqlite.prepare(`
+      SELECT title, status, completed_at, parent_id
+      FROM tasks
+      WHERE parent_id = ?
+      ORDER BY title
+    `).all(first.recurrenceNextTaskId);
+    expect(successorSubtasks).toEqual([
+      {
+        title: 'Check soil',
+        status: 'todo',
+        completed_at: null,
+        parent_id: first.recurrenceNextTaskId,
+      },
+      {
+        title: 'Fill watering can',
+        status: 'todo',
+        completed_at: null,
+        parent_id: first.recurrenceNextTaskId,
+      },
+    ]);
 
     vi.useFakeTimers();
     vi.setSystemTime(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
@@ -174,11 +242,12 @@ describe('completion-anchored task recurrence', () => {
     } finally {
       vi.useRealTimers();
     }
-    expect(sqlite.prepare('SELECT id FROM tasks').all()).toHaveLength(2);
+    expect(sqlite.prepare('SELECT id FROM tasks').all()).toHaveLength(6);
     expect(sqlite.prepare('SELECT occurrence_id FROM task_recurrence_occurrences').all())
       .toHaveLength(1);
+    sqlite.prepare('DELETE FROM tasks WHERE parent_id = ?').run(first.recurrenceNextTaskId);
     sqlite.prepare('DELETE FROM tasks WHERE id = ?').run(first.recurrenceNextTaskId);
-    expect(sqlite.prepare('SELECT id FROM tasks').all()).toHaveLength(1);
+    expect(sqlite.prepare('SELECT id FROM tasks').all()).toHaveLength(3);
 
     const reopenResponse = await patchTask(new Request(`http://localhost/api/tasks/${id}`, {
       method: 'PATCH',
@@ -186,13 +255,13 @@ describe('completion-anchored task recurrence', () => {
       body: JSON.stringify({ status: 'todo' }),
     }), { params: Promise.resolve({ id }) });
     expect(reopenResponse.status).toBe(200);
-    expect(sqlite.prepare('SELECT id FROM tasks').all()).toHaveLength(1);
+    expect(sqlite.prepare('SELECT id FROM tasks').all()).toHaveLength(3);
     const recompleteResponse = await complete();
     expect(recompleteResponse.status).toBe(200);
     await expect(recompleteResponse.json()).resolves.toMatchObject({
       recurrenceNextTaskId: first.recurrenceNextTaskId,
     });
-    expect(sqlite.prepare('SELECT id FROM tasks').all()).toHaveLength(1);
+    expect(sqlite.prepare('SELECT id FROM tasks').all()).toHaveLength(3);
   });
 
   it('persists the shifted wall time for a successor in a DST gap', async () => {

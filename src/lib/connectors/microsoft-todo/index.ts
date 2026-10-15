@@ -11,7 +11,10 @@ import { randomUUID } from 'crypto';
 import { getTimezone } from '@/lib/mode';
 import { connectorLogger } from '@/lib/logger';
 import { getLocalToday } from '@/lib/utils/date';
-import { compareRecurringOccurrencePriority } from '@/lib/sync/recurring-task-reconciliation';
+import {
+  compareRecurringOccurrencePriority,
+  resetRecurringSuccessorSubtasks,
+} from '@/lib/sync/recurring-task-reconciliation';
 import { MICROSOFT_TODO_TASK_AUTHORITY } from '../task-source-profiles';
 import { mergeAsyncStreams } from '../task-page-stream';
 import { isMicroStatusSyncEnabled, updateTagsWithMicroStatus } from '@/lib/micro-status';
@@ -1038,7 +1041,7 @@ export class MicrosoftTodoConnector implements IConnector {
     }
 
     if (recurringTasks.length > 0) {
-      yield recurringTasks;
+      yield resetRecurringSuccessorSubtasks(recurringTasks);
     }
   }
 

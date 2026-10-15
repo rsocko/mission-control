@@ -166,7 +166,7 @@ async function recoverApplyingOperation(
   return NextResponse.json({ error: 'Operation is still being applied' }, { status: 409 });
 }
 
-function patchTaskAtVersion(
+function patchTaskWithConflictRetry(
   request: Request,
   taskId: string,
   patch: Record<string, unknown>,
@@ -178,6 +178,7 @@ function patchTaskAtVersion(
       headers: {
         'Content-Type': 'application/json',
         'x-expected-task-updated-at': updatedAt,
+        'x-retry-task-revision-conflicts': 'true',
       },
       body: JSON.stringify(patch),
     }),
@@ -309,7 +310,12 @@ export async function POST(request: Request) {
     }
     after = capturedAfter;
   } else if (mutatesTask) {
-    let patchResponse = await patchTaskAtVersion(request, taskId, patch!, before.updatedAt);
+    let patchResponse = await patchTaskWithConflictRetry(
+      request,
+      taskId,
+      patch!,
+      before.updatedAt,
+    );
     let rebaseAttempts = 0;
     while (
       rebaseAttempts < MAX_REVISION_REBASE_ATTEMPTS
@@ -320,6 +326,7 @@ export async function POST(request: Request) {
         await quickSort.discardApplyingOperation(operationId);
         return NextResponse.json({ error: 'Task not found' }, { status: 404 });
       }
+      if (!patchFieldsUnchanged(rebasedBefore, reservation.operation)) break;
       const rebased = await quickSort.rebaseApplyingOperation(operationId, {
         ...rebasedBefore,
         originalPatch,
@@ -329,7 +336,12 @@ export async function POST(request: Request) {
       }
       before = rebasedBefore;
       rebaseAttempts++;
-      patchResponse = await patchTaskAtVersion(request, taskId, patch!, before.updatedAt);
+      patchResponse = await patchTaskWithConflictRetry(
+        request,
+        taskId,
+        patch!,
+        before.updatedAt,
+      );
     }
     if (!patchResponse.ok) {
       await quickSort.discardApplyingOperation(operationId);

@@ -316,7 +316,7 @@ describe('My Day reconciliation coalescing', () => {
     }));
   });
 
-  it('removes an existing auto-included successor created after completing its recurring sibling', async () => {
+  it('removes an existing auto-included successor after completing its recurring sibling', async () => {
     state.snapshot.localItems = [{
       id: 'md-recurring-successor',
       taskId: 'task-recurring-successor',
@@ -346,11 +346,10 @@ describe('My Day reconciliation coalescing', () => {
       Id: 'recurring-successor',
       Subject: 'Daily reset',
       Status: 'NotStarted',
-      CreatedDateTime: '2026-08-12T14:00:01Z',
-      DueDateTime: { DateTime: '2026-08-12T00:00:00Z' },
+      DueDateTime: { DateTime: '2026-08-13T00:00:00Z' },
       Recurrence: {
         Pattern: { Type: 'daily', Interval: 1 },
-        Range: { Type: 'noEnd', StartDate: '2026-08-12' },
+        Range: { Type: 'noEnd', StartDate: '2026-08-13' },
       },
     }]);
 
@@ -360,6 +359,44 @@ describe('My Day reconciliation coalescing', () => {
     expect(body.skippedFutureRecurring).toBe(1);
     expect(myDaySync.applyReconciliation).toHaveBeenCalledWith(expect.objectContaining({
       removeItemIds: ['md-recurring-successor'],
+      signal: expect.objectContaining({ provenance: 'microsoft-todo-substrate' }),
+    }));
+  });
+
+  it('keeps a recurring successor eligible when its next due date is today', async () => {
+    state.localTasks = [{
+      id: 'task-recurring-successor',
+      sourceId: 'chores:recurring-successor',
+      metadata: { recurrence: 'daily' },
+      status: 'todo',
+    }];
+    state.completedSiblings = [{
+      sourceListId: 'chores',
+      title: 'Daily reset',
+      completedAt: '2026-08-12T14:00:00Z',
+      metadata: { recurrence: 'daily' },
+    }];
+
+    const { POST } = await import('@/app/api/my-day/sync/route');
+    const responsePromise = POST(request('2026-08-12'));
+    await vi.waitFor(() => expect(fetchMyDayTasks).toHaveBeenCalledTimes(1));
+    resolveRemoteTasks([{
+      ParentFolderId: 'chores',
+      Id: 'recurring-successor',
+      Subject: 'Daily reset',
+      Status: 'NotStarted',
+      DueDateTime: { DateTime: '2026-08-12T00:00:00Z' },
+      Recurrence: {
+        Pattern: { Type: 'daily', Interval: 1 },
+        Range: { Type: 'noEnd', StartDate: '2026-08-12' },
+      },
+    }]);
+
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    expect(myDaySync.applyReconciliation).toHaveBeenCalledWith(expect.objectContaining({
+      committedRows: [expect.objectContaining({ taskId: 'task-recurring-successor' })],
+      removeItemIds: [],
       signal: expect.objectContaining({ provenance: 'microsoft-todo-substrate' }),
     }));
   });

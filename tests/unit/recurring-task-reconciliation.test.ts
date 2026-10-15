@@ -386,39 +386,39 @@ describe('recurring task reconciliation', () => {
   it('suppresses the successor for the rest of the day after its sibling was completed in My Day', () => {
     expect(shouldSuppressRecurringMyDaySuccessor({
       isRecurring: true,
-      dueDate: '2026-08-02',
+      dueDate: '2026-08-03',
       today: '2026-08-02',
-      successorCreatedAfterMyDayCompletion: true,
+      matchesCompletedMyDaySibling: true,
     })).toBe(true);
   });
 
-  it('does not suppress an unrelated recurrence due today', () => {
+  it('does not suppress a recurring successor when its next due date is today', () => {
     expect(shouldSuppressRecurringMyDaySuccessor({
       isRecurring: true,
       dueDate: '2026-08-02',
       today: '2026-08-02',
-      successorCreatedAfterMyDayCompletion: false,
+      matchesCompletedMyDaySibling: true,
     })).toBe(false);
   });
 
   it('matches a successor only to a completed sibling with the same recurrence pattern', () => {
-    const successor = {
-      incomingRecurrence: 'daily',
-      successorCreatedAt: '2026-08-02T15:01:00Z',
-      completedAt: '2026-08-02T15:00:00Z',
-    };
-
     expect(isMatchingRecurringSuccessor({
-      ...successor,
+      incomingRecurrence: 'daily',
       completedSiblingMetadata: { recurrence: 'daily' },
     })).toBe(true);
     expect(isMatchingRecurringSuccessor({
-      ...successor,
+      incomingRecurrence: 'daily',
       completedSiblingMetadata: { recurrence: 'weekly' },
     })).toBe(false);
     expect(isMatchingRecurringSuccessor({
-      ...successor,
+      incomingRecurrence: 'daily',
       completedSiblingMetadata: {},
+    })).toBe(false);
+    expect(isMatchingRecurringSuccessor({
+      incomingRecurrence: 'daily',
+      completedSiblingMetadata: { recurrence: 'daily' },
+      successorCreatedAt: '2026-08-02T14:59:00Z',
+      completedAt: '2026-08-02T15:00:00Z',
     })).toBe(false);
   });
 

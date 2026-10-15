@@ -535,8 +535,8 @@ export default function QuickSortMode() {
         setStatsKey((k) => k + 1);
         setSessionSorted((n) => n + 1);
         toast.success(`Effort set to ${EFFORT_LABELS[effort] ?? effort}`);
-      } catch {
-        toast.error('Failed to update effort');
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to update effort');
       }
       setBusy(false);
     },

@@ -61,12 +61,12 @@ export class SqliteSyncRunRepository implements SyncRunRepository {
       INSERT INTO sync_log (
         id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
         tasks_pushed, local_only_protected, alerts_added, errors, details,
-        activity, synced_at, duration_ms, job_id,
+        activity, metrics, synced_at, duration_ms, job_id,
         identity_mode, identity_mode_revision
       ) VALUES (
         @id, @connectorId, @success, @tasksAdded, @tasksUpdated, @tasksRemoved,
         @tasksPushed, @localOnlyProtected, @notificationsAdded, @errors, @details,
-        @activity, @syncedAt, @durationMs, @jobId,
+        @activity, @metrics, @syncedAt, @durationMs, @jobId,
         @identityMode, @identityRevision
       )
     `).run({
@@ -82,6 +82,7 @@ export class SqliteSyncRunRepository implements SyncRunRepository {
       errors: JSON.stringify(record.errors),
       details: JSON.stringify(record.details),
       activity: record.activity ? JSON.stringify(record.activity) : null,
+      metrics: record.metrics ? JSON.stringify(record.metrics) : null,
       syncedAt: record.syncedAt,
       durationMs: record.durationMs,
       jobId: record.jobId,

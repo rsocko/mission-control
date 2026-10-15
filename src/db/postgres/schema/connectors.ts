@@ -11,6 +11,7 @@ import {
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import type { ContextAppearance } from '@/types';
 import type { SyncActivityPayload } from '@/lib/sync/activity';
+import type { SyncRunMetrics } from '@/lib/sync/metrics';
 import type { tasks } from './tasks';
 
 // ─── CONNECTOR CONFIGS ──────────────────────────────────────────────────────
@@ -234,6 +235,7 @@ export const syncLog = pgTable('sync_log', {
   /** Detailed audit trail: individual task-level actions taken during this sync */
   details: jsonb('details').notNull().default([]),
   activity: jsonb('activity').$type<SyncActivityPayload>(),
+  metrics: jsonb('metrics').$type<SyncRunMetrics>(),
   syncedAt: text('synced_at').notNull(),
   durationMs: integer('duration_ms'),
   jobId: text('job_id'),

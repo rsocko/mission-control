@@ -1,6 +1,7 @@
 import type { SourceListRecord } from './connector-execution';
 import type { ContextAppearance } from '@/types';
 import type { SyncActivityPayload } from '@/lib/sync/activity';
+import type { SyncRunMetrics } from '@/lib/sync/metrics';
 
 export interface ManagedConnectorRecord {
   id: string;
@@ -236,6 +237,7 @@ export interface SyncHistoryRecord {
   errors: unknown[];
   details: unknown[];
   activity: SyncActivityPayload | null;
+  metrics?: SyncRunMetrics | null;
   syncedAt: string;
   durationMs: number | null;
   jobId: string | null;

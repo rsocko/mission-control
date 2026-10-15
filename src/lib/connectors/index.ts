@@ -13,6 +13,7 @@ import type {
 } from '@/types';
 import type { ConnectorNotificationTypeDefinition } from '@/lib/notifications/push-policy/catalog';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
+import type { SyncRunMetrics } from '@/lib/sync/metrics';
 import { customRestFactory } from './custom-rest';
 import { documentIntelligenceFactory } from './document-intelligence';
 import { githubIssuesFactory } from './github-issues';
@@ -96,6 +97,11 @@ export interface IConnector {
   getDeletedTaskSourceIds?(): readonly string[];
   /** Commit connector-owned task cursors after fetched tasks and tombstones are durable. */
   commitTaskFetch?(): Promise<void>;
+  /** Keep selected source-list cursors uncommitted so their deltas replay next run. */
+  deferTaskFetchCheckpoints?(sourceListIds: readonly string[]): void;
+  /** Connector-owned operational metrics for the current sync run. */
+  beginSyncMetrics?(): void;
+  getSyncMetrics?(): Partial<SyncRunMetrics>;
 
   /** Fetch notifications */
   fetchNotifications(since?: Date): Promise<InboundNotification[]>;

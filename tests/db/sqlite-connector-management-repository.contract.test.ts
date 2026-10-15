@@ -128,11 +128,11 @@ runConnectorManagementRepositoryContract(
       const insert = database.sqlite.prepare(`
         INSERT INTO sync_log (
           id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
-          tasks_pushed, local_only_protected, alerts_added, errors, details, activity,
+          tasks_pushed, local_only_protected, alerts_added, errors, details, activity, metrics,
           synced_at, duration_ms, job_id, trigger, scheduled_for, started_at,
           attempt, max_attempts, identity_mode, identity_mode_revision
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       for (const record of records) {
@@ -149,6 +149,7 @@ runConnectorManagementRepositoryContract(
           JSON.stringify(record.errors),
           JSON.stringify(record.details),
           record.activity ? JSON.stringify(record.activity) : null,
+          record.metrics ? JSON.stringify(record.metrics) : null,
           record.syncedAt,
           record.durationMs,
           record.jobId,

@@ -1,0 +1,1 @@
+ALTER TABLE "sync_log" ADD COLUMN "metrics" jsonb;

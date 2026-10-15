@@ -7,6 +7,13 @@ const SUBSTRATE_BASE_URL = 'https://substrate.office.com/todob2/api/v1';
 
 export { GRAPH_BASE_URL, GRAPH_BETA_URL, SUBSTRATE_BASE_URL };
 
+export interface GraphRequestMetric {
+  durationMs: number;
+  retry: boolean;
+  failed: boolean;
+  rateLimited: boolean;
+}
+
 /**
  * Fetch with retry logic for rate-limiting (429) and transient errors (5xx).
  * Respects Retry-After header from Microsoft Graph API.
@@ -17,6 +24,7 @@ async function fetchWithRetry(
   connectorId: string,
   options?: RequestInit,
   maxRetries = 3,
+  onRequest?: (metric: GraphRequestMetric) => void,
 ): Promise<Response> {
   let lastError: Error | null = null;
   let didInvalidate = false;
@@ -24,6 +32,7 @@ async function fetchWithRetry(
   const canRetryAmbiguousOutcome = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'].includes(method);
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const startedAt = Date.now();
     try {
       const token = await getToken();
       const res = await fetch(url, {
@@ -37,6 +46,12 @@ async function fetchWithRetry(
       });
 
       if (res.status === 401 && !didInvalidate && attempt < maxRetries) {
+        onRequest?.({
+          durationMs: Date.now() - startedAt,
+          retry: true,
+          failed: false,
+          rateLimited: false,
+        });
         didInvalidate = true;
         connectorLogger.warn({ attempt: attempt + 1, maxAttempts: maxRetries + 1 }, 'Graph fetch returned 401, invalidating token and retrying');
         await invalidateToken(connectorId);
@@ -48,20 +63,44 @@ async function fetchWithRetry(
         const delay = Math.min(retryAfter * 1000, 30000);
         connectorLogger.warn({ retryAfterSeconds: retryAfter, attempt: attempt + 1, maxAttempts: maxRetries + 1 }, 'Graph fetch rate limited, retrying');
         if (attempt < maxRetries) {
+          onRequest?.({
+            durationMs: Date.now() - startedAt,
+            retry: true,
+            failed: false,
+            rateLimited: true,
+          });
           await new Promise(r => setTimeout(r, delay));
           continue;
         }
       }
 
       if (res.status >= 500 && canRetryAmbiguousOutcome && attempt < maxRetries) {
+        onRequest?.({
+          durationMs: Date.now() - startedAt,
+          retry: true,
+          failed: false,
+          rateLimited: false,
+        });
         const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
         connectorLogger.warn({ status: res.status, delayMs: delay, attempt: attempt + 1, maxAttempts: maxRetries + 1 }, 'Graph fetch server error, retrying');
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
 
+      onRequest?.({
+        durationMs: Date.now() - startedAt,
+        retry: false,
+        failed: !res.ok,
+        rateLimited: res.status === 429,
+      });
       return res;
     } catch (err) {
+      onRequest?.({
+        durationMs: Date.now() - startedAt,
+        retry: canRetryAmbiguousOutcome && attempt < maxRetries,
+        failed: !canRetryAmbiguousOutcome || attempt >= maxRetries,
+        rateLimited: false,
+      });
       lastError = err instanceof Error ? err : new Error(String(err));
       if (!canRetryAmbiguousOutcome) {
         throw lastError;
@@ -78,7 +117,10 @@ async function fetchWithRetry(
   throw lastError || new Error('Request failed after retries');
 }
 
-export function createGraphClient(connectorId: string) {
+export function createGraphClient(
+  connectorId: string,
+  onRequest?: (metric: GraphRequestMetric) => void,
+) {
   return {
     graphFetch(path: string, options?: RequestInit): Promise<Response> {
       return fetchWithRetry(
@@ -86,6 +128,8 @@ export function createGraphClient(connectorId: string) {
         () => getValidToken(connectorId),
         connectorId,
         options,
+        3,
+        onRequest,
       );
     },
 
@@ -95,6 +139,8 @@ export function createGraphClient(connectorId: string) {
         () => getValidToken(connectorId),
         connectorId,
         options,
+        3,
+        onRequest,
       );
     },
 
@@ -104,6 +150,8 @@ export function createGraphClient(connectorId: string) {
         () => getSubstrateToken(connectorId),
         connectorId,
         options,
+        3,
+        onRequest,
       );
     },
   };

@@ -30,7 +30,8 @@ related:
 9. [How the To Do Web App Works](#how-the-to-do-web-app-works)
 10. [Multi-Account Aggregation](#multi-account-aggregation)
 11. [ID Format Reference](#id-format-reference)
-12. [Risk Assessment & Mitigations](#risk-assessment--mitigations)
+12. [Incremental Sync Performance and Reliability](#incremental-sync-performance-and-reliability)
+13. [Risk Assessment & Mitigations](#risk-assessment--mitigations)
 
 ---
 
@@ -507,6 +508,42 @@ The To Do web app appears to:
 - **Folder groups**: Start with `Rg` (base64-encoded, short)
 
 ---
+
+## Incremental Sync Performance and Reliability
+
+Mission Control stores a separate Graph delta checkpoint for each To Do list.
+List streams can run concurrently, but a reconciliation conflict must not force
+unrelated lists to replay. When task-level compare-and-swap retries are
+exhausted, the connector leaves only that task's list checkpoint unchanged,
+commits unaffected list checkpoints, and replays the conflicted list during the
+next run.
+
+Delta pages do not reliably expand checklist items. Mission Control enriches a
+page with Microsoft Graph `$batch` requests of at most 20 subrequests and uses
+bounded batch concurrency. Failed batch subrequests are retried as direct reads.
+If a checklist still cannot be read, the list sync fails before its checkpoint
+advances rather than silently replacing checklist data with an empty result.
+
+Linked resources are fetched only for the `flaggedEmails` list, where they
+provide the Outlook deep link. Existing linked-resource metadata is preserved
+when ordinary To Do task deltas omit the collection. Microsoft Graph does allow
+a linked resource to be added to an existing task later through
+`POST /me/todo/lists/{listId}/tasks/{taskId}/linkedResources`; however, Mission
+Control does not poll that navigation property for ordinary tasks because
+Open-in-Outlook semantics originate from flagged-email materialization and
+Mission Control-created source links are attached when the task is created.
+
+Each durable sync history row includes versioned operational metrics:
+
+- phase durations and success states
+- Graph request, retry, rate-limit, failure, and aggregate duration counts
+- delta pages, received tasks/removals, enrichment batches/fallbacks, and
+  committed/deferred checkpoints
+- received, changed, unchanged, CAS-conflict, retry, and deferred task counts
+- configured list-fetch and enrichment concurrency limits
+
+Telemetry contains only aggregate counts and durations. It does not persist
+task/list identifiers, request URLs, or connector payloads.
 
 ## Risk Assessment & Mitigations
 

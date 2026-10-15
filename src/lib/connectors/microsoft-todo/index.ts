@@ -5,9 +5,7 @@ import type {
  ConnectorConfig,
  ConnectorCapabilities,
  SourceList,
- SyncResult,
 } from '@/types';
-import { randomUUID } from 'crypto';
 import { getTimezone } from '@/lib/mode';
 import { connectorLogger } from '@/lib/logger';
 import { getLocalToday } from '@/lib/utils/date';
@@ -30,13 +28,14 @@ import {
 
 import { createGraphClient, GRAPH_BASE_URL, SUBSTRATE_BASE_URL } from './graph-client';
 import type { GraphClient } from './graph-client';
+import type { SyncRunMetrics, SyncTodoMetrics } from '@/lib/sync/metrics';
 import {
   graphTodoChecklistItemPath,
   graphTodoListPath,
   graphTodoTaskPath,
   graphTodoTasksPath,
 } from './resource-paths';
-import { mapGraphTask, mapSubstrateTask, mapChecklistItem, mapStatus, statusToGraph, priorityToImportance, parseSourceId } from './task-transformer';
+import { mapGraphTask, mapSubstrateTask, mapChecklistItem, statusToGraph, priorityToImportance, parseSourceId } from './task-transformer';
 import { removeMicrosoftTodoTitleTag } from './title-tags';
 import type {
   GraphChecklistItem,
@@ -61,6 +60,22 @@ export const MICROSOFT_TODO_RECURRENCE_CONTRACT = {
     'delete-series': ['mission-control', 'provider'],
   },
 } as const satisfies ConnectorRecurrenceContract;
+
+const LIST_FETCH_CONCURRENCY = 3;
+const GRAPH_BATCH_SUBREQUEST_LIMIT = 20;
+const GRAPH_BATCH_CONCURRENCY = 2;
+const GRAPH_FALLBACK_CONCURRENCY = 4;
+
+type TodoGraphBatchResponse = {
+  responses?: Array<{
+    id: string;
+    status: number;
+    body?: {
+      value?: unknown[];
+      '@odata.nextLink'?: string;
+    };
+  }>;
+};
 
 function removeBufferedRecurringTask(tasks: TaskItem[], sourceId: string): void {
   const index = tasks.findIndex(task => task.sourceId === sourceId);
@@ -124,8 +139,17 @@ export class MicrosoftTodoConnector implements IConnector {
   private deltaToken: string | null = null;
   private taskDeltaLinks = new Map<string, string>();
   private pendingTaskDeltaLinks = new Map<string, string>();
+  private deferredTaskDeltaLinks = new Set<string>();
   private deletedTaskSourceIds = new Set<string>();
   private client!: GraphClient;
+  private graphMetrics = {
+    requests: 0,
+    retries: 0,
+    failures: 0,
+    rateLimited: 0,
+    durationMs: 0,
+  };
+  private todoMetrics: SyncTodoMetrics = this.createTodoMetrics();
 
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
@@ -134,7 +158,13 @@ export class MicrosoftTodoConnector implements IConnector {
     if (creds.accessToken) {
       this.accessToken = creds.accessToken;
     }
-    this.client = createGraphClient(config.id);
+    this.client = createGraphClient(config.id, (metric) => {
+      this.graphMetrics.requests++;
+      this.graphMetrics.durationMs += metric.durationMs;
+      if (metric.retry) this.graphMetrics.retries++;
+      if (metric.failed) this.graphMetrics.failures++;
+      if (metric.rateLimited) this.graphMetrics.rateLimited++;
+    });
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
@@ -171,6 +201,7 @@ export class MicrosoftTodoConnector implements IConnector {
     this.accessToken = '';
     this.taskDeltaLinks.clear();
     this.pendingTaskDeltaLinks.clear();
+    this.deferredTaskDeltaLinks.clear();
     this.deletedTaskSourceIds.clear();
   }
 
@@ -332,7 +363,7 @@ export class MicrosoftTodoConnector implements IConnector {
     let taskCount = 0;
 
     const listStreams = lists.map(list => this.fetchListTaskPages(list, since));
-    for await (const page of mergeAsyncStreams(listStreams, 3)) {
+    for await (const page of mergeAsyncStreams(listStreams, LIST_FETCH_CONCURRENCY)) {
       taskCount += page.length;
       yield page;
     }
@@ -387,7 +418,7 @@ export class MicrosoftTodoConnector implements IConnector {
     yield* this.fetchTasksFromList(list.id, list.displayName, since, list.wellKnownListName);
   }
 
-  async fetchNotifications(_since?: Date): Promise<InboundNotification[]> { return []; }
+  async fetchNotifications(): Promise<InboundNotification[]> { return []; }
 
   getDeletedTaskSourceIds(): readonly string[] {
     return [...this.deletedTaskSourceIds];
@@ -395,20 +426,54 @@ export class MicrosoftTodoConnector implements IConnector {
 
   async commitTaskFetch(): Promise<void> {
     if (this.pendingTaskDeltaLinks.size === 0) return;
+    const checkpoints = [...this.pendingTaskDeltaLinks]
+      .filter(([listSourceId]) => !this.deferredTaskDeltaLinks.has(listSourceId));
+    this.todoMetrics.checkpointsDeferred = this.deferredTaskDeltaLinks.size;
+    if (checkpoints.length === 0) {
+      this.pendingTaskDeltaLinks.clear();
+      this.deferredTaskDeltaLinks.clear();
+      this.deletedTaskSourceIds.clear();
+      return;
+    }
     await (await getWorkerPersistenceRepositories()).connectorState.taskDelta.replace({
       connectorId: this.id,
-      checkpoints: [...this.pendingTaskDeltaLinks].map(([listSourceId, deltaLink]) => ({
+      checkpoints: checkpoints.map(([listSourceId, deltaLink]) => ({
         listSourceId,
         deltaLink,
       })),
       removedListSourceIds: [],
       now: new Date().toISOString(),
     });
-    for (const [listSourceId, deltaLink] of this.pendingTaskDeltaLinks) {
+    for (const [listSourceId, deltaLink] of checkpoints) {
       this.taskDeltaLinks.set(listSourceId, deltaLink);
     }
+    this.todoMetrics.checkpointsCommitted = checkpoints.length;
     this.pendingTaskDeltaLinks.clear();
+    this.deferredTaskDeltaLinks.clear();
     this.deletedTaskSourceIds.clear();
+  }
+
+  deferTaskFetchCheckpoints(sourceListIds: readonly string[]): void {
+    for (const sourceListId of sourceListIds) {
+      this.deferredTaskDeltaLinks.add(sourceListId);
+    }
+  }
+
+  getSyncMetrics(): Partial<SyncRunMetrics> {
+    return {
+      graph: { ...this.graphMetrics },
+      todo: { ...this.todoMetrics },
+      concurrency: {
+        listFetchLimit: LIST_FETCH_CONCURRENCY,
+        graphBatchSubrequestLimit: GRAPH_BATCH_SUBREQUEST_LIMIT,
+        graphBatchConcurrency: GRAPH_BATCH_CONCURRENCY,
+        graphFallbackConcurrency: GRAPH_FALLBACK_CONCURRENCY,
+      },
+    };
+  }
+
+  beginSyncMetrics(): void {
+    this.resetSyncMetrics();
   }
 
   async createTask(task: Partial<TaskItem>): Promise<TaskItem> {
@@ -966,21 +1031,26 @@ export class MicrosoftTodoConnector implements IConnector {
         '@odata.deltaLink'?: string;
       };
       const pageTasks: TaskItem[] = [];
+      const graphTasks = (data.value || []).filter(
+        (task): task is GraphTodoTask => !('@removed' in task),
+      );
+      const enrichments = await this.fetchTaskEnrichments(
+        listId,
+        graphTasks,
+        wellKnownListName === 'flaggedEmails',
+      );
+      this.todoMetrics.deltaPages++;
+      this.todoMetrics.deltaTasksReceived += graphTasks.length;
+      this.todoMetrics.deltaRemovalsReceived += (data.value || []).length - graphTasks.length;
 
       for (const graphTask of data.value || []) {
         if ('@removed' in graphTask) {
           this.deletedTaskSourceIds.add(`${listId}:${graphTask.id}`);
           continue;
         }
-        const [checklistItems, linkedResources] = await Promise.all([
-          this.fetchChecklistItems(
-            listId,
-            graphTask.id,
-            graphTask.checklistItems,
-          ),
-          this.fetchLinkedResources(listId, graphTask.id, graphTask.linkedResources),
-        ]);
-        graphTask.linkedResources = linkedResources;
+        const checklistItems = enrichments.checklists.get(graphTask.id) ?? [];
+        const linkedResources = enrichments.linkedResources.get(graphTask.id);
+        if (linkedResources) graphTask.linkedResources = linkedResources;
 
         if (graphTask.recurrence && graphTask.status === 'completed') {
           const titleKey = (graphTask.title || '').trim().toLowerCase();
@@ -1015,7 +1085,16 @@ export class MicrosoftTodoConnector implements IConnector {
 
         const task = mapGraphTask(graphTask, listId, listName, this.type, this.id, wellKnownListName);
         const checklistTasks = checklistItems.map(item =>
-          mapChecklistItem(item, listId, graphTask.id, task.id, this.type, this.id, graphTask.createdDateTime)
+          mapChecklistItem(
+            item,
+            listId,
+            graphTask.id,
+            task.id,
+            this.type,
+            this.id,
+            graphTask.createdDateTime,
+            graphTask.lastModifiedDateTime,
+          )
         );
 
         if (!graphTask.recurrence) {
@@ -1049,25 +1128,18 @@ export class MicrosoftTodoConnector implements IConnector {
     listId: string,
     taskId: string,
     expandedItems: GraphChecklistItem[] | undefined,
+    startUrl?: string,
   ): Promise<GraphChecklistItem[]> {
     const items = [...(expandedItems ?? [])];
-    if (items.length > 0) return items;
+    if (items.length > 0 && !startUrl) return items;
 
-    let url = `${graphTodoTaskPath(listId, taskId)}/checklistItems`;
+    let url = startUrl ?? `${graphTodoTaskPath(listId, taskId)}/checklistItems`;
     while (url) {
-      let response: Response;
-      try {
-        response = await this.client.graphFetch(url);
-      } catch (error) {
-        connectorLogger.warn({ err: error, listId, taskId }, 'Failed to fetch Todo checklist items');
-        return items;
-      }
+      const response = await this.client.graphFetch(url);
       if (!response.ok) {
-        connectorLogger.warn(
-          { status: response.status, listId, taskId },
-          'Failed to fetch Todo checklist items',
+        throw new Error(
+          `Failed to fetch Todo checklist items: ${response.status}`,
         );
-        return items;
       }
 
       const data = await response.json() as {
@@ -1085,26 +1157,19 @@ export class MicrosoftTodoConnector implements IConnector {
     listId: string,
     taskId: string,
     expandedResources: GraphLinkedResource[] | undefined,
+    startUrl?: string,
   ): Promise<GraphLinkedResource[]> {
     const resources = [...(expandedResources ?? [])];
-    if (resources.length > 0) return resources;
+    if (resources.length > 0 && !startUrl) return resources;
 
-    let url = `${graphTodoTaskPath(listId, taskId)}/linkedResources`;
+    let url = startUrl ?? `${graphTodoTaskPath(listId, taskId)}/linkedResources`;
 
     while (url) {
-      let response: Response;
-      try {
-        response = await this.client.graphFetch(url);
-      } catch (error) {
-        connectorLogger.warn({ err: error, listId, taskId }, 'Failed to fetch Todo linked resources');
-        return resources;
-      }
+      const response = await this.client.graphFetch(url);
       if (!response.ok) {
-        connectorLogger.warn(
-          { status: response.status, listId, taskId },
-          'Failed to fetch Todo linked resources',
+        throw new Error(
+          `Failed to fetch Todo linked resources: ${response.status}`,
         );
-        return resources;
       }
 
       const data = await response.json() as {
@@ -1116,6 +1181,199 @@ export class MicrosoftTodoConnector implements IConnector {
     }
 
     return resources;
+  }
+
+  private async fetchTaskEnrichments(
+    listId: string,
+    tasks: GraphTodoTask[],
+    includeLinkedResources: boolean,
+  ): Promise<{
+    checklists: Map<string, GraphChecklistItem[]>;
+    linkedResources: Map<string, GraphLinkedResource[]>;
+  }> {
+    const checklists = new Map<string, GraphChecklistItem[]>();
+    const linkedResources = new Map<string, GraphLinkedResource[]>();
+    const requests: Array<{
+      id: string;
+      taskId: string;
+      kind: 'checklist' | 'linked';
+      url: string;
+    }> = [];
+
+    for (const task of tasks) {
+      if (task.checklistItems?.length) {
+        checklists.set(task.id, [...task.checklistItems]);
+      } else {
+        requests.push({
+          id: `checklist-${requests.length}`,
+          taskId: task.id,
+          kind: 'checklist',
+          url: `${graphTodoTaskPath(listId, task.id)}/checklistItems`,
+        });
+        this.todoMetrics.checklistTasksRequested++;
+      }
+      if (!includeLinkedResources) continue;
+      if (task.linkedResources?.length) {
+        linkedResources.set(task.id, [...task.linkedResources]);
+      } else {
+        requests.push({
+          id: `linked-${requests.length}`,
+          taskId: task.id,
+          kind: 'linked',
+          url: `${graphTodoTaskPath(listId, task.id)}/linkedResources`,
+        });
+        this.todoMetrics.linkedResourceTasksRequested++;
+      }
+    }
+
+    const chunks: typeof requests[] = [];
+    for (let index = 0; index < requests.length; index += GRAPH_BATCH_SUBREQUEST_LIMIT) {
+      chunks.push(requests.slice(index, index + GRAPH_BATCH_SUBREQUEST_LIMIT));
+    }
+
+    let nextChunk = 0;
+    const workers = Array.from(
+      { length: Math.min(GRAPH_BATCH_CONCURRENCY, chunks.length) },
+      async () => {
+        while (nextChunk < chunks.length) {
+          const chunk = chunks[nextChunk++];
+          if (chunk.some(request => request.kind === 'checklist')) {
+            this.todoMetrics.checklistBatchRequests++;
+          }
+          if (chunk.some(request => request.kind === 'linked')) {
+            this.todoMetrics.linkedResourceBatchRequests++;
+          }
+          let response: Response;
+          try {
+            response = await this.client.graphFetch('/$batch', {
+              method: 'POST',
+              body: JSON.stringify({
+                requests: chunk.map(request => ({
+                  id: request.id,
+                  method: 'GET',
+                  url: request.url,
+                })),
+              }),
+            });
+          } catch (error) {
+            connectorLogger.warn(
+              { err: error, subrequestCount: chunk.length },
+              'Microsoft Todo enrichment batch failed; retrying subrequests directly',
+            );
+            await this.fetchEnrichmentFallbacks(listId, chunk, checklists, linkedResources);
+            continue;
+          }
+          if (!response.ok) {
+            await this.fetchEnrichmentFallbacks(listId, chunk, checklists, linkedResources);
+            continue;
+          }
+          const data = await response.json() as TodoGraphBatchResponse;
+          const responses = new Map((data.responses ?? []).map(item => [item.id, item]));
+          for (const request of chunk) {
+            const result = responses.get(request.id);
+            if (!result || result.status < 200 || result.status >= 300) {
+              await this.fetchEnrichmentFallbacks(
+                listId,
+                [request],
+                checklists,
+                linkedResources,
+              );
+              continue;
+            }
+            const nextLink = result.body?.['@odata.nextLink']?.replace(GRAPH_BASE_URL, '');
+            if (request.kind === 'checklist') {
+              const items = (result.body?.value ?? []) as GraphChecklistItem[];
+              checklists.set(
+                request.taskId,
+                nextLink
+                  ? await this.fetchChecklistItems(
+                      listId,
+                      request.taskId,
+                      items,
+                      nextLink,
+                    )
+                  : items,
+              );
+            } else {
+              const items = (result.body?.value ?? []) as GraphLinkedResource[];
+              linkedResources.set(
+                request.taskId,
+                nextLink
+                  ? await this.fetchLinkedResources(
+                      listId,
+                      request.taskId,
+                      items,
+                      nextLink,
+                    )
+                  : items,
+              );
+            }
+          }
+        }
+      },
+    );
+    await Promise.all(workers);
+    return { checklists, linkedResources };
+  }
+
+  private async fetchEnrichmentFallbacks(
+    listId: string,
+    requests: Array<{
+      taskId: string;
+      kind: 'checklist' | 'linked';
+    }>,
+    checklists: Map<string, GraphChecklistItem[]>,
+    linkedResources: Map<string, GraphLinkedResource[]>,
+  ): Promise<void> {
+    let nextRequest = 0;
+    const workers = Array.from(
+      { length: Math.min(GRAPH_FALLBACK_CONCURRENCY, requests.length) },
+      async () => {
+        while (nextRequest < requests.length) {
+          const request = requests[nextRequest++];
+          if (request.kind === 'checklist') {
+            this.todoMetrics.checklistFallbackRequests++;
+            checklists.set(
+              request.taskId,
+              await this.fetchChecklistItems(listId, request.taskId, undefined),
+            );
+          } else {
+            linkedResources.set(
+              request.taskId,
+              await this.fetchLinkedResources(listId, request.taskId, undefined),
+            );
+          }
+        }
+      },
+    );
+    await Promise.all(workers);
+  }
+
+  private createTodoMetrics(): SyncTodoMetrics {
+    return {
+      deltaPages: 0,
+      deltaTasksReceived: 0,
+      deltaRemovalsReceived: 0,
+      checklistTasksRequested: 0,
+      checklistBatchRequests: 0,
+      checklistFallbackRequests: 0,
+      linkedResourceTasksRequested: 0,
+      linkedResourceBatchRequests: 0,
+      checkpointsCommitted: 0,
+      checkpointsDeferred: 0,
+    };
+  }
+
+  private resetSyncMetrics(): void {
+    this.graphMetrics = {
+      requests: 0,
+      retries: 0,
+      failures: 0,
+      rateLimited: 0,
+      durationMs: 0,
+    };
+    this.todoMetrics = this.createTodoMetrics();
+    this.deferredTaskDeltaLinks.clear();
   }
 
   private async *fetchTasksFromHiddenLists(

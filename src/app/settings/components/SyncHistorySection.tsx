@@ -35,6 +35,10 @@ import {
   normalizeSyncActivity,
   type SyncActivityPayload,
 } from '@/lib/sync/activity';
+import {
+  normalizeSyncRunMetrics,
+  type SyncRunMetrics,
+} from '@/lib/sync/metrics';
 
 const PAGE_SIZE = 10;
 const DETAIL_PAGE_SIZE = 10;
@@ -171,6 +175,80 @@ function parseActivity(value: SyncLogEntry['activity']): SyncActivityPayload | n
   } catch {
     return null;
   }
+}
+
+function parseMetrics(value: SyncLogEntry['metrics']): SyncRunMetrics | null {
+  if (typeof value !== 'string') return normalizeSyncRunMetrics(value);
+  try {
+    return normalizeSyncRunMetrics(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function SyncPerformanceDetails({ metrics }: { metrics: SyncRunMetrics }) {
+  const phaseRows = Object.entries(metrics.phases).map(([key, value]) => ({
+    key,
+    label: key.replaceAll('-', ' '),
+    value: `${Math.round(value.durationMs)} ms`,
+  }));
+  const counterGroups = [
+    ['Graph requests', metrics.graph],
+    ['Microsoft To Do', metrics.todo],
+    ['Reconciliation', metrics.reconciliation],
+    ['Concurrency', metrics.concurrency],
+  ] as const;
+
+  return (
+    <section aria-labelledby="sync-performance-heading" className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Clock size={14} className="text-[var(--text-muted)]" aria-hidden="true" />
+        <h4 id="sync-performance-heading" className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+          Sync performance
+        </h4>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {phaseRows.length > 0 && (
+          <MetricGroup title="Phase timings" rows={phaseRows} />
+        )}
+        {counterGroups.map(([title, group]) => group && (
+          <MetricGroup
+            key={title}
+            title={title}
+            rows={Object.entries(group).map(([key, value]) => ({
+              key,
+              label: key.replaceAll(/([A-Z])/g, ' $1').toLowerCase(),
+              value: fmt(value),
+            }))}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MetricGroup({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: Array<{ key: string; label: string; value: string }>;
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] p-3">
+      <div className="text-xs font-medium text-[var(--text-secondary)]">{title}</div>
+      <dl className="mt-2 space-y-1.5">
+        {rows.map(row => (
+          <div key={row.key} className="flex items-baseline justify-between gap-3 text-xs">
+            <dt className="min-w-0 capitalize text-[var(--text-muted)]">{row.label}</dt>
+            <dd className="shrink-0 font-semibold tabular-nums text-[var(--text-primary)]">
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
 }
 
 function ActivityDetails({ activity }: { activity: SyncActivityPayload }) {
@@ -357,6 +435,7 @@ function DetailPanel({ entry, auditDetails, connectorCapabilities, pushed, forma
   );
   const protectedCount = Math.max(entry.localOnlyProtected || 0, protectedFromAudit);
   const activity = parseActivity(entry.activity);
+  const metrics = parseMetrics(entry.metrics);
 
   // Items with actual changes (exclude untouched — items not in audit are untouched)
   const changedDetails = useMemo(
@@ -464,6 +543,7 @@ function DetailPanel({ entry, auditDetails, connectorCapabilities, pushed, forma
       {activity && (
         <ActivityDetails activity={activity} />
       )}
+      {metrics && <SyncPerformanceDetails metrics={metrics} />}
       {/* Stats grid — clickable KPI cards */}
       <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
         {kpiCards.map(({ key, label, value, color }) => (

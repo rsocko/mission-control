@@ -8,6 +8,7 @@ import {
 import type { ContextAppearance } from '@/types';
 import type { ConnectorDataClassification } from '@/lib/connectors/data-classification';
 import type { SyncActivityPayload } from '@/lib/sync/activity';
+import type { SyncRunMetrics } from '@/lib/sync/metrics';
 
 export { getConnectorDisplayName } from '@/lib/connectors/display-name';
 export { isSourceListSelected, normalizeSyncedLists };
@@ -87,6 +88,7 @@ export interface SyncLogEntry {
   errors: string[] | string;
   details: SyncAuditDetail[] | string;
   activity?: SyncActivityPayload | string | null;
+  metrics?: SyncRunMetrics | string | null;
   syncedAt: string;
   durationMs: number | null;
   jobId?: string | null;

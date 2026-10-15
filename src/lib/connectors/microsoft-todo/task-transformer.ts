@@ -193,6 +193,7 @@ export function mapChecklistItem(
   connectorType: string,
   connectorInstanceId: string,
   parentCreatedAt?: string,
+  parentUpdatedAt?: string,
 ): TaskItem {
   const effectiveCreatedAt = item.createdDateTime || parentCreatedAt || new Date().toISOString();
   return {
@@ -205,7 +206,7 @@ export function mapChecklistItem(
     status: item.isChecked ? 'done' : 'todo',
     priority: 'none' as const,
     createdAt: effectiveCreatedAt,
-    updatedAt: effectiveCreatedAt,
+    updatedAt: parentUpdatedAt || effectiveCreatedAt,
     parentId: parentInternalId,
     childIds: [],
     depth: 1,

@@ -74,6 +74,7 @@ import {
 } from '@/lib/telemetry/database-operation-context';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import type { SyncRunRecord } from '@/db/persistence/worker-repositories';
+import type { SyncPhaseMetric, SyncRunMetrics } from './metrics';
 import type {
   ConnectorNotificationCommand,
   ConnectorNotificationInput,
@@ -169,6 +170,7 @@ async function withSyncPhaseTiming<T>(
   connectorId: string,
   phase: string,
   operation: () => Promise<T>,
+  phaseMetrics?: Record<string, SyncPhaseMetric>,
 ): Promise<T> {
   const startedAt = Date.now();
   return withDatabaseOperation(
@@ -181,12 +183,24 @@ async function withSyncPhaseTiming<T>(
     }, async () => {
       try {
         const result = await operation();
+        if (phaseMetrics) {
+          phaseMetrics[phase] = {
+            durationMs: Date.now() - startedAt,
+            success: true,
+          };
+        }
         syncLogger.info(
           { connectorId, phase, durationMs: Date.now() - startedAt, success: true },
           'Sync phase completed',
         );
         return result;
       } catch (error) {
+        if (phaseMetrics) {
+          phaseMetrics[phase] = {
+            durationMs: Date.now() - startedAt,
+            success: false,
+          };
+        }
         syncLogger.warn(
           { err: error, connectorId, phase, durationMs: Date.now() - startedAt, success: false },
           'Sync phase failed',
@@ -423,6 +437,8 @@ export class SyncExecutionPipeline {
     syncLogger.info({ connectorId, full: options?.full ?? false }, 'Sync started');
     const errors: string[] = [];
     const details: SyncAuditEntry[] = [];
+    const phaseMetrics: Record<string, SyncPhaseMetric> = {};
+    let connectorForMetrics: IConnector | null = null;
     let tasksAdded = 0;
     let tasksUpdated = 0;
     let tasksRemoved = 0;
@@ -449,6 +465,8 @@ export class SyncExecutionPipeline {
       if (!connector) {
         throw new Error(`Connector config not found in database: ${connectorId}`);
       }
+      connectorForMetrics = connector;
+      connector.beginSyncMetrics?.();
       const executionPersistence = (await getWorkerPersistenceRepositories()).execution;
       executionPersistence.support.assertConnectorSupported(connector);
       if (connector.type === 'github-issues') {
@@ -483,6 +501,7 @@ export class SyncExecutionPipeline {
           jobId: options?.jobId,
           connectorOperationLeaseHeld: true,
         }),
+        phaseMetrics,
       );
       tasksUpdated += pushResult.pushed;
       if (pushResult.errors.length > 0) {
@@ -501,6 +520,7 @@ export class SyncExecutionPipeline {
             signal: options?.signal,
             jobId: options?.jobId,
           }),
+          phaseMetrics,
         );
       }
 
@@ -528,6 +548,7 @@ export class SyncExecutionPipeline {
         connectorId,
         'remote-fetch',
         () => connector.fetchNotifications(since),
+        phaseMetrics,
       );
       // The task stream may take longer than notifications; attach a handler now
       // so an early notification failure is not reported as an unhandled rejection.
@@ -570,6 +591,7 @@ export class SyncExecutionPipeline {
             );
             return sourceLists;
           },
+          phaseMetrics,
         );
 
         const persistedLists = await executionPersistence.lists.list(connectorId);
@@ -622,10 +644,18 @@ export class SyncExecutionPipeline {
           identityRuntime,
           deletionProtectedSourceListIds,
         ),
+        phaseMetrics,
       );
       tasksAdded += upsertResult.added;
       tasksUpdated += upsertResult.updated;
       tasksRemoved += upsertResult.removed;
+      if (upsertResult.deferredSourceListIds.size > 0) {
+        connector.deferTaskFetchCheckpoints?.([...upsertResult.deferredSourceListIds]);
+        errors.push(
+          `${upsertResult.casDeferred} task update(s) deferred after concurrent local changes; `
+          + `${upsertResult.deferredSourceListIds.size} list checkpoint(s) retained for retry`,
+        );
+      }
       await connector.commitTaskFetch?.();
       const localOnlyProtected = upsertResult.localOnlyProtected;
       const remoteSourceIds = upsertResult.remoteSourceIds ?? new Set<string>();
@@ -654,6 +684,7 @@ export class SyncExecutionPipeline {
               remoteSourceIds,
               identityRuntime,
             ),
+            phaseMetrics,
           );
         }
         const dependencyResult = await withSyncPhaseTiming(
@@ -664,6 +695,7 @@ export class SyncExecutionPipeline {
             connector,
             { full: isFullSync, identityRuntime },
           ),
+          phaseMetrics,
         );
         if (dependencyResult.failed > 0) {
           errors.push(`${dependencyResult.failed} task dependency write(s) failed`);
@@ -741,6 +773,7 @@ export class SyncExecutionPipeline {
                 : undefined,
               identityFence,
             ),
+            phaseMetrics,
           );
         }
       } catch (err) {
@@ -893,6 +926,21 @@ export class SyncExecutionPipeline {
         && (identityRuntime?.blockedReasonCodes.length ?? 0) === 0
       );
       const syncRunId = randomUUID();
+      const connectorMetrics = connector.getSyncMetrics?.() ?? {};
+      const metrics: SyncRunMetrics = {
+        version: 1,
+        phases: phaseMetrics,
+        ...connectorMetrics,
+        reconciliation: {
+          tasksReceived: upsertResult.tasksReceived,
+          tasksChanged: upsertResult.tasksChanged,
+          tasksUnchanged: upsertResult.tasksUnchanged,
+          casConflicts: upsertResult.casConflicts,
+          casRetries: upsertResult.casRetries,
+          casDeferred: upsertResult.casDeferred,
+          listsDeferred: upsertResult.deferredSourceListIds.size,
+        },
+      };
       const result: SyncResult = {
         connectorId,
         success: syncSucceeded,
@@ -903,6 +951,7 @@ export class SyncExecutionPipeline {
         errors,
         syncedAt: new Date().toISOString(),
         syncRunId,
+        metrics,
         ...(domainDataResult?.activity ? { activity: domainDataResult.activity } : {}),
         ...(domainDataResult?.status ? { domainStatus: domainDataResult.status } : {}),
         ...(domainDataResult?.datasetErrors
@@ -931,6 +980,7 @@ export class SyncExecutionPipeline {
         jobId: null,
         identityMode: identitySnapshot?.effectiveMode ?? null,
         identityModeRevision: identitySnapshot?.modeRevision ?? null,
+        metrics,
       };
       const workerPersistence = await getWorkerPersistenceRepositories();
       await workerPersistence.syncRuns.append(syncLogEntry);
@@ -1051,6 +1101,11 @@ export class SyncExecutionPipeline {
         errors: [err instanceof Error ? err.message : String(err)],
         syncedAt: new Date().toISOString(),
         syncRunId,
+        metrics: {
+          version: 1,
+          phases: phaseMetrics,
+          ...(connectorForMetrics?.getSyncMetrics?.() ?? {}),
+        },
         ...(domainDataResult?.activity
           ? {
               activity: {
@@ -1079,6 +1134,7 @@ export class SyncExecutionPipeline {
         jobId: options?.jobId ?? null,
         identityMode: identitySnapshot?.effectiveMode ?? null,
         identityModeRevision: identitySnapshot?.modeRevision ?? null,
+        metrics: result.metrics ?? null,
       };
       try {
         const workerPersistence = await getWorkerPersistenceRepositories();

@@ -10,6 +10,7 @@ import {
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import type { ContextAppearance } from '@/types';
 import type { SyncActivityPayload } from '@/lib/sync/activity';
+import type { SyncRunMetrics } from '@/lib/sync/metrics';
 import type { tasks } from './tasks';
 
 // ─── CONNECTOR CONFIGS ──────────────────────────────────────────────────────
@@ -233,6 +234,7 @@ export const syncLog = sqliteTable('sync_log', {
   /** Detailed audit trail: individual task-level actions taken during this sync */
   details: text('details', { mode: 'json' }).notNull().default('[]'),
   activity: text('activity', { mode: 'json' }).$type<SyncActivityPayload>(),
+  metrics: text('metrics', { mode: 'json' }).$type<SyncRunMetrics>(),
   syncedAt: text('synced_at').notNull(),
   durationMs: integer('duration_ms'),
   jobId: text('job_id'),

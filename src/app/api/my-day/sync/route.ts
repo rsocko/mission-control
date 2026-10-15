@@ -247,16 +247,14 @@ async function reconcileMyDay(
       const recurrencePattern = parseSubstrateRecurrence(remoteTask.Recurrence) || localRecurrencePattern;
       const isRecurring = !!recurrencePattern;
 
-      let successorCreatedAfterMyDayCompletion = false;
+      let matchesCompletedMyDaySibling = false;
       if (isRecurring) {
         const completedSibling = completedSiblings.get(
           recurringSiblingKey(remoteTask.ParentFolderId, remoteTask.Subject),
         );
-        successorCreatedAfterMyDayCompletion = isMatchingRecurringSuccessor({
+        matchesCompletedMyDaySibling = isMatchingRecurringSuccessor({
           incomingRecurrence: recurrencePattern,
           completedSiblingMetadata: completedSibling?.metadata,
-          successorCreatedAt: remoteTask.CreatedDateTime,
-          completedAt: completedSibling?.completedAt || null,
         });
       }
 
@@ -264,7 +262,7 @@ async function reconcileMyDay(
         isRecurring,
         dueDate: remoteDueDate,
         today,
-        successorCreatedAfterMyDayCompletion,
+        matchesCompletedMyDaySibling,
       })) {
         skippedFutureRecurring++;
         suppressedRecurringSourceIds.add(sourceId);
@@ -273,7 +271,7 @@ async function reconcileMyDay(
           myDayIdsToRemove.push(existingMyDayItem.id);
         }
         logger.info(
-          { title: remoteTask.Subject, remoteDueDate, date: today, successorCreatedAfterMyDayCompletion },
+          { title: remoteTask.Subject, remoteDueDate, date: today, matchesCompletedMyDaySibling },
           'Skipping Microsoft To Do recurring successor in My Day',
         );
         continue;

@@ -55,6 +55,7 @@ import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runti
  *  responsiveness (shorter blocking windows for HTTP/cron/SSE). */
 const BATCH_SIZE = 25;
 const MAX_BLOCKED_IDENTITY_AUDIT_ENTRIES = 20;
+const MAX_REMOTE_UPDATE_ATTEMPTS = 3;
 
 /** Minimum milliseconds to yield between batches. Must be long enough for
  *  queued macrotasks (healthcheck HTTP, cron, SSE) to run.  2 ms was too
@@ -605,8 +606,12 @@ export async function upsertTasks(
           const statusDiffers = remoteTask.status !== existing.status;
           const forceTerminalSync = remoteIsTerminal && statusDiffers;
 
-          if (existing.syncStatus === 'pending_push' || existing.syncStatus === 'push_error') {
-            // The task has unpushed local edits (or a failed push attempt).
+          if (
+            existing.syncStatus === 'pending_push'
+            || existing.syncStatus === 'push_error'
+            || existing.syncStatus === 'pushing'
+          ) {
+            // The task has unpushed local edits, an active push, or a failed push attempt.
             // Only allow the remote to overwrite when it's a terminal status
             // (issue closed/cancelled on the source). Otherwise, skip — the
             // write-through / push-manager will push local changes and the
@@ -620,7 +625,7 @@ export async function upsertTasks(
               existingBySourceId.set(remoteTask.sourceId, refreshed);
               existingById.set(existing.id, refreshed);
             }
-            if (forceTerminalSync) {
+            if (forceTerminalSync && existing.syncStatus !== 'pushing') {
               pendingUpdates.push({ existing, remoteTask });
               audit.push({ action: 'conflict_resolved', taskTitle: remoteTask.title, taskSourceId: remoteTask.sourceId, taskId: existing.id, reason: 'Remote terminal status — forced sync (local pending edits cleared)' });
             } else {
@@ -1125,6 +1130,7 @@ async function applyRemoteUpdate(
   canSyncTags = true,
   resolvedListName?: string | null,
   caps?: ConnectorCapabilities | null,
+  attempt = 1,
 ): Promise<SearchableTask | null> {
   // When the connector doesn't support a field, preserve the MC-local value
   // instead of overwriting it with the remote's null/empty value.
@@ -1256,6 +1262,46 @@ async function applyRemoteUpdate(
   });
 
   if (!applied) {
+    const [latestTask] = await persistence.findBySourceIds(
+      existingTask.connectorInstanceId,
+      [remote.sourceId],
+    );
+    if (!latestTask) {
+      throw new Error(
+        `Concurrent local update removed remote task ${remote.sourceId} during reconciliation`,
+      );
+    }
+
+    const remoteIsTerminal = remote.status === 'done' || remote.status === 'cancelled';
+    const terminalStatusDiffers = remoteIsTerminal && remote.status !== latestTask.status;
+    const hasPendingLocalMutation = (
+      latestTask.syncStatus === 'pending_push'
+      || latestTask.syncStatus === 'push_error'
+      || latestTask.syncStatus === 'pushing'
+    );
+    if (
+      hasPendingLocalMutation
+      && (!terminalStatusDiffers || latestTask.syncStatus === 'pushing')
+    ) {
+      syncLogger.info({
+        taskId: latestTask.id,
+        sourceId: remote.sourceId,
+        syncStatus: latestTask.syncStatus,
+      }, 'Deferred remote task update after concurrent local mutation');
+      return null;
+    }
+
+    if (attempt < MAX_REMOTE_UPDATE_ATTEMPTS) {
+      return applyRemoteUpdate(
+        latestTask,
+        remote,
+        now,
+        canSyncTags,
+        resolvedListName,
+        caps,
+        attempt + 1,
+      );
+    }
     throw new Error(
       `Concurrent local update prevented remote task ${remote.sourceId} from being applied`,
     );

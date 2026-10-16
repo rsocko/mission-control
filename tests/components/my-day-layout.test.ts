@@ -22,6 +22,10 @@ const sidebarSource = readFileSync(
   resolve(process.cwd(), 'src/components/today/TodaySidebar.tsx'),
   'utf8',
 );
+const utilityPanelsSource = readFileSync(
+  resolve(process.cwd(), 'src/components/today/TodayUtilityPanels.tsx'),
+  'utf8',
+);
 const focusSource = readFileSync(
   resolve(process.cwd(), 'src/components/today/Focus3Panel.tsx'),
   'utf8',
@@ -73,9 +77,19 @@ describe('My Day desktop layout', () => {
   });
 
   it('constrains the desktop suggestions panel so expanded groups remain scrollable', () => {
-    expect(pageSource).toContain('className="hidden h-full min-h-0 sm:block"');
+    expect(pageSource).toContain('<TodayUtilityPanels');
     expect(sidebarSource).toContain('flex h-full min-h-0 w-80');
     expect(sidebarSource).toContain('min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain');
+  });
+
+  it('adapts suggestions and notifications to the available desktop width', () => {
+    expect(utilityPanelsSource).toContain('new ResizeObserver');
+    expect(utilityPanelsSource).toContain("layout === 'dual'");
+    expect(utilityPanelsSource).toContain("layout === 'detail-single'");
+    expect(utilityPanelsSource).toContain("layout === 'rail'");
+    expect(utilityPanelsSource).toContain('<TodaySidebar');
+    expect(utilityPanelsSource).toContain('<NotificationsPanel');
+    expect(utilityPanelsSource).toContain('showHideButton={false}');
   });
 
   it('connects Focus 3 to My Day task creation and detail interactions', () => {

@@ -129,6 +129,123 @@ describe('Quick Sort planning horizon queue', () => {
     );
   });
 
+  it('finds projects by phase name and exits phase selection with Escape', () => {
+    render(
+      <QuickSortActions
+        task={task}
+        mode="no_project"
+        onViewTask={vi.fn()}
+        onSkip={vi.fn()}
+        onMarkDone={vi.fn()}
+        onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
+        onApplyPriority={vi.fn()}
+        onApplyEffort={vi.fn()}
+        onApplyTag={vi.fn()}
+        onApplyPlanningHorizon={vi.fn()}
+        onApplyProject={vi.fn()}
+        allTags={[]}
+        projects={[
+          {
+            id: 'project-1',
+            name: 'Mission Control',
+            color: '#06b6d4',
+            phases: [{ id: 'phase-1', name: 'Delivery', color: '#22d3ee' }],
+          },
+          {
+            id: 'project-2',
+            name: 'Home Improvements',
+            color: '#f59e0b',
+            phases: [{ id: 'phase-2', name: 'Planning', color: '#fbbf24' }],
+          },
+        ]}
+        projectsLoading={false}
+        tagsLoading={false}
+        recentTagIds={[]}
+        busy={false}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find a project' }), {
+      target: { value: 'delivery' },
+    });
+
+    expect(screen.getByRole('button', { name: /Mission Control Delivery/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Home Improvements/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Mission Control Delivery/i }));
+    expect(screen.getByRole('button', { name: /Mission Control Change/i })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('button', { name: /Mission Control Change/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Mission Control Delivery/i })).toBeInTheDocument();
+  });
+
+  it('supports keyboard navigation from search through project and phase choices', () => {
+    const onApplyProject = vi.fn();
+    render(
+      <QuickSortActions
+        task={task}
+        mode="no_project"
+        onViewTask={vi.fn()}
+        onSkip={vi.fn()}
+        onMarkDone={vi.fn()}
+        onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
+        onApplyPriority={vi.fn()}
+        onApplyEffort={vi.fn()}
+        onApplyTag={vi.fn()}
+        onApplyPlanningHorizon={vi.fn()}
+        onApplyProject={onApplyProject}
+        allTags={[]}
+        projects={[
+          {
+            id: 'project-1',
+            name: 'Mission Control',
+            color: '#06b6d4',
+            phases: [{ id: 'phase-1', name: 'Delivery', color: '#22d3ee' }],
+          },
+          {
+            id: 'project-2',
+            name: 'Home Improvements',
+            color: '#f59e0b',
+            phases: [],
+          },
+        ]}
+        projectsLoading={false}
+        tagsLoading={false}
+        recentTagIds={[]}
+        busy={false}
+      />,
+    );
+
+    const search = screen.getByRole('searchbox', { name: 'Find a project' });
+    search.focus();
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+
+    expect(screen.getByRole('button', { name: /Mission Control/i })).toHaveFocus();
+
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    expect(screen.getByRole('button', { name: /Home Improvements/i })).toHaveFocus();
+
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    fireEvent.click(document.activeElement!);
+
+    expect(screen.getByRole('button', { name: 'Project only' })).toHaveFocus();
+
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+    expect(screen.getByRole('button', { name: 'Delivery' })).toHaveFocus();
+
+    fireEvent.click(document.activeElement!);
+    expect(onApplyProject).toHaveBeenCalledWith(
+      'project-1',
+      'Mission Control',
+      'phase-1',
+      'Delivery',
+    );
+  });
+
   it('labels project assignment clearly and uses the Projects navigation icon', () => {
     const { container } = render(
       <ModeSelector

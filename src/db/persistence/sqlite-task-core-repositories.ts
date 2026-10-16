@@ -84,6 +84,7 @@ import {
   compileQuickFilterCondition,
   enabledGitHubConnectorCondition,
   getCanonicalTaskSourceCondition,
+  getNoVisibleProjectCondition,
   getTaskSourceVisibilityConditions,
   withCondition,
   type CanonicalTaskFilterInputs,
@@ -930,7 +931,7 @@ class SqliteTaskReadRepository implements TaskReadRepository {
       }).from(tasks)
         .innerJoin(taskProjects, eq(taskProjects.taskId, tasks.id))
         .innerJoin(hubProjects, eq(hubProjects.id, taskProjects.projectId))
-        .where(taskWhere);
+        .where(and(taskWhere, eq(hubProjects.hidden, false)));
       const taskIds = [...new Set(projectRows.map((row) => row.taskId))];
       const phaseRows = taskIds.length > 0
         ? await this.database.select({
@@ -967,7 +968,7 @@ class SqliteTaskReadRepository implements TaskReadRepository {
         .from(tasks)
         .where(and(
           taskWhere,
-          sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`,
+          getNoVisibleProjectCondition(),
         ));
       const unprojectedCount = Number(unprojected?.count ?? 0);
       if (unprojectedCount > 0) counts['No Project'] = unprojectedCount;
@@ -2674,8 +2675,11 @@ class SqliteTaskCollectionReadRepository implements TaskCollectionReadRepository
           taskId: taskProjects.taskId,
           projectId: taskProjects.projectId,
           projectName: hubProjects.name,
-        }).from(taskProjects).leftJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
-          .where(inArray(taskProjects.taskId, uniqueIds))
+        }).from(taskProjects).innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+          .where(and(
+            inArray(taskProjects.taskId, uniqueIds),
+            eq(hubProjects.hidden, false),
+          ))
           .orderBy(asc(taskProjects.taskId), asc(taskProjects.projectId)),
         this.database.select({
           taskId: projectPhaseItems.taskId,
@@ -2684,7 +2688,11 @@ class SqliteTaskCollectionReadRepository implements TaskCollectionReadRepository
           projectId: projectPhases.projectId,
         }).from(projectPhaseItems)
           .innerJoin(projectPhases, eq(projectPhaseItems.phaseId, projectPhases.id))
-          .where(inArray(projectPhaseItems.taskId, uniqueIds))
+          .innerJoin(hubProjects, eq(projectPhases.projectId, hubProjects.id))
+          .where(and(
+            inArray(projectPhaseItems.taskId, uniqueIds),
+            eq(hubProjects.hidden, false),
+          ))
           .orderBy(
             asc(projectPhaseItems.taskId),
             asc(projectPhases.projectId),

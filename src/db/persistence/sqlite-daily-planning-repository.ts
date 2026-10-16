@@ -41,6 +41,12 @@ function visibleTask(alias: string): string {
   return `${alias}.connector_instance_id NOT IN (
       SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
     )
+    AND NOT EXISTS (
+      SELECT 1 FROM source_lists
+      WHERE source_lists.connector_instance_id = ${alias}.connector_instance_id
+        AND source_lists.source_id = ${alias}.source_list_id
+        AND source_lists.hidden = 1
+    )
     AND ${alias}.connector_type NOT IN (${NOTIFICATION_ONLY_LIST})`;
 }
 
@@ -591,9 +597,11 @@ export function createSqliteDailyPlanningPersistence(
           }
 
           for (const row of sqlite.prepare(`
-            SELECT task_id AS taskId, project_id AS projectId
-            FROM task_projects WHERE task_id IN (${marks})
-            ORDER BY task_id, project_id
+            SELECT tp.task_id AS taskId, tp.project_id AS projectId
+            FROM task_projects tp
+            INNER JOIN hub_projects hp ON hp.id = tp.project_id
+            WHERE tp.task_id IN (${marks}) AND hp.hidden = 0
+            ORDER BY tp.task_id, tp.project_id
           `).all(...batch) as Array<{ taskId: string; projectId: string }>) {
             if (!projectsByTask.has(row.taskId)) projectsByTask.set(row.taskId, []);
             projectsByTask.get(row.taskId)!.push(row.projectId);
@@ -604,7 +612,9 @@ export function createSqliteDailyPlanningPersistence(
                    p.id AS phaseId, p.name AS phaseName
             FROM project_phase_items i
             INNER JOIN project_phases p ON p.id = i.phase_id
+            INNER JOIN hub_projects hp ON hp.id = p.project_id
             WHERE i.task_id IN (${marks}) AND p.project_id IS NOT NULL
+              AND hp.hidden = 0
             ORDER BY i.task_id, p.project_id, p.id
           `).all(...batch) as Array<MyDayPhaseMembershipRecord & { taskId: string }>) {
             const { taskId, ...membership } = row;

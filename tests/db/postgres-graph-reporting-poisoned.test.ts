@@ -542,6 +542,7 @@ const organization = {
     }],
     taskTags: [{ taskId: 'task-1', tagId: 'tag-1', tagName: 'Alpha' }],
     taskProjects: [],
+    momentumSignals: [],
     estimatedDurations: [{ taskId: 'task-1', estimatedDuration: 30 }],
   })),
 };

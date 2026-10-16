@@ -225,6 +225,13 @@
       "when": 1792106359004,
       "tag": "0031_sync_run_metrics",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792170872941,
+      "tag": "0032_right_daimon_hellstrom",
+      "breakpoints": true
     }
   ]
 }

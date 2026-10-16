@@ -346,25 +346,26 @@ export default function QuickSortMode() {
       if (busy || !mode) return;
       const task = tasks.find((candidate) => candidate.id === taskId);
       if (!task) return;
-      setBusy(true);
+      const queueIndex = tasks.findIndex((candidate) => candidate.id === taskId);
+      const operation = runOperation({
+        task,
+        patch: {},
+        operationMode: mode,
+        action: 'skipped',
+        label: 'Skip',
+      });
+      dismiss(taskId);
       try {
-        await runOperation({
-          task,
-          patch: {},
-          operationMode: mode,
-          action: 'skipped',
-          label: 'Skip',
-        });
-        dismiss(taskId);
+        await operation;
         refreshCounts();
         setStatsKey((k) => k + 1);
         toast.info('Skipped for 30 minutes');
       } catch {
+        restoreTask(task, queueIndex);
         toast.error('Failed to skip task');
       }
-      setBusy(false);
     },
-    [busy, dismiss, mode, refreshCounts, runOperation, tasks]
+    [busy, dismiss, mode, refreshCounts, restoreTask, runOperation, tasks]
   );
 
   const handleSetLocalDisposition = useCallback(
@@ -595,8 +596,8 @@ export default function QuickSortMode() {
         setStatsKey((k) => k + 1);
         setSessionSorted((n) => n + 1);
         toast.success(`Horizon set to ${planningHorizon}`);
-      } catch {
-        toast.error('Failed to set horizon');
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to set horizon');
       }
       setBusy(false);
     },
@@ -1016,7 +1017,7 @@ export default function QuickSortMode() {
             </div>
           )}
           <div className="mt-1">
-            <ActivityBanner key={statsKey} />
+            <ActivityBanner refreshKey={statsKey} />
           </div>
           <ModeSelector
             counts={counts}

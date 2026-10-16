@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { KanbanBoard } from '@/app/kanban/components/KanbanBoard';
 import type { KanbanColumn, Task } from '@/app/kanban/components/types';
@@ -62,7 +62,17 @@ vi.mock('@/app/kanban/components/ColumnHeader', () => ({
 }));
 
 vi.mock('@/app/kanban/components/KanbanCard', () => ({
-  KanbanCard: () => null,
+  KanbanCard: ({
+    task,
+    onOpenSubtasks,
+  }: {
+    task: Task;
+    onOpenSubtasks?: () => void;
+  }) => (
+    <button type="button" onClick={onOpenSubtasks}>
+      Open subtasks for {task.title}
+    </button>
+  ),
 }));
 
 vi.mock('@/app/kanban/components/QuickAddInput', () => ({
@@ -91,7 +101,11 @@ const task = {
   editPolicy: {} as Task['editPolicy'],
 } satisfies Task;
 
-function renderBoard(onDrop: (columnId: string) => void, tasks: Task[] = []) {
+function renderBoard(
+  onDrop: (columnId: string) => void,
+  tasks: Task[] = [],
+  onOpenSubtasks = vi.fn(),
+) {
   render(
     <KanbanBoard
       loading={false}
@@ -121,6 +135,7 @@ function renderBoard(onDrop: (columnId: string) => void, tasks: Task[] = []) {
       onDragStart={vi.fn()}
       onDrop={onDrop}
       onTaskClick={vi.fn()}
+      onOpenSubtasks={onOpenSubtasks}
       onStartRename={vi.fn()}
       onRenameChange={vi.fn()}
       onConfirmRename={vi.fn()}
@@ -162,5 +177,14 @@ describe('KanbanBoard drag and drop', () => {
 
     expect(motionDivProps.some((props) => props.layout === true)).toBe(false);
     expect(motionDivProps.some((props) => props.layout === 'position')).toBe(true);
+  });
+
+  it('routes a card subtask pill through the board callback', () => {
+    const onOpenSubtasks = vi.fn();
+    renderBoard(vi.fn(), [task], onOpenSubtasks);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open subtasks for Move me' }));
+
+    expect(onOpenSubtasks).toHaveBeenCalledWith(task);
   });
 });

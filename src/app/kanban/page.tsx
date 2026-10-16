@@ -19,6 +19,7 @@ import {
   selectedTaskRemovalBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
+import type { TaskSubtasksOpenRequest } from '@/components/task-detail/TaskDetailPanel';
 
 const INITIAL_CONFIRM_DIALOG: KanbanConfirmDialogState = {
   open: false,
@@ -47,6 +48,7 @@ function KanbanPageInner() {
   const [quickAddTitle, setQuickAddTitle] = useState('');
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
   const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
+  const [subtasksOpenRequest, setSubtasksOpenRequest] = useState<TaskSubtasksOpenRequest | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [swimlaneMode, setSwimlaneMode] = useState<SwimlaneMode>('none');
   const [confirmDialog, setConfirmDialog] = useState(INITIAL_CONFIRM_DIALOG);
@@ -328,7 +330,17 @@ function KanbanPageInner() {
         onFixMappings={() => columnsState.setEditingColumns(true)}
         onDragStart={setDragging}
         onDrop={handleDrop}
-        onTaskClick={(task) => setSelectedTaskId(task.id)}
+        onTaskClick={(task) => {
+          setSubtasksOpenRequest(null);
+          setSelectedTaskId(task.id);
+        }}
+        onOpenSubtasks={(task) => {
+          setSelectedTaskId(task.id);
+          setSubtasksOpenRequest((current) => ({
+            requestId: (current?.requestId ?? 0) + 1,
+            taskId: task.id,
+          }));
+        }}
         onStartRename={(id, name) => {
           columnsState.setRenamingColumn(id);
           columnsState.setRenameValue(name);
@@ -361,12 +373,16 @@ function KanbanPageInner() {
 
       <TaskDetailPanel
         task={selectedTask}
-        onClose={(reason) => setSelectedTaskId(
-          null,
-          reason === 'task-removed' ? { history: 'replace' } : undefined,
-        )}
+        onClose={(reason) => {
+          setSubtasksOpenRequest(null);
+          setSelectedTaskId(
+            null,
+            reason === 'task-removed' ? { history: 'replace' } : undefined,
+          );
+        }}
         onTaskUpdate={handleTaskUpdate}
         onRefresh={tasksState.fetchData}
+        subtasksOpenRequest={subtasksOpenRequest}
       />
 
       <ConfirmDialog

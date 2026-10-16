@@ -55,6 +55,13 @@ describe('canonical demo seed', () => {
     expect(richTask.description).toContain('## Demo goals');
     expect(richTask.effort).toBe(4);
 
+    const iconlessRoutine = sqlite.prepare(`
+      SELECT icon
+      FROM routines
+      WHERE id = 'routine-weekly-review'
+    `).get() as { icon: string | null };
+    expect(iconlessRoutine.icon).toBeNull();
+
     const phaseMembership = sqlite.prepare(`
       SELECT COUNT(*) AS count
       FROM project_phase_items

@@ -42,6 +42,7 @@ describeGitHubProjectRepositoriesContract('SQLite', async (): Promise<GitHubProj
         DELETE FROM external_entity_bindings;
         DELETE FROM external_entities;
         DELETE FROM github_identity_controls;
+        DELETE FROM project_auto_include_exclusions;
         DELETE FROM task_projects;
         DELETE FROM hub_projects;
         DELETE FROM tasks;
@@ -104,11 +105,19 @@ describeGitHubProjectRepositoriesContract('SQLite', async (): Promise<GitHubProj
       `).run(`locator-${randomUUID()}`, entityId, NOW, NOW, locatorRevision);
       return { externalEntityId: entityId, bindingRevision, locatorRevision };
     },
-    seedExistingLink: async (projectIdValue, taskId) => {
+    seedExistingLink: async (projectIdValue, taskId, provenance = 'github-sync') => {
       sqlite.prepare(`
-        INSERT INTO task_projects (task_id, project_id) VALUES (?, ?)
-        ON CONFLICT(task_id, project_id) DO NOTHING
-      `).run(taskId, projectIdValue);
+        INSERT INTO task_projects (task_id, project_id, provenance) VALUES (?, ?, ?)
+        ON CONFLICT(task_id, project_id) DO UPDATE SET provenance = excluded.provenance
+      `).run(taskId, projectIdValue, provenance);
+    },
+    seedProjectExclusion: async (projectIdValue, taskId) => {
+      sqlite.prepare(`
+        INSERT INTO project_auto_include_exclusions (project_id, task_id, excluded_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(project_id, task_id)
+        DO UPDATE SET excluded_at = excluded.excluded_at
+      `).run(projectIdValue, taskId, NOW);
     },
     getHubProject: async (projectIdValue) => {
       const row = sqlite.prepare(`
@@ -132,6 +141,12 @@ describeGitHubProjectRepositoriesContract('SQLite', async (): Promise<GitHubProj
         SELECT task_id AS taskId FROM task_projects WHERE project_id = ? ORDER BY task_id
       `).all(projectIdValue) as Array<{ taskId: string }>;
       return rows.map((r) => r.taskId);
+    },
+    getLinkProvenance: async (projectIdValue, taskId) => {
+      const row = sqlite.prepare(`
+        SELECT provenance FROM task_projects WHERE project_id = ? AND task_id = ?
+      `).get(projectIdValue, taskId) as { provenance: string } | undefined;
+      return row?.provenance ?? null;
     },
     close: () => undefined,
   };

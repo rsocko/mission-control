@@ -470,6 +470,7 @@ function fakePersistence(): TaskCorePersistence {
         sourceRankings: [],
         taskTags: [],
         taskProjects: [],
+        momentumSignals: [],
         estimatedDurations: [],
       }),
     },

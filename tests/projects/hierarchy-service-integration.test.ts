@@ -610,6 +610,9 @@ describe('project hierarchy service', () => {
         placement: null,
       }],
     });
+    const [assignedMembership] = await db.select().from(schema.taskProjects)
+      .where((await import('drizzle-orm')).eq(schema.taskProjects.taskId, taskId));
+    expect(assignedMembership.provenance).toBe('local');
 
     const restored = await applyProjectHierarchyCommand({
       projectId,

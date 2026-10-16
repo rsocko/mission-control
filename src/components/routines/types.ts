@@ -12,7 +12,7 @@ export interface CadenceConfig {
   target?: number;
   minDays?: number;
   maxDays?: number;
-  preferredDay?: string;
+  preferredDay?: number | string;
 }
 
 export interface WeekCompletion {

@@ -74,6 +74,23 @@ export interface ProjectOption {
   phases: Array<{ id: string; name: string; color: string | null }>;
 }
 
+function HighlightedMatch({ text, query }: { text: string; query: string }) {
+  if (!query) return text;
+
+  const matchIndex = text.toLowerCase().indexOf(query);
+  if (matchIndex < 0) return text;
+
+  return (
+    <>
+      {text.slice(0, matchIndex)}
+      <mark className="rounded-sm bg-cyan-400/15 text-cyan-100">
+        {text.slice(matchIndex, matchIndex + query.length)}
+      </mark>
+      {text.slice(matchIndex + query.length)}
+    </>
+  );
+}
+
 function ProjectPicker({
   projects,
   suggestions,
@@ -89,35 +106,106 @@ function ProjectPicker({
 }) {
   const [query, setQuery] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const projectResultsRef = useRef<HTMLDivElement>(null);
+  const projectChoicesRef = useRef<HTMLDivElement>(null);
+  const projectOnlyButtonRef = useRef<HTMLButtonElement>(null);
 
+  const normalizedQuery = query.trim().toLowerCase();
+  const projectMatchesQuery = (project: ProjectOption) => (
+    normalizedQuery.length === 0
+    || project.name.toLowerCase().includes(normalizedQuery)
+    || project.phases.some((phase) => phase.name.toLowerCase().includes(normalizedQuery))
+  );
   const filteredProjects = projects.filter((project) => (
-    project.name.toLowerCase().includes(query.trim().toLowerCase())
+    projectMatchesQuery(project)
   ));
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const suggestedProjects = suggestions.flatMap((suggestion) => {
     const project = projects.find((candidate) => candidate.id === suggestion.id);
-    return project ? [{ project, suggestion }] : [];
+    return project && projectMatchesQuery(project) ? [{ project, suggestion }] : [];
   });
+
+  const focusAdjacentButton = (
+    container: HTMLDivElement | null,
+    currentTarget: EventTarget | null,
+    direction: 1 | -1,
+  ) => {
+    if (!container || !(currentTarget instanceof HTMLElement)) return;
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+    const currentIndex = buttons.indexOf(currentTarget as HTMLButtonElement);
+    if (currentIndex < 0) return;
+    buttons.at((currentIndex + direction + buttons.length) % buttons.length)?.focus();
+  };
+
+  const clearSelectedProject = () => {
+    setSelectedProjectId(null);
+    searchInputRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!selectedProject) return;
+    projectOnlyButtonRef.current?.focus();
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      clearSelectedProject();
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [selectedProject]);
 
   return (
     <div className="flex min-h-0 flex-col gap-2">
-      <div className="input-glow flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3">
-        <Search size={14} className="flex-shrink-0 text-[var(--text-tertiary)]" />
+      <div className="input-glow flex min-h-11 items-center gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+        <span
+          aria-hidden="true"
+          className="flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md bg-[var(--surface-2)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]"
+        >
+          <Search size={12} />
+          Filter
+        </span>
         <input
+          ref={searchInputRef}
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Find a project…"
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowDown') return;
+            const firstResult = projectResultsRef.current
+              ?.querySelector<HTMLButtonElement>('button:not(:disabled)');
+            if (!firstResult) return;
+            event.preventDefault();
+            firstResult.focus();
+          }}
+          placeholder="Search projects and phases…"
           aria-label="Find a project"
-          className="min-h-11 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+          className="min-h-11 min-w-0 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
           disabled={busy}
         />
+        {query && (
+          <button
+            type="button"
+            onClick={() => {
+              setQuery('');
+              searchInputRef.current?.focus();
+            }}
+            disabled={busy}
+            aria-label="Clear project filter"
+            className="flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:opacity-50"
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
       {selectedProject ? (
         <div className="rounded-xl border border-cyan-700/45 bg-cyan-950/25 p-3">
           <button
             type="button"
-            onClick={() => setSelectedProjectId(null)}
+            onClick={clearSelectedProject}
             className="mb-3 flex min-h-11 w-full items-center gap-2 text-left"
           >
             <span
@@ -129,8 +217,21 @@ function ProjectPicker({
             </span>
             <span className="text-xs text-cyan-300">Change</span>
           </button>
-          <div className="grid grid-cols-2 gap-2">
+          <div
+            ref={projectChoicesRef}
+            className="grid grid-cols-2 gap-2"
+            onKeyDown={(event) => {
+              if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
+              event.preventDefault();
+              focusAdjacentButton(
+                projectChoicesRef.current,
+                event.target,
+                event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1,
+              );
+            }}
+          >
             <button
+              ref={projectOnlyButtonRef}
               type="button"
               onClick={() => onApply(selectedProject.id, selectedProject.name)}
               disabled={busy}
@@ -168,13 +269,36 @@ function ProjectPicker({
           )}
         </div>
       ) : (
-        <div className="max-h-52 overflow-y-auto overscroll-contain pr-1">
+        <div
+          ref={projectResultsRef}
+          className="max-h-52 overflow-y-auto overscroll-contain pr-1"
+          onKeyDown={(event) => {
+            if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
+            const buttons = Array.from(
+              projectResultsRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [],
+            );
+            if (
+              event.key === 'ArrowUp'
+              && event.target === buttons[0]
+            ) {
+              event.preventDefault();
+              searchInputRef.current?.focus();
+              return;
+            }
+            event.preventDefault();
+            focusAdjacentButton(
+              projectResultsRef.current,
+              event.target,
+              event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1,
+            );
+          }}
+        >
           {suggestedProjects.length > 0 && (
             <div className="mb-3 rounded-xl border border-cyan-700/45 bg-cyan-950/25 p-2">
               <p className="px-1 pb-2 text-xs font-medium text-cyan-200">
                 Suggested from similar items
               </p>
-              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-1.5">
                 {suggestedProjects.map(({ project, suggestion }) => (
                   <button
                     key={project.id}
@@ -189,7 +313,7 @@ function ProjectPicker({
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-cyan-100">
-                        {project.name}
+                        <HighlightedMatch text={project.name} query={normalizedQuery} />
                       </span>
                       <span className="block truncate text-xs text-cyan-300/70">
                         {suggestion.reason}
@@ -201,27 +325,52 @@ function ProjectPicker({
               </div>
             </div>
           )}
-          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+          <div
+            data-testid="project-picker-grid"
+            className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-1.5"
+          >
           {loading && <span className="text-xs text-[var(--text-muted)]">Loading projects…</span>}
           {!loading && filteredProjects.length === 0 && (
-            <span className="text-xs text-[var(--text-muted)]">No active projects found</span>
+            <span className="text-xs text-[var(--text-muted)]">
+              {normalizedQuery ? 'No matching projects or phases found' : 'No active projects found'}
+            </span>
           )}
-          {filteredProjects.map((project) => (
-            <button
-              key={project.id}
-              type="button"
-              onClick={() => setSelectedProjectId(project.id)}
-              disabled={busy}
-              className="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-left text-sm text-[var(--text-secondary)] transition-colors hover:border-cyan-700/55 hover:bg-cyan-950/20 disabled:opacity-50"
-            >
-              <span
-                className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                style={{ backgroundColor: project.color }}
-              />
-              <span className="min-w-0 flex-1 truncate">{project.name}</span>
-              <ChartNetwork size={14} className="flex-shrink-0 text-[var(--text-muted)]" />
-            </button>
-          ))}
+          {filteredProjects.map((project) => {
+            const matchingPhases = normalizedQuery
+              ? project.phases.filter((phase) => phase.name.toLowerCase().includes(normalizedQuery))
+              : [];
+
+            return (
+              <button
+                key={project.id}
+                type="button"
+                onClick={() => setSelectedProjectId(project.id)}
+                disabled={busy}
+                className="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-left text-sm text-[var(--text-secondary)] transition-colors hover:border-cyan-700/55 hover:bg-cyan-950/20 disabled:opacity-50"
+              >
+                <span
+                  className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                  style={{ backgroundColor: project.color }}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">
+                    <HighlightedMatch text={project.name} query={normalizedQuery} />
+                  </span>
+                  {matchingPhases.length > 0 && (
+                    <span className="block truncate text-xs text-[var(--text-muted)]">
+                      {matchingPhases.map((phase, index) => (
+                        <span key={phase.id}>
+                          {index > 0 && ', '}
+                          <HighlightedMatch text={phase.name} query={normalizedQuery} />
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </span>
+                <ChartNetwork size={14} className="flex-shrink-0 text-[var(--text-muted)]" />
+              </button>
+            );
+          })}
           </div>
         </div>
       )}

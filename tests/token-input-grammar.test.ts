@@ -42,6 +42,18 @@ describe('Quick Add token highlighting', () => {
     expect(input.slice(project?.start, project?.end)).toBe('+Website Redesign');
   });
 
+  it('highlights project tokens only at token boundaries', () => {
+    const embedded = findTokens('Do something+something else', {
+      naturalLanguageDates: true,
+    });
+    const standalone = findTokens('Do something +something else', {
+      naturalLanguageDates: true,
+    });
+
+    expect(embedded.some(({ type }) => type === 'project')).toBe(false);
+    expect(standalone).toContainEqual(expect.objectContaining({ type: 'project' }));
+  });
+
   it('does not highlight metadata disabled for subtask entry', () => {
     const tokens = findTokens('Child #ops daily ^3', {
       naturalLanguageDates: true,

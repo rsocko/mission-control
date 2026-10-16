@@ -57,6 +57,8 @@ const tasks = [
     title: 'Alpha migration',
     priority: 'high',
     effort: 2,
+    subtaskDone: 1,
+    subtaskTotal: 2,
     sourceListName: 'Backlog',
     tags: [{ id: 'tag-design', name: 'Design', slug: 'design', type: 'label', color: null }],
     updatedAt: '2026-08-14T18:00:00.000Z',
@@ -216,6 +218,17 @@ describe('project tasks tab', () => {
     fireEvent.click(await screen.findByText('Alpha migration'));
 
     expect(await screen.findByTestId('task-detail-task-alpha')).toBeInTheDocument();
+  });
+
+  it('opens the Subtasks section from the task-list pill', async () => {
+    await renderProjectTab('Project Tasks');
+
+    fireEvent.click(await screen.findByRole('button', {
+      name: 'Open subtasks, 1 of 2 subtasks complete',
+    }));
+
+    expect(await screen.findByTestId('task-detail-task-alpha')).toBeInTheDocument();
+    expect(screen.getByTestId('subtasks-request-task-alpha')).toBeInTheDocument();
   });
 
   it('creates a new project task from the add menu without a phase target', async () => {

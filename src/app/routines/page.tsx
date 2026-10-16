@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { BarChart3, Calendar, CalendarCheck, ChevronLeft, ChevronRight, Loader2, Plus, Repeat } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { useSearchParams } from 'next/navigation';
-import { AddRoutineForm, BehaviorHeatmap, CadenceInsightsView, FlexibleRoutineCard, OverCompletionLog, WeeklyGrid, type HeatmapCompletion, type Routine } from '@/components/routines';
+import { BehaviorHeatmap, CadenceInsightsView, FlexibleRoutineCard, OverCompletionLog, RoutineForm, WeeklyGrid, type HeatmapCompletion, type Routine } from '@/components/routines';
 import ResetView from '@/components/reset/ResetView';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,7 @@ function RoutinesPageContent() {
   const [weekMonday, setWeekMonday] = useState(() => getWeekMonday(getClientToday()));
   const [heatmapData, setHeatmapData] = useState<HeatmapCompletion[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmState>({ open: false, title: '', message: '', confirmLabel: '', variant: 'danger', onConfirm: () => {} });
   const [highlightedRoutineId, setHighlightedRoutineId] = useState<string | null>(searchParams.get('highlight'));
   const today = getClientToday();
@@ -81,6 +82,10 @@ function RoutinesPageContent() {
 
   useEffect(() => { fetchRoutines(); }, [fetchRoutines]);
   useEffect(() => { if (activeTab === 'insights') fetchHeatmap(); }, [activeTab, fetchHeatmap]);
+  useEffect(() => {
+    if (!editingRoutine) return;
+    document.querySelector('[data-routine-editor]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [editingRoutine]);
 
   const toggleCompletion = async (routineId: string, date: string, isCompleted: boolean) => {
     try {
@@ -114,6 +119,11 @@ function RoutinesPageContent() {
         }
       },
     });
+  };
+
+  const startEditing = (routine: Routine) => {
+    setShowAddForm(false);
+    setEditingRoutine(routine);
   };
 
   const navigateWeek = (direction: -1 | 1) => {
@@ -162,22 +172,48 @@ function RoutinesPageContent() {
         <AnimatePresence mode="wait">
           {activeTab === 'routines' && (
             <motion.div key="routines" variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
+              {editingRoutine && (
+                <motion.div variants={fadeSlideUp}>
+                  <RoutineForm
+                    key={editingRoutine.id}
+                    routine={editingRoutine}
+                    onClose={() => setEditingRoutine(null)}
+                    onSaved={() => {
+                      setEditingRoutine(null);
+                      fetchRoutines();
+                    }}
+                  />
+                </motion.div>
+              )}
               {weeklyGroups.map((group) => (
                 <motion.div key={group.title} variants={fadeSlideUp}>
-                  <WeeklyGrid title={group.title} routines={group.routines} weekDates={weekDates} today={today} onToggle={toggleCompletion} onDelete={deleteRoutine} />
+                  <WeeklyGrid title={group.title} routines={group.routines} weekDates={weekDates} today={today} onToggle={toggleCompletion} onEdit={startEditing} onDelete={deleteRoutine} />
                 </motion.div>
               ))}
               {flexibleRoutines.length > 0 && (
                 <motion.div variants={fadeSlideUp}>
                   <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)]">
                     <div className="border-b border-[var(--border)] px-5 py-3"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Flexible / Target-Based</p></div>
-                    <div className="space-y-3 p-4">{flexibleRoutines.map((routine) => <FlexibleRoutineCard key={routine.id} routine={routine} today={today} weekDates={weekDates} onToggle={toggleCompletion} onDelete={deleteRoutine} />)}</div>
+                    <div className="space-y-3 p-4">{flexibleRoutines.map((routine) => <FlexibleRoutineCard key={routine.id} routine={routine} today={today} weekDates={weekDates} onToggle={toggleCompletion} onEdit={startEditing} onDelete={deleteRoutine} />)}</div>
                   </div>
                 </motion.div>
               )}
               {routinesList.length === 0 && <motion.div variants={fadeSlideUp} className="py-16 text-center"><Repeat size={40} className="mx-auto mb-4 text-[var(--text-muted)]" /><p className="text-sm text-[var(--text-secondary)]">No routines yet. Add your first one below.</p><p className="mt-1 text-xs text-[var(--text-muted)]">Missing a day is normal — it&apos;s not judged.</p></motion.div>}
               <motion.div variants={fadeSlideUp}>
-                {!showAddForm ? <Button variant="outline" onClick={() => setShowAddForm(true)} className="w-full border-dashed"><Plus size={16} /> Add Routine</Button> : <AddRoutineForm onClose={() => setShowAddForm(false)} onCreated={() => { setShowAddForm(false); fetchRoutines(); }} />}
+                {!showAddForm ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditingRoutine(null);
+                      setShowAddForm(true);
+                    }}
+                    className="w-full border-dashed"
+                  >
+                    <Plus size={16} /> Add Routine
+                  </Button>
+                ) : (
+                  <RoutineForm onClose={() => setShowAddForm(false)} onSaved={() => { setShowAddForm(false); fetchRoutines(); }} />
+                )}
               </motion.div>
             </motion.div>
           )}

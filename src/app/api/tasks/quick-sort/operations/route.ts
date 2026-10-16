@@ -33,7 +33,9 @@ interface ApplyOperationBody {
   };
 }
 
-const MAX_REVISION_REBASE_ATTEMPTS = 3;
+const MAX_REVISION_REBASE_ATTEMPTS = 6;
+const REVISION_REBASE_BASE_DELAY_MS = 25;
+const REVISION_REBASE_MAX_DELAY_MS = 250;
 const APPLYING_OPERATION_STALE_MS = 60_000;
 
 function operationResponse(operation: TaskQuickSortOperation) {
@@ -192,6 +194,14 @@ async function isTaskRevisionConflict(response: Response) {
   return body?.code === 'TASK_REVISION_CONFLICT';
 }
 
+function waitForRevisionRebase(attempt: number) {
+  const delay = Math.min(
+    REVISION_REBASE_BASE_DELAY_MS * (2 ** attempt),
+    REVISION_REBASE_MAX_DELAY_MS,
+  );
+  return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
 export async function POST(request: Request) {
   let body: ApplyOperationBody;
   try {
@@ -321,6 +331,7 @@ export async function POST(request: Request) {
       rebaseAttempts < MAX_REVISION_REBASE_ATTEMPTS
       && await isTaskRevisionConflict(patchResponse)
     ) {
+      await waitForRevisionRebase(rebaseAttempts);
       const rebasedBefore = await captureQuickSortTask(taskId);
       if (!rebasedBefore) {
         await quickSort.discardApplyingOperation(operationId);

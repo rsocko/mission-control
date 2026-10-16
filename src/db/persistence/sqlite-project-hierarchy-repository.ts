@@ -200,7 +200,10 @@ function applyMutations(
     switch (mutation.kind) {
       case 'add_task_membership':
         sqlite.prepare(`
-          INSERT OR IGNORE INTO task_projects (task_id, project_id) VALUES (?, ?)
+          INSERT INTO task_projects (task_id, project_id, provenance)
+          VALUES (?, ?, 'local')
+          ON CONFLICT(task_id, project_id)
+          DO UPDATE SET provenance = 'local'
         `).run(mutation.taskId, projectId);
         break;
       case 'remove_task_membership':

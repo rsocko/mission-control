@@ -107,6 +107,22 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/features', async (route) => {
     await route.fulfill({ json: { taskCreation: true, aiEnabled: true } });
   });
+  await page.route('**/api/projects-overview', async (route) => {
+    await route.fulfill({
+      json: {
+        categories: [{
+          projects: Array.from({ length: 8 }, (_, index) => ({
+            id: `project-${index + 1}`,
+            name: `Project ${index + 1}`,
+            color: index % 2 === 0 ? '#3b82f6' : '#06b6d4',
+            status: 'active',
+            phases: [],
+          })),
+        }],
+        uncategorized: [],
+      },
+    });
+  });
   await page.route('**/api/health', async (route) => {
     await route.fulfill({
       json: {
@@ -144,6 +160,31 @@ test('keeps quadrant queue context visible on desktop', async ({ page }) => {
   expect(queueBox).not.toBeNull();
   expect(workspaceBox).not.toBeNull();
   expect(workspaceBox!.x).toBeGreaterThanOrEqual(queueBox!.x + queueBox!.width);
+});
+
+test('distinguishes the project filter and expands the project grid on wide screens', async ({ page }) => {
+  await page.getByRole('button', { name: /Add to Project/ }).click();
+
+  const search = page.getByRole('searchbox', { name: 'Find a project' });
+  const grid = page.getByTestId('project-picker-grid');
+  await expect(search).toBeVisible();
+  await expect(grid.getByRole('button')).toHaveCount(8);
+
+  const layout = await grid.evaluate((element) => {
+    const searchTool = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Find a project"]',
+    )!.parentElement!;
+    const firstProject = element.querySelector<HTMLButtonElement>('button')!;
+
+    return {
+      columnCount: getComputedStyle(element).gridTemplateColumns.split(' ').length,
+      filterBackground: getComputedStyle(searchTool).backgroundColor,
+      projectBackground: getComputedStyle(firstProject).backgroundColor,
+    };
+  });
+
+  expect(layout.columnCount).toBeGreaterThanOrEqual(3);
+  expect(layout.filterBackground).not.toBe(layout.projectBackground);
 });
 
 test('supports numeric desktop shortcuts for the active queue', async ({ page }) => {

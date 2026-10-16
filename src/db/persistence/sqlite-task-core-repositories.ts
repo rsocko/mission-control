@@ -24,6 +24,7 @@ import {
   parseConfiguredInboxListEntries,
 } from '@/lib/tasks/core/inbox-list-entries';
 import { canonicalTaskSourceType } from '@/lib/tasks/source-hierarchy';
+import { getLocalToday } from '@/lib/utils/date';
 import {
   appSettings,
   connectorConfigs,
@@ -87,6 +88,7 @@ import {
   withCondition,
   type CanonicalTaskFilterInputs,
 } from './sqlite-task-filter';
+import { mergeSmartScoreMomentumRows } from '@/lib/tasks/core/smart-score-momentum';
 import {
   CLOSED_TASK_STATUSES,
   parseTaskQuickSortAction,
@@ -1871,6 +1873,71 @@ const MOVE_TASK_COLUMNS = {
   isBulkImport: tasks.isBulkImport,
 };
 
+async function readSmartScoreMomentum(
+  database: Drizzle,
+  taskIds: readonly string[],
+) {
+  if (!taskIds.length) return [];
+
+  const [myDayRows, historyRows, subtaskRows] = await Promise.all([
+    database.select({
+      taskId: myDayItems.taskId,
+      latestMyDayDate: myDayItems.date,
+      latestMyDayAddedAt: sql<string | null>`max(${myDayItems.addedAt})`,
+    }).from(myDayItems)
+      .where(and(
+        inArray(myDayItems.taskId, [...taskIds]),
+        eq(myDayItems.date, getLocalToday()),
+      ))
+      .groupBy(myDayItems.taskId, myDayItems.date),
+    database.select({
+      taskId: taskHistoryEvents.taskId,
+      lastMyDayCommittedAt: sql<string | null>`max(CASE WHEN ${taskHistoryEvents.eventType} = 'my_day_committed' THEN ${taskHistoryEvents.occurredAt} END)`,
+      lastMyDayWithdrawnAt: sql<string | null>`max(CASE WHEN ${taskHistoryEvents.eventType} = 'my_day_withdrawn' THEN ${taskHistoryEvents.occurredAt} END)`,
+      inProgressStartedAt: sql<string | null>`max(CASE WHEN ${taskHistoryEvents.eventType} = 'status_changed' AND ${taskHistoryEvents.newValue} = 'in_progress' THEN ${taskHistoryEvents.occurredAt} END)`,
+    }).from(taskHistoryEvents)
+      .where(and(
+        inArray(taskHistoryEvents.taskId, [...taskIds]),
+        inArray(taskHistoryEvents.eventType, [
+          'my_day_committed',
+          'my_day_withdrawn',
+          'status_changed',
+        ]),
+      ))
+      .groupBy(taskHistoryEvents.taskId),
+    database.select({
+      taskId: tasks.parentId,
+      lastSubtaskCompletedAt: sql<string | null>`max(${tasks.completedAt})`,
+    }).from(tasks)
+      .where(and(
+        inArray(tasks.parentId, [...taskIds]),
+        isNotNull(tasks.completedAt),
+      ))
+      .groupBy(tasks.parentId),
+  ]);
+
+  const planningByTaskId = new Map(taskIds.map((taskId) => [taskId, {
+    taskId,
+    latestMyDayDate: null as string | null,
+    latestMyDayAddedAt: null as string | null,
+    lastMyDayCommittedAt: null as string | null,
+    lastMyDayWithdrawnAt: null as string | null,
+    inProgressStartedAt: null as string | null,
+  }]));
+  for (const row of myDayRows) {
+    planningByTaskId.set(row.taskId, { ...planningByTaskId.get(row.taskId)!, ...row });
+  }
+  for (const row of historyRows) {
+    planningByTaskId.set(row.taskId, { ...planningByTaskId.get(row.taskId)!, ...row });
+  }
+
+  return mergeSmartScoreMomentumRows(
+    taskIds,
+    [...planningByTaskId.values()],
+    subtaskRows,
+  );
+}
+
 type RawMoveTaskRow = {
   [K in keyof typeof MOVE_TASK_COLUMNS]: unknown;
 };
@@ -2147,12 +2214,16 @@ class SqliteTaskAncillaryRepository implements TaskAncillaryRepository {
           }))).run();
         }
       }
-      const projectRows = tx.select({ projectId: taskProjects.projectId }).from(taskProjects)
+      const projectRows = tx.select({
+        projectId: taskProjects.projectId,
+        provenance: taskProjects.provenance,
+      }).from(taskProjects)
         .where(eq(taskProjects.taskId, input.sourceTaskId)).all();
       if (projectRows.length) {
-        tx.insert(taskProjects).values(projectRows.map(({ projectId }) => ({
+        tx.insert(taskProjects).values(projectRows.map(({ projectId, provenance }) => ({
           taskId: input.newTaskId,
           projectId,
+          provenance,
         }))).run();
       }
       return { kind: 'committed', connectorType: connector.type } as const;
@@ -2785,10 +2856,13 @@ class SqliteTaskCollectionReadRepository implements TaskCollectionReadRepository
         }
       : input.page);
     const hydrated = await this.hydrate(ids, input.includeTags || input.includeScoreInputs || smart);
-    const rankings = smart || input.includeScoreInputs
-      ? await this.database.select().from(sourceRankings)
-          .orderBy(asc(sourceRankings.rank), asc(sourceRankings.id))
-      : [];
+    const [rankings, momentumSignals] = smart || input.includeScoreInputs
+      ? await Promise.all([
+          this.database.select().from(sourceRankings)
+            .orderBy(asc(sourceRankings.rank), asc(sourceRankings.id)),
+          readSmartScoreMomentum(this.database, ids),
+        ])
+      : [[], []];
     return {
       ...hydrated,
       total,
@@ -2797,7 +2871,7 @@ class SqliteTaskCollectionReadRepository implements TaskCollectionReadRepository
       facetCounts,
       availableTags,
       smartScore: smart || input.includeScoreInputs
-        ? { rows: hydrated.rows, sourceRankings: rankings }
+        ? { rows: hydrated.rows, sourceRankings: rankings, momentumSignals }
         : null,
     };
   }
@@ -3818,13 +3892,17 @@ class SqliteTaskMutationRepository implements TaskMutationRepository {
                 tagId: row.tagId,
               }))).run();
             }
-            const sourceProjects = tx.select({ projectId: taskProjects.projectId })
+            const sourceProjects = tx.select({
+              projectId: taskProjects.projectId,
+              provenance: taskProjects.provenance,
+            })
               .from(taskProjects)
               .where(eq(taskProjects.taskId, request.taskId)).all();
             if (sourceProjects.length) {
               tx.insert(taskProjects).values(sourceProjects.map((row) => ({
                 taskId: successor.id,
                 projectId: row.projectId,
+                provenance: row.provenance,
               }))).run();
             }
             const phases = tx.select().from(projectPhaseItems)
@@ -5857,11 +5935,12 @@ class SqliteTaskOrganizationRepository implements TaskOrganizationRepository {
         sourceRankings: rankingRows,
         taskTags: [],
         taskProjects: [],
+        momentumSignals: [],
         estimatedDurations: [],
       };
     }
 
-    const [tagRows, projectRows, scheduleRows] = await Promise.all([
+    const [tagRows, projectRows, scheduleRows, momentumSignals] = await Promise.all([
       this.database.select({
         taskId: taskTags.taskId,
         tagId: tags.id,
@@ -5885,6 +5964,7 @@ class SqliteTaskOrganizationRepository implements TaskOrganizationRepository {
       }).from(taskSchedules)
         .where(inArray(taskSchedules.taskId, taskIds))
         .orderBy(asc(taskSchedules.taskId)),
+      readSmartScoreMomentum(this.database, taskIds),
     ]);
 
     return {
@@ -5896,6 +5976,7 @@ class SqliteTaskOrganizationRepository implements TaskOrganizationRepository {
         tagName: row.tagName,
       })),
       taskProjects: projectRows,
+      momentumSignals,
       estimatedDurations: scheduleRows,
     };
   }

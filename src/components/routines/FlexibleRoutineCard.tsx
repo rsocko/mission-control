@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Flame, Plus, Trash2 } from 'lucide-react';
+import { Check, Flame, Pencil, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { type Routine } from './types';
 
@@ -9,6 +9,7 @@ interface FlexibleRoutineCardProps {
   today: string;
   weekDates: string[];
   onToggle: (routineId: string, date: string, isCompleted: boolean) => void;
+  onEdit: (routine: Routine) => void;
   onDelete: (id: string) => void;
 }
 
@@ -17,6 +18,7 @@ export function FlexibleRoutineCard({
   today,
   weekDates,
   onToggle,
+  onEdit,
   onDelete,
 }: FlexibleRoutineCardProps) {
   void weekDates;
@@ -122,9 +124,20 @@ export function FlexibleRoutineCard({
             {isCompletedToday ? 'Done' : '+1'}
           </button>
           <button
+            type="button"
+            onClick={() => onEdit(routine)}
+            className="rounded-[var(--radius-sm)] p-1 text-[var(--text-muted)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+            title="Edit routine"
+            aria-label={`Edit ${routine.name}`}
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            type="button"
             onClick={() => onDelete(routine.id)}
             className="rounded-[var(--radius-sm)] p-1 text-[var(--text-muted)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-2)] hover:text-[var(--danger)]"
-            title="Archive"
+            title="Archive routine"
+            aria-label={`Archive ${routine.name}`}
           >
             <Trash2 size={13} />
           </button>

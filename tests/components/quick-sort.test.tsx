@@ -306,7 +306,9 @@ describe('Quick Sort planning horizon queue', () => {
       />,
     );
 
-    expect(screen.getAllByRole('button').every((button) => button.hasAttribute('disabled'))).toBe(true);
+    const busyButtons = screen.getAllByRole('button');
+    expect(busyButtons.every((button) => button.hasAttribute('disabled'))).toBe(true);
+    expect(busyButtons.every((button) => !button.className.includes('opacity-40'))).toBe(true);
   });
 
   it('offers all planning horizon actions', () => {

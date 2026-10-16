@@ -542,26 +542,33 @@ describe('QuickSortMode task drawer', () => {
   });
 
   it('records skipped tasks without mutating task fields', async () => {
-    const fetchMock = vi.fn<typeof fetch>(
-      async () => new Response(JSON.stringify({ success: true })),
-    );
+    let resolveSkip: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn<typeof fetch>(() => new Promise<Response>((resolve) => {
+      resolveSkip = resolve;
+    }));
     vi.stubGlobal('fetch', fetchMock);
     const { unmount } = render(<QuickSortMode />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open no-tags queue' }));
     fireEvent.click(screen.getByRole('button', { name: 'Skip task' }));
 
-    await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
+    expect(mocks.dismiss).toHaveBeenCalledWith('task-1');
+    expect(mocks.refreshCounts).not.toHaveBeenCalled();
     const patchCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks/quick-sort/operations');
     if (!patchCall) throw new Error('Expected Quick Sort skip request');
     const body = JSON.parse(String(patchCall[1]?.body));
     expect(body).toMatchObject({ action: 'skipped', patch: {} });
-    expect(mocks.refreshCounts).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      if (!resolveSkip) throw new Error('Expected pending Quick Sort skip request');
+      resolveSkip(new Response(JSON.stringify({ success: true })));
+    });
+    await waitFor(() => expect(mocks.refreshCounts).toHaveBeenCalledOnce());
 
     unmount();
   });
 
-  it('keeps a task visible when recording its skip fails', async () => {
+  it('restores a task when recording its optimistic skip fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 500 })));
     render(<QuickSortMode />);
 
@@ -569,7 +576,11 @@ describe('QuickSortMode task drawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Skip task' }));
 
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Failed to skip task'));
-    expect(mocks.dismiss).not.toHaveBeenCalled();
+    expect(mocks.dismiss).toHaveBeenCalledWith('task-1');
+    expect(mocks.restoreTask).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task-1' }),
+      0,
+    );
   });
 
   it('allows skip when the upstream source blocks snooze', async () => {

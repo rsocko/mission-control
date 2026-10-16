@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Loader2, Plus, Save, X } from 'lucide-react';
+import { IconPickerButton } from '@rsocko/icon-picker/picker';
 import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import {
@@ -132,16 +133,15 @@ export function RoutineForm({ routine, onClose, onSaved }: RoutineFormProps) {
             className="w-full rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none transition-colors duration-[var(--transition-fast)] focus:border-[var(--accent-500)]"
           />
         </label>
-        <label className="block text-sm">
+        <div className="block text-sm">
           <span className="mb-2 block font-medium text-[var(--text-secondary)]">Icon</span>
-          <input
-            type="text"
-            value={icon}
-            onChange={(event) => setIcon(event.target.value)}
-            placeholder="Optional"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none transition-colors duration-[var(--transition-fast)] focus:border-[var(--accent-500)]"
+          <IconPickerButton
+            value={icon || null}
+            onChange={setIcon}
+            size="md"
+            label="Choose routine icon"
           />
-        </label>
+        </div>
       </div>
 
       <label className="block text-sm">

@@ -1,7 +1,6 @@
 export const DEFAULT_TASK_PAGE_SIZE = 50;
 export const MAX_TASK_PAGE_SIZE = 200;
 export const MAX_TASK_OFFSET = 100_000;
-export const SMART_SCORE_CANDIDATE_LIMIT = 1_000;
 
 export type TaskPaginationResult =
   | { ok: true; limit: number; offset: number }

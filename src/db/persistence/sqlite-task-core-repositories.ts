@@ -462,6 +462,7 @@ class SqliteTaskQueryRepository implements TaskQueryRepository {
       : column;
 
     const smartOrder = page.order.field === 'smartScore'
+      || page.order.field === 'smartScorePercentile'
       ? [
           asc(PRIORITY_ORDER_EXPRESSION),
           asc(sql`CASE WHEN ${tasks.dueDate} IS NULL THEN 1 ELSE 0 END`),
@@ -2826,9 +2827,9 @@ class SqliteTaskCollectionReadRepository implements TaskCollectionReadRepository
     includeTags: boolean;
     includeScoreInputs: boolean;
     countsOnly: boolean;
-    smartScoreCandidateLimit: number;
   }): Promise<TaskCollectionResult> {
-    const smart = input.page.order.field === 'smartScore';
+    const smart = input.page.order.field === 'smartScore'
+      || input.page.order.field === 'smartScorePercentile';
     const [stats, sourceCounts, facetCounts, availableTags, total] = await Promise.all([
       this.queries.getStats(input.spec),
       this.queries.getSourceCounts(input.spec),
@@ -2848,30 +2849,39 @@ class SqliteTaskCollectionReadRepository implements TaskCollectionReadRepository
         smartScore: null,
       };
     }
-    const ids = await this.queries.listTaskIds(input.spec, smart
-      ? {
-          order: input.page.order,
-          limit: input.smartScoreCandidateLimit,
+    const includeScores = smart || input.includeScoreInputs;
+    const scoreIds = includeScores && total > 0
+      ? await this.queries.listTaskIds(input.spec, {
+          order: { field: 'smartScore', direction: 'desc' },
+          limit: total,
           offset: 0,
-        }
-      : input.page);
-    const hydrated = await this.hydrate(ids, input.includeTags || input.includeScoreInputs || smart);
-    const [rankings, momentumSignals] = smart || input.includeScoreInputs
+        })
+      : [];
+    const pageIds = smart
+      ? scoreIds
+      : await this.queries.listTaskIds(input.spec, input.page);
+    const scoreHydrated = includeScores
+      ? await this.hydrate(scoreIds, true)
+      : null;
+    const pageHydrated = smart
+      ? scoreHydrated!
+      : await this.hydrate(pageIds, input.includeTags);
+    const [rankings, momentumSignals] = includeScores
       ? await Promise.all([
           this.database.select().from(sourceRankings)
             .orderBy(asc(sourceRankings.rank), asc(sourceRankings.id)),
-          readSmartScoreMomentum(this.database, ids),
+          readSmartScoreMomentum(this.database, scoreIds),
         ])
       : [[], []];
     return {
-      ...hydrated,
+      ...pageHydrated,
       total,
       stats,
       sourceCounts,
       facetCounts,
       availableTags,
-      smartScore: smart || input.includeScoreInputs
-        ? { rows: hydrated.rows, sourceRankings: rankings, momentumSignals }
+      smartScore: includeScores
+        ? { rows: scoreHydrated!.rows, sourceRankings: rankings, momentumSignals }
         : null,
     };
   }

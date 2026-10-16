@@ -1421,7 +1421,6 @@ export function describeTaskCoreContract(
           includeTags: true,
           includeScoreInputs: false,
           countsOnly: false,
-          smartScoreCandidateLimit: 100,
         });
         expect(collection.rows.map((row) => row.id)).toEqual(['task-literal']);
         expect(collection.rows[0]).toMatchObject({
@@ -1451,6 +1450,47 @@ export function describeTaskCoreContract(
             'tag-selected': 'Selected',
           },
         });
+      });
+
+      it('returns complete score inputs while preserving the requested page', async () => {
+        await harness.insertTasks(baseTasks());
+
+        const collection = await harness.persistence.collections.readTaskCollection({
+          spec: makeSpec(),
+          page: { order: { field: 'createdAt', direction: 'asc' }, limit: 1, offset: 0 },
+          includeTags: true,
+          includeScoreInputs: true,
+          countsOnly: false,
+        });
+
+        expect(collection.rows).toHaveLength(1);
+        expect(collection.smartScore?.rows).toHaveLength(collection.total);
+        expect(collection.smartScore?.momentumSignals).toHaveLength(collection.total);
+      });
+
+      it('supports score percentile pagination beyond the former 1,000-task ceiling', async () => {
+        await harness.insertTasks(Array.from({ length: 1_005 }, (_, index) => ({
+          id: `ranked-task-${String(index).padStart(4, '0')}`,
+          title: `Ranked task ${index}`,
+          sourceId: `local:ranked-${index}`,
+          priority: index < 5 ? 'critical' : 'medium',
+        })));
+
+        const collection = await harness.persistence.collections.readTaskCollection({
+          spec: makeSpec(),
+          page: {
+            order: { field: 'smartScorePercentile', direction: 'desc' },
+            limit: 5,
+            offset: 1_000,
+          },
+          includeTags: true,
+          includeScoreInputs: false,
+          countsOnly: false,
+        });
+
+        expect(collection.total).toBe(1_005);
+        expect(collection.rows).toHaveLength(1_005);
+        expect(collection.smartScore?.rows).toHaveLength(1_005);
       });
 
       it('creates once from triage and replays without duplicating the task or event', async () => {

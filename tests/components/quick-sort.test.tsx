@@ -172,6 +172,9 @@ describe('Quick Sort planning horizon queue', () => {
 
     expect(screen.getByRole('button', { name: /Mission Control Delivery/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Home Improvements/i })).not.toBeInTheDocument();
+    const phaseMatch = screen.getByText('Delivery');
+    expect(phaseMatch.tagName).toBe('MARK');
+    expect(phaseMatch).toHaveClass('bg-cyan-400/15', 'text-cyan-100');
 
     fireEvent.click(screen.getByRole('button', { name: /Mission Control Delivery/i }));
     expect(screen.getByRole('button', { name: /Mission Control Change/i })).toBeInTheDocument();

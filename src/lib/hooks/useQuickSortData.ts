@@ -79,6 +79,7 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
   const [suggestions, setSuggestions] = useState<Record<string, QuickSortSuggestion>>({});
   const [recentTagIds, setRecentTagIds] = useState<string[]>([]);
   const queueRequestId = useRef(0);
+  const countRequestId = useRef(0);
   const doneIdsRef = useRef<Set<string>>(new Set());
 
   /** Build query string from scope filter. */
@@ -100,7 +101,10 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
     const dismissedAtStart = new Set(doneIdsRef.current);
     if (!options.background) setLoading(true);
     try {
-      const res = await fetch(`/api/tasks/quick-sort?mode=${m}&order=${order}${scopeParams(scopeFilter)}`);
+      const res = await fetch(
+        `/api/tasks/quick-sort?mode=${m}&order=${order}${scopeParams(scopeFilter)}`,
+        { cache: 'no-store' },
+      );
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       if (queueRequestId.current !== requestId) return;
@@ -118,7 +122,7 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
       // Fetch suggestions for the first batch in the background
       if (fetched.length > 0 && m !== 'no_planning_horizon' && m !== 'quadrant') {
         const ids = fetched.slice(0, 20).map((t) => t.id).join(',');
-        fetch(`/api/tasks/quick-sort/suggestions?taskIds=${ids}`)
+        fetch(`/api/tasks/quick-sort/suggestions?taskIds=${ids}`, { cache: 'no-store' })
           .then((r) => r.json())
           .then((d) => setSuggestions((prev) => ({ ...prev, ...(d.suggestions ?? {}) })))
           .catch(() => {});
@@ -134,10 +138,15 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
   }, [scopeParams, scopeFilter, order]);
 
   const fetchCounts = useCallback(async () => {
+    const requestId = ++countRequestId.current;
     try {
-      const res = await fetch(`/api/tasks/quick-sort?counts=true${scopeParams(scopeFilter)}`);
+      const res = await fetch(
+        `/api/tasks/quick-sort?counts=true${scopeParams(scopeFilter)}`,
+        { cache: 'no-store' },
+      );
       if (!res.ok) return;
       const data = await res.json();
+      if (countRequestId.current !== requestId) return;
       setCounts(data.counts ?? null);
     } catch {
       // Silent

@@ -56,6 +56,14 @@ describe('useQuickSortData background revalidation', () => {
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
       expect(result.current.tasks).toEqual([task]);
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/tasks/quick-sort?mode=no_tags'),
+        { cache: 'no-store' },
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/tasks/quick-sort?counts=true'),
+        { cache: 'no-store' },
+      );
     });
 
     await act(async () => {
@@ -108,5 +116,61 @@ describe('useQuickSortData background revalidation', () => {
     });
 
     expect(result.current.tasks).toEqual([]);
+  });
+
+  it('ignores an older count response that finishes after a newer refresh', async () => {
+    let countRequests = 0;
+    let resolveOlderCount: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('counts=true')) {
+        countRequests++;
+        if (countRequests === 1) {
+          return new Promise<Response>((resolve) => {
+            resolveOlderCount = resolve;
+          });
+        }
+        return new Response(JSON.stringify({
+          counts: {
+            no_priority: 0,
+            quadrant: 0,
+            no_effort: 0,
+            no_tags: 0,
+            no_planning_horizon: 0,
+            no_project: 0,
+          },
+        }));
+      }
+      if (url.includes('/suggestions?')) {
+        return new Response(JSON.stringify({ suggestions: {} }));
+      }
+      return new Response(JSON.stringify({ tasks: [task] }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useQuickSortData('no_tags'));
+    await waitFor(() => expect(result.current.tasks).toEqual([task]));
+
+    act(() => {
+      result.current.refreshCounts();
+    });
+    await waitFor(() => expect(result.current.counts?.no_project).toBe(0));
+
+    await act(async () => {
+      if (!resolveOlderCount) throw new Error('Expected pending count request');
+      resolveOlderCount(new Response(JSON.stringify({
+        counts: {
+          no_priority: 21,
+          quadrant: 21,
+          no_effort: 21,
+          no_tags: 21,
+          no_planning_horizon: 21,
+          no_project: 21,
+        },
+      })));
+      await Promise.resolve();
+    });
+
+    expect(result.current.counts?.no_project).toBe(0);
   });
 });

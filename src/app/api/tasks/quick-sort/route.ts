@@ -13,7 +13,12 @@ import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 export type QuickSortQueueMode = TaskQuickSortQueueMode;
 export type QuickSortOrder = TaskQuickSortOrder;
 
+export const dynamic = 'force-dynamic';
+
 const LIMIT = 50;
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'private, no-store, max-age=0',
+};
 
 /**
  * GET /api/tasks/quick-sort?mode=no_priority|quadrant|no_effort|no_tags|no_planning_horizon|no_project
@@ -54,7 +59,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       sources: buildQuickSortSourceData(rows, definitions),
-    });
+    }, { headers: NO_STORE_HEADERS });
   }
 
   const scope: TaskQuickSortScope = {
@@ -69,11 +74,14 @@ export async function GET(request: Request) {
   if (countsOnly) {
     return NextResponse.json({
       counts: await taskReads.getQuickSortCounts(scope),
-    });
+    }, { headers: NO_STORE_HEADERS });
   }
 
   if (!mode || !['no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon', 'no_project'].includes(mode)) {
-    return NextResponse.json({ error: 'Invalid mode' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Invalid mode' },
+      { status: 400, headers: NO_STORE_HEADERS },
+    );
   }
 
   const rows = await taskReads.listQuickSortTasks({ ...scope, mode, order, limit: LIMIT });
@@ -95,5 +103,5 @@ export async function GET(request: Request) {
     }),
     returned: rows.length,
     limit: LIMIT,
-  });
+  }, { headers: NO_STORE_HEADERS });
 }

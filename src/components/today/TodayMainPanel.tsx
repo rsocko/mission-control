@@ -17,6 +17,7 @@ import {
   Timer,
   Trash2,
   Network,
+  Sparkles,
   Wand2,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -71,6 +72,7 @@ import { InteractiveTimeline } from '@/components/today/InteractiveTimeline';
 import { MobileSuggestions } from '@/components/today/MobileSuggestions';
 import { ConnectorIcon, SortableTaskRow } from '@/components/today/SortableTaskRow';
 import { TimerPanel } from '@/components/today/TimerPanel';
+import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { uiLogger } from '@/lib/client-logger';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
@@ -155,6 +157,7 @@ interface TodayMainPanelProps {
     addToProject: (taskId: string, projectId: string, phaseId?: string | null) => Promise<void>;
     saveTemplateTask: Dispatch<SetStateAction<SaveTemplateTask | null>>;
     openNotes: (taskId: string, mode: 'read' | 'edit') => void;
+    openSubtasks: (taskId: string) => void;
     addToDay?: (taskId: string) => void;
     moveToSource?: (taskId: string) => void;
   };
@@ -174,7 +177,6 @@ interface TodayMainPanelProps {
     openScheduleModal: (taskId: string | null) => void;
     whatsNextResult: string | null;
     setWhatsNextResult: Dispatch<SetStateAction<string | null>>;
-    getWhatsNext: () => Promise<void>;
     dayPlan: DayPlan | null;
     setDayPlan: Dispatch<SetStateAction<DayPlan | null>>;
     planningDay: boolean;
@@ -232,7 +234,8 @@ export function TodayMainPanel({
     setDueDate: onSetTaskDueDate, setLocalDisposition: onSetTaskLocalDisposition,
     moveToList: onMoveTaskToList, deleteTask: onDeleteTask,
     addToProject: onAddTaskToProject, saveTemplateTask: onSaveTemplateTask,
-    openNotes: onOpenTaskNotes, addToDay: onAddToDay, moveToSource: onMoveToSource,
+    openNotes: onOpenTaskNotes, openSubtasks: onOpenTaskSubtasks,
+    addToDay: onAddToDay, moveToSource: onMoveToSource,
   } = taskActions;
   const {
     selectedTaskId, selectTask: onSelectTask, doubleClickTask: onDoubleClickTask,
@@ -243,7 +246,7 @@ export function TodayMainPanel({
   } = focus;
   const {
     openScheduleModal: onOpenScheduleModal, whatsNextResult,
-    setWhatsNextResult: onSetWhatsNextResult, getWhatsNext: onGetWhatsNext, dayPlan,
+    setWhatsNextResult: onSetWhatsNextResult, dayPlan,
     setDayPlan: onSetDayPlan, planningDay, planMyDay: onPlanMyDay,
     scheduleAtTime: onScheduleAtTime, unscheduleTask: onUnscheduleTask,
     resizeScheduledTask: onResizeScheduledTask, setConfirmDialog: onSetConfirmDialog,
@@ -596,8 +599,16 @@ export function TodayMainPanel({
             <TodayViewSwitcher todayISO={todayISO} view={view} onViewChange={setView} />
             <button onClick={() => setShowCalendar((current) => !current)} aria-pressed={showCalendar} className={`px-3 py-1.5 text-xs rounded-md border font-medium flex items-center gap-1 transition-colors ${showCalendar ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/20' : 'bg-transparent text-[var(--text-tertiary)] border-[var(--border)] hover:bg-[var(--surface-1)]'}`}><Calendar size={12} />Calendar</button>
             <button onClick={() => onSetShowTimer((current) => !current)} aria-pressed={showTimer} className={`px-3 py-1.5 text-xs rounded-md border font-medium flex items-center gap-1 transition-colors ${showTimer ? 'bg-blue-500/15 text-blue-300 border-blue-500/30 hover:bg-blue-500/20' : 'bg-transparent text-[var(--text-tertiary)] border-[var(--border)] hover:bg-[var(--surface-1)]'}`}><Timer size={12} />Timer</button>
-            <button onClick={() => { void onGetWhatsNext(); }} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700 font-medium flex items-center gap-1"><Target size={12} /> What&apos;s Next?</button>
-            <button onClick={() => { void onPlanMyDay(); }} disabled={planningDay} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 font-medium flex items-center gap-1 disabled:opacity-50">{planningDay ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}{planningDay ? 'Planning...' : 'AI Plan Day'}</button>
+            <Button
+              variant="ai"
+              size="sm"
+              onClick={() => { void onPlanMyDay(); }}
+              disabled={planningDay}
+              className="h-7 gap-1 px-3 text-xs"
+            >
+              {planningDay ? <Loader2 className="animate-spin" /> : <Sparkles />}
+              {planningDay ? 'Planning...' : 'AI Plan Day'}
+            </Button>
             {allItemsByStatus.open.length > 0 && (
               <button onClick={() => toggleCalm({ type: 'my-day', taskIds: allItemsByStatus.open.map(i => i.taskId), label: 'My Day' })} className="px-3 py-1.5 text-xs bg-transparent text-[var(--text-tertiary)] border border-[var(--border)] rounded-md hover:bg-[var(--surface-1)] font-medium flex items-center gap-1"><Moon size={12} />Calm</button>
             )}
@@ -977,7 +988,7 @@ export function TodayMainPanel({
                   {allItemsByStatus.completed.length + allItemsByStatus.cancelled.length > 0 ? (
                     <p className="text-sm">No open tasks remain.</p>
                   ) : (
-                    <><p className="text-sm mb-2">A fresh day &mdash; let&apos;s pick your focus!</p><p className="text-xs">Grab something from the suggestions panel, or tap &quot;What&apos;s Next?&quot; and let AI pick for you.</p></>
+                    <><p className="text-sm mb-2">A fresh day &mdash; let&apos;s pick your focus!</p><p className="text-xs">Grab something from the suggestions panel, or choose &quot;Suggest Next Task&quot; and let AI pick for you.</p></>
                   )}
                 </div>
               ) : activeItems.length === 0 ? (
@@ -1036,6 +1047,7 @@ export function TodayMainPanel({
                                       onFilterPriority={filterByPriority}
                                       onFilterStatus={filterByStatus}
                                       onOpenNotes={(mode) => onOpenTaskNotes(item.taskId, mode)}
+                                      onOpenSubtasks={() => onOpenTaskSubtasks(item.taskId)}
                                       sourceLists={sourceLists}
                                       listGroups={listGroups}
                                       projects={projects}

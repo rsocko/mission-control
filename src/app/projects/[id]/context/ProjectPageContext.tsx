@@ -17,6 +17,7 @@ import type { HubProject, TaskContextMenuActions } from '@/components/task-list/
 import type {
   TaskDetailMode,
   TaskNotesOpenRequest,
+  TaskSubtasksOpenRequest,
 } from '@/components/task-detail/task-detail-types';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
@@ -112,8 +113,11 @@ interface ProjectPageTaskInteractionsContextValue {
   detailMode: Exclude<TaskDetailMode, 'mobile'>;
   setDetailMode: Dispatch<SetStateAction<Exclude<TaskDetailMode, 'mobile'>>>;
   notesOpenRequest: TaskNotesOpenRequest | null;
+  subtasksOpenRequest: TaskSubtasksOpenRequest | null;
   openTaskNotes: (taskId: string, mode: 'read' | 'edit') => void;
+  openTaskSubtasks: (taskId: string) => void;
   clearTaskNotesRequest: () => void;
+  clearTaskSubtasksRequest: () => void;
   selectTask: (taskId: string) => void;
   handleTaskClick: (taskId: string) => void;
   handleTaskDoubleClick: (taskId: string) => void;
@@ -186,12 +190,14 @@ export function ProjectPageProvider({
   const [detailMode, setDetailMode] =
     useState<Exclude<TaskDetailMode, 'mobile'>>('panel');
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
+  const [subtasksOpenRequest, setSubtasksOpenRequest] = useState<TaskSubtasksOpenRequest | null>(null);
   const [allProjects, setAllProjects] = useState<HubProject[]>([]);
   const hierarchyRevisionRef = useRef(0);
   const hierarchyProjectIdRef = useRef<string | null>(null);
   const hierarchyUndoTrackerRef = useRef(new ProjectHierarchyUndoTracker());
   const loadRequestIdRef = useRef(0);
   const notesRequestIdRef = useRef(0);
+  const subtasksRequestIdRef = useRef(0);
   const loadedProjectIdRef = useRef<string | null>(null);
   const { setQuickAddFilter, clearQuickAddFilter } = useQuickAddContext();
 
@@ -203,6 +209,7 @@ export function ProjectPageProvider({
     selectedTaskId,
     onSelectionChange: (taskId) => {
       setNotesOpenRequest(null);
+      setSubtasksOpenRequest(null);
       setDetailMode('panel');
       setSelectedTaskId(taskId);
     },
@@ -211,11 +218,13 @@ export function ProjectPageProvider({
 
   const handleGraphTaskSelect = useCallback((taskId: string | null) => {
     setNotesOpenRequest(null);
+    setSubtasksOpenRequest(null);
     setDetailMode('panel');
     setSelectedTaskId(taskId);
   }, [setSelectedTaskId]);
 
   const openTaskNotes = useCallback((taskId: string, mode: 'read' | 'edit') => {
+    setSubtasksOpenRequest(null);
     setDetailMode('panel');
     setSelectedTaskId(taskId);
     notesRequestIdRef.current += 1;
@@ -226,8 +235,23 @@ export function ProjectPageProvider({
     });
   }, [setSelectedTaskId]);
 
+  const openTaskSubtasks = useCallback((taskId: string) => {
+    setNotesOpenRequest(null);
+    setDetailMode('panel');
+    setSelectedTaskId(taskId);
+    subtasksRequestIdRef.current += 1;
+    setSubtasksOpenRequest({
+      requestId: subtasksRequestIdRef.current,
+      taskId,
+    });
+  }, [setSelectedTaskId]);
+
   const clearTaskNotesRequest = useCallback(() => {
     setNotesOpenRequest(null);
+  }, []);
+
+  const clearTaskSubtasksRequest = useCallback(() => {
+    setSubtasksOpenRequest(null);
   }, []);
 
   const applyHierarchySnapshot = useCallback((snapshot: ProjectHierarchySnapshot) => {
@@ -626,8 +650,11 @@ export function ProjectPageProvider({
     detailMode,
     setDetailMode,
     notesOpenRequest,
+    subtasksOpenRequest,
     openTaskNotes,
+    openTaskSubtasks,
     clearTaskNotesRequest,
+    clearTaskSubtasksRequest,
     selectTask,
     handleTaskClick,
     handleTaskDoubleClick,
@@ -645,12 +672,14 @@ export function ProjectPageProvider({
   }), [
     allProjects,
     clearTaskNotesRequest,
+    clearTaskSubtasksRequest,
     detailMode,
     handleGraphTaskSelect,
     handleTaskClick,
     handleTaskDoubleClick,
     notesOpenRequest,
     openTaskNotes,
+    openTaskSubtasks,
     selectedTaskId,
     setSelectedTaskId,
     taskActions.completingIds,
@@ -663,6 +692,7 @@ export function ProjectPageProvider({
     taskActions.myDayTaskIds,
     taskActions.pendingTaskRemoval,
     selectTask,
+    subtasksOpenRequest,
   ]);
 
   return (

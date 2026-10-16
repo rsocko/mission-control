@@ -140,6 +140,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   } = useProjectPageMutations();
   const {
     clearTaskNotesRequest,
+    clearTaskSubtasksRequest,
     detailMode,
     handleAddToMyDay,
     handleCompleteTask,
@@ -149,6 +150,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     pendingTaskRemoval,
     cancelPendingTaskRemoval,
     confirmPendingTaskRemoval,
+    subtasksOpenRequest,
     selectedTaskId,
     setDetailMode,
     setSelectedTaskId,
@@ -741,6 +743,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             taskId={selectedTaskId}
             onClose={(reason) => {
               clearTaskNotesRequest();
+              clearTaskSubtasksRequest();
               setSelectedTaskId(
                 null,
                 reason === 'task-removed' ? { history: 'replace' } : undefined,
@@ -776,6 +779,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             portalDialog
             focusPanelOnMount
             notesOpenRequest={notesOpenRequest}
+            subtasksOpenRequest={subtasksOpenRequest}
           />
         </motion.div>
       ) : null}

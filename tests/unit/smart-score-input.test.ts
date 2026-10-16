@@ -4,6 +4,7 @@ import { computeSmartScore, createScoreInput, type PriorityEntity } from '@/lib/
 const task = {
   id: 'task-1',
   title: 'Plan launch',
+  status: 'todo' as const,
   description: 'Coordinate with Jordan',
   priority: 'none' as const,
   dueDate: '2026-08-01',
@@ -29,6 +30,7 @@ describe('createScoreInput', () => {
     )).toEqual({
       taskId: 'task-1',
       title: 'Plan launch',
+      status: 'todo',
       priority: 'none',
       dueDate: '2026-08-01',
       createdAt: '2026-07-01T00:00:00.000Z',
@@ -87,16 +89,19 @@ describe('createScoreInput', () => {
         updatedAt: task.updatedAt,
       }]);
 
-      expect(result.score).toEqual({
-        priorityBase: 20,
-        entityTier: 25,
+      expect(result.score).toMatchObject({
+        priority: 25,
+        organizationalContext: 20,
         urgency: 20,
-        planningHorizon: 10,
-        sourceRank: 10,
-        freshness: 10,
-        executionFit: 5,
+        planningHorizon: 20,
+        momentum: 0,
+        sourceTrust: 5,
         snoozePenalty: 0,
-        total: 100,
+        total: 90,
+      });
+      expect(result.score.audit.sessionFit).toMatchObject({
+        estimatedDuration: 15,
+        effort: 2,
       });
     });
 
@@ -114,11 +119,10 @@ describe('createScoreInput', () => {
         snoozedUntil: 'invalid',
       }), [], []);
 
-      expect(result.score.priorityBase).toBe(0);
+      expect(result.score.priority).toBe(0);
       expect(result.score.urgency).toBe(0);
-      expect(result.score.planningHorizon).toBe(7);
-      expect(result.score.executionFit).toBe(0);
-      expect(result.score.freshness).toBe(0);
+      expect(result.score.planningHorizon).toBe(14);
+      expect(result.score.audit.sessionFit.estimatedDuration).toBe(300);
       expect(result.score.snoozePenalty).toBe(0);
     });
 
@@ -134,7 +138,7 @@ describe('createScoreInput', () => {
       expect(result.score.urgency).toBe(18);
     });
 
-    it('falls back to effort when duration is unavailable', () => {
+    it('keeps effort as planning context without changing Smart Score', () => {
       const result = computeSmartScore(createScoreInput({
         ...task,
         estimatedDuration: null,
@@ -142,8 +146,47 @@ describe('createScoreInput', () => {
         snoozedUntil: null,
       }), [], []);
 
-      expect(result.score.executionFit).toBe(4);
+      expect(result.score.audit.sessionFit).toMatchObject({
+        estimatedDuration: null,
+        effort: 2,
+      });
+      expect(result.score.total).toBe(
+        result.score.priority
+        + result.score.organizationalContext
+        + result.score.urgency
+        + result.score.planningHorizon
+        + result.score.momentum
+        + result.score.sourceTrust,
+      );
     });
+
+    it('uses typed momentum instead of generic updated-at freshness', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime('2026-08-01T12:00:00.000Z');
+      const result = computeSmartScore(createScoreInput({
+        ...task,
+        status: 'in_progress',
+        priority: 'none',
+        planningHorizon: null,
+        dueDate: null,
+        createdAt: '2026-07-01T00:00:00.000Z',
+        updatedAt: '2026-08-01T11:59:00.000Z',
+        snoozedUntil: null,
+      }, [], [], {
+        currentDate: '2026-08-01',
+        latestMyDayDate: '2026-08-01',
+        latestMyDayAddedAt: '2026-08-01T08:00:00.000Z',
+        inProgressStartedAt: '2026-07-15T08:00:00.000Z',
+        lastSubtaskCompletedAt: '2026-07-31T14:00:00.000Z',
+      }), [], []);
+
+      expect(result.score.momentum).toBe(10);
+      expect(result.score.audit.evidence).toEqual(expect.arrayContaining([
+        expect.objectContaining({ label: 'Committed to My Day', points: 6 }),
+        expect.objectContaining({ label: 'Work underway', points: 4 }),
+      ]));
+    });
+
   });
 
   it('omits empty optional entity names', () => {

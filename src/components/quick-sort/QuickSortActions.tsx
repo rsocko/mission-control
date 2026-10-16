@@ -74,6 +74,23 @@ export interface ProjectOption {
   phases: Array<{ id: string; name: string; color: string | null }>;
 }
 
+function HighlightedMatch({ text, query }: { text: string; query: string }) {
+  if (!query) return text;
+
+  const matchIndex = text.toLowerCase().indexOf(query);
+  if (matchIndex < 0) return text;
+
+  return (
+    <>
+      {text.slice(0, matchIndex)}
+      <mark className="rounded-sm bg-cyan-400/15 text-cyan-100">
+        {text.slice(matchIndex, matchIndex + query.length)}
+      </mark>
+      {text.slice(matchIndex + query.length)}
+    </>
+  );
+}
+
 function ProjectPicker({
   projects,
   suggestions,
@@ -143,8 +160,14 @@ function ProjectPicker({
 
   return (
     <div className="flex min-h-0 flex-col gap-2">
-      <div className="input-glow flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3">
-        <Search size={14} className="flex-shrink-0 text-[var(--text-tertiary)]" />
+      <div className="input-glow flex min-h-11 items-center gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]">
+        <span
+          aria-hidden="true"
+          className="flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md bg-[var(--surface-2)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]"
+        >
+          <Search size={12} />
+          Filter
+        </span>
         <input
           ref={searchInputRef}
           type="search"
@@ -158,11 +181,25 @@ function ProjectPicker({
             event.preventDefault();
             firstResult.focus();
           }}
-          placeholder="Find a project…"
+          placeholder="Search projects and phases…"
           aria-label="Find a project"
-          className="min-h-11 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+          className="min-h-11 min-w-0 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
           disabled={busy}
         />
+        {query && (
+          <button
+            type="button"
+            onClick={() => {
+              setQuery('');
+              searchInputRef.current?.focus();
+            }}
+            disabled={busy}
+            aria-label="Clear project filter"
+            className="flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:opacity-50"
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
       {selectedProject ? (
         <div className="rounded-xl border border-cyan-700/45 bg-cyan-950/25 p-3">
@@ -237,6 +274,17 @@ function ProjectPicker({
           className="max-h-52 overflow-y-auto overscroll-contain pr-1"
           onKeyDown={(event) => {
             if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
+            const buttons = Array.from(
+              projectResultsRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [],
+            );
+            if (
+              event.key === 'ArrowUp'
+              && event.target === buttons[0]
+            ) {
+              event.preventDefault();
+              searchInputRef.current?.focus();
+              return;
+            }
             event.preventDefault();
             focusAdjacentButton(
               projectResultsRef.current,
@@ -250,7 +298,7 @@ function ProjectPicker({
               <p className="px-1 pb-2 text-xs font-medium text-cyan-200">
                 Suggested from similar items
               </p>
-              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-1.5">
                 {suggestedProjects.map(({ project, suggestion }) => (
                   <button
                     key={project.id}
@@ -265,7 +313,7 @@ function ProjectPicker({
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-cyan-100">
-                        {project.name}
+                        <HighlightedMatch text={project.name} query={normalizedQuery} />
                       </span>
                       <span className="block truncate text-xs text-cyan-300/70">
                         {suggestion.reason}
@@ -277,7 +325,10 @@ function ProjectPicker({
               </div>
             </div>
           )}
-          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+          <div
+            data-testid="project-picker-grid"
+            className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-1.5"
+          >
           {loading && <span className="text-xs text-[var(--text-muted)]">Loading projects…</span>}
           {!loading && filteredProjects.length === 0 && (
             <span className="text-xs text-[var(--text-muted)]">
@@ -302,10 +353,17 @@ function ProjectPicker({
                   style={{ backgroundColor: project.color }}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate">{project.name}</span>
+                  <span className="block truncate">
+                    <HighlightedMatch text={project.name} query={normalizedQuery} />
+                  </span>
                   {matchingPhases.length > 0 && (
                     <span className="block truncate text-xs text-[var(--text-muted)]">
-                      {matchingPhases.map((phase) => phase.name).join(', ')}
+                      {matchingPhases.map((phase, index) => (
+                        <span key={phase.id}>
+                          {index > 0 && ', '}
+                          <HighlightedMatch text={phase.name} query={normalizedQuery} />
+                        </span>
+                      ))}
                     </span>
                   )}
                 </span>

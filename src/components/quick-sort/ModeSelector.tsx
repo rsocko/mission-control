@@ -98,7 +98,8 @@ export default function ModeSelector({
               'flex items-center gap-4 rounded-xl border px-4 py-4 text-left transition-all duration-150 active:scale-[0.98]',
               mode.accentClass,
               isSelected && 'ring-2 ring-inset ring-[var(--accent-400)]/55',
-              isDisabled && 'cursor-not-allowed opacity-40'
+              isEmpty && 'cursor-not-allowed opacity-40',
+              disabled && !isEmpty && 'cursor-progress'
             )}
           >
             <div className="flex-shrink-0">

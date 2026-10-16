@@ -47,12 +47,17 @@ vi.mock('lucide-react', () => ({
   ArrowLeft: () => <span data-testid="icon-arrow-left">←</span>,
   CalendarDays: () => <span data-testid="icon-calendar-days">🗓</span>,
   Check: () => <span data-testid="icon-check">✓</span>,
+  ChevronDown: () => <span data-testid="icon-chevron-down">⌄</span>,
+  ChevronUp: () => <span data-testid="icon-chevron-up">⌃</span>,
   Flame: () => <span data-testid="icon-flame">🔥</span>,
   Loader2: () => <span data-testid="icon-loader">⏳</span>,
   Moon: () => <span data-testid="icon-moon">🌙</span>,
+  Pencil: () => <span data-testid="icon-pencil">✎</span>,
   Plus: () => <span data-testid="icon-plus">＋</span>,
   Repeat: () => <span data-testid="icon-repeat">↻</span>,
+  Save: () => <span data-testid="icon-save">save</span>,
   Sun: () => <span data-testid="icon-sun">☀️</span>,
+  X: () => <span data-testid="icon-x">×</span>,
 }));
 
 const { toastError, toastSuccess } = vi.hoisted(() => ({
@@ -168,6 +173,10 @@ function mockRoutineFetch({
       return jsonResponse({}, { status: completionStatus });
     }
 
+    if (url.startsWith('/api/routines/') && method === 'PATCH') {
+      return jsonResponse({ success: true });
+    }
+
     if (url.startsWith('/api/routines/completions?') && method === 'DELETE') {
       return jsonResponse({});
     }
@@ -268,6 +277,24 @@ describe('MobileRoutinesScreen', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ routineId: 'r1', date: '2026-07-29' }),
+      }));
+    });
+  });
+
+  it('edits a routine from its card', async () => {
+    render(<MobileRoutinesScreen onBack={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Edit Morning meditation' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Morning meditation' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Evening meditation' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/ }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith('/api/routines/r1', expect.objectContaining({
+        method: 'PATCH',
       }));
     });
   });

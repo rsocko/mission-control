@@ -242,6 +242,7 @@ export function ProjectPhasesTab({
     handleTaskDoubleClick,
     myDayTaskIds,
     openTaskNotes,
+    openTaskSubtasks,
     selectedTaskId,
     setSelectedTaskId,
     selectTask,
@@ -1807,6 +1808,7 @@ export function ProjectPhasesTab({
                                                   onSelect={handleTaskClick}
                                                   onDoubleClick={handleTaskDoubleClick}
                                                   onOpenNotes={openTaskNotes}
+                                                  onOpenSubtasks={openTaskSubtasks}
                                                   onModifierClick={handleBulkModifierClick}
                                                   onComplete={handleCompleteTask}
                                                   isInMyDay={myDayTaskIds.has(task.id)}
@@ -1894,6 +1896,7 @@ export function ProjectPhasesTab({
                                     onSelect={handleTaskClick}
                                     onDoubleClick={handleTaskDoubleClick}
                                     onOpenNotes={openTaskNotes}
+                                    onOpenSubtasks={openTaskSubtasks}
                                     onModifierClick={handleBulkModifierClick}
                                     onComplete={handleCompleteTask}
                                     isInMyDay={myDayTaskIds.has(task.id)}
@@ -1958,6 +1961,7 @@ export function ProjectPhasesTab({
               onSelectTask={(taskId) => taskId === null ? setSelectedTaskId(null) : handleTaskClick(taskId)}
               onDoubleClickTask={handleTaskDoubleClick}
               onOpenTaskNotes={openTaskNotes}
+              onOpenTaskSubtasks={openTaskSubtasks}
               onCompleteTask={handleCompleteTask}
               onRenamePhase={renamePhase}
               savingPhaseIds={savingPhaseIds}

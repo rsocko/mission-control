@@ -9,6 +9,21 @@ const { toastError, toastSuccess } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/toast', () => ({ toast: { error: toastError, success: toastSuccess } }));
+vi.mock('@rsocko/icon-picker/picker', () => ({
+  IconPickerButton: ({
+    value,
+    onChange,
+    label,
+  }: {
+    value: string | null;
+    onChange: (value: string) => void;
+    label?: string;
+  }) => (
+    <button type="button" aria-label={label} onClick={() => onChange('lucide:activity')}>
+      {value ?? 'No icon'}
+    </button>
+  ),
+}));
 
 const routine: Routine = {
   id: 'routine-1',
@@ -77,5 +92,27 @@ describe('RoutineForm', () => {
 
     expect(toastError).toHaveBeenCalledWith('Routine name is required');
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('uses the icon picker and saves the selected icon', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<RoutineForm routine={routine} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    const iconPicker = screen.getByRole('button', { name: 'Choose routine icon' });
+    expect(iconPicker).toHaveTextContent('🚶');
+
+    fireEvent.click(iconPicker);
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+
+    const request = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      icon: 'lucide:activity',
+    });
   });
 });

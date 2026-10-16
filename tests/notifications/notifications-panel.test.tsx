@@ -282,12 +282,14 @@ function Harness({
   error = null,
   empty = false,
   statsOverride,
+  showHideButton = true,
 }: {
   initialUnread?: boolean;
   isLoading?: boolean;
   error?: string | null;
   empty?: boolean;
   statsOverride?: Partial<UseNotificationsReturn['stats']>;
+  showHideButton?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [allNotifications, setAllNotifications] = useState(() => empty ? [] : [actionable, passive]);
@@ -398,10 +400,16 @@ function Harness({
     unreadNotifications: notifications,
   };
 
-  return <NotificationsPanel hook={hook} />;
+  return <NotificationsPanel hook={hook} showHideButton={showHideButton} />;
 }
 
 describe('NotificationsPanel V2', () => {
+  it('can omit its manual hide control in responsive layouts', () => {
+    render(<Harness showHideButton={false} />);
+
+    expect(screen.queryByRole('button', { name: 'Hide notifications' })).not.toBeInTheDocument();
+  });
+
   it('shows only the highest-severity count in the collapsed rail badge', () => {
     render(
       <CollapsedNotificationsRail

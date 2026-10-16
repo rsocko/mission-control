@@ -584,7 +584,7 @@ function seedDatabaseContents(db: Database.Database): void {
       { id: 'routine-read', name: 'Read 30 min', description: 'Read non-fiction or technical book', cadenceType: 'specific_days', cadenceConfig: JSON.stringify({ days: [1, 2, 3, 4, 5] }), icon: '📚', sortOrder: 3, isActive: 1 },
       { id: 'routine-inbox-zero', name: 'Inbox Zero', description: 'Process email to zero items', cadenceType: 'daily', cadenceConfig: '{}', icon: '📧', sortOrder: 4, isActive: 1 },
       { id: 'routine-water', name: 'Drink 8 glasses of water', description: 'Stay hydrated throughout the day', cadenceType: 'daily', cadenceConfig: '{}', icon: '💧', sortOrder: 5, isActive: 1 },
-      { id: 'routine-weekly-review', name: 'Weekly Review', description: 'Plan next week, review goals, process loose ends', cadenceType: 'weekly', cadenceConfig: JSON.stringify({ preferredDay: 0 }), icon: '📋', sortOrder: 6, isActive: 1 },
+      { id: 'routine-weekly-review', name: 'Weekly Review', description: 'Plan next week, review goals, process loose ends', cadenceType: 'weekly', cadenceConfig: JSON.stringify({ preferredDay: 0 }), icon: null, sortOrder: 6, isActive: 1 },
       { id: 'routine-meal-prep', name: 'Meal Prep', description: 'Prep lunches for the work week', cadenceType: 'weekly', cadenceConfig: JSON.stringify({ preferredDay: 0 }), icon: '🥗', sortOrder: 7, isActive: 1 },
       { id: 'routine-budget-review', name: 'Monthly Budget Review', description: 'Review spending, check kid card limits, adjust categories', cadenceType: 'monthly', cadenceConfig: JSON.stringify({ preferredDay: '1st' }), icon: '💰', sortOrder: 8, isActive: 1 },
     ];

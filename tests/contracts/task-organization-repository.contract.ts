@@ -1242,6 +1242,20 @@ export function describeTaskOrganizationRepositoryContract(
           taskId: 'task-open',
           estimatedDuration: 45,
         }]);
+        expect(snapshot.momentumSignals).toEqual([
+          expect.objectContaining({
+            taskId: 'task-active',
+            latestMyDayDate: null,
+            inProgressStartedAt: null,
+            lastSubtaskCompletedAt: null,
+          }),
+          expect.objectContaining({
+            taskId: 'task-open',
+            latestMyDayDate: null,
+            inProgressStartedAt: null,
+            lastSubtaskCompletedAt: null,
+          }),
+        ]);
         expect(snapshot.sourceRankings).toEqual([{
           id: 'gh-1',
           connectorType: 'github-issues',
@@ -1256,6 +1270,7 @@ export function describeTaskOrganizationRepositoryContract(
         expect(snapshot.tasks).toEqual([]);
         expect(snapshot.taskTags).toEqual([]);
         expect(snapshot.taskProjects).toEqual([]);
+        expect(snapshot.momentumSignals).toEqual([]);
         expect(snapshot.estimatedDurations).toEqual([]);
         // Source rankings are global, not scoped to the matched tasks.
         expect(snapshot.sourceRankings).toHaveLength(1);

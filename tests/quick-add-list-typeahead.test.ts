@@ -1,11 +1,37 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  getQuickAddTypeaheadTriggerStart,
   getQuickAddSlashDestinations,
+  isQuickAddTypeaheadDismissed,
   scrollListTypeaheadSelectionIntoView,
 } from '@/components/add-task/QuickAddBar';
 import type { QuickAddDestination } from '@/components/add-task/quick-add-types';
 
 describe('quick-add list typeahead', () => {
+  it.each([
+    ['template', 'Draft t/release', 6],
+    ['list', 'Draft /home', 6],
+    ['tag', 'Draft #home', 6],
+    ['project', 'Draft +Home project', 6],
+    ['priority', 'Draft !high', 6],
+    ['effort', 'Draft ^3', 6],
+  ] as const)('keeps a dismissed %s lookup hidden while its token is edited', (kind, input, triggerStart) => {
+    const dismissal = { kind, triggerStart };
+
+    expect(getQuickAddTypeaheadTriggerStart(input, kind)).toBe(triggerStart);
+    expect(isQuickAddTypeaheadDismissed(dismissal, input, kind)).toBe(true);
+    expect(isQuickAddTypeaheadDismissed(dismissal, `${input} more`, kind)).toBe(
+      kind === 'project',
+    );
+  });
+
+  it('stops suppressing a lookup after the dismissed token ends', () => {
+    const dismissal = { kind: 'tag' as const, triggerStart: 6 };
+
+    expect(isQuickAddTypeaheadDismissed(dismissal, 'Draft #home task', 'tag')).toBe(false);
+    expect(isQuickAddTypeaheadDismissed(dismissal, 'Draft task #home', 'tag')).toBe(false);
+  });
+
   it.each(['hom', 'home', '  HOME  '])('ranks list-name matches ahead of group-only matches for %j', (query) => {
     const destinations: QuickAddDestination[] = [
       { listId: 'garage', listName: 'Garage' },

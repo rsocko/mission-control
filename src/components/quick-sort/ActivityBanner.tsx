@@ -19,15 +19,25 @@ interface TriageStats {
   streak: number;
 }
 
-export default function ActivityBanner() {
+export default function ActivityBanner({ refreshKey = 0 }: { refreshKey?: number }) {
   const [stats, setStats] = useState<TriageStats | null>(null);
 
   useEffect(() => {
-    fetch('/api/tasks/quick-sort-stats')
-      .then((r) => r.json())
-      .then((d) => setStats(d as TriageStats))
-      .catch(() => {});
-  }, []);
+    const controller = new AbortController();
+
+    void fetch('/api/tasks/quick-sort-stats', { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error('Failed to refresh Quick Sort activity');
+        return response.json();
+      })
+      .then((data) => setStats(data as TriageStats))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        console.error('Failed to refresh Quick Sort activity', error);
+      });
+
+    return () => controller.abort();
+  }, [refreshKey]);
 
   // Don't render until we have data, and skip if there's no activity at all
   if (!stats || (stats.thisWeek.total === 0 && stats.streak === 0)) return null;

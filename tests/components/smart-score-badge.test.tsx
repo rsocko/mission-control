@@ -14,15 +14,30 @@ describe('SmartScoreBadge', () => {
         <SmartScoreBadge
           score={64}
           breakdown={{
-            priorityBase: 15,
-            entityTier: 10,
+            priority: 19,
+            organizationalContext: 14,
             urgency: 10,
-            planningHorizon: 7,
-            sourceRank: 5,
-            freshness: 6,
-            executionFit: 4,
+            planningHorizon: 14,
+            momentum: 6,
+            sourceTrust: 3,
             snoozePenalty: -3,
-            total: 54,
+            total: 63,
+            audit: {
+              confidence: { level: 'medium', percentage: 70 },
+              evidence: [{
+                factor: 'momentum',
+                label: 'Committed to My Day',
+                detail: 'This task is in My Day now.',
+                points: 6,
+              }],
+              missingSignals: ['No priority entity matches this task'],
+              sessionFit: {
+                estimatedDuration: null,
+                effort: 4,
+                status: 'todo',
+                note: 'Duration and effort inform contextual planning, not Smart Score.',
+              },
+            },
           }}
         />
       </TooltipProvider>,
@@ -30,12 +45,13 @@ describe('SmartScoreBadge', () => {
 
     fireEvent.focus(screen.getByRole('group', { name: 'Smart score: 64 out of 100' }));
 
-    expect(await screen.findAllByText('Each factor uses its own maximum')).not.toHaveLength(0);
-    expect(screen.getAllByText('15 / 20')[0]).toBeInTheDocument();
-    expect(screen.getAllByText('7 / 10')[0]).toBeInTheDocument();
-    expect(screen.getAllByText('4 / 5')[0]).toBeInTheDocument();
-    expect(screen.getAllByRole('progressbar', { name: 'Priority' })[0]).toHaveStyle({ width: '75%' });
+    expect(await screen.findAllByText('Attention-worthiness, not ease of execution')).not.toHaveLength(0);
+    expect(screen.getAllByText('19 / 25')[0]).toBeInTheDocument();
+    expect(screen.getAllByText('14 / 20')[0]).toBeInTheDocument();
+    expect(screen.getAllByText('6 / 10')[0]).toBeInTheDocument();
+    expect(screen.getAllByRole('progressbar', { name: 'Priority' })[0]).toHaveStyle({ width: '76%' });
     expect(screen.getAllByRole('progressbar', { name: 'Planning horizon' })[0]).toHaveStyle({ width: '70%' });
-    expect(screen.getAllByRole('progressbar', { name: 'Execution fit' })[0]).toHaveStyle({ width: '80%' });
+    expect(screen.getAllByRole('progressbar', { name: 'Momentum' })[0]).toHaveStyle({ width: '60%' });
+    expect(screen.getAllByText(/Duration unknown/)[0]).toBeInTheDocument();
   });
 });

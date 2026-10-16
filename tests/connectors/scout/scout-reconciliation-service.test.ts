@@ -75,7 +75,11 @@ function testDatabase() {
       push_count INTEGER DEFAULT 0 NOT NULL,
       recurrence_generated_from_task_id TEXT
     );
-    CREATE TABLE task_projects (task_id TEXT NOT NULL, project_id TEXT NOT NULL);
+    CREATE TABLE task_projects (
+      task_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      provenance TEXT DEFAULT 'local' NOT NULL
+    );
     CREATE TABLE task_history_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, task_id TEXT NOT NULL, event_type TEXT NOT NULL,
       field_name TEXT, previous_value TEXT, new_value TEXT, project_id TEXT, phase_id TEXT,
@@ -755,7 +759,11 @@ function createSqliteScoutContractHarness(): ScoutPersistenceContractHarness {
       created_at TEXT NOT NULL, unified_into TEXT
     );
     CREATE TABLE task_tags (task_id TEXT NOT NULL, tag_id TEXT NOT NULL);
-    CREATE TABLE task_projects (task_id TEXT NOT NULL, project_id TEXT NOT NULL);
+    CREATE TABLE task_projects (
+      task_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      provenance TEXT DEFAULT 'local' NOT NULL
+    );
     CREATE UNIQUE INDEX idx_task_projects_task_project ON task_projects(task_id, project_id);
     CREATE TABLE hub_projects (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',

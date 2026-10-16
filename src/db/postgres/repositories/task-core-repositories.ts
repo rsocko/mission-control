@@ -59,6 +59,7 @@ import {
   weeklyOneThing,
 } from '../schema';
 import { canonicalTaskSourceType } from '@/lib/tasks/source-hierarchy';
+import { getLocalToday } from '@/lib/utils/date';
 import { taskTimeActivities } from '../schema/tasks';
 import type { PostgresDatabase, PostgresTransaction } from '../runtime';
 import {
@@ -79,6 +80,7 @@ import {
 import { cleanupTaskAssociationsInTransaction } from './task-deletion';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from '@/db/persistence/value-codecs';
 import { eventSubscriptionMatches, parseEventTypes } from '@/db/persistence/event-outbox';
+import { mergeSmartScoreMomentumRows } from '@/lib/tasks/core/smart-score-momentum';
 import {
   mergeInboxListEntries,
   parseConfiguredInboxListEntries,
@@ -1715,8 +1717,8 @@ async function rebuildProjectPlacements(
     }
 
     await tx.execute(sql`
-      INSERT INTO task_projects (task_id, project_id)
-      SELECT ${successorTaskId}, project_id
+      INSERT INTO task_projects (task_id, project_id, provenance)
+      SELECT ${successorTaskId}, project_id, provenance
       FROM task_projects
       WHERE task_id = ${sourceTaskId}
       ON CONFLICT DO NOTHING
@@ -1983,6 +1985,71 @@ const MOVE_TASK_COLUMNS = {
   effort: tasks.effort,
   isBulkImport: tasks.isBulkImport,
 };
+
+async function readSmartScoreMomentum(
+  db: PostgresDatabase,
+  taskIds: readonly string[],
+) {
+  if (!taskIds.length) return [];
+
+  const [myDayRows, historyRows, subtaskRows] = await Promise.all([
+    db.select({
+      taskId: myDayItems.taskId,
+      latestMyDayDate: myDayItems.date,
+      latestMyDayAddedAt: sql<string | null>`max(${myDayItems.addedAt})`,
+    }).from(myDayItems)
+      .where(and(
+        inArray(myDayItems.taskId, [...taskIds]),
+        eq(myDayItems.date, getLocalToday()),
+      ))
+      .groupBy(myDayItems.taskId, myDayItems.date),
+    db.select({
+      taskId: taskHistoryEvents.taskId,
+      lastMyDayCommittedAt: sql<string | null>`max(CASE WHEN ${taskHistoryEvents.eventType} = 'my_day_committed' THEN ${taskHistoryEvents.occurredAt} END)`,
+      lastMyDayWithdrawnAt: sql<string | null>`max(CASE WHEN ${taskHistoryEvents.eventType} = 'my_day_withdrawn' THEN ${taskHistoryEvents.occurredAt} END)`,
+      inProgressStartedAt: sql<string | null>`max(CASE WHEN ${taskHistoryEvents.eventType} = 'status_changed' AND ${taskHistoryEvents.newValue} = 'in_progress' THEN ${taskHistoryEvents.occurredAt} END)`,
+    }).from(taskHistoryEvents)
+      .where(and(
+        inArray(taskHistoryEvents.taskId, [...taskIds]),
+        inArray(taskHistoryEvents.eventType, [
+          'my_day_committed',
+          'my_day_withdrawn',
+          'status_changed',
+        ]),
+      ))
+      .groupBy(taskHistoryEvents.taskId),
+    db.select({
+      taskId: tasks.parentId,
+      lastSubtaskCompletedAt: sql<string | null>`max(${tasks.completedAt})`,
+    }).from(tasks)
+      .where(and(
+        inArray(tasks.parentId, [...taskIds]),
+        isNotNull(tasks.completedAt),
+      ))
+      .groupBy(tasks.parentId),
+  ]);
+
+  const planningByTaskId = new Map(taskIds.map((taskId) => [taskId, {
+    taskId,
+    latestMyDayDate: null as string | null,
+    latestMyDayAddedAt: null as string | null,
+    lastMyDayCommittedAt: null as string | null,
+    lastMyDayWithdrawnAt: null as string | null,
+    inProgressStartedAt: null as string | null,
+  }]));
+  for (const row of myDayRows) {
+    planningByTaskId.set(row.taskId, { ...planningByTaskId.get(row.taskId)!, ...row });
+  }
+  for (const row of historyRows) {
+    planningByTaskId.set(row.taskId, { ...planningByTaskId.get(row.taskId)!, ...row });
+  }
+
+  return mergeSmartScoreMomentumRows(
+    taskIds,
+    [...planningByTaskId.values()],
+    subtaskRows,
+  );
+}
 
 function toMoveTaskRow(row: Record<string, unknown>): TaskMoveTaskRow {
   return {
@@ -2258,12 +2325,16 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
           })));
         }
       }
-      const projectRows = await tx.select({ projectId: taskProjects.projectId }).from(taskProjects)
+      const projectRows = await tx.select({
+        projectId: taskProjects.projectId,
+        provenance: taskProjects.provenance,
+      }).from(taskProjects)
         .where(eq(taskProjects.taskId, input.sourceTaskId));
       if (projectRows.length) {
-        await tx.insert(taskProjects).values(projectRows.map(({ projectId }) => ({
+        await tx.insert(taskProjects).values(projectRows.map(({ projectId, provenance }) => ({
           taskId: input.newTaskId,
           projectId,
+          provenance,
         })));
       }
       return { kind: 'committed', connectorType: connector.type } as const;
@@ -2916,10 +2987,13 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
       ? { order: input.page.order, limit: input.smartScoreCandidateLimit, offset: 0 }
       : input.page);
     const hydrated = await this.hydrate(ids, input.includeTags || input.includeScoreInputs || smart);
-    const rankings = smart || input.includeScoreInputs
-      ? await this.db.select().from(sourceRankings)
-          .orderBy(asc(sourceRankings.rank), asc(sourceRankings.id))
-      : [];
+    const [rankings, momentumSignals] = smart || input.includeScoreInputs
+      ? await Promise.all([
+          this.db.select().from(sourceRankings)
+            .orderBy(asc(sourceRankings.rank), asc(sourceRankings.id)),
+          readSmartScoreMomentum(this.db, ids),
+        ])
+      : [[], []];
     return {
       ...hydrated,
       total,
@@ -2928,7 +3002,7 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
       facetCounts,
       availableTags,
       smartScore: smart || input.includeScoreInputs
-        ? { rows: hydrated.rows, sourceRankings: rankings }
+        ? { rows: hydrated.rows, sourceRankings: rankings, momentumSignals }
         : null,
     };
   }
@@ -3943,12 +4017,16 @@ class PostgresTaskMutationRepository implements TaskMutationRepository {
                 tagId: row.tagId,
               })));
             }
-            const sourceProjects = await tx.select({ projectId: taskProjects.projectId })
+            const sourceProjects = await tx.select({
+              projectId: taskProjects.projectId,
+              provenance: taskProjects.provenance,
+            })
               .from(taskProjects).where(eq(taskProjects.taskId, request.taskId));
             if (sourceProjects.length) {
               await tx.insert(taskProjects).values(sourceProjects.map((row) => ({
                 taskId: successor.id,
                 projectId: row.projectId,
+                provenance: row.provenance,
               })));
             }
             const phases = await tx.select().from(projectPhaseItems)
@@ -5965,11 +6043,12 @@ class PostgresTaskOrganizationRepository implements TaskOrganizationRepository {
         sourceRankings: rankingRows,
         taskTags: [],
         taskProjects: [],
+        momentumSignals: [],
         estimatedDurations: [],
       };
     }
 
-    const [tagRows, projectRows, scheduleRows] = await Promise.all([
+    const [tagRows, projectRows, scheduleRows, momentumSignals] = await Promise.all([
       this.db.select({
         taskId: taskTags.taskId,
         tagId: tags.id,
@@ -5999,6 +6078,7 @@ class PostgresTaskOrganizationRepository implements TaskOrganizationRepository {
       }).from(taskSchedules)
         .where(inArray(taskSchedules.taskId, taskIds))
         .orderBy(asc(sql`${taskSchedules.taskId} COLLATE "C"`)),
+      readSmartScoreMomentum(this.db, taskIds),
     ]);
 
     return {
@@ -6010,6 +6090,7 @@ class PostgresTaskOrganizationRepository implements TaskOrganizationRepository {
         tagName: row.tagName,
       })),
       taskProjects: projectRows,
+      momentumSignals,
       estimatedDurations: scheduleRows,
     };
   }

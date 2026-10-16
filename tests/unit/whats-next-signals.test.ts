@@ -5,6 +5,7 @@ import type { ScoreInputTask, ScoredTask } from '@/lib/smart-score';
 const TASK: ScoreInputTask = {
   id: 'task-1',
   title: 'Prepare launch',
+  status: 'todo',
   priority: 'high',
   dueDate: null,
   planningHorizon: 'next',
@@ -19,15 +20,25 @@ const TASK: ScoreInputTask = {
 const SCORE: ScoredTask = {
   taskId: TASK.id,
   score: {
-    priorityBase: 15,
-    entityTier: 0,
+    priority: 19,
+    organizationalContext: 0,
     urgency: 0,
-    planningHorizon: 10,
-    sourceRank: 5,
-    freshness: 6,
-    executionFit: 4,
+    planningHorizon: 20,
+    momentum: 6,
+    sourceTrust: 3,
     snoozePenalty: 0,
-    total: 40,
+    total: 48,
+    audit: {
+      confidence: { level: 'medium', percentage: 70 },
+      evidence: [],
+      missingSignals: [],
+      sessionFit: {
+        estimatedDuration: null,
+        effort: 2,
+        status: 'todo',
+        note: 'Duration and effort inform contextual planning, not Smart Score.',
+      },
+    },
   },
   matchedEntities: [],
 };
@@ -36,7 +47,8 @@ describe('what is next signal explanations', () => {
   it('describes deadline pressure and Horizon as separate signals', () => {
     expect(describeWhatsNextTask(TASK, SCORE, '2026-09-17', 'high')).toBe(
       '- [Prepare launch](/tasks/task-1) | importance: high | deadline: none (0/20) | '
-      + 'Horizon: next (10/10) | effort: 2 | Smart Score: 40 | energy: high | source: local',
+      + 'Horizon: next (20/20) | momentum: 6/10 | effort: 2 | '
+      + 'score confidence: medium (70%) | Smart Score: 48 | energy: high | source: local',
     );
   });
 

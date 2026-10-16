@@ -184,21 +184,32 @@ export function createPostgresGitHubProjectRepositories(
         for (const row of rows) desired.add(row.id);
       }
 
+      const exclusions = await query<{ taskId: string }>(
+        client,
+        `SELECT task_id AS "taskId"
+         FROM project_auto_include_exclusions
+         WHERE project_id = $1`,
+        [projectId],
+      );
+      for (const exclusion of exclusions) desired.delete(exclusion.taskId);
+
       const existingLinks = await query<{ taskId: string }>(
         client,
-        'SELECT task_id AS "taskId" FROM task_projects WHERE project_id = $1',
+        `SELECT task_id AS "taskId"
+         FROM task_projects
+         WHERE project_id = $1 AND provenance = 'github-sync'`,
         [projectId],
       );
       for (const taskId of desired) {
         await client.query(
-          `INSERT INTO task_projects (task_id, project_id)
-           VALUES ($1, $2)
+          `INSERT INTO task_projects (task_id, project_id, provenance)
+           VALUES ($1, $2, 'github-sync')
            ON CONFLICT (task_id, project_id) DO NOTHING`,
           [taskId, projectId],
         );
       }
-      // Stale links are pruned only from complete authoritative observations, so
-      // a partial project observation never deletes existing associations.
+      // Only sync-owned links are pruned from complete authoritative observations.
+      // Local assignments and explicit user exclusions remain authoritative in MC.
       if (project.authoritative) {
         for (const link of existingLinks) {
           if (desired.has(link.taskId)) continue;

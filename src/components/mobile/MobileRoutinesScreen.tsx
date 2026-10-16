@@ -9,10 +9,12 @@ import {
   Flame,
   Loader2,
   Moon,
+  Pencil,
   Plus,
   Repeat,
   Sun,
 } from 'lucide-react';
+import { RoutineForm, type Routine } from '@/components/routines';
 import { PullToRefreshIndicator } from '@/components/ui/PullToRefreshIndicator';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { cn } from '@/lib/utils';
@@ -21,55 +23,9 @@ import { getWeekDates, getWeekMonday } from '@/lib/utils/date-format';
 import { toast } from '@/lib/toast';
 
 type ViewMode = 'daily' | 'weekly';
-type CadenceType =
-  | 'daily'
-  | 'specific_days'
-  | 'x_per_week'
-  | 'every_n_days'
-  | 'weekly'
-  | 'monthly'
-  | 'quarterly';
-
-interface CadenceConfig {
-  days?: number[];
-  target?: number;
-  minDays?: number;
-  maxDays?: number;
-  preferredDay?: number | string;
-}
-
-interface WeekCompletion {
-  date: string;
-  id: string;
-}
-
-interface IntervalStatus {
-  status: 'on_track' | 'due_soon' | 'overdue_soft';
-  daysSinceLast: number;
-  progressPercent: number;
-}
-
-interface WeeklyProgress {
-  done: number;
-  target: number;
-  isOver: boolean;
-  bonus: number;
-}
-
-interface RoutineSnapshot {
-  id: string;
-  name: string;
-  icon: string | null;
-  cadenceType: CadenceType;
-  cadenceConfig: CadenceConfig;
-  streak: number;
-  weekCompletions: WeekCompletion[];
-  intervalStatus: IntervalStatus | null;
-  weeklyProgress: WeeklyProgress | null;
-}
 
 interface RoutinesResponse {
-  routines?: RoutineSnapshot[];
+  routines?: Routine[];
 }
 
 export interface MobileRoutinesScreenProps {
@@ -87,7 +43,7 @@ function parseLocalDate(date: string) {
   return new Date(`${date}T12:00:00`);
 }
 
-function getCadenceLabel(routine: RoutineSnapshot) {
+function getCadenceLabel(routine: Routine) {
   switch (routine.cadenceType) {
     case 'daily':
       return 'Daily';
@@ -113,7 +69,7 @@ function getCadenceLabel(routine: RoutineSnapshot) {
   }
 }
 
-function getScheduleState(routine: RoutineSnapshot, date: string): boolean | null {
+function getScheduleState(routine: Routine, date: string): boolean | null {
   const dayOfWeek = parseLocalDate(date).getDay();
 
   switch (routine.cadenceType) {
@@ -137,7 +93,7 @@ function getScheduleState(routine: RoutineSnapshot, date: string): boolean | nul
   }
 }
 
-function isRoutineRelevantToday(routine: RoutineSnapshot, today: string) {
+function isRoutineRelevantToday(routine: Routine, today: string) {
   if (getScheduleState(routine, today)) return true;
   if (routine.weekCompletions.some((completion) => completion.date === today)) return true;
   if (routine.weeklyProgress && routine.weeklyProgress.done < routine.weeklyProgress.target) return true;
@@ -145,7 +101,7 @@ function isRoutineRelevantToday(routine: RoutineSnapshot, today: string) {
   return false;
 }
 
-function applyCompletionState(routines: RoutineSnapshot[], routineId: string, date: string, completed: boolean) {
+function applyCompletionState(routines: Routine[], routineId: string, date: string, completed: boolean) {
   return routines.map((routine) => {
     if (routine.id !== routineId) return routine;
 
@@ -171,7 +127,7 @@ function applyCompletionState(routines: RoutineSnapshot[], routineId: string, da
   });
 }
 
-function getRoutineIcon(routine: RoutineSnapshot) {
+function getRoutineIcon(routine: Routine) {
   const keyword = `${routine.icon ?? ''} ${routine.name}`.toLowerCase();
 
   if (/sun|morning|wake|rise|startup|start/.test(keyword)) {
@@ -189,7 +145,7 @@ function getRoutineIcon(routine: RoutineSnapshot) {
   return { Icon: Repeat, className: 'text-sky-400' };
 }
 
-function getHeaderProgress(routine: RoutineSnapshot, completedToday: boolean) {
+function getHeaderProgress(routine: Routine, completedToday: boolean) {
   if (routine.weeklyProgress) {
     return routine.weeklyProgress.done > 0
       ? `${routine.weeklyProgress.done} of ${routine.weeklyProgress.target} done`
@@ -209,13 +165,15 @@ function DailyRoutineCard({
   pending,
   index,
   onToggle,
+  onEdit,
   prefersReducedMotion,
 }: {
-  routine: RoutineSnapshot;
+  routine: Routine;
   today: string;
   pending: boolean;
   index: number;
   onToggle: (routineId: string) => void;
+  onEdit: (routine: Routine) => void;
   prefersReducedMotion: boolean;
 }) {
   const completedToday = routine.weekCompletions.some((completion) => completion.date === today);
@@ -234,7 +192,17 @@ function DailyRoutineCard({
           <Icon className={cn('h-3 w-3 shrink-0', className)} />
           <span className="truncate text-sm font-semibold text-white">{routine.name}</span>
         </div>
-        <span className={cn('shrink-0 text-xs', getHeaderProgressTone(progress))}>{progress}</span>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className={cn('text-xs', getHeaderProgressTone(progress))}>{progress}</span>
+          <button
+            type="button"
+            onClick={() => onEdit(routine)}
+            className={cn(TOUCH_TARGET, '-my-2 -mr-2 p-2 text-slate-400 hover:text-white')}
+            aria-label={`Edit ${routine.name}`}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -284,12 +252,14 @@ function WeeklyRoutineCard({
   today,
   weekDates,
   index,
+  onEdit,
   prefersReducedMotion,
 }: {
-  routine: RoutineSnapshot;
+  routine: Routine;
   today: string;
   weekDates: string[];
   index: number;
+  onEdit: (routine: Routine) => void;
   prefersReducedMotion: boolean;
 }) {
   const completedToday = routine.weekCompletions.some((completion) => completion.date === today);
@@ -308,7 +278,17 @@ function WeeklyRoutineCard({
           <Icon className={cn('h-3 w-3 shrink-0', className)} />
           <span className="truncate text-sm font-semibold text-white">{routine.name}</span>
         </div>
-        <span className={cn('shrink-0 text-xs', getHeaderProgressTone(progress))}>{progress}</span>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className={cn('text-xs', getHeaderProgressTone(progress))}>{progress}</span>
+          <button
+            type="button"
+            onClick={() => onEdit(routine)}
+            className={cn(TOUCH_TARGET, '-my-2 -mr-2 p-2 text-slate-400 hover:text-white')}
+            aria-label={`Edit ${routine.name}`}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-7 gap-2">
@@ -362,7 +342,8 @@ export function MobileRoutinesScreen({ onBack }: MobileRoutinesScreenProps) {
   const weekMonday = useMemo(() => getWeekMonday(today), [today]);
   const weekDates = useMemo(() => getWeekDates(weekMonday), [weekMonday]);
   const [viewMode, setViewMode] = useState<ViewMode>('daily');
-  const [routines, setRoutines] = useState<RoutineSnapshot[]>([]);
+  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
@@ -541,6 +522,20 @@ export function MobileRoutinesScreen({ onBack }: MobileRoutinesScreenProps) {
               ) : null}
             </div>
 
+            {editingRoutine ? (
+              <div className="mt-5">
+                <RoutineForm
+                  key={editingRoutine.id}
+                  routine={editingRoutine}
+                  onClose={() => setEditingRoutine(null)}
+                  onSaved={() => {
+                    setEditingRoutine(null);
+                    void loadData();
+                  }}
+                />
+              </div>
+            ) : null}
+
             {error ? (
               <div className={cn(GLASS_CARD, 'mt-5 p-4')}>
                 <p className="text-sm text-slate-200">{error}</p>
@@ -593,6 +588,7 @@ export function MobileRoutinesScreen({ onBack }: MobileRoutinesScreenProps) {
                         onToggle={(routineId) => {
                           void handleToggleCompletion(routineId);
                         }}
+                        onEdit={setEditingRoutine}
                       />
                     ))}
                   </motion.div>
@@ -612,6 +608,7 @@ export function MobileRoutinesScreen({ onBack }: MobileRoutinesScreenProps) {
                         weekDates={weekDates}
                         index={index}
                         prefersReducedMotion={prefersReducedMotion}
+                        onEdit={setEditingRoutine}
                       />
                     ))}
                   </motion.div>

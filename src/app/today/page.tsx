@@ -13,7 +13,7 @@ import {
 } from '@/components/task-detail/TaskDetailPanel';
 import { TodayMainPanel } from '@/components/today/TodayMainPanel';
 import { TodayScheduleModal } from '@/components/today/TodayScheduleModal';
-import { TodaySidebar } from '@/components/today/TodaySidebar';
+import { TodayUtilityPanels } from '@/components/today/TodayUtilityPanels';
 import { MobileTodayList } from '@/components/today/MobileTodayList';
 import { applyMyDayTaskFieldUpdate } from '@/components/today/apply-task-field-update';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -450,33 +450,34 @@ export default function TodayPage() {
         )}
       </MobileSheet>
 
-      <div className="hidden h-full min-h-0 sm:block">
-        <TodaySidebar
-        suggestions={suggestions}
-        totalMinutes={totalMinutes}
-        whatsNextLoading={actions.whatsNextLoading}
-        onAddToDay={actions.addToDay}
-        onCompleteTask={(task) => {
-          void actions.completeTask(task.id, {
-            title: task.title,
-            status: task.status,
-            editPolicy: task.editPolicy,
-          });
+      <TodayUtilityPanels
+        detailOpen={Boolean(selectedTaskId && detailSurface === 'desktop' && detailMode === 'panel')}
+        todaySidebarProps={{
+          suggestions,
+          totalMinutes,
+          whatsNextLoading: actions.whatsNextLoading,
+          onAddToDay: actions.addToDay,
+          onCompleteTask: (task) => {
+            void actions.completeTask(task.id, {
+              title: task.title,
+              status: task.status,
+              editPolicy: task.editPolicy,
+            });
+          },
+          completingIds: actions.completingIds,
+          onSelectTask: (taskId) => {
+            setDetailSurface('desktop');
+            setDetailMode('panel');
+            taskSelection.selectTask(taskId);
+            setSelectedSuggestionContext(suggestionTasks.find((task) => task.id === taskId) || null);
+          },
+          getContextMenuActions: getSuggestionContextMenuActions,
+          sourceLists,
+          listGroups,
+          projects,
+          onGetWhatsNext: () => { void actions.getWhatsNext(); },
         }}
-        completingIds={actions.completingIds}
-        onSelectTask={(taskId) => {
-          setDetailSurface('desktop');
-          setDetailMode('panel');
-          taskSelection.selectTask(taskId);
-          setSelectedSuggestionContext(suggestionTasks.find((task) => task.id === taskId) || null);
-        }}
-        getContextMenuActions={getSuggestionContextMenuActions}
-        sourceLists={sourceLists}
-        listGroups={listGroups}
-        projects={projects}
-        onGetWhatsNext={() => { void actions.getWhatsNext(); }}
       />
-      </div>
 
       <TodayScheduleModal
         taskId={actions.showScheduleModal}

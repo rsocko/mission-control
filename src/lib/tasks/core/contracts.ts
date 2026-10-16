@@ -599,6 +599,7 @@ export interface TaskSmartScoreInputs {
     readonly rank: number;
     readonly updatedAt: string;
   }>;
+  readonly momentumSignals: SmartScoreTaskMomentumRow[];
 }
 
 export interface TaskCollectionResult {
@@ -2301,11 +2302,22 @@ export interface SmartScoreTaskProjectRow {
   readonly projectName: string;
 }
 
+export interface SmartScoreTaskMomentumRow {
+  readonly taskId: string;
+  readonly latestMyDayDate: string | null;
+  readonly latestMyDayAddedAt: string | null;
+  readonly lastMyDayCommittedAt: string | null;
+  readonly lastMyDayWithdrawnAt: string | null;
+  readonly inProgressStartedAt: string | null;
+  readonly lastSubtaskCompletedAt: string | null;
+}
+
 export interface TaskSmartScoreSnapshot {
   readonly tasks: TaskCoreTaskRow[];
   readonly sourceRankings: TaskSmartScoreInputs['sourceRankings'];
   readonly taskTags: SmartScoreTaskTagRow[];
   readonly taskProjects: SmartScoreTaskProjectRow[];
+  readonly momentumSignals: SmartScoreTaskMomentumRow[];
   readonly estimatedDurations: Array<{
     readonly taskId: string;
     readonly estimatedDuration: number | null;

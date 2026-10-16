@@ -180,6 +180,7 @@ vi.mock('@/lib/tasks/core/runtime', () => ({
         sourceRankings: [],
         taskTags: [],
         taskProjects: [],
+        momentumSignals: [],
         estimatedDurations: [],
       }),
     },

@@ -74,6 +74,23 @@ export interface ProjectOption {
   phases: Array<{ id: string; name: string; color: string | null }>;
 }
 
+function HighlightedMatch({ text, query }: { text: string; query: string }) {
+  if (!query) return text;
+
+  const matchIndex = text.toLowerCase().indexOf(query);
+  if (matchIndex < 0) return text;
+
+  return (
+    <>
+      {text.slice(0, matchIndex)}
+      <mark className="rounded-sm bg-cyan-400/15 text-cyan-100">
+        {text.slice(matchIndex, matchIndex + query.length)}
+      </mark>
+      {text.slice(matchIndex + query.length)}
+    </>
+  );
+}
+
 function ProjectPicker({
   projects,
   suggestions,
@@ -237,6 +254,17 @@ function ProjectPicker({
           className="max-h-52 overflow-y-auto overscroll-contain pr-1"
           onKeyDown={(event) => {
             if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
+            const buttons = Array.from(
+              projectResultsRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [],
+            );
+            if (
+              event.key === 'ArrowUp'
+              && event.target === buttons[0]
+            ) {
+              event.preventDefault();
+              searchInputRef.current?.focus();
+              return;
+            }
             event.preventDefault();
             focusAdjacentButton(
               projectResultsRef.current,
@@ -265,7 +293,7 @@ function ProjectPicker({
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-cyan-100">
-                        {project.name}
+                        <HighlightedMatch text={project.name} query={normalizedQuery} />
                       </span>
                       <span className="block truncate text-xs text-cyan-300/70">
                         {suggestion.reason}
@@ -302,10 +330,17 @@ function ProjectPicker({
                   style={{ backgroundColor: project.color }}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate">{project.name}</span>
+                  <span className="block truncate">
+                    <HighlightedMatch text={project.name} query={normalizedQuery} />
+                  </span>
                   {matchingPhases.length > 0 && (
                     <span className="block truncate text-xs text-[var(--text-muted)]">
-                      {matchingPhases.map((phase) => phase.name).join(', ')}
+                      {matchingPhases.map((phase, index) => (
+                        <span key={phase.id}>
+                          {index > 0 && ', '}
+                          <HighlightedMatch text={phase.name} query={normalizedQuery} />
+                        </span>
+                      ))}
                     </span>
                   )}
                 </span>

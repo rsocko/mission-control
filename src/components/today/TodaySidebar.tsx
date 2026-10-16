@@ -2,6 +2,7 @@
 
 import { AlertCircle, Brain, Calendar, CalendarClock, Clock, Flame, History, Plus, RotateCcw, Sparkles, Target, TimerReset } from 'lucide-react';
 import { SuggestionGroup } from './SuggestionGroup';
+import { Button } from '@/components/ui/button';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
 import { REPLANNING_SUGGESTION, type SourceList, type SuggestionGroups, type SuggestionTask } from './types';
@@ -56,9 +57,9 @@ export function TodaySidebar({
         <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-2)] p-3">
           <h4 className="mb-2 flex items-center gap-1 text-xs font-semibold uppercase text-[var(--accent-400)]"><Target size={11} /> Do Next</h4>
           <p className="text-xs text-[var(--text-tertiary)] mb-2">Get AI-powered focus recommendation</p>
-          <button onClick={onGetWhatsNext} disabled={whatsNextLoading} className="w-full rounded-[var(--radius-md)] bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-400)] disabled:opacity-50">
+          <Button size="sm" onClick={onGetWhatsNext} disabled={whatsNextLoading} className="w-full">
             {whatsNextLoading ? 'Thinking...' : 'Suggest Next Task'}
-          </button>
+          </Button>
         </div>
 
         <div>

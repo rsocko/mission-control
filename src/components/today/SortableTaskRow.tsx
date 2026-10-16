@@ -57,6 +57,7 @@ interface SortableTaskRowProps {
   onFilterPriority?: (priority: string) => void;
   onFilterStatus?: (status: string) => void;
   onOpenNotes: (mode: 'read' | 'edit') => void;
+  onOpenSubtasks?: () => void;
   compact?: boolean;
   draggable?: boolean;
   sortableId?: string;
@@ -89,6 +90,7 @@ export function SortableTaskRow({
   onFilterPriority,
   onFilterStatus,
   onOpenNotes,
+  onOpenSubtasks,
   compact = false,
   draggable = true,
   sortableId,
@@ -256,7 +258,11 @@ export function SortableTaskRow({
           )}
         </div>
       </div>
-      <SubtaskPill done={item.subtaskDone ?? 0} total={item.subtaskTotal ?? 0} />
+      <SubtaskPill
+        done={item.subtaskDone ?? 0}
+        total={item.subtaskTotal ?? 0}
+        onClick={onOpenSubtasks}
+      />
       <TaskRowActions
         smartScore={item.smartScore}
         scoreBreakdown={item.scoreBreakdown ?? undefined}

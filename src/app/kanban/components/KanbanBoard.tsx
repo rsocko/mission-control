@@ -72,6 +72,7 @@ interface KanbanBoardProps {
   onDragStart: (taskId: string) => void;
   onDrop: (columnId: string) => void;
   onTaskClick: (task: KanbanTaskViewModel) => void;
+  onOpenSubtasks: (task: KanbanTaskViewModel) => void;
   onStartRename: (id: string, name: string) => void;
   onRenameChange: (value: string) => void;
   onConfirmRename: (columnId: string) => void;
@@ -100,6 +101,7 @@ interface SortableCardProps {
   showDueDates: boolean;
   showScores: boolean;
   onTaskClick: (task: KanbanTaskViewModel) => void;
+  onOpenSubtasks: (task: KanbanTaskViewModel) => void;
   onSnooze: (taskId: string, until: string) => Promise<void>;
   compact?: boolean;
 }
@@ -113,6 +115,7 @@ function SortableCard({
   showDueDates,
   showScores,
   onTaskClick,
+  onOpenSubtasks,
   onSnooze,
   compact = false,
 }: SortableCardProps) {
@@ -156,6 +159,7 @@ function SortableCard({
         showDueDates={showDueDates}
         showScores={showScores}
         onSnooze={onSnooze}
+        onOpenSubtasks={() => onOpenSubtasks(task)}
       />
     </div>
   );
@@ -217,6 +221,7 @@ export function KanbanBoard({
   onDragStart,
   onDrop,
   onTaskClick,
+  onOpenSubtasks,
   onStartRename,
   onRenameChange,
   onConfirmRename,
@@ -322,6 +327,7 @@ export function KanbanBoard({
                 showDueDates={showDueDates}
                 showScores={showScores}
                 onTaskClick={onTaskClick}
+                onOpenSubtasks={onOpenSubtasks}
                 onSnooze={onSnoozeTask}
                 compact={compact}
               />

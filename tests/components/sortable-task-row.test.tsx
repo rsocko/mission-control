@@ -44,7 +44,22 @@ vi.mock('@/components/ui/CompletionBurst', () => ({
 }));
 
 vi.mock('@/components/ui/SubtaskPill', () => ({
-  SubtaskPill: () => <span data-testid="subtask-pill" />,
+  SubtaskPill: ({ onClick }: { onClick?: () => void }) => (
+    onClick
+      ? (
+          <button
+            type="button"
+            data-testid="subtask-pill"
+            onClick={(event) => {
+              event.stopPropagation();
+              onClick();
+            }}
+          >
+            Subtasks
+          </button>
+        )
+      : <span data-testid="subtask-pill" />
+  ),
 }));
 
 vi.mock('@/components/smart-score/SmartScoreBadge', () => ({
@@ -187,6 +202,33 @@ describe('SortableTaskRow aligned properties', () => {
 
     expect(screen.getByText('Narrow row')).toHaveClass('min-w-0', 'flex-1', 'truncate');
     expect(screen.getByText('Waiting on someone')).toHaveClass('hidden', '@min-[960px]:inline');
+  });
+
+  it('opens subtasks directly from the My Day list pill', () => {
+    const onOpenSubtasks = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <SortableTaskRow
+        item={{ ...item, subtaskDone: 1, subtaskTotal: 2 }}
+        onComplete={vi.fn()}
+        onFocus={vi.fn()}
+        onSchedule={vi.fn()}
+        onRemove={vi.fn()}
+        onSelect={onSelect}
+        isSelected={false}
+        onSetDueDate={vi.fn()}
+        onSetPriority={vi.fn()}
+        onSetStatus={vi.fn()}
+        onOpenNotes={vi.fn()}
+        onOpenSubtasks={onOpenSubtasks}
+        draggable={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Subtasks' }));
+
+    expect(onOpenSubtasks).toHaveBeenCalledOnce();
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('lets the source list use available metadata-row space', () => {

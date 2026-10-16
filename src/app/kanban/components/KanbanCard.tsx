@@ -35,9 +35,19 @@ interface KanbanCardProps {
   showDueDates: boolean;
   showScores?: boolean;
   onSnooze?: (taskId: string, until: string) => void;
+  onOpenSubtasks?: () => void;
 }
 
-export function KanbanCard({ task, dragHandleProps, onClick, showSources, showDueDates, showScores, onSnooze }: KanbanCardProps) {
+export function KanbanCard({
+  task,
+  dragHandleProps,
+  onClick,
+  showSources,
+  showDueDates,
+  showScores,
+  onSnooze,
+  onOpenSubtasks,
+}: KanbanCardProps) {
   const today = getLocalToday();
   const isOverdue = task.dueDate && task.dueDate < today;
   const recurrence = extractRecurrenceFromMetadata(task.metadata);
@@ -82,7 +92,12 @@ export function KanbanCard({ task, dragHandleProps, onClick, showSources, showDu
               )}
             </div>
           </div>
-          <SubtaskPill done={task.subtaskDone ?? 0} total={task.subtaskTotal ?? 0} className="mt-1" />
+          <SubtaskPill
+            done={task.subtaskDone ?? 0}
+            total={task.subtaskTotal ?? 0}
+            className="mt-1"
+            onClick={onOpenSubtasks}
+          />
           {(showSources || showDueDates || (task.snoozedUntil && new Date(task.snoozedUntil) > new Date())) && (
             <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
               {task.snoozedUntil && new Date(task.snoozedUntil) > new Date() && (

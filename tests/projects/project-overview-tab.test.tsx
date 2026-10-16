@@ -48,7 +48,12 @@ const phases = [
 ];
 
 const tasks = [
-  makeTask('task-alpha', { title: 'Alpha task', updatedAt: '2026-08-14T18:00:00.000Z' }),
+  makeTask('task-alpha', {
+    title: 'Alpha task',
+    subtaskDone: 1,
+    subtaskTotal: 2,
+    updatedAt: '2026-08-14T18:00:00.000Z',
+  }),
   makeTask('task-beta', { title: 'Beta task', status: 'done', updatedAt: '2026-08-14T17:00:00.000Z' }),
   makeTask('task-gamma', { title: 'Gamma task', updatedAt: '2026-08-14T16:00:00.000Z' }),
   makeTask('task-delta', { title: 'Delta task', status: 'done', updatedAt: '2026-08-14T15:00:00.000Z' }),
@@ -150,6 +155,17 @@ describe('project overview tab', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('task-detail-task-alpha')).not.toBeInTheDocument();
     });
+  });
+
+  it('opens the Subtasks section from a recent activity pill', async () => {
+    await renderProjectTab('Overview');
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Open subtasks, 1 of 2 subtasks complete',
+    }));
+
+    expect(await screen.findByTestId('task-detail-task-alpha')).toBeInTheDocument();
+    expect(screen.getByTestId('subtasks-request-task-alpha')).toBeInTheDocument();
   });
 
   it('keeps the selected task while the user moves between tabs', async () => {

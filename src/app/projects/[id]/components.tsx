@@ -335,11 +335,21 @@ export function TaskDisplayId({ task }: { task: ProjectTask }) {
 /**
  * Inline badges for effort and subtask progress shown on project task rows.
  */
-export function TaskInfoBadges({ task }: { task: ProjectTask }) {
+export function TaskInfoBadges({
+  task,
+  onOpenSubtasks,
+}: {
+  task: ProjectTask;
+  onOpenSubtasks?: () => void;
+}) {
   return (
     <>
       <EffortBadge effort={task.effort ?? null} size="sm" />
-      <SubtaskPill done={task.subtaskDone ?? 0} total={task.subtaskTotal ?? 0} />
+      <SubtaskPill
+        done={task.subtaskDone ?? 0}
+        total={task.subtaskTotal ?? 0}
+        onClick={onOpenSubtasks}
+      />
     </>
   );
 }

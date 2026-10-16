@@ -54,6 +54,7 @@ function AssignPhaseTarget({
   onSelectTask,
   onDoubleClickTask,
   onOpenTaskNotes,
+  onOpenTaskSubtasks,
   selectedTaskId,
   completingIds,
   myDayTaskIds,
@@ -74,6 +75,7 @@ function AssignPhaseTarget({
   onSelectTask: (taskId: string | null) => void;
   onDoubleClickTask: (taskId: string) => void;
   onOpenTaskNotes: (taskId: string, mode: 'read' | 'edit') => void;
+  onOpenTaskSubtasks: (taskId: string) => void;
   selectedTaskId: string | null;
   completingIds: Set<string>;
   myDayTaskIds: Set<string>;
@@ -206,6 +208,7 @@ function AssignPhaseTarget({
                             onSelect={onSelectTask}
                             onDoubleClick={onDoubleClickTask}
                             onOpenNotes={onOpenTaskNotes}
+                            onOpenSubtasks={onOpenTaskSubtasks}
                             onComplete={onCompleteTask}
                             isInMyDay={myDayTaskIds.has(task.id)}
                             contextMenuActions={getTaskContextActions(task)}
@@ -269,6 +272,7 @@ interface PhaseAssignViewProps {
   onSelectTask: (taskId: string | null) => void;
   onDoubleClickTask: (taskId: string) => void;
   onOpenTaskNotes: (taskId: string, mode: 'read' | 'edit') => void;
+  onOpenTaskSubtasks: (taskId: string) => void;
   onCompleteTask: (taskId: string) => void;
   onRenamePhase: (phase: ProjectPhase, name: string) => void | Promise<void>;
   savingPhaseIds: Set<string>;
@@ -299,6 +303,7 @@ export function PhaseAssignView({
   onSelectTask,
   onDoubleClickTask,
   onOpenTaskNotes,
+  onOpenTaskSubtasks,
   onCompleteTask,
   onRenamePhase,
   savingPhaseIds,
@@ -452,6 +457,7 @@ export function PhaseAssignView({
                             onSelect={onSelectTask}
                             onDoubleClick={onDoubleClickTask}
                             onOpenNotes={onOpenTaskNotes}
+                            onOpenSubtasks={onOpenTaskSubtasks}
                             onComplete={onCompleteTask}
                             isInMyDay={myDayTaskIds.has(task.id)}
                             contextMenuActions={getTaskContextActions(task)}
@@ -533,6 +539,7 @@ export function PhaseAssignView({
                   onSelectTask={onSelectTask}
                   onDoubleClickTask={onDoubleClickTask}
                   onOpenTaskNotes={onOpenTaskNotes}
+                  onOpenTaskSubtasks={onOpenTaskSubtasks}
                   selectedTaskId={selectedTaskId}
                   completingIds={completingIds}
                   myDayTaskIds={myDayTaskIds}

@@ -238,6 +238,10 @@ export async function GET(request: Request) {
       ? await getResolvedPriorityEntities()
       : [];
     const scoreInputs = collection.smartScore;
+    const momentumByTaskId = new Map(
+      scoreInputs?.momentumSignals.map((signal) => [signal.taskId, signal]) ?? [],
+    );
+    const smartScoreDate = getLocalToday();
     const scoredRows = scoreInputs
       ? computeBatchSmartScores(
           scoreInputs.rows.map((task) => createScoreInput(
@@ -255,6 +259,10 @@ export async function GET(request: Request) {
                 id: membership.projectId,
                 name: membership.projectName,
               })),
+            {
+              currentDate: smartScoreDate,
+              ...momentumByTaskId.get(task.id),
+            },
           )),
           entities,
           scoreInputs.sourceRankings as SourceRanking[],

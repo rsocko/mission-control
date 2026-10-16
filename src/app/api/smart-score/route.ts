@@ -11,6 +11,7 @@ import { getResolvedPriorityEntities } from '@/lib/priority-entities';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
 import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import type { TaskCoreTaskRow } from '@/lib/tasks/core/contracts';
+import { getLocalToday } from '@/lib/utils/date';
 
 export async function GET(request: Request) {
   try {
@@ -55,6 +56,9 @@ export async function GET(request: Request) {
     const durationByTaskId = new Map(
       snapshot.estimatedDurations.map((row) => [row.taskId, row.estimatedDuration]),
     );
+    const momentumByTaskId = new Map(
+      snapshot.momentumSignals.map((row) => [row.taskId, row]),
+    );
 
     // Build score inputs with linked entity names
     const scoreInputs = allTasks.map((task) => createScoreInput(
@@ -65,6 +69,10 @@ export async function GET(request: Request) {
       },
       tagsByTaskId.get(task.id),
       projectsByTaskId.get(task.id),
+      {
+        currentDate: getLocalToday(),
+        ...momentumByTaskId.get(task.id),
+      },
     ));
 
     // Compute scores

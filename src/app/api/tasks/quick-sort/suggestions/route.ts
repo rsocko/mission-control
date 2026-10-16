@@ -67,6 +67,7 @@ export async function GET(request: Request) {
       {
         taskId: task.id,
         title: task.title,
+        status: 'todo',
         priority: task.priority as TaskPriority,
         dueDate: task.dueDate,
         createdAt: task.createdAt,
@@ -101,7 +102,7 @@ export async function GET(request: Request) {
         suggestedPriority = { value: 'medium', confidence: 0.55, reason: 'Moderate priority keywords' };
       } else {
         // Fall back to SmartScore — but use adjusted thresholds for unfiled tasks
-        // (since priority=none removes 20pts from the score, shift thresholds down)
+        // (since priority=none removes 25pts from the score, shift thresholds down)
         const score = scored.score.total;
         if (score >= 50) {
           suggestedPriority = { value: 'critical', confidence: 0.7, reason: 'High urgency score' };

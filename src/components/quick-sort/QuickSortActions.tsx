@@ -237,6 +237,17 @@ function ProjectPicker({
           className="max-h-52 overflow-y-auto overscroll-contain pr-1"
           onKeyDown={(event) => {
             if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
+            const buttons = Array.from(
+              projectResultsRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [],
+            );
+            if (
+              event.key === 'ArrowUp'
+              && event.target === buttons[0]
+            ) {
+              event.preventDefault();
+              searchInputRef.current?.focus();
+              return;
+            }
             event.preventDefault();
             focusAdjacentButton(
               projectResultsRef.current,

@@ -8,6 +8,7 @@ describe('task attribute filtering', () => {
   let buildConditions: typeof import('@/app/api/tasks/canonical-filter').buildCanonicalTaskFilterConditions;
   let getCanonicalWhere: typeof import('@/app/api/tasks/canonical-filter').getCanonicalTaskFilterWhere;
   let and: typeof import('drizzle-orm').and;
+  let eq: typeof import('drizzle-orm').eq;
 
   beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
@@ -27,6 +28,7 @@ describe('task attribute filtering', () => {
     buildConditions = filterModule.buildCanonicalTaskFilterConditions;
     getCanonicalWhere = filterModule.getCanonicalTaskFilterWhere;
     and = drizzle.and;
+    eq = drizzle.eq;
   }, 30_000);
 
   beforeEach(async () => {
@@ -154,6 +156,36 @@ describe('task attribute filtering', () => {
     await expect(matchingIds('phase:none')).resolves.toEqual(['project-only', 'unassigned']);
     await expect(matchingIds('phase:phase-1 phase:none')).resolves.toEqual([
       'assigned',
+      'project-only',
+      'unassigned',
+    ]);
+  });
+
+  it('ignores hidden projects and excludes tasks from hidden source lists', async () => {
+    const now = '2026-08-05T12:00:00.000Z';
+    await db.insert(schema.hubProjects).values({
+      id: 'project-hidden',
+      name: 'Hidden',
+      color: '#000000',
+      hidden: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.taskProjects).values({
+      taskId: 'unassigned',
+      projectId: 'project-hidden',
+    });
+
+    await expect(matchingIds('project:project-hidden')).resolves.toEqual([]);
+    await expect(matchingIds('project:none')).resolves.toEqual(['unassigned']);
+
+    await db.update(schema.sourceLists)
+      .set({ hidden: true })
+      .where(and(
+        eq(schema.sourceLists.connectorInstanceId, 'custom-rest-read-only'),
+        eq(schema.sourceLists.sourceId, 'backlog'),
+      ));
+    await expect(matchingParamIds(new URLSearchParams())).resolves.toEqual([
       'project-only',
       'unassigned',
     ]);

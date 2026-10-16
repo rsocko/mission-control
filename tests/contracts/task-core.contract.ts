@@ -1453,6 +1453,41 @@ export function describeTaskCoreContract(
         });
       });
 
+      it('omits hidden project memberships from collection rows while preserving recovery data', async () => {
+        await harness.insertTasks([{ id: 'task-project-visibility' }]);
+        await harness.insertProjects([
+          { id: 'project-visible', name: 'Visible' },
+          { id: 'project-hidden', name: 'Hidden', hidden: true },
+        ]);
+        await harness.insertTaskProjects([
+          { taskId: 'task-project-visibility', projectId: 'project-visible' },
+          { taskId: 'task-project-visibility', projectId: 'project-hidden' },
+        ]);
+
+        const collection = await harness.persistence.collections.readTaskCollection({
+          spec: makeSpec({ search: 'task-project-visibility' }),
+          page: { order: { field: 'createdAt', direction: 'asc' }, limit: 20, offset: 0 },
+          includeTags: false,
+          includeScoreInputs: false,
+          countsOnly: false,
+          smartScoreCandidateLimit: 100,
+        });
+        expect(collection.rows).toHaveLength(1);
+        expect(collection.rows[0].projectIds).toEqual(['project-visible']);
+        expect(collection.rows[0].projectPhaseMemberships).toEqual([{
+          projectId: 'project-visible',
+          projectName: 'Visible',
+          phaseId: null,
+          phaseName: null,
+        }]);
+
+        const detail = await harness.persistence.details.getTaskDetail(
+          'task-project-visibility',
+          TODAY,
+        );
+        expect(detail?.projectIds.sort()).toEqual(['project-hidden', 'project-visible']);
+      });
+
       it('creates once from triage and replays without duplicating the task or event', async () => {
         await harness.insertTriageItem({
           id: 'triage-create',
@@ -1846,6 +1881,43 @@ export function describeTaskCoreContract(
         expect(await harness.persistence.queries.countTasks(
           makeSpec({ projectId: 'unknown-project' }),
         )).toBe(0);
+      });
+
+      it('treats hidden project memberships as absent from the visible dataset', async () => {
+        await harness.insertProjects([{ id: 'project-hidden', name: 'Hidden', hidden: true }]);
+        await harness.insertTaskProjects([{
+          taskId: 'task-alpha',
+          projectId: 'project-hidden',
+        }]);
+
+        expect(await harness.persistence.queries.countTasks(
+          makeSpec({ projectId: 'project-hidden' }),
+        )).toBe(0);
+        expect(await harness.persistence.queries.countTasks(
+          makeSpec({ noProject: true }),
+        )).toBe(3);
+        expect(await harness.persistence.queries.countTasks(
+          makeSpec({ filterQuery: 'project:none' }),
+        )).toBe(3);
+        expect(await harness.persistence.taskReads.getGroupCounts({
+          spec: makeSpec(),
+          groupBy: 'project',
+        })).toEqual({
+          'Project One › Unphased': 1,
+          'No Project': 3,
+        });
+      });
+
+      it('excludes tasks from hidden source lists from the visible dataset', async () => {
+        await harness.insertSourceLists([{
+          id: 'source-hidden',
+          connectorInstanceId: 'gh-1',
+          sourceId: 'repo-a',
+          name: 'Repo A',
+          hidden: true,
+        }]);
+
+        expect(await harness.persistence.queries.countTasks(makeSpec())).toBe(3);
       });
 
       it('honours the created-at age window boundaries inclusively', async () => {

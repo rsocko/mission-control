@@ -259,7 +259,7 @@ export function ProjectSettingsTab({
     if (!project) return;
     requestConfirmation({
       title: 'Hide project?',
-      message: `Hide "${project.name}"? It will be removed from project navigation and portfolio views. You can unhide it from All Projects.`,
+      message: `Hide "${project.name}"? It will be excluded from navigation, filters, grouping, and project membership. You can unhide it from All Projects.`,
       confirmLabel: 'Hide project',
       variant: 'warning',
       onConfirm: async (close) => {

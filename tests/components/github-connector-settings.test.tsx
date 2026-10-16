@@ -461,7 +461,7 @@ describe('GitHub connector settings', () => {
     expect(visibleNames()).toEqual(['Gamma', 'Alpha']);
     expect(screen.getByRole('button', { name: /^All lists/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Not in a group/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Hide Gamma from navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Exclude Gamma from workspace' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Customize Gamma appearance' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Move Gamma' }));

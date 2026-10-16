@@ -92,6 +92,7 @@ function renderRow(overrides: Partial<React.ComponentProps<typeof PlanTaskRow>> 
     onSelect: vi.fn(),
     onDoubleClick: vi.fn(),
     onOpenNotes: vi.fn(),
+    onOpenSubtasks: vi.fn(),
     onComplete: vi.fn(),
     isInMyDay: false,
     contextMenuActions,
@@ -153,6 +154,19 @@ describe('PlanTaskRow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open notes' }));
 
     expect(onOpenNotes).toHaveBeenCalledWith('task-1', 'read');
+  });
+
+  it('opens the Subtasks section without selecting the row', () => {
+    const onOpenSubtasks = vi.fn();
+    const onSelect = vi.fn();
+    renderRow({ onOpenSubtasks, onSelect });
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Open subtasks, 1 of 2 subtasks complete',
+    }));
+
+    expect(onOpenSubtasks).toHaveBeenCalledWith('task-1');
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('uses bulk selection instead of opening the task when bulk mode is active', () => {

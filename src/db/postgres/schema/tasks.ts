@@ -349,6 +349,10 @@ export const taskTags = pgTable('task_tags', {
 export const taskProjects = pgTable('task_projects', {
   taskId: text('task_id').notNull(),
   projectId: text('project_id').notNull(),
+  provenance: text('provenance')
+    .$type<'local' | 'github-sync'>()
+    .notNull()
+    .default('local'),
 }, (table) => [
   uniqueIndex('idx_task_projects_task_project').on(table.taskId, table.projectId),
 ]);

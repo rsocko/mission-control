@@ -421,16 +421,21 @@ export function taskDetailPanelModule() {
       onClose,
       onComplete,
       notesOpenRequest,
+      subtasksOpenRequest,
     }: {
       taskId: string;
       onClose: () => void;
       onComplete?: () => void | Promise<void>;
       notesOpenRequest?: { taskId: string; mode: 'read' | 'edit' } | null;
+      subtasksOpenRequest?: { taskId: string } | null;
     }) => (
       <aside aria-label="Task detail" data-testid={`task-detail-${taskId}`}>
         <p>Detail for {taskId}</p>
         {notesOpenRequest?.taskId === taskId ? (
           <div role="dialog" aria-label="Notes" data-mode={notesOpenRequest.mode} />
+        ) : null}
+        {subtasksOpenRequest?.taskId === taskId ? (
+          <div data-testid={`subtasks-request-${taskId}`} />
         ) : null}
         {onComplete ? (
           <button type="button" onClick={() => { void onComplete(); }}>

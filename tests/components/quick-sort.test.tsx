@@ -172,6 +172,9 @@ describe('Quick Sort planning horizon queue', () => {
 
     expect(screen.getByRole('button', { name: /Mission Control Delivery/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Home Improvements/i })).not.toBeInTheDocument();
+    const phaseMatch = screen.getByText('Delivery');
+    expect(phaseMatch.tagName).toBe('MARK');
+    expect(phaseMatch).toHaveClass('bg-cyan-400/15', 'text-cyan-100');
 
     fireEvent.click(screen.getByRole('button', { name: /Mission Control Delivery/i }));
     expect(screen.getByRole('button', { name: /Mission Control Change/i })).toBeInTheDocument();
@@ -180,6 +183,50 @@ describe('Quick Sort planning horizon queue', () => {
 
     expect(screen.queryByRole('button', { name: /Mission Control Change/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Mission Control Delivery/i })).toBeInTheDocument();
+  });
+
+  it('separates the project filter from the responsive project grid', () => {
+    render(
+      <QuickSortActions
+        task={task}
+        mode="no_project"
+        onViewTask={vi.fn()}
+        onSkip={vi.fn()}
+        onMarkDone={vi.fn()}
+        onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
+        onApplyPriority={vi.fn()}
+        onApplyEffort={vi.fn()}
+        onApplyTag={vi.fn()}
+        onApplyPlanningHorizon={vi.fn()}
+        onApplyProject={vi.fn()}
+        allTags={[]}
+        projects={[
+          {
+            id: 'project-1',
+            name: 'Mission Control',
+            color: '#06b6d4',
+            phases: [],
+          },
+        ]}
+        projectsLoading={false}
+        tagsLoading={false}
+        recentTagIds={[]}
+        busy={false}
+      />,
+    );
+
+    const search = screen.getByRole('searchbox', { name: 'Find a project' });
+    expect(screen.getByText('Filter')).toBeInTheDocument();
+    expect(search).toHaveAttribute('placeholder', 'Search projects and phases…');
+    expect(search.parentElement).toHaveClass('bg-[var(--surface-0)]', 'rounded-lg');
+    expect(screen.getByTestId('project-picker-grid').className).toContain('repeat(auto-fit');
+
+    fireEvent.change(search, { target: { value: 'mission' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear project filter' }));
+
+    expect(search).toHaveValue('');
+    expect(search).toHaveFocus();
   });
 
   it('supports keyboard navigation from search through project and phase choices', () => {
@@ -230,6 +277,10 @@ describe('Quick Sort planning horizon queue', () => {
     expect(screen.getByRole('button', { name: /Home Improvements/i })).toHaveFocus();
 
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    expect(search).toHaveFocus();
+
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
     fireEvent.click(document.activeElement!);
 
     expect(screen.getByRole('button', { name: 'Project only' })).toHaveFocus();
@@ -299,7 +350,9 @@ describe('Quick Sort planning horizon queue', () => {
       />,
     );
 
-    expect(screen.getAllByRole('button').every((button) => button.hasAttribute('disabled'))).toBe(true);
+    const busyButtons = screen.getAllByRole('button');
+    expect(busyButtons.every((button) => button.hasAttribute('disabled'))).toBe(true);
+    expect(busyButtons.every((button) => !button.className.includes('opacity-40'))).toBe(true);
   });
 
   it('offers all planning horizon actions', () => {

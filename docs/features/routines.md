@@ -47,6 +47,7 @@ Recurring habits and routines need different treatment than one-off tasks. This 
 - **Routine Cards** — Detailed cards with streak info, schedule, and quick-complete
 - **Toggle completion** — Click any day cell to mark complete/incomplete
 - **Add routine** — Form to create new routines with name, schedule, cadence
+- **Edit routine** — Update a routine's name, description, icon, and cadence from the pencil action beside it
 
 #### Reset
 - **Reset View** — A dedicated interface for resetting/restarting routines

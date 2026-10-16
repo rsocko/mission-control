@@ -151,18 +151,29 @@ export function createSqliteGitHubProjectRepositories(
         for (const row of rows) desired.add(row.id);
       }
 
+      const exclusions = sqlite.prepare(`
+        SELECT task_id AS taskId
+        FROM project_auto_include_exclusions
+        WHERE project_id = ?
+      `).all(projectId) as Array<{ taskId: string }>;
+      for (const exclusion of exclusions) desired.delete(exclusion.taskId);
+
       const existingLinks = sqlite
-        .prepare('SELECT task_id AS taskId FROM task_projects WHERE project_id = ?')
+        .prepare(`
+          SELECT task_id AS taskId
+          FROM task_projects
+          WHERE project_id = ? AND provenance = 'github-sync'
+        `)
         .all(projectId) as Array<{ taskId: string }>;
       for (const taskId of desired) {
         sqlite.prepare(`
-          INSERT INTO task_projects (task_id, project_id)
-          VALUES (?, ?)
+          INSERT INTO task_projects (task_id, project_id, provenance)
+          VALUES (?, ?, 'github-sync')
           ON CONFLICT(task_id, project_id) DO NOTHING
         `).run(taskId, projectId);
       }
-      // Stale links are pruned only from complete authoritative observations, so
-      // a partial project observation never deletes existing associations.
+      // Only sync-owned links are pruned from complete authoritative observations.
+      // Local assignments and explicit user exclusions remain authoritative in MC.
       if (project.authoritative) {
         for (const link of existingLinks) {
           if (desired.has(link.taskId)) continue;

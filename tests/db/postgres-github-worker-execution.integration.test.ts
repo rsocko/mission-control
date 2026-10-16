@@ -1069,7 +1069,7 @@ describePostgres('PostgreSQL GitHub worker queue-execution smoke', () => {
 
     // Projects: a non-authoritative observation keeps existing links.
     await pool.query(
-      `INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)
+      `INSERT INTO task_projects (task_id, project_id, provenance) VALUES ($1, $2, 'github-sync')
        ON CONFLICT (task_id, project_id) DO NOTHING`,
       [ids.parentTaskId, projectId(ids.connectorId, 5)],
     );
@@ -1209,7 +1209,7 @@ describePostgres('PostgreSQL GitHub worker queue-execution smoke', () => {
 
     // A complete authoritative observation prunes a stale association.
     await pool.query(
-      `INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)
+      `INSERT INTO task_projects (task_id, project_id, provenance) VALUES ($1, $2, 'github-sync')
        ON CONFLICT (task_id, project_id) DO NOTHING`,
       [ids.parentTaskId, projectId(ids.connectorId, 6)],
     );
@@ -1226,7 +1226,7 @@ describePostgres('PostgreSQL GitHub worker queue-execution smoke', () => {
 
     // A withheld (blocked) project number is never rewritten.
     await pool.query(
-      `INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)
+      `INSERT INTO task_projects (task_id, project_id, provenance) VALUES ($1, $2, 'github-sync')
        ON CONFLICT (task_id, project_id) DO NOTHING`,
       [ids.parentTaskId, projectId(ids.connectorId, 5)],
     );

@@ -61,8 +61,10 @@ export function describeWhatsNextTask(
     `- ${taskMarkdownLink(task)}`,
     `importance: ${task.priority}`,
     `deadline: ${deadlineDescription(task.dueDate ?? null, today)} (${breakdown.urgency}/20)`,
-    `Horizon: ${task.planningHorizon ?? 'not set'} (${breakdown.planningHorizon}/10)`,
+    `Horizon: ${task.planningHorizon ?? 'not set'} (${breakdown.planningHorizon}/20)`,
+    `momentum: ${breakdown.momentum}/10`,
     `effort: ${task.effort ?? 'not set'}`,
+    `score confidence: ${breakdown.audit.confidence.level} (${breakdown.audit.confidence.percentage}%)`,
     `Smart Score: ${breakdown.total}`,
     energy ? `energy: ${energy}` : null,
     `source: ${task.connectorType}`,
@@ -78,7 +80,7 @@ export async function whatsNext(context?: {
   const persistence = await getAIWorkflowPersistence();
   const taskCore = await getTaskCorePersistence();
   const [snapshot, entities] = await Promise.all([
-    taskCore.organization.readSmartScoreInputs({ statuses: ['todo'] }),
+    taskCore.organization.readSmartScoreInputs({ statuses: ['todo', 'in_progress'] }),
     getResolvedPriorityEntities(),
   ]);
   const unreadNotifications = await persistence.recommendations
@@ -87,6 +89,9 @@ export async function whatsNext(context?: {
   const projectsByTaskId = groupByTaskId(snapshot.taskProjects);
   const durationByTaskId = new Map(
     snapshot.estimatedDurations.map((entry) => [entry.taskId, entry.estimatedDuration]),
+  );
+  const momentumByTaskId = new Map(
+    snapshot.momentumSignals.map((entry) => [entry.taskId, entry]),
   );
   const candidates = snapshot.tasks.map((task): ScoreInputTask => ({
     ...task,
@@ -102,6 +107,10 @@ export async function whatsNext(context?: {
         id: project.projectId,
         name: project.projectName,
       })),
+      {
+        currentDate: today,
+        ...momentumByTaskId.get(task.id),
+      },
     )),
     entities,
     snapshot.sourceRankings as SourceRanking[],

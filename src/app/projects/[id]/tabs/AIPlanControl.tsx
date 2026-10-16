@@ -12,13 +12,13 @@ type PlanningMode = 'suggest' | 'refine';
 interface AIPlanControlProps {
   hasPhases: boolean;
   proposalActions: ProjectProposalActions;
-  variant?: 'outline' | 'secondary';
+  variant?: 'ai' | 'secondary';
 }
 
 export function AIPlanControl({
   hasPhases,
   proposalActions,
-  variant = 'outline',
+  variant = 'ai',
 }: AIPlanControlProps) {
   const [planningMode, setPlanningMode] = useState<PlanningMode | null>(null);
   const [guidance, setGuidance] = useState('');
@@ -48,9 +48,6 @@ export function AIPlanControl({
           <Button
             variant={variant}
             disabled={isWorking}
-            className={variant === 'outline'
-              ? 'border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300'
-              : undefined}
           >
             {isWorking ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
             AI Plan
@@ -70,7 +67,7 @@ export function AIPlanControl({
                   className="cursor-default rounded-lg px-3 py-2 outline-none focus:bg-[var(--surface-2)]"
                 >
                   <div className="flex items-start gap-2">
-                    <RefreshCw className="mt-0.5 size-4 shrink-0 text-purple-400" />
+                    <RefreshCw className="mt-0.5 size-4 shrink-0 text-[var(--accent-400)]" />
                     <div>
                       <p className="text-sm font-medium text-[var(--text-primary)]">
                         Improve current plan
@@ -87,7 +84,7 @@ export function AIPlanControl({
                   className="cursor-default rounded-lg px-3 py-2 outline-none focus:bg-[var(--surface-2)]"
                 >
                   <div className="flex items-start gap-2">
-                    <Sparkles className="mt-0.5 size-4 shrink-0 text-purple-400" />
+                    <Sparkles className="mt-0.5 size-4 shrink-0 text-[var(--accent-400)]" />
                     <div>
                       <p className="text-sm font-medium text-[var(--text-primary)]">
                         Start over from tasks
@@ -105,7 +102,7 @@ export function AIPlanControl({
                 className="cursor-default rounded-lg px-3 py-2 outline-none focus:bg-[var(--surface-2)]"
               >
                 <div className="flex items-start gap-2">
-                  <Sparkles className="mt-0.5 size-4 shrink-0 text-purple-400" />
+                  <Sparkles className="mt-0.5 size-4 shrink-0 text-[var(--accent-400)]" />
                   <div>
                     <p className="text-sm font-medium text-[var(--text-primary)]">
                       Generate plan
@@ -164,7 +161,7 @@ export function AIPlanControl({
               placeholder={isRefining
                 ? 'For example: preserve Discovery, reduce handoffs, and target a two-week launch.'
                 : 'For example: prioritize the launch path and separate frontend from backend work.'}
-              className="mt-2 w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-purple-500 focus:shadow-[var(--shadow-focus-glow)]"
+              className="mt-2 w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent-500)] focus:shadow-[var(--shadow-focus-glow)]"
             />
             <p className="mt-1 text-right text-xs text-[var(--text-muted)]">
               {guidance.length}/4000

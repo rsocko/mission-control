@@ -407,6 +407,76 @@ describe('Quick Sort operation apply route', () => {
     expect(mocks.discardApplyingOperation).not.toHaveBeenCalled();
   });
 
+  it('waits out a longer sync burst before applying the Quick Sort update', async () => {
+    const horizonOperation = {
+      ...operation,
+      mode: 'no_planning_horizon' as const,
+      label: 'Set horizon',
+      beforeSnapshot: { ...snapshot, originalPatch: { planningHorizon: 'soon' } },
+    };
+    const revisions = Array.from({ length: 4 }, (_, index) => ({
+      ...snapshot,
+      updatedAt: `2026-08-16T12:00:${String((index + 1) * 10).padStart(2, '0')}.000Z`,
+      dueDate: `2026-08-${20 + index}T12:00:00.000Z`,
+    }));
+    const after = {
+      ...revisions.at(-1)!,
+      updatedAt: '2026-08-16T12:01:00.000Z',
+      planningHorizon: 'soon' as const,
+    };
+    const conflict = () => Response.json({
+      error: 'Task changed before this update could be applied',
+      code: 'TASK_REVISION_CONFLICT',
+    }, { status: 409 });
+    mocks.getOperation.mockResolvedValue(null);
+    mocks.reserveOperation.mockResolvedValue({
+      kind: 'reserved',
+      operation: { ...horizonOperation, state: 'applying' },
+    });
+    mocks.captureTask
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(revisions[0])
+      .mockResolvedValueOnce(revisions[1])
+      .mockResolvedValueOnce(revisions[2])
+      .mockResolvedValueOnce(revisions[3])
+      .mockResolvedValueOnce(after);
+    mocks.patchTask
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(Response.json({ success: true }));
+    mocks.finalizeOperation.mockResolvedValue({
+      ...horizonOperation,
+      beforeSnapshot: { ...revisions[3], originalPatch: { planningHorizon: 'soon' } },
+      afterSnapshot: after,
+    });
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: horizonOperation.id,
+          taskId: horizonOperation.taskId,
+          mode: horizonOperation.mode,
+          action: horizonOperation.action,
+          label: horizonOperation.label,
+          contextKey: horizonOperation.contextKey,
+          queueIndex: horizonOperation.queueIndex,
+          patch: { planningHorizon: 'soon' },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.patchTask).toHaveBeenCalledTimes(5);
+    expect(mocks.rebaseApplyingOperation).toHaveBeenCalledTimes(4);
+    expect(mocks.discardApplyingOperation).not.toHaveBeenCalled();
+  });
+
   it('does not rebase over a concurrent edit to the target field', async () => {
     const effortOperation = {
       ...operation,
@@ -461,7 +531,7 @@ describe('Quick Sort operation apply route', () => {
     expect(mocks.discardApplyingOperation).toHaveBeenCalledWith(effortOperation.id);
   });
 
-  it('stops rebasing after repeated revision conflicts', async () => {
+  it('stops rebasing after the bounded retry window', async () => {
     const conflict = () => Response.json({
       error: 'Task changed before this update could be applied',
       code: 'TASK_REVISION_CONFLICT',
@@ -471,8 +541,14 @@ describe('Quick Sort operation apply route', () => {
       .mockResolvedValueOnce(snapshot)
       .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:10.000Z' })
       .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:20.000Z' })
-      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:30.000Z' });
+      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:30.000Z' })
+      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:40.000Z' })
+      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:00:50.000Z' })
+      .mockResolvedValueOnce({ ...snapshot, updatedAt: '2026-08-16T12:01:00.000Z' });
     mocks.patchTask
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
+      .mockResolvedValueOnce(conflict())
       .mockResolvedValueOnce(conflict())
       .mockResolvedValueOnce(conflict())
       .mockResolvedValueOnce(conflict())
@@ -501,8 +577,8 @@ describe('Quick Sort operation apply route', () => {
     await expect(response.json()).resolves.toMatchObject({
       code: 'TASK_REVISION_CONFLICT',
     });
-    expect(mocks.patchTask).toHaveBeenCalledTimes(4);
-    expect(mocks.rebaseApplyingOperation).toHaveBeenCalledTimes(3);
+    expect(mocks.patchTask).toHaveBeenCalledTimes(7);
+    expect(mocks.rebaseApplyingOperation).toHaveBeenCalledTimes(6);
     expect(mocks.discardApplyingOperation).toHaveBeenCalledWith(operation.id);
   });
 

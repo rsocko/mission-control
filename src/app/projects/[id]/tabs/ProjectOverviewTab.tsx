@@ -47,6 +47,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
   } = useProjectPageData();
   const {
     handleGraphTaskSelect,
+    openTaskSubtasks,
     selectedTaskId,
     selectTask,
   } = useProjectPageTaskInteractions();
@@ -177,7 +178,10 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
                           <ConnectorIcon size={14} className="text-[var(--text-tertiary)]" />
                           <p className="truncate text-sm font-medium text-[var(--text-primary)]">{task.title}</p>
                           <TaskDisplayId task={task} />
-                          <TaskInfoBadges task={task} />
+                          <TaskInfoBadges
+                            task={task}
+                            onOpenSubtasks={() => openTaskSubtasks(task.id)}
+                          />
                         </div>
                         <p className="mt-1 text-xs text-[var(--text-tertiary)]">Updated {formatRelativeTime(task.updatedAt)}</p>
                       </div>

@@ -302,8 +302,10 @@ async function applyMutations(
     switch (mutation.kind) {
       case 'add_task_membership':
         await client.query(`
-          INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)
-          ON CONFLICT DO NOTHING
+          INSERT INTO task_projects (task_id, project_id, provenance)
+          VALUES ($1, $2, 'local')
+          ON CONFLICT (task_id, project_id)
+          DO UPDATE SET provenance = 'local'
         `, [mutation.taskId, projectId]);
         break;
       case 'remove_task_membership':

@@ -1,7 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Check, ChevronDown, Sparkles, X } from 'lucide-react';
+import { Check, Sparkles, X } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { QuickSortSuggestion } from '@/lib/hooks/useQuickSortData';
 import {
   getQuickAddSuggestionConfidenceBand,
@@ -23,6 +32,8 @@ const EFFORTS = [
   { value: 4, label: 'L' },
   { value: 5, label: 'XL' },
 ] as const;
+
+const EMPTY_SELECT_VALUE = '__none__';
 
 export interface QuickAddReviewProject {
   id: string;
@@ -142,22 +153,21 @@ function SelectControl({
   children: ReactNode;
 }) {
   return (
-    <label className="relative min-w-0">
-      <span className="sr-only">{label}</span>
-      <select
+    <Select
+      value={value || EMPTY_SELECT_VALUE}
+      disabled={disabled}
+      onValueChange={(nextValue) => onChange(nextValue === EMPTY_SELECT_VALUE ? '' : nextValue)}
+    >
+      <SelectTrigger
         data-suggestion-control
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-8 max-w-full appearance-none rounded-md border border-[var(--border)] bg-[var(--surface-0)] py-1 pl-2.5 pr-7 text-xs font-medium text-[var(--text-primary)] outline-none transition-colors hover:border-[var(--text-muted)] focus:border-[var(--border-focus)] disabled:cursor-not-allowed disabled:opacity-50"
+        data-enter-native
+        aria-label={label}
+        className="h-8 min-h-0 max-w-full rounded-md px-2.5 py-1 text-xs"
       >
-        {children}
-      </select>
-      <ChevronDown
-        size={12}
-        className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-      />
-    </label>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>{children}</SelectContent>
+    </Select>
   );
 }
 
@@ -365,7 +375,7 @@ export function QuickAddSuggestionReview({
               onChange={setPriority}
             >
               {PRIORITIES.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
               ))}
             </SelectControl>
             <span className="ml-auto hidden truncate text-[11px] text-[var(--text-muted)] md:block">
@@ -390,7 +400,7 @@ export function QuickAddSuggestionReview({
               onChange={(value) => setEffort(Number(value))}
             >
               {EFFORTS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+                <SelectItem key={option.value} value={String(option.value)}>{option.label}</SelectItem>
               ))}
             </SelectControl>
             <span className="ml-auto hidden truncate text-[11px] text-[var(--text-muted)] md:block">
@@ -423,21 +433,23 @@ export function QuickAddSuggestionReview({
                 ));
               }}
             >
-              <option value="">No project</option>
+              <SelectItem value={EMPTY_SELECT_VALUE}>No project</SelectItem>
               {suggestion.projects.length > 0 && (
-                <optgroup label="Suggested">
+                <SelectGroup>
+                  <SelectLabel>Suggested</SelectLabel>
                   {suggestion.projects.map((project) => (
-                    <option key={project.id} value={project.id}>{project.name}</option>
+                    <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
                   ))}
-                </optgroup>
+                </SelectGroup>
               )}
-              <optgroup label="All projects">
+              <SelectGroup>
+                <SelectLabel>All projects</SelectLabel>
                 {projects
                   .filter((project) => !suggestion.projects.some((candidate) => candidate.id === project.id))
                   .map((project) => (
-                    <option key={project.id} value={project.id}>{project.name}</option>
+                    <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
                   ))}
-              </optgroup>
+              </SelectGroup>
             </SelectControl>
             {projectSuggestion && projectId === projectSuggestion.id && (
               <span className="hidden truncate text-[11px] text-[var(--text-muted)] md:block">
@@ -462,9 +474,9 @@ export function QuickAddSuggestionReview({
                     setPhaseSelected(Boolean(value));
                   }}
                 >
-                  <option value="">No phase</option>
+                  <SelectItem value={EMPTY_SELECT_VALUE}>No phase</SelectItem>
                   {selectedProject.phases?.map((phase) => (
-                    <option key={phase.id} value={phase.id}>{phase.name}</option>
+                    <SelectItem key={phase.id} value={phase.id}>{phase.name}</SelectItem>
                   ))}
                 </SelectControl>
                 {phaseSuggestion && phaseId === phaseSuggestion.id && (

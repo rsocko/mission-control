@@ -92,11 +92,10 @@ describe('Quick Add suggestion review', () => {
       />,
     );
 
-    expect(screen.getByLabelText('Phase')).toHaveValue('phase-ready');
-    fireEvent.change(screen.getByLabelText('Project'), {
-      target: { value: 'project-other' },
-    });
-    expect(screen.getByLabelText('Phase')).toHaveValue('');
+    expect(screen.getByLabelText('Phase')).toHaveTextContent('Launch readiness');
+    fireEvent.click(screen.getByLabelText('Project'));
+    fireEvent.click(screen.getByRole('option', { name: 'Other' }));
+    expect(screen.getByLabelText('Phase')).toHaveTextContent('No phase');
 
     const review = screen.getByText('Review suggestions').parentElement?.parentElement;
     expect(review).not.toBeNull();

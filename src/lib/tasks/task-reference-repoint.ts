@@ -112,8 +112,8 @@ function rebuildProjectPlacements(
     }
 
     tx.run(sql`
-      INSERT OR IGNORE INTO task_projects (task_id, project_id)
-      SELECT ${successorTaskId}, project_id
+      INSERT OR IGNORE INTO task_projects (task_id, project_id, provenance)
+      SELECT ${successorTaskId}, project_id, provenance
       FROM task_projects
       WHERE task_id = ${sourceTaskId}
     `);

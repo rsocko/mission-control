@@ -1,0 +1,1904 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Control - Quick Entry Suggestion Alternatives</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #020617;
+      --chrome: #0b1120;
+      --panel: #111827;
+      --raised: #1e293b;
+      --pressed: #334155;
+      --border-subtle: #162032;
+      --border: #1e293b;
+      --border-strong: #334155;
+      --text: #f8fafc;
+      --heading: #c4cede;
+      --text-2: #94a3b8;
+      --text-3: #8b9ab5;
+      --muted: #8190a6;
+      --blue: #3b82f6;
+      --blue-soft: #60a5fa;
+      --blue-deep: #1e3a8a;
+      --green: #10b981;
+      --green-deep: #065f46;
+      --amber: #f59e0b;
+      --amber-deep: #92400e;
+      --rose: #f43f5e;
+      --orange: #fb923c;
+      --purple: #a855f7;
+      --cyan: #22d3ee;
+      --shadow-md: 0 18px 44px rgba(0, 0, 0, .32);
+      --shadow-lg: 0 28px 80px rgba(0, 0, 0, .5);
+      --font: "Geist Sans", "Segoe UI", system-ui, sans-serif;
+      --mono: "Geist Mono", "Cascadia Code", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    button, input, select { font: inherit; }
+    button, select { color: inherit; }
+    button { cursor: pointer; }
+    ::selection { background: rgba(59, 130, 246, .35); color: var(--text); }
+    :focus-visible { outline: 2px solid var(--blue-soft); outline-offset: 2px; }
+    * { scrollbar-color: var(--pressed) var(--chrome); scrollbar-width: thin; }
+
+    .icon {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.8;
+    }
+    .icon-sm { width: 13px; height: 13px; }
+
+    .page-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      min-height: 58px;
+      padding: 8px 24px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(2, 6, 23, .94);
+      backdrop-filter: blur(12px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 650;
+      letter-spacing: -.02em;
+    }
+    .brand-mark {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--blue);
+      color: white;
+      font-weight: 750;
+    }
+    .brand-subtitle {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 450;
+    }
+    .header-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      color: var(--text-2);
+      font-size: 12px;
+    }
+    .issue-link {
+      color: var(--blue-soft);
+      text-decoration: none;
+      text-underline-offset: 3px;
+    }
+    .issue-link:hover { text-decoration: underline; }
+
+    main {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 30px 24px 72px;
+    }
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+      gap: 28px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+    h1 {
+      max-width: 760px;
+      margin: 0 0 10px;
+      color: var(--text);
+      font-size: 20px;
+      line-height: 1.04;
+      letter-spacing: -.04em;
+      text-wrap: balance;
+    }
+    .intro p {
+      max-width: 72ch;
+      margin: 0;
+      color: var(--text-2);
+      font-size: 14px;
+    }
+    .thesis {
+      padding: 14px 16px;
+      border: 1px solid rgba(96, 165, 250, .28);
+      border-radius: 12px;
+      background: #0c1830;
+      color: var(--text-2);
+    }
+    .thesis strong {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--heading);
+      font-size: 13px;
+    }
+
+    .comparison-nav {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 5px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--chrome);
+    }
+    .comparison-tab {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      padding: 10px 12px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-2);
+      text-align: left;
+      transition: 140ms ease;
+    }
+    .comparison-tab:hover {
+      background: var(--panel);
+      color: var(--text);
+    }
+    .comparison-tab[aria-selected="true"] {
+      border-color: rgba(96, 165, 250, .28);
+      background: var(--raised);
+      color: var(--text);
+    }
+    .tab-letter {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      flex: 0 0 auto;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--blue-soft);
+      font-weight: 700;
+    }
+    .comparison-tab[aria-selected="true"] .tab-letter { background: var(--blue-deep); color: var(--text); }
+    .tab-copy { min-width: 0; }
+    .tab-copy strong, .tab-copy span { display: block; }
+    .tab-copy strong { font-size: 12px; }
+    .tab-copy span {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .prototype {
+      display: none;
+      grid-template-columns: minmax(0, 1fr) 310px;
+      min-height: 690px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--chrome);
+      box-shadow: var(--shadow-lg);
+    }
+    .prototype.active { display: grid; animation: reveal 180ms cubic-bezier(.22, 1, .36, 1); }
+    @keyframes reveal {
+      from { opacity: .4; filter: blur(3px); clip-path: inset(0 0 10px 0); }
+      to { opacity: 1; filter: blur(0); clip-path: inset(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .prototype.active { animation: none; }
+      * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    }
+
+    .app-stage {
+      position: relative;
+      min-width: 0;
+      padding: 22px;
+      background: var(--chrome);
+    }
+    .stage-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 56px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .stage-toolbar::after {
+      width: 74px;
+      height: 8px;
+      margin-left: auto;
+      border-radius: 9999px;
+      background: var(--border-subtle);
+      content: "";
+    }
+    .fake-rail {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 52px;
+      border-right: 1px solid var(--border-subtle);
+      background: #050a13;
+    }
+    .fake-rail::before {
+      position: absolute;
+      top: 18px;
+      left: 14px;
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+      background: var(--blue);
+      content: "";
+    }
+    .app-stage-inner { position: relative; margin-left: 44px; }
+    .backdrop-list {
+      display: grid;
+      gap: 10px;
+      opacity: .42;
+    }
+    .backdrop-row {
+      display: grid;
+      grid-template-columns: 18px 1fr 90px 70px;
+      gap: 12px;
+      align-items: center;
+      min-height: 46px;
+      padding: 0 14px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .ghost-box, .ghost-line { display: block; background: var(--pressed); }
+    .ghost-box { width: 15px; height: 15px; border-radius: 6px; }
+    .ghost-line { height: 7px; border-radius: 9999px; }
+    .ghost-line.short { width: 55%; }
+
+    .quick-entry {
+      position: absolute;
+      z-index: 3;
+      top: 88px;
+      left: 50%;
+      width: min(760px, calc(100% - 92px));
+      transform: translateX(-50%);
+      filter: drop-shadow(0 24px 34px rgba(0, 0, 0, .42));
+    }
+    .source-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      margin-left: auto;
+      padding: 4px 7px;
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      color: var(--text-2);
+      font-size: 10px;
+    }
+    .source-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--purple); }
+    .entry-field {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0;
+      padding: 8px 8px 8px 12px;
+      border: 1px solid rgba(96, 165, 250, .58);
+      border-radius: 12px 12px 0 0;
+      background: var(--panel);
+      box-shadow: 0 7px 18px rgba(2, 6, 23, .45), 0 0 0 3px rgba(59, 130, 246, .08);
+    }
+    .more-button {
+      display: inline-flex;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--blue-soft);
+      font-size: 16px;
+      letter-spacing: .08em;
+    }
+    .more-button:hover { background: var(--raised); }
+    .entry-field input {
+      flex: 1;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      caret-color: var(--blue-soft);
+    }
+    .kbd {
+      padding: 2px 5px;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: var(--chrome);
+      color: var(--muted);
+      font: 10px var(--mono);
+    }
+    .add-button, .apply-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 32px;
+      padding: 6px 11px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--blue);
+      color: white;
+      font-size: 12px;
+      font-weight: 650;
+      transition: 130ms ease;
+    }
+    .add-button:hover, .apply-button:hover { background: var(--blue-soft); }
+    .apply-button:disabled {
+      cursor: not-allowed;
+      background: var(--raised);
+      color: var(--muted);
+    }
+
+    .created-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 34px;
+      margin: 0;
+      padding: 6px 10px;
+      border: 1px solid rgba(16, 185, 129, .34);
+      border-top: 0;
+      border-radius: 0;
+      background: rgba(6, 95, 70, .22);
+    }
+    .created-status {
+      display: inline-flex;
+      flex: 0 0 auto;
+      align-items: center;
+      color: var(--green);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+    }
+    .created-copy { min-width: 0; }
+    .created-copy strong {
+      display: inline;
+      overflow: hidden;
+      color: var(--heading);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .created-copy span { margin-left: 7px; color: var(--green); font-size: 10px; }
+    .undo-button {
+      border: 0;
+      background: transparent;
+      color: var(--blue-soft);
+      font-size: 11px;
+    }
+    .view-button {
+      margin-left: auto;
+      border: 0;
+      background: transparent;
+      color: var(--blue-soft);
+      font-size: 11px;
+    }
+
+    .suggestion-region {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-top: 0;
+      border-radius: 0 0 12px 12px;
+      background: var(--panel);
+    }
+    .suggestion-header {
+      display: flex;
+      align-items: center;
+      min-height: 38px;
+      gap: 7px;
+      padding: 0 14px;
+      color: var(--text-2);
+      font-size: 11px;
+    }
+    .suggestion-header strong { color: var(--heading); font-size: 12px; }
+    .suggestion-header .count {
+      margin-left: auto;
+      font-variant-numeric: tabular-nums;
+    }
+    .ai-mark { color: var(--blue-soft); }
+
+    .option-check {
+      appearance: none;
+      display: grid;
+      width: 17px;
+      height: 17px;
+      margin: 0;
+      flex: 0 0 auto;
+      place-items: center;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: var(--chrome);
+    }
+    .option-check:checked {
+      border-color: var(--blue);
+      background: var(--blue);
+    }
+    .option-check:checked::after {
+      width: 7px;
+      height: 4px;
+      margin-top: -2px;
+      border-bottom: 2px solid white;
+      border-left: 2px solid white;
+      transform: rotate(-45deg);
+      content: "";
+    }
+
+    .suggestion-list { display: grid; padding: 0 10px 10px; }
+    .suggestion-item {
+      display: grid;
+      grid-template-columns: 22px 88px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 42px;
+      padding: 6px 8px;
+      border-radius: 8px;
+    }
+    .suggestion-item:hover { background: var(--raised); }
+    .field-name {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .field-value {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      gap: 7px;
+      color: var(--text);
+      font-size: 12px;
+    }
+    .value-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
+    .dot-orange { background: var(--orange); }
+    .dot-blue { background: var(--blue); }
+    .dot-cyan { background: var(--cyan); }
+    .dot-purple { background: var(--purple); }
+    .field-select {
+      max-width: 210px;
+      min-height: 29px;
+      padding: 4px 28px 4px 8px;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: var(--chrome);
+      color: var(--text);
+      font-size: 11px;
+    }
+    .field-stack {
+      display: grid;
+      min-width: 0;
+      gap: 3px;
+    }
+    .field-value.field-stack {
+      grid-template-columns: 7px minmax(0, 1fr);
+      align-items: center;
+    }
+    .field-value.field-stack .field-help { grid-column: 2; }
+    .field-help {
+      color: var(--muted);
+      font-size: 9px;
+    }
+    .field-help.pending { color: var(--blue-soft); }
+    .confidence {
+      padding: 3px 6px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--muted);
+      font: 10px var(--mono);
+    }
+    .confidence.medium { border-color: rgba(245, 158, 11, .32); color: var(--amber); }
+    .confidence.high { border-color: rgba(59, 130, 246, .34); color: var(--blue-soft); }
+    .tag-suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .tag-suggestion {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 7px;
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      background: var(--chrome);
+      color: var(--text-2);
+      font-size: 11px;
+    }
+    .tag-suggestion[aria-pressed="true"] {
+      border-color: rgba(96, 165, 250, .5);
+      background: var(--blue-deep);
+      color: var(--text);
+    }
+    .tag-suggestion.low-confidence {
+      border-style: dashed;
+      opacity: .52;
+    }
+    .tag-remove {
+      color: currentColor;
+      font-size: 13px;
+      line-height: 1;
+      opacity: .72;
+    }
+    .confidence-policy {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      margin-bottom: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .policy-cell {
+      padding: 11px 13px;
+      border-left: 1px solid var(--border);
+    }
+    .policy-cell:first-child { border-left: 0; }
+    .policy-cell strong { display: block; color: var(--heading); font-size: 11px; }
+    .policy-cell span { color: var(--text-2); font-size: 10px; }
+    .policy-cell.high { background: rgba(30, 58, 138, .2); }
+    .policy-cell.medium { background: rgba(146, 64, 14, .12); }
+    .suggestion-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 14px;
+      border-top: 1px solid var(--border);
+    }
+    .text-button {
+      min-height: 30px;
+      padding: 5px 8px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-2);
+      font-size: 11px;
+    }
+    .text-button:hover { background: var(--raised); color: var(--text); }
+    .suggestion-actions .apply-button { margin-left: auto; }
+    .shortcut-hint {
+      width: 100%;
+      color: var(--muted);
+      font: 9px var(--mono);
+    }
+    .low-confidence-list {
+      display: grid;
+      margin: 0 10px 8px;
+      padding: 6px;
+      border: 1px dashed var(--border-strong);
+      border-radius: 8px;
+      background: var(--chrome);
+    }
+    .low-confidence-list[hidden] { display: none; }
+    .low-confidence-note {
+      padding: 5px 8px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+    .tag-adder {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .tag-adder[hidden] { display: none; }
+    .tag-adder input {
+      width: 140px;
+      min-height: 28px;
+      padding: 4px 7px;
+      border: 1px solid var(--blue);
+      border-radius: 6px;
+      outline: 0;
+      background: var(--chrome);
+      color: var(--text);
+      font-size: 11px;
+    }
+    .add-tag-button {
+      min-height: 28px;
+      padding: 4px 7px;
+      border: 1px dashed var(--border-strong);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--blue-soft);
+      font-size: 11px;
+    }
+    .applied-note {
+      display: none;
+      align-items: center;
+      gap: 7px;
+      min-height: 40px;
+      padding: 0 14px;
+      border-top: 1px solid rgba(16, 185, 129, .26);
+      background: var(--green-deep);
+      color: var(--text);
+      font-size: 11px;
+    }
+    .suggestion-region.applied .applied-note { display: flex; }
+    .suggestion-region.applied .suggestion-list,
+    .suggestion-region.applied .suggestion-actions,
+    .suggestion-region.applied .low-confidence-list { display: none; }
+
+    .notes {
+      padding: 20px;
+      border-left: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .notes h2 {
+      margin: 0 0 7px;
+      color: var(--heading);
+      font-size: 16px;
+      letter-spacing: -.02em;
+    }
+    .notes > p { margin: 0 0 18px; color: var(--text-2); font-size: 12px; }
+    .note-section {
+      padding: 14px 0;
+      border-top: 1px solid var(--border);
+    }
+    .note-section h3 {
+      margin: 0 0 8px;
+      color: var(--text);
+      font-size: 11px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .note-section ul { margin: 0; padding-left: 17px; color: var(--text-2); font-size: 11px; }
+    .note-section li + li { margin-top: 6px; }
+    .verdict {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+      padding: 5px 8px;
+      border: 1px solid rgba(96, 165, 250, .28);
+      border-radius: 6px;
+      background: #0c1830;
+      color: #bfdbfe;
+      font-size: 10px;
+      font-weight: 650;
+    }
+
+    /* Alternative B */
+    .chip-canvas {
+      padding: 4px 14px 14px;
+      border: 1px solid var(--border);
+      border-top: 0;
+      border-radius: 0 0 12px 12px;
+      background: var(--panel);
+    }
+    .chip-canvas-head {
+      display: flex;
+      align-items: center;
+      min-height: 38px;
+      gap: 7px;
+      color: var(--text-2);
+      font-size: 11px;
+    }
+    .chip-canvas-head strong { color: var(--heading); }
+    .chip-grid { display: flex; flex-wrap: wrap; gap: 7px; }
+    .smart-chip {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      gap: 6px;
+      padding: 5px 8px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      background: var(--chrome);
+      color: var(--text-2);
+      font-size: 11px;
+      transition: 130ms ease;
+    }
+    .smart-chip:hover { border-color: #475569; color: var(--text); }
+    .smart-chip.selected {
+      border-color: rgba(96, 165, 250, .55);
+      background: var(--blue-deep);
+      color: var(--text);
+    }
+    .smart-chip .chip-state {
+      display: grid;
+      width: 15px;
+      height: 15px;
+      place-items: center;
+      border: 1px solid currentColor;
+      border-radius: 6px;
+      font-size: 9px;
+    }
+    .smart-chip.selected .chip-state::after { content: "✓"; }
+    .chip-edit {
+      padding-left: 7px;
+      border-left: 1px solid currentColor;
+      color: inherit;
+      opacity: .76;
+    }
+    .chip-evidence {
+      display: none;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--chrome);
+      color: var(--text-2);
+      font-size: 11px;
+    }
+    .chip-evidence.open { display: grid; }
+    .chip-evidence strong { display: block; color: var(--heading); }
+    .chip-evidence span { color: var(--muted); }
+    .chip-footer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .selection-summary { color: var(--muted); font-size: 10px; }
+    .chip-footer .apply-button { margin-left: auto; }
+    .popover {
+      position: absolute;
+      z-index: 8;
+      display: none;
+      width: 190px;
+      padding: 6px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      background: var(--chrome);
+      box-shadow: var(--shadow-md);
+    }
+    .popover.open { display: block; }
+    .popover button {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 8px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-2);
+      font-size: 11px;
+      text-align: left;
+    }
+    .popover button:hover { background: var(--raised); color: var(--text); }
+    .popover button.active { background: var(--blue-deep); color: var(--text); }
+
+    /* Alternative C */
+    .review-layout {
+      display: grid;
+      grid-template-columns: 1fr 240px;
+      border-right: 1px solid var(--border);
+      border-left: 1px solid var(--border);
+    }
+    .review-fields { padding: 10px; }
+    .review-item {
+      display: grid;
+      grid-template-columns: 30px 88px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 43px;
+      padding: 5px 7px;
+      border-radius: 8px;
+    }
+    .review-item:hover, .review-item.active { background: var(--raised); }
+    .mini-switch {
+      position: relative;
+      width: 27px;
+      height: 16px;
+      padding: 0;
+      border: 1px solid var(--border-strong);
+      border-radius: 9999px;
+      background: var(--pressed);
+    }
+    .mini-switch::after {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: 130ms ease;
+      content: "";
+    }
+    .mini-switch[aria-pressed="true"] { border-color: var(--blue); background: var(--blue-deep); }
+    .mini-switch[aria-pressed="true"]::after { left: 13px; background: white; }
+    .review-value {
+      overflow: hidden;
+      color: var(--text);
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .review-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding-block: 4px;
+    }
+    .review-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 6px;
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      background: var(--chrome);
+      color: var(--text-2);
+      font-size: 10px;
+    }
+    .why-button {
+      padding: 4px 6px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--blue-soft);
+      font-size: 10px;
+    }
+    .why-button:hover { background: var(--chrome); }
+    .evidence-panel {
+      padding: 13px;
+      border-left: 1px solid var(--border);
+      background: #0d1525;
+    }
+    .evidence-panel h3 {
+      margin: 0 0 10px;
+      color: var(--heading);
+      font-size: 12px;
+    }
+    .evidence-title {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 10px;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .evidence-list { display: grid; gap: 8px; }
+    .evidence-line {
+      display: grid;
+      grid-template-columns: 17px 1fr;
+      gap: 7px;
+      color: var(--text-2);
+      font-size: 10px;
+    }
+    .evidence-line strong { display: block; color: var(--heading); }
+    .evidence-icon {
+      display: grid;
+      width: 17px;
+      height: 17px;
+      place-items: center;
+      border-radius: 6px;
+      background: var(--raised);
+      color: var(--blue-soft);
+    }
+    .rule-alert {
+      margin-top: 11px;
+      padding: 9px;
+      border: 1px solid rgba(245, 158, 11, .28);
+      border-radius: 8px;
+      background: var(--amber-deep);
+      color: var(--text);
+      font-size: 10px;
+    }
+    .review-footer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border: 1px solid var(--border);
+      border-top: 1px solid var(--border);
+      border-radius: 0 0 12px 12px;
+      background: var(--panel);
+    }
+    .created-row + .suggestion-header {
+      border-right: 1px solid var(--border);
+      border-left: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .review-footer span { color: var(--muted); font-size: 10px; }
+    .review-footer .apply-button { margin-left: auto; }
+
+    .recommendation-strip {
+      display: grid;
+      grid-template-columns: 1.1fr repeat(3, 1fr);
+      gap: 0;
+      margin-top: 18px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+    .recommendation-lead, .recommendation-cell { padding: 14px; }
+    .recommendation-cell { border-left: 1px solid var(--border); }
+    .recommendation-lead strong, .recommendation-cell strong { display: block; color: var(--heading); font-size: 12px; }
+    .recommendation-lead span, .recommendation-cell span { color: var(--text-2); font-size: 10px; }
+    .recommendation-cell.best { background: #0c1830; }
+    .recommendation-cell.best strong { color: #bfdbfe; }
+
+    @media (max-width: 1050px) {
+      .intro { grid-template-columns: 1fr; }
+      .prototype { grid-template-columns: 1fr; }
+      .notes { border-top: 1px solid var(--border); border-left: 0; }
+      .recommendation-strip { grid-template-columns: 1fr 1fr; }
+      .recommendation-cell:nth-child(odd) { border-left: 0; }
+      .recommendation-cell { border-top: 1px solid var(--border); }
+    }
+    @media (max-width: 700px) {
+      .page-header { padding-inline: 14px; }
+      .brand-subtitle, .header-meta span { display: none; }
+      main { padding: 20px 12px 48px; }
+      .comparison-nav { grid-template-columns: 1fr; }
+      .confidence-policy { grid-template-columns: 1fr; }
+      .policy-cell { border-top: 1px solid var(--border); border-left: 0; }
+      .policy-cell:first-child { border-top: 0; }
+      .prototype { min-height: 780px; }
+      .app-stage { min-height: 580px; padding: 14px; }
+      .fake-rail { display: none; }
+      .app-stage-inner { margin-left: 0; }
+      .quick-entry {
+        top: 72px;
+        width: calc(100% - 28px);
+      }
+      .entry-field { flex-wrap: wrap; }
+      .entry-field input { min-width: 170px; }
+      .suggestion-item { grid-template-columns: 22px 70px minmax(0, 1fr); }
+      .suggestion-item .confidence { display: none; }
+      .review-layout { grid-template-columns: 1fr; }
+      .evidence-panel { border-top: 1px solid var(--border); border-left: 0; }
+      .recommendation-strip { grid-template-columns: 1fr; }
+      .recommendation-cell { border-top: 1px solid var(--border); border-left: 0; }
+      .comparison-tab,
+      .add-button,
+      .apply-button,
+      .text-button,
+      .undo-button,
+      .smart-chip,
+      .why-button {
+        min-height: 44px;
+      }
+      .suggestion-item, .review-item { min-height: 48px; }
+      .tag-suggestion { min-height: 44px; }
+    }
+  </style>
+</head>
+<body>
+  <svg aria-hidden="true" width="0" height="0" style="position:absolute">
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3-1.5 4.5L6 9l4.5 1.5L12 15l1.5-4.5L18 9l-4.5-1.5L12 3Z"/><path d="m5 3-.6 1.8L2.5 5.5l1.9.7L5 8l.6-1.8 1.9-.7-1.9-.7L5 3Z"/><path d="m19 16-.8 2.2-2.2.8 2.2.8L19 22l.8-2.2 2.2-.8-2.2-.8L19 16Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-git" viewBox="0 0 24 24"><circle cx="6" cy="4" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="20" r="2"/><path d="M6 6v12M18 8a6 6 0 0 1-6 6H6"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-rule" viewBox="0 0 24 24"><path d="M4 7h10M4 17h16M16 7l2 2 3-3"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M20 13 11 22l-9-9V2h11l7 7a3 3 0 0 1 0 4Z"/><circle cx="7" cy="7" r="1"/></symbol>
+  </svg>
+
+  <header class="page-header">
+    <div class="brand">
+      <span class="brand-mark">M</span>
+      <span>Mission Control</span>
+      <span class="brand-subtitle">Quick entry suggestions</span>
+    </div>
+    <div class="header-meta">
+      <span>Interactive concept for</span>
+      <a class="issue-link" href="https://github.com/rsocko/mission-control/issues/2304">#2304</a>
+      <span>+</span>
+      <a class="issue-link" href="https://github.com/rsocko/mission-control/issues/2305">#2305</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div>
+        <h1>Suggestions should be a set of choices, not a bundled verdict.</h1>
+        <p>Each concept lets the user accept one or more fields independently, adjust bounded values, and inspect why a project or phase was proposed. All three use the same newly created task so the interaction tradeoffs remain clear.</p>
+      </div>
+      <div class="thesis">
+        <strong>Recommended product rule</strong>
+        Editable fields use constrained controls. Project and phase remain selectable, but only from existing records. A matching project rule is disclosed before apply because it may make the suggestion redundant.
+      </div>
+    </section>
+
+    <section class="confidence-policy" aria-label="Recommended confidence behavior">
+      <div class="policy-cell high"><strong>80–100% · Visible and selected</strong><span>Strong evidence; ready to apply unless the user turns it off.</span></div>
+      <div class="policy-cell medium"><strong>55–79% · Visible, not selected</strong><span>Worth considering, but never applied without an explicit click.</span></div>
+      <div class="policy-cell"><strong>Below 55% · Hidden by default</strong><span>Available behind “Show lower-confidence suggestions” for investigation.</span></div>
+    </section>
+
+    <nav class="comparison-nav" role="tablist" aria-label="Suggestion design alternatives">
+      <button class="comparison-tab" role="tab" aria-selected="true" aria-controls="option-a" id="tab-a" data-target="option-a">
+        <span class="tab-letter">A</span>
+        <span class="tab-copy"><strong>Selective review</strong><span>Explicit, editable, easiest to trust</span></span>
+      </button>
+      <button class="comparison-tab" role="tab" aria-selected="false" aria-controls="option-b" id="tab-b" data-target="option-b">
+        <span class="tab-letter">B</span>
+        <span class="tab-copy"><strong>Smart chips</strong><span>Fastest and most compact</span></span>
+      </button>
+      <button class="comparison-tab" role="tab" aria-selected="false" aria-controls="option-c" id="tab-c" data-target="option-c">
+        <span class="tab-letter">C</span>
+        <span class="tab-copy"><strong>Evidence review</strong><span>Best for uncertain project matching</span></span>
+      </button>
+    </nav>
+
+    <section class="prototype active" id="option-a" role="tabpanel" aria-labelledby="tab-a">
+      <div class="app-stage">
+        <div class="fake-rail"></div>
+        <div class="app-stage-inner">
+          <div class="stage-toolbar"><span>Tasks</span><span>/</span><span>GitHub</span><span>/</span><span>mission-control</span></div>
+          <div class="backdrop-list" aria-hidden="true">
+            <div class="backdrop-row"><span class="ghost-box"></span><span class="ghost-line"></span><span class="ghost-line"></span><span class="ghost-line short"></span></div>
+            <div class="backdrop-row"><span class="ghost-box"></span><span class="ghost-line short"></span><span class="ghost-line"></span><span class="ghost-line"></span></div>
+            <div class="backdrop-row"><span class="ghost-box"></span><span class="ghost-line"></span><span class="ghost-line short"></span><span class="ghost-line"></span></div>
+          </div>
+          <article class="quick-entry">
+            <div class="entry-field">
+              <button class="more-button" type="button" aria-label="More Quick Add actions">•••</button>
+              <input data-task-input value="" placeholder="Add a task…" aria-label="Task title for alternative A">
+              <span class="source-pill"><span class="source-dot"></span> GitHub / mission-control</span>
+            </div>
+            <div class="created-row">
+              <span class="created-status">Added</span>
+              <span class="created-copy"><strong>Make quick entry suggestions clickable independently</strong><span>Saved to GitHub / mission-control</span></span>
+              <button class="view-button" type="button">View</button>
+              <button class="undo-button" type="button">Undo</button>
+            </div>
+            <div class="suggestion-region" data-suggestion-region>
+              <div class="suggestion-header">
+                <svg class="icon icon-sm ai-mark"><use href="#i-sparkles"></use></svg>
+                <strong>Review suggestions</strong>
+                <span>Choose only what looks right</span>
+                <span class="count" data-selection-count>4 selected</span>
+              </div>
+              <div class="suggestion-list">
+                <label class="suggestion-item">
+                  <input class="option-check" type="checkbox" checked>
+                  <span class="field-name">Priority</span>
+                  <span class="field-value">
+                    <span class="value-dot dot-orange"></span>
+                    <select class="field-select" aria-label="Suggested priority">
+                      <option>Critical / P0</option>
+                      <option selected>High / P1</option>
+                      <option>Medium / P2</option>
+                      <option>Low / P3</option>
+                      <option>None</option>
+                    </select>
+                  </span>
+                  <span class="confidence high">82%</span>
+                </label>
+                <label class="suggestion-item">
+                  <input class="option-check" type="checkbox">
+                  <span class="field-name">Effort</span>
+                  <span class="field-value">
+                    <span class="value-dot dot-cyan"></span>
+                    <select class="field-select" aria-label="Suggested effort">
+                      <option>XS</option>
+                      <option selected>Small</option>
+                      <option>Medium</option>
+                      <option>Large</option>
+                      <option>XL</option>
+                    </select>
+                  </span>
+                  <span class="confidence medium">76%</span>
+                </label>
+                <label class="suggestion-item">
+                  <input class="option-check" type="checkbox" checked>
+                  <span class="field-name">Project</span>
+                  <span class="field-value field-stack">
+                    <span class="value-dot dot-blue"></span>
+                    <select class="field-select" aria-label="Suggested project" data-project-select>
+                      <optgroup label="Suggested projects">
+                        <option selected>Mission Control</option>
+                        <option>Developer productivity</option>
+                      </optgroup>
+                      <optgroup label="All projects">
+                        <option>Copilot CLI</option>
+                        <option>Home operations</option>
+                        <option>No project</option>
+                      </optgroup>
+                    </select>
+                    <span class="field-help">Suggested first, then searchable all projects</span>
+                  </span>
+                  <span class="confidence high">94%</span>
+                </label>
+                <label class="suggestion-item" data-phase-row>
+                  <input class="option-check" type="checkbox" checked>
+                  <span class="field-name">Phase</span>
+                  <span class="field-value field-stack">
+                    <span class="value-dot dot-purple"></span>
+                    <select class="field-select" aria-label="Suggested phase" data-phase-select>
+                      <optgroup label="Suggested in Mission Control">
+                        <option selected>Quick entry improvements</option>
+                      </optgroup>
+                      <optgroup label="All Mission Control phases">
+                        <option>Discovery</option>
+                        <option>Polish and accessibility</option>
+                        <option>No phase</option>
+                      </optgroup>
+                    </select>
+                    <span class="field-help" data-phase-help>Only phases in Mission Control</span>
+                  </span>
+                  <span class="confidence high" data-phase-confidence>88%</span>
+                </label>
+                <div class="suggestion-item">
+                  <span></span>
+                  <span class="field-name">Tags</span>
+                  <span class="field-stack">
+                    <span class="tag-suggestions">
+                      <button class="tag-suggestion" type="button" aria-pressed="true" data-tag-suggestion><span>#frontend</span><span class="tag-remove" aria-hidden="true">×</span></button>
+                      <button class="tag-suggestion" type="button" aria-pressed="false" data-tag-suggestion><span>#ux</span><span class="tag-remove" aria-hidden="true">×</span></button>
+                      <button class="tag-suggestion" type="button" aria-pressed="false" data-tag-suggestion><span>#accessibility</span><span class="tag-remove" aria-hidden="true">×</span></button>
+                      <button class="add-tag-button" type="button" data-more-tags>+1 more</button>
+                      <button class="add-tag-button" type="button" data-add-tag>+ Add tag</button>
+                      <span class="tag-adder" data-tag-adder hidden><input type="text" placeholder="Search or create tag" aria-label="Search or create tag"></span>
+                    </span>
+                    <span class="field-help">Choose existing tags or create one here; #name remains the fastest path while typing</span>
+                  </span>
+                  <span class="confidence medium">61–86%</span>
+                </div>
+              </div>
+              <div class="low-confidence-list" data-low-confidence hidden>
+                <div class="low-confidence-note">Other field types below the threshold appear here on request and always start unselected.</div>
+                <label class="suggestion-item">
+                  <input class="option-check" type="checkbox">
+                  <span class="field-name">Due date</span>
+                  <span class="field-value"><span>Tomorrow</span></span>
+                  <span class="confidence">47%</span>
+                </label>
+              </div>
+              <div class="suggestion-actions">
+                <button class="text-button" type="button" data-select-all>Select all</button>
+                <button class="text-button" type="button" data-clear-all>Clear</button>
+                <button class="text-button" type="button" data-toggle-low>Show 1 other lower-confidence field</button>
+                <button class="text-button" type="button" data-skip>Skip</button>
+                <button class="apply-button" type="button" data-apply>Apply selected</button>
+                <span class="shortcut-hint">↑↓ navigate · Space toggle · Enter apply selected · Ctrl/⌘ Enter apply all · Esc skip and return to capture</span>
+              </div>
+              <div class="applied-note"><svg class="icon icon-sm"><use href="#i-check"></use></svg><span data-applied-copy>Applied 4 suggestions. Project rule remains unchanged.</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+      <aside class="notes">
+        <h2>Selective review</h2>
+        <p>A compact field table makes the bundle legible and turns every suggestion into an independent decision.</p>
+        <div class="note-section">
+          <h3>Why it works</h3>
+          <ul>
+            <li>Selection and editing are separate, visible actions.</li>
+            <li>Project ranks suggested matches above a searchable full list; phase is always scoped to that project.</li>
+            <li>Changing project clears phase immediately, then re-evaluates and preselects only a new high-confidence match.</li>
+            <li>Tags are removable one by one and can be searched or created inline; <code>#tag</code> remains the fastest capture syntax.</li>
+          </ul>
+        </div>
+        <div class="note-section">
+          <h3>Tradeoff</h3>
+          <ul>
+            <li>Tallest option; best after creation rather than during rapid typing.</li>
+            <li>Five or more suggestions need strong ordering and a compact overflow pattern.</li>
+          </ul>
+        </div>
+        <span class="verdict"><svg class="icon icon-sm"><use href="#i-check"></use></svg> Recommended baseline</span>
+      </aside>
+    </section>
+
+    <section class="prototype" id="option-b" role="tabpanel" aria-labelledby="tab-b" hidden>
+      <div class="app-stage">
+        <div class="fake-rail"></div>
+        <div class="app-stage-inner">
+          <div class="stage-toolbar"><span>Tasks</span><span>/</span><span>GitHub</span><span>/</span><span>mission-control</span></div>
+          <div class="backdrop-list" aria-hidden="true">
+            <div class="backdrop-row"><span class="ghost-box"></span><span class="ghost-line"></span><span class="ghost-line"></span><span class="ghost-line short"></span></div>
+            <div class="backdrop-row"><span class="ghost-box"></span><span class="ghost-line short"></span><span class="ghost-line"></span><span class="ghost-line"></span></div>
+          </div>
+          <article class="quick-entry">
+            <div class="entry-field">
+              <button class="more-button" type="button" aria-label="More Quick Add actions">•••</button>
+              <input value="" placeholder="Add a task…" aria-label="Task title for alternative B">
+              <span class="source-pill"><span class="source-dot"></span> GitHub / mission-control</span>
+            </div>
+            <div class="created-row">
+              <span class="created-status">Added</span>
+              <span class="created-copy"><strong>Make quick entry suggestions clickable independently</strong><span>Saved to GitHub / mission-control</span></span>
+              <button class="view-button" type="button">View</button>
+              <button class="undo-button" type="button">Undo</button>
+            </div>
+            <div class="chip-canvas" data-chip-canvas>
+              <div class="chip-canvas-head">
+                <svg class="icon icon-sm ai-mark"><use href="#i-sparkles"></use></svg>
+                <strong>Suggested details</strong>
+                <span>Click a chip to include it</span>
+              </div>
+              <div class="chip-grid">
+                <button class="smart-chip selected" type="button" data-chip="Priority" data-editable>
+                  <span class="chip-state"></span><span>High priority</span><span class="chip-edit">Change</span>
+                </button>
+                <button class="smart-chip" type="button" data-chip="Effort" data-editable>
+                  <span class="chip-state"></span><span>Small effort</span><span class="chip-edit">Change</span>
+                </button>
+                <button class="smart-chip selected" type="button" data-chip="Project" data-evidence="project">
+                  <span class="chip-state"></span><svg class="icon icon-sm"><use href="#i-git"></use></svg><span>Mission Control</span><span class="chip-edit">Why?</span>
+                </button>
+                <button class="smart-chip" type="button" data-chip="Phase" data-evidence="phase">
+                  <span class="chip-state"></span><svg class="icon icon-sm"><use href="#i-list"></use></svg><span>Quick entry improvements</span><span class="chip-edit">Why?</span>
+                </button>
+                <button class="smart-chip selected" type="button" data-chip="Tag">
+                  <span class="chip-state"></span><svg class="icon icon-sm"><use href="#i-tag"></use></svg><span>#frontend</span><span class="chip-edit">×</span>
+                </button>
+                <button class="smart-chip" type="button" data-chip="Tag">
+                  <span class="chip-state"></span><svg class="icon icon-sm"><use href="#i-tag"></use></svg><span>#ux</span><span class="chip-edit">×</span>
+                </button>
+                <button class="smart-chip" type="button" data-chip="Tag">
+                  <span class="chip-state"></span><svg class="icon icon-sm"><use href="#i-tag"></use></svg><span>#accessibility</span><span class="chip-edit">×</span>
+                </button>
+                <button class="smart-chip" type="button" data-add-chip-tag data-utility>
+                  <span>+ Add tag</span>
+                </button>
+                <button class="smart-chip" type="button" data-low-chip data-utility>
+                  <span>2 lower-confidence</span>
+                </button>
+              </div>
+              <div class="chip-evidence" data-chip-evidence>
+                <div><strong>Mission Control is a strong match</strong><span>12 of 14 recent tasks from this GitHub source use this project. The task title also closely matches issue #2304.</span></div>
+                <span class="confidence">94%</span>
+              </div>
+              <div class="chip-footer">
+                <span class="selection-summary" data-chip-summary>3 of 5 selected</span>
+                <button class="text-button" type="button" data-show-evidence>Show evidence</button>
+                <button class="apply-button" type="button" data-chip-apply>Apply 3</button>
+              </div>
+              <div class="popover" data-popover>
+                <button type="button">Critical / P0</button>
+                <button class="active" type="button">High / P1</button>
+                <button type="button">Medium / P2</button>
+                <button type="button">Low / P3</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+      <aside class="notes">
+        <h2>Smart chips</h2>
+        <p>The existing suggestion language becomes interactive: each chip is both an inclusion toggle and a doorway to edit or evidence.</p>
+        <div class="note-section">
+          <h3>Why it works</h3>
+          <ul>
+            <li>Smallest footprint and easiest to scan in the existing toast.</li>
+            <li>Selected state replaces the current green-on-green treatment with blue action semantics.</li>
+            <li>Project and phase evidence stays progressive rather than permanently visible.</li>
+            <li>Each tag is its own chip, so removing one never discards the others.</li>
+          </ul>
+        </div>
+        <div class="note-section">
+          <h3>Tradeoff</h3>
+          <ul>
+            <li>A chip has two jobs: toggle and edit. The internal “Change” target must remain distinct.</li>
+            <li>Less suitable when the system needs to explain a surprising match.</li>
+          </ul>
+        </div>
+        <span class="verdict">Best compact evolution</span>
+      </aside>
+    </section>
+
+    <section class="prototype" id="option-c" role="tabpanel" aria-labelledby="tab-c" hidden>
+      <div class="app-stage">
+        <div class="fake-rail"></div>
+        <div class="app-stage-inner">
+          <div class="stage-toolbar"><span>Tasks</span><span>/</span><span>GitHub</span><span>/</span><span>mission-control</span></div>
+          <div class="backdrop-list" aria-hidden="true">
+            <div class="backdrop-row"><span class="ghost-box"></span><span class="ghost-line"></span><span class="ghost-line"></span><span class="ghost-line short"></span></div>
+            <div class="backdrop-row"><span class="ghost-box"></span><span class="ghost-line short"></span><span class="ghost-line"></span><span class="ghost-line"></span></div>
+          </div>
+          <article class="quick-entry">
+            <div class="entry-field">
+              <button class="more-button" type="button" aria-label="More Quick Add actions">•••</button>
+              <input value="" placeholder="Add a task…" aria-label="Task title for alternative C">
+              <span class="source-pill"><span class="source-dot"></span> GitHub / mission-control</span>
+            </div>
+            <div class="created-row">
+              <span class="created-status">Added</span>
+              <span class="created-copy"><strong>Make quick entry suggestions clickable independently</strong><span>Saved to GitHub / mission-control</span></span>
+              <button class="view-button" type="button">View</button>
+              <button class="undo-button" type="button">Undo</button>
+            </div>
+            <div class="suggestion-header">
+              <svg class="icon icon-sm ai-mark"><use href="#i-sparkles"></use></svg>
+              <strong>Review suggested details</strong>
+              <span>Select a field to see why</span>
+            </div>
+            <div class="review-layout" data-review>
+              <div class="review-fields">
+                <div class="review-item" data-review-key="priority">
+                  <button class="mini-switch" type="button" aria-pressed="true" aria-label="Apply priority suggestion"></button>
+                  <span class="field-name">Priority</span>
+                  <span class="review-value">High / P1</span>
+                  <button class="why-button" type="button">Why?</button>
+                </div>
+                <div class="review-item" data-review-key="effort">
+                  <button class="mini-switch" type="button" aria-pressed="false" aria-label="Apply effort suggestion"></button>
+                  <span class="field-name">Effort</span>
+                  <span class="review-value">Small</span>
+                  <button class="why-button" type="button">Why?</button>
+                </div>
+                <div class="review-item active" data-review-key="project">
+                  <button class="mini-switch" type="button" aria-pressed="true" aria-label="Apply project suggestion"></button>
+                  <span class="field-name">Project</span>
+                  <span class="review-value">Mission Control</span>
+                  <button class="why-button" type="button">Why?</button>
+                </div>
+                <div class="review-item" data-review-key="phase">
+                  <button class="mini-switch" type="button" aria-pressed="true" aria-label="Apply phase suggestion"></button>
+                  <span class="field-name">Phase</span>
+                  <span class="review-value">Quick entry improvements</span>
+                  <button class="why-button" type="button">Why?</button>
+                </div>
+                <div class="review-item" data-review-key="tags">
+                  <button class="mini-switch" type="button" aria-pressed="true" aria-label="Apply remaining tag suggestions"></button>
+                  <span class="field-name">Tags</span>
+                  <span class="review-tags">
+                    <button class="review-tag" type="button">#frontend <span aria-hidden="true">×</span></button>
+                    <button class="review-tag" type="button">#ux <span aria-hidden="true">×</span></button>
+                    <button class="review-tag" type="button">#accessibility <span aria-hidden="true">×</span></button>
+                    <button class="review-tag" type="button" data-add-review-tag>+ Add tag</button>
+                  </span>
+                  <button class="why-button" type="button">Why?</button>
+                </div>
+              </div>
+              <aside class="evidence-panel" aria-live="polite">
+                <h3>Why this suggestion?</h3>
+                <div class="evidence-title"><span class="value-dot dot-blue"></span><span data-evidence-title>Mission Control</span><span class="confidence" data-evidence-confidence>94%</span></div>
+                <div class="evidence-list" data-evidence-list>
+                  <div class="evidence-line"><span class="evidence-icon"><svg class="icon icon-sm"><use href="#i-git"></use></svg></span><span><strong>Source affinity</strong>12 of 14 tasks from this repo use this project.</span></div>
+                  <div class="evidence-line"><span class="evidence-icon"><svg class="icon icon-sm"><use href="#i-search"></use></svg></span><span><strong>Name match</strong>“Quick entry” appears in the project and phase backlog.</span></div>
+                  <div class="evidence-line"><span class="evidence-icon"><svg class="icon icon-sm"><use href="#i-sparkles"></use></svg></span><span><strong>Semantic match</strong>The task describes improving an existing Mission Control capture workflow.</span></div>
+                  <div class="evidence-line"><span class="evidence-icon"><svg class="icon icon-sm"><use href="#i-rule"></use></svg></span><span><strong>Existing rule</strong>Repo <code>rsocko/mission-control</code> already maps here.</span></div>
+                </div>
+                <div class="rule-alert">This project will already auto-apply through an existing rule. Keep it selected to confirm the expected result; applying will not create a duplicate rule.</div>
+              </aside>
+            </div>
+            <div class="review-footer">
+              <span data-review-summary>4 of 5 fields selected</span>
+              <button class="text-button" type="button">Edit values</button>
+              <button class="apply-button" type="button" data-review-apply>Apply 3</button>
+            </div>
+          </article>
+        </div>
+      </div>
+      <aside class="notes">
+        <h2>Evidence review</h2>
+        <p>A field list and dedicated explanation pane make project and phase inference inspectable, including whether an existing rule will already act.</p>
+        <div class="note-section">
+          <h3>Why it works</h3>
+          <ul>
+            <li>Best expression of source affinity, exact/fuzzy title match, semantic match, and project rules.</li>
+            <li>Makes confidence understandable through evidence rather than a naked score.</li>
+            <li>Supports future “Always use this match” or rule-management actions.</li>
+          </ul>
+        </div>
+        <div class="note-section">
+          <h3>Tradeoff</h3>
+          <ul>
+            <li>Too heavy for every successful quick entry.</li>
+            <li>Best reserved for low-confidence or conflicting project/phase suggestions.</li>
+            <li>Tags remain individually removable even when the evidence view is open.</li>
+          </ul>
+        </div>
+        <span class="verdict">Use as uncertainty escalation</span>
+      </aside>
+    </section>
+
+    <section class="recommendation-strip" aria-label="Design recommendation summary">
+      <div class="recommendation-lead"><strong>Recommended combined direction</strong><span>Use progressive disclosure rather than choosing one pattern for every confidence level.</span></div>
+      <div class="recommendation-cell best"><strong>Default: A</strong><span>Independent rows and constrained editing establish trust.</span></div>
+      <div class="recommendation-cell"><strong>Compact state: B</strong><span>Collapse accepted or familiar fields into chips.</span></div>
+      <div class="recommendation-cell"><strong>Escalation: C</strong><span>Show evidence when project/phase confidence is low or rules conflict.</span></div>
+    </section>
+  </main>
+
+  <script>
+    window.__mockupErrors = [];
+    window.addEventListener("error", (event) => window.__mockupErrors.push(event.message));
+
+    const tabs = [...document.querySelectorAll(".comparison-tab")];
+    const panels = [...document.querySelectorAll(".prototype")];
+
+    function activatePanel(targetId) {
+      tabs.forEach((tab) => {
+        const active = tab.dataset.target === targetId;
+        tab.setAttribute("aria-selected", String(active));
+        tab.tabIndex = active ? 0 : -1;
+      });
+      panels.forEach((panel) => {
+        const active = panel.id === targetId;
+        panel.classList.toggle("active", active);
+        panel.hidden = !active;
+      });
+    }
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => activatePanel(tab.dataset.target));
+      tab.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+        event.preventDefault();
+        const direction = event.key === "ArrowRight" ? 1 : -1;
+        const next = tabs[(index + direction + tabs.length) % tabs.length];
+        activatePanel(next.dataset.target);
+        next.focus();
+      });
+    });
+
+    document.querySelectorAll("[data-suggestion-region]").forEach((region) => {
+      const checks = [...region.querySelectorAll(".option-check")];
+      const taskInput = document.querySelector("[data-task-input]");
+      const lowConfidence = region.querySelector("[data-low-confidence]");
+      const lowToggle = region.querySelector("[data-toggle-low]");
+      const tagAdder = region.querySelector("[data-tag-adder]");
+      const tagAdderInput = tagAdder.querySelector("input");
+      const count = region.querySelector("[data-selection-count]");
+      const apply = region.querySelector("[data-apply]");
+      const appliedCopy = region.querySelector("[data-applied-copy]");
+      const getTagSuggestions = () => [...region.querySelectorAll("[data-tag-suggestion]")];
+
+      function update() {
+        const selected = checks.filter((check) => check.checked).length
+          + getTagSuggestions().filter((tag) => tag.getAttribute("aria-pressed") === "true").length;
+        count.textContent = `${selected} selected`;
+        apply.disabled = selected === 0;
+        apply.textContent = selected === 0 ? "Select suggestions" : `Apply selected`;
+      }
+
+      checks.forEach((check) => check.addEventListener("change", update));
+      function registerTagSuggestion(tag) {
+        tag.addEventListener("click", () => {
+          tag.setAttribute("aria-pressed", String(tag.getAttribute("aria-pressed") !== "true"));
+          update();
+        });
+      }
+      getTagSuggestions().forEach(registerTagSuggestion);
+      region.querySelector("[data-add-tag]").addEventListener("click", () => {
+        tagAdder.hidden = false;
+        tagAdderInput.focus();
+      });
+      region.querySelector("[data-more-tags]").addEventListener("click", (event) => {
+        const existing = region.querySelector("[data-inline-low-tag]");
+        if (existing) {
+          existing.remove();
+          event.currentTarget.textContent = "+1 more";
+          update();
+          return;
+        }
+        const tag = document.createElement("button");
+        tag.type = "button";
+        tag.className = "tag-suggestion low-confidence";
+        tag.dataset.tagSuggestion = "";
+        tag.dataset.inlineLowTag = "";
+        tag.setAttribute("aria-pressed", "false");
+        tag.innerHTML = '<span>#design · 42%</span><span class="tag-remove" aria-hidden="true">×</span>';
+        event.currentTarget.before(tag);
+        event.currentTarget.textContent = "Hide 1 more";
+        registerTagSuggestion(tag);
+        tag.focus();
+        update();
+      });
+      tagAdderInput.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          tagAdder.hidden = true;
+          tagAdderInput.value = "";
+          taskInput.focus();
+          return;
+        }
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        const value = tagAdderInput.value.trim().replace(/^#/, "");
+        if (!value) return;
+        const tag = document.createElement("button");
+        tag.type = "button";
+        tag.className = "tag-suggestion";
+        tag.dataset.tagSuggestion = "";
+        tag.setAttribute("aria-pressed", "true");
+        tag.innerHTML = `<span>#${value}</span><span class="tag-remove" aria-hidden="true">×</span>`;
+        tagAdder.before(tag);
+        registerTagSuggestion(tag);
+        tagAdderInput.value = "";
+        tagAdder.hidden = true;
+        tag.focus();
+        update();
+      });
+      lowToggle.addEventListener("click", () => {
+        lowConfidence.hidden = !lowConfidence.hidden;
+        lowToggle.textContent = lowConfidence.hidden
+          ? "Show 1 other lower-confidence field"
+          : "Hide lower-confidence";
+        if (!lowConfidence.hidden) {
+          lowConfidence.querySelector(".option-check").focus();
+        }
+      });
+      region.querySelector("[data-select-all]").addEventListener("click", () => {
+        checks
+          .filter((check) => !check.closest("[hidden]"))
+          .forEach((check) => { check.checked = true; });
+        getTagSuggestions().forEach((tag) => tag.setAttribute("aria-pressed", "true"));
+        update();
+      });
+      region.querySelector("[data-clear-all]").addEventListener("click", () => {
+        checks.forEach((check) => { check.checked = false; });
+        getTagSuggestions().forEach((tag) => tag.setAttribute("aria-pressed", "false"));
+        update();
+      });
+      region.querySelector("[data-skip]").addEventListener("click", () => {
+        region.hidden = true;
+        taskInput.focus();
+      });
+      apply.addEventListener("click", () => {
+        const selected = checks.filter((check) => check.checked).length
+          + getTagSuggestions().filter((tag) => tag.getAttribute("aria-pressed") === "true").length;
+        appliedCopy.textContent = `Applied ${selected} ${selected === 1 ? "suggestion" : "suggestions"}. Ready for the next task.`;
+        region.classList.add("applied");
+        taskInput.focus();
+      });
+
+      region.addEventListener("keydown", (event) => {
+        const target = event.target;
+        if (target.matches("select, input[type='text']")) return;
+        const navigationTargets = [
+          ...region.querySelectorAll(".option-check, [data-tag-suggestion]")
+        ].filter((item) => !item.closest("[hidden]"));
+        const currentIndex = navigationTargets.indexOf(target);
+
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const direction = event.key === "ArrowDown" ? 1 : -1;
+          const nextIndex = currentIndex < 0
+            ? 0
+            : (currentIndex + direction + navigationTargets.length) % navigationTargets.length;
+          navigationTargets[nextIndex]?.focus();
+          return;
+        }
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          event.preventDefault();
+          region.querySelector("[data-select-all]").click();
+          apply.click();
+          return;
+        }
+        if (event.key === "Enter" && currentIndex >= 0) {
+          event.preventDefault();
+          apply.click();
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          region.querySelector("[data-skip]").click();
+        }
+      });
+      update();
+    });
+
+    const projectSelect = document.querySelector("[data-project-select]");
+    const phaseSelect = document.querySelector("[data-phase-select]");
+    const phaseRow = document.querySelector("[data-phase-row]");
+    const phaseCheck = phaseRow.querySelector(".option-check");
+    const phaseHelp = document.querySelector("[data-phase-help]");
+    const phaseConfidence = document.querySelector("[data-phase-confidence]");
+    const projectPhases = {
+      "Mission Control": {
+        confidence: 88,
+        suggested: "Quick entry improvements",
+        all: ["Discovery", "Polish and accessibility", "No phase"]
+      },
+      "Developer productivity": {
+        confidence: 81,
+        suggested: "Capture workflows",
+        all: ["Automation", "Research", "No phase"]
+      },
+      "Copilot CLI": {
+        confidence: 73,
+        suggested: "CLI ergonomics",
+        all: ["Extension platform", "Reliability", "No phase"]
+      },
+      "Home operations": {
+        confidence: 0,
+        suggested: null,
+        all: ["Planning", "In progress", "No phase"]
+      }
+    };
+
+    projectSelect.addEventListener("change", () => {
+      const project = projectSelect.value;
+      phaseCheck.checked = false;
+      phaseSelect.disabled = true;
+      phaseHelp.textContent = project === "No project"
+        ? "Phase requires a project"
+        : `Re-evaluating phases in ${project}…`;
+      phaseHelp.classList.add("pending");
+      phaseConfidence.textContent = "—";
+      phaseConfidence.className = "confidence";
+
+      window.setTimeout(() => {
+        if (project === "No project") {
+          phaseSelect.innerHTML = '<option selected>No phase</option>';
+          phaseSelect.disabled = true;
+          phaseHelp.textContent = "Choose a project before choosing a phase";
+          phaseHelp.classList.remove("pending");
+          return;
+        }
+
+        const result = projectPhases[project];
+        const suggestedOptions = result.suggested
+          ? `<optgroup label="Suggested in ${project}"><option selected>${result.suggested}</option></optgroup>`
+          : "";
+        const allOptions = result.all.map((phase) => `<option>${phase}</option>`).join("");
+        phaseSelect.innerHTML = `${suggestedOptions}<optgroup label="All ${project} phases">${allOptions}</optgroup>`;
+        phaseSelect.disabled = false;
+        phaseHelp.textContent = result.suggested
+          ? `Re-evaluated inside ${project}`
+          : `No confident phase match in ${project}`;
+        phaseHelp.classList.remove("pending");
+        phaseConfidence.textContent = result.confidence ? `${result.confidence}%` : "No match";
+        phaseConfidence.className = result.confidence >= 80
+          ? "confidence high"
+          : result.confidence >= 55
+            ? "confidence medium"
+            : "confidence";
+        phaseCheck.checked = result.confidence >= 80;
+        phaseCheck.dispatchEvent(new Event("change"));
+      }, 450);
+    });
+
+    const chipCanvas = document.querySelector("[data-chip-canvas]");
+    const chipSummary = chipCanvas.querySelector("[data-chip-summary]");
+    const chipApply = chipCanvas.querySelector("[data-chip-apply]");
+    const evidence = chipCanvas.querySelector("[data-chip-evidence]");
+    const popover = chipCanvas.querySelector("[data-popover]");
+
+    function updateChips() {
+      const chips = [...chipCanvas.querySelectorAll(".smart-chip:not([data-utility])")];
+      const selected = chips.filter((chip) => chip.classList.contains("selected")).length;
+      chipSummary.textContent = `${selected} of ${chips.length} selected`;
+      chipApply.textContent = selected ? `Apply ${selected}` : "Select suggestions";
+      chipApply.disabled = selected === 0;
+    }
+
+    function registerChip(chip) {
+      chip.addEventListener("click", (event) => {
+        const clickedEdit = event.target.closest(".chip-edit");
+        if (clickedEdit && chip.hasAttribute("data-editable")) {
+          const rect = chip.getBoundingClientRect();
+          const canvasRect = chipCanvas.getBoundingClientRect();
+          popover.style.left = `${Math.max(0, rect.left - canvasRect.left)}px`;
+          popover.style.top = `${rect.bottom - canvasRect.top + 4}px`;
+          popover.classList.toggle("open");
+          return;
+        }
+        if (clickedEdit && chip.dataset.evidence) {
+          evidence.classList.add("open");
+          return;
+        }
+        chip.classList.toggle("selected");
+        updateChips();
+      });
+    }
+    chipCanvas.querySelectorAll(".smart-chip:not([data-utility])").forEach(registerChip);
+    chipCanvas.querySelector("[data-add-chip-tag]").addEventListener("click", (event) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "smart-chip selected";
+      chip.dataset.chip = "Tag";
+      chip.innerHTML = '<span class="chip-state"></span><svg class="icon icon-sm"><use href="#i-tag"></use></svg><span>#new-tag</span><span class="chip-edit">×</span>';
+      event.currentTarget.before(chip);
+      registerChip(chip);
+      updateChips();
+    });
+    chipCanvas.querySelector("[data-low-chip]").addEventListener("click", (event) => {
+      const expanded = event.currentTarget.dataset.expanded === "true";
+      chipCanvas.querySelectorAll("[data-generated-low]").forEach((chip) => chip.remove());
+      event.currentTarget.dataset.expanded = String(!expanded);
+      event.currentTarget.querySelector("span").textContent = expanded
+        ? "2 lower-confidence"
+        : "Hide lower-confidence";
+      if (!expanded) {
+        ["Tomorrow · 47%", "#design · 42%"].forEach((label) => {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "smart-chip";
+          chip.dataset.generatedLow = "";
+          chip.innerHTML = `<span class="chip-state"></span><span>${label}</span>`;
+          event.currentTarget.before(chip);
+          registerChip(chip);
+        });
+      }
+      updateChips();
+    });
+
+    chipCanvas.querySelector("[data-show-evidence]").addEventListener("click", () => evidence.classList.toggle("open"));
+    popover.querySelectorAll("button").forEach((option) => {
+      option.addEventListener("click", () => {
+        popover.querySelectorAll("button").forEach((item) => item.classList.remove("active"));
+        option.classList.add("active");
+        const priorityChip = chipCanvas.querySelector('[data-chip="Priority"]');
+        priorityChip.querySelector("span:nth-child(2)").textContent = option.textContent.replace(" / P1", " priority").replace(" / P0", " priority").replace(" / P2", " priority").replace(" / P3", " priority");
+        popover.classList.remove("open");
+      });
+    });
+    chipApply.addEventListener("click", () => {
+      const selected = chipCanvas.querySelectorAll(".smart-chip.selected:not([data-utility])").length;
+      chipSummary.textContent = `Applied ${selected} suggestions`;
+      chipApply.textContent = "Applied";
+      chipApply.disabled = true;
+    });
+    updateChips();
+
+    const evidenceData = {
+      priority: {
+        title: "High / P1",
+        confidence: "82%",
+        lines: [
+          ["rule", "Urgency language", "“independently” describes a UX defect, not a production outage."],
+          ["search", "Similar tasks", "Recent quick-entry defects were usually P1 or P2."]
+        ],
+        alert: "Priority is safe to edit before applying."
+      },
+      effort: {
+        title: "Small effort",
+        confidence: "76%",
+        lines: [
+          ["search", "Task shape", "The title implies a focused interaction change."],
+          ["list", "Historical work", "Comparable Quick Add UI changes closed in one implementation pass."]
+        ],
+        alert: "Effort is a planning estimate and never auto-applies through a rule."
+      },
+      project: {
+        title: "Mission Control",
+        confidence: "94%",
+        lines: [
+          ["git", "Source affinity", "12 of 14 tasks from this repo use this project."],
+          ["search", "Name match", "“Quick entry” appears in the project and phase backlog."],
+          ["sparkles", "Semantic match", "The task describes improving an existing Mission Control capture workflow."],
+          ["rule", "Existing rule", "Repo rsocko/mission-control already maps here."]
+        ],
+        alert: "This project will already auto-apply through an existing rule. Keep it selected to confirm the expected result; applying will not create a duplicate rule."
+      },
+      phase: {
+        title: "Quick entry improvements",
+        confidence: "88%",
+        lines: [
+          ["search", "Exact phrase match", "The phase contains two tasks beginning with “Quick entry”."],
+          ["git", "Project constraint", "Only phases inside Mission Control are considered."],
+          ["rule", "No phase rule", "This phase would not apply without accepting the suggestion."]
+        ],
+        alert: "Phase matching is constrained to the selected project and existing phases."
+      },
+      tags: {
+        title: "3 suggested tags",
+        confidence: "61–86%",
+        lines: [
+          ["tag", "Independent suggestions", "#frontend is high confidence; #ux and #accessibility need explicit acceptance."],
+          ["search", "Existing tags only", "Suggestions resolve to existing tags rather than creating new taxonomy."]
+        ],
+        alert: "Remove any tag independently. Add a known tag during capture with the existing #tag syntax; this review does not add a separate free-form tag field."
+      }
+    };
+
+    const review = document.querySelector("[data-review]");
+    const evidenceTitle = review.querySelector("[data-evidence-title]");
+    const evidenceConfidence = review.querySelector("[data-evidence-confidence]");
+    const evidenceList = review.querySelector("[data-evidence-list]");
+    const ruleAlert = review.querySelector(".rule-alert");
+    const reviewSummary = document.querySelector("[data-review-summary]");
+    const reviewApply = document.querySelector("[data-review-apply]");
+
+    function renderEvidence(key) {
+      const data = evidenceData[key];
+      evidenceTitle.textContent = data.title;
+      evidenceConfidence.textContent = data.confidence;
+      evidenceList.innerHTML = data.lines.map(([icon, title, copy]) => `
+        <div class="evidence-line">
+          <span class="evidence-icon"><svg class="icon icon-sm"><use href="#i-${icon}"></use></svg></span>
+          <span><strong>${title}</strong>${copy}</span>
+        </div>
+      `).join("");
+      ruleAlert.textContent = data.alert;
+    }
+
+    function updateReview() {
+      const switches = [...review.querySelectorAll(".mini-switch")];
+      const selected = switches.filter((item) => item.getAttribute("aria-pressed") === "true").length;
+      reviewSummary.textContent = `${selected} of ${switches.length} fields selected`;
+      reviewApply.textContent = selected ? `Apply ${selected}` : "Select fields";
+      reviewApply.disabled = selected === 0;
+    }
+
+    review.querySelectorAll(".review-item").forEach((item) => {
+      item.addEventListener("click", (event) => {
+        review.querySelectorAll(".review-item").forEach((row) => row.classList.remove("active"));
+        item.classList.add("active");
+        renderEvidence(item.dataset.reviewKey);
+        if (event.target.closest(".mini-switch")) {
+          const toggle = item.querySelector(".mini-switch");
+          toggle.setAttribute("aria-pressed", String(toggle.getAttribute("aria-pressed") !== "true"));
+          updateReview();
+        }
+      });
+    });
+    review.querySelectorAll(".review-tag:not([data-add-review-tag])").forEach((tag) => {
+      tag.addEventListener("click", (event) => {
+        event.stopPropagation();
+        tag.remove();
+        renderEvidence("tags");
+      });
+    });
+    review.querySelector("[data-add-review-tag]").addEventListener("click", (event) => {
+      event.stopPropagation();
+      const tag = document.createElement("button");
+      tag.type = "button";
+      tag.className = "review-tag";
+      tag.innerHTML = '#new-tag <span aria-hidden="true">×</span>';
+      event.currentTarget.before(tag);
+      tag.addEventListener("click", (tagEvent) => {
+        tagEvent.stopPropagation();
+        tag.remove();
+        renderEvidence("tags");
+      });
+      renderEvidence("tags");
+    });
+    reviewApply.addEventListener("click", () => {
+      const selected = [...review.querySelectorAll(".mini-switch")].filter((item) => item.getAttribute("aria-pressed") === "true").length;
+      reviewSummary.textContent = `Applied ${selected} fields`;
+      reviewApply.textContent = "Applied";
+      reviewApply.disabled = true;
+    });
+    updateReview();
+  </script>
+</body>
+</html>

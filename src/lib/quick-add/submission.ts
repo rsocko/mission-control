@@ -599,24 +599,50 @@ export async function undoQuickAddTasks(
   };
 }
 
-const SUGGESTION_CONFIDENCE_THRESHOLD = 0.4;
+export type QuickAddSuggestionField = 'priority' | 'effort' | 'tag' | 'project' | 'phase';
+export type QuickAddSuggestionConfidenceBand = 'high' | 'medium' | 'low';
+
+const SUGGESTION_CONFIDENCE_THRESHOLDS: Record<
+  QuickAddSuggestionField,
+  { high: number; visible: number }
+> = {
+  priority: { high: 0.7, visible: 0.4 },
+  effort: { high: 0.6, visible: 0.4 },
+  tag: { high: 0.7, visible: 0.4 },
+  project: { high: 0.8, visible: 0.55 },
+  phase: { high: 0.75, visible: 0.5 },
+};
+
+export function getQuickAddSuggestionConfidenceBand(
+  field: QuickAddSuggestionField,
+  confidence: number,
+): QuickAddSuggestionConfidenceBand {
+  const thresholds = SUGGESTION_CONFIDENCE_THRESHOLDS[field];
+  if (confidence >= thresholds.high) return 'high';
+  if (confidence >= thresholds.visible) return 'medium';
+  return 'low';
+}
 
 export function filterQuickAddSuggestion(
   suggestion: QuickSortSuggestion,
 ): QuickSortSuggestion | null {
   const priority = suggestion.priority
-    && suggestion.priority.confidence >= SUGGESTION_CONFIDENCE_THRESHOLD
+    && getQuickAddSuggestionConfidenceBand('priority', suggestion.priority.confidence) !== 'low'
     ? suggestion.priority
     : null;
   const effort = suggestion.effort
-    && suggestion.effort.confidence >= SUGGESTION_CONFIDENCE_THRESHOLD
+    && getQuickAddSuggestionConfidenceBand('effort', suggestion.effort.confidence) !== 'low'
     ? suggestion.effort
     : null;
-  const tags = suggestion.tags.filter(
-    (tag) => tag.confidence >= SUGGESTION_CONFIDENCE_THRESHOLD,
+  const visibleTags = suggestion.tags.filter(
+    (tag) => getQuickAddSuggestionConfidenceBand('tag', tag.confidence) !== 'low',
   );
-  if (!priority && !effort && tags.length === 0) return null;
-  return { priority, effort, tags, projects: [] };
+  const tags = suggestion.tags;
+  const projects = suggestion.projects.filter(
+    (project) => getQuickAddSuggestionConfidenceBand('project', project.confidence) !== 'low',
+  );
+  if (!priority && !effort && visibleTags.length === 0 && projects.length === 0) return null;
+  return { priority, effort, tags, projects };
 }
 
 export function mergeQuickAddSuggestions(
@@ -641,8 +667,14 @@ export function mergeQuickAddSuggestions(
 
   const priority = override.priority ?? base.priority;
   const effort = override.effort ?? base.effort;
-  if (!priority && !effort && tags.length === 0) return null;
-  return { priority, effort, tags, projects: [] };
+  const seenProjectIds = new Set<string>();
+  const projects = [...override.projects, ...base.projects].filter((project) => {
+    if (seenProjectIds.has(project.id)) return false;
+    seenProjectIds.add(project.id);
+    return true;
+  });
+  if (!priority && !effort && tags.length === 0 && projects.length === 0) return null;
+  return { priority, effort, tags, projects };
 }
 
 export async function fetchQuickAddSuggestion(

@@ -3,6 +3,7 @@ import {
   applyQuickAddWorkflowTemplate,
   createQuickAddTask,
   fetchQuickAddSuggestion,
+  getQuickAddSuggestionConfidenceBand,
   getQuickAddSubmissionMessage,
   mergeQuickAddSuggestions,
   planQuickAddSubmission,
@@ -521,7 +522,7 @@ describe('Quick Add follow-up workflows', () => {
       .rejects.toThrow('Undo failed');
   });
 
-  it('filters low-confidence follow-up suggestions and merges duplicate tags', async () => {
+  it('keeps low-confidence tags collapsed for review and merges duplicate tags', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => jsonResponse({
       suggestions: {
         'task-1': {
@@ -531,7 +532,13 @@ describe('Quick Add follow-up workflows', () => {
             { id: 'tag-1', name: 'Release', confidence: 0.9 },
             { id: 'tag-2', name: 'Maybe', confidence: 0.1 },
           ],
-          projects: [],
+          projects: [{
+            id: 'project-release',
+            name: 'Release',
+            color: 'blue',
+            confidence: 0.75,
+            reason: '3 of 4 items on this source',
+          }],
         },
       },
     }));
@@ -540,8 +547,17 @@ describe('Quick Add follow-up workflows', () => {
     expect(fetched).toEqual({
       priority: { value: 'high', confidence: 0.8, reason: 'urgent' },
       effort: null,
-      tags: [{ id: 'tag-1', name: 'Release', confidence: 0.9 }],
-      projects: [],
+      tags: [
+        { id: 'tag-1', name: 'Release', confidence: 0.9 },
+        { id: 'tag-2', name: 'Maybe', confidence: 0.1 },
+      ],
+      projects: [{
+        id: 'project-release',
+        name: 'Release',
+        color: 'blue',
+        confidence: 0.75,
+        reason: '3 of 4 items on this source',
+      }],
     });
     expect(mergeQuickAddSuggestions({
       priority: null,
@@ -549,5 +565,13 @@ describe('Quick Add follow-up workflows', () => {
       tags: [{ id: 'other-id', name: 'release', confidence: 0.7 }],
       projects: [],
     }, fetched)).toEqual(fetched);
+  });
+
+  it('uses field-specific confidence bands for default selection and visibility', () => {
+    expect(getQuickAddSuggestionConfidenceBand('priority', 0.7)).toBe('high');
+    expect(getQuickAddSuggestionConfidenceBand('priority', 0.55)).toBe('medium');
+    expect(getQuickAddSuggestionConfidenceBand('priority', 0.39)).toBe('low');
+    expect(getQuickAddSuggestionConfidenceBand('effort', 0.6)).toBe('high');
+    expect(getQuickAddSuggestionConfidenceBand('project', 0.67)).toBe('medium');
   });
 });

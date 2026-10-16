@@ -162,7 +162,7 @@ export function findTokens(text: string, options: TokenDetectionOptions): TokenM
     tokens.push({ start, end: start + project.name.length + 1, type: 'project' });
   }
 
-  const projectRegex = /(?<!\\)\+(?:"[^"]+"|[a-zA-Z][a-zA-Z0-9_-]*)/g;
+  const projectRegex = /(?<!\S)\+(?:"[^"]+"|[a-zA-Z][a-zA-Z0-9_-]*)/g;
   while (metadataEnabled('project') && (m = projectRegex.exec(text)) !== null) {
     if (tokens.some(token => m!.index < token.end && m!.index + m![0].length > token.start)) {
       continue;

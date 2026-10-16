@@ -29,13 +29,19 @@ export interface GitHubProjectHarness {
     localId: string;
     bindingType?: 'task' | 'source_list';
   }): Promise<SeededBinding>;
-  seedExistingLink(projectId: string, taskId: string): Promise<void>;
+  seedExistingLink(
+    projectId: string,
+    taskId: string,
+    provenance?: 'local' | 'github-sync',
+  ): Promise<void>;
+  seedProjectExclusion(projectId: string, taskId: string): Promise<void>;
   getHubProject(projectId: string): Promise<{
     name: string;
     description: string | null;
     metadata: Record<string, unknown>;
   } | null>;
   listLinkedTaskIds(projectId: string): Promise<string[]>;
+  getLinkProvenance(projectId: string, taskId: string): Promise<string | null>;
   close(): Promise<void> | void;
 }
 
@@ -100,6 +106,7 @@ export function describeGitHubProjectRepositoriesContract(
         syncManaged: true,
       });
       expect((await harness.listLinkedTaskIds(projectId(7))).sort()).toEqual(['task-1', 'task-2']);
+      expect(await harness.getLinkProvenance(projectId(7), 'task-1')).toBe('github-sync');
     });
 
     it('creates idempotent project links on replay', async () => {
@@ -134,7 +141,7 @@ export function describeGitHubProjectRepositoriesContract(
 
     it('does not delete existing associations for an incomplete (non-authoritative) observation', async () => {
       await harness.seedTask({ id: 'kept-task', sourceId: 'acme/app:1', connectorInstanceId: CONNECTOR });
-      await harness.seedExistingLink(projectId(5), 'kept-task');
+      await harness.seedExistingLink(projectId(5), 'kept-task', 'github-sync');
 
       await harness.repositories.reconcileSyncManagedProjects({
         connectorInstanceId: CONNECTOR,
@@ -151,7 +158,7 @@ export function describeGitHubProjectRepositoriesContract(
 
     it('prunes stale associations only for a complete (authoritative) observation', async () => {
       await harness.seedTask({ id: 'stale-task', sourceId: 'acme/app:1', connectorInstanceId: CONNECTOR });
-      await harness.seedExistingLink(projectId(6), 'stale-task');
+      await harness.seedExistingLink(projectId(6), 'stale-task', 'github-sync');
 
       await harness.repositories.reconcileSyncManagedProjects({
         connectorInstanceId: CONNECTOR,
@@ -160,6 +167,52 @@ export function describeGitHubProjectRepositoriesContract(
       });
 
       expect(await harness.listLinkedTaskIds(projectId(6))).toEqual([]);
+    });
+
+    it('preserves a local assignment during authoritative reconciliation', async () => {
+      await harness.seedTask({ id: 'local-task', sourceId: 'acme/app:1', connectorInstanceId: CONNECTOR });
+      await harness.repositories.reconcileSyncManagedProjects({
+        connectorInstanceId: CONNECTOR,
+        now: '2026-08-09T00:00:00.000Z',
+        projects: [reconciliation({ number: 6, authoritative: true, taskSourceIds: [] })],
+      });
+      await harness.seedExistingLink(projectId(6), 'local-task', 'local');
+
+      await harness.repositories.reconcileSyncManagedProjects({
+        connectorInstanceId: CONNECTOR,
+        now: '2026-08-09T00:00:00.000Z',
+        projects: [reconciliation({ number: 6, authoritative: true, taskSourceIds: [] })],
+      });
+
+      expect(await harness.listLinkedTaskIds(projectId(6))).toEqual(['local-task']);
+      expect(await harness.getLinkProvenance(projectId(6), 'local-task')).toBe('local');
+    });
+
+    it('honors an explicit local exclusion from an upstream project', async () => {
+      await harness.seedTask({ id: 'excluded-task', sourceId: 'acme/app:1', connectorInstanceId: CONNECTOR });
+      await harness.repositories.reconcileSyncManagedProjects({
+        connectorInstanceId: CONNECTOR,
+        now: '2026-08-09T00:00:00.000Z',
+        projects: [reconciliation({
+          number: 11,
+          authoritative: true,
+          taskSourceIds: ['acme/app:1'],
+        })],
+      });
+      await harness.seedExistingLink(projectId(11), 'excluded-task', 'github-sync');
+      await harness.seedProjectExclusion(projectId(11), 'excluded-task');
+
+      await harness.repositories.reconcileSyncManagedProjects({
+        connectorInstanceId: CONNECTOR,
+        now: '2026-08-09T00:00:00.000Z',
+        projects: [reconciliation({
+          number: 11,
+          authoritative: true,
+          taskSourceIds: ['acme/app:1'],
+        })],
+      });
+
+      expect(await harness.listLinkedTaskIds(projectId(11))).toEqual([]);
     });
 
     it('never rewrites associations for a project number the caller withheld (blocked)', async () => {

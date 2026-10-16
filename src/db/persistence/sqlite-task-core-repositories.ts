@@ -2147,12 +2147,16 @@ class SqliteTaskAncillaryRepository implements TaskAncillaryRepository {
           }))).run();
         }
       }
-      const projectRows = tx.select({ projectId: taskProjects.projectId }).from(taskProjects)
+      const projectRows = tx.select({
+        projectId: taskProjects.projectId,
+        provenance: taskProjects.provenance,
+      }).from(taskProjects)
         .where(eq(taskProjects.taskId, input.sourceTaskId)).all();
       if (projectRows.length) {
-        tx.insert(taskProjects).values(projectRows.map(({ projectId }) => ({
+        tx.insert(taskProjects).values(projectRows.map(({ projectId, provenance }) => ({
           taskId: input.newTaskId,
           projectId,
+          provenance,
         }))).run();
       }
       return { kind: 'committed', connectorType: connector.type } as const;
@@ -3818,13 +3822,17 @@ class SqliteTaskMutationRepository implements TaskMutationRepository {
                 tagId: row.tagId,
               }))).run();
             }
-            const sourceProjects = tx.select({ projectId: taskProjects.projectId })
+            const sourceProjects = tx.select({
+              projectId: taskProjects.projectId,
+              provenance: taskProjects.provenance,
+            })
               .from(taskProjects)
               .where(eq(taskProjects.taskId, request.taskId)).all();
             if (sourceProjects.length) {
               tx.insert(taskProjects).values(sourceProjects.map((row) => ({
                 taskId: successor.id,
                 projectId: row.projectId,
+                provenance: row.provenance,
               }))).run();
             }
             const phases = tx.select().from(projectPhaseItems)

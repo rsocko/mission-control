@@ -15,7 +15,10 @@
  *
  * Atomicity: `reconcileSyncManagedProjects` reconciles each project in exactly
  * one transaction per adapter — the hub-project upsert and the `task_projects`
- * link inserts/deletes commit together. The frozen identity fence (epoch
+ * link inserts/deletes commit together. GitHub-owned memberships are tagged
+ * with `github-sync`; local memberships and explicit exclusions remain
+ * authoritative when a complete upstream observation prunes stale links.
+ * The frozen identity fence (epoch
  * revision + per-decision binding/locator revisions) is re-checked with SQL at
  * the start of each project transaction so no async identity callback runs
  * inside the write. Deletion of stale links only happens for `authoritative`

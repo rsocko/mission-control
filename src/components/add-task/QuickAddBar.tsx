@@ -46,6 +46,11 @@ import {
 } from '@/lib/quick-add-preferences';
 import type { QuickAddProject } from '@/lib/parse-task-input';
 import { DestinationPicker } from './DestinationPicker';
+import {
+  QuickAddSuggestionReview,
+  type QuickAddReviewProject,
+  type QuickAddSuggestionSelection,
+} from './QuickAddSuggestionReview';
 import type { QuickAddDestination, QuickAddPendingTask } from './quick-add-types';
 import { useQuickAddDestinations } from '@/lib/hooks/useQuickAddDestinations';
 import { useQuickAddTemplates } from '@/lib/hooks/useQuickAddTemplates';
@@ -227,7 +232,6 @@ function extractPendingTasksForTyping(text: string): { committed: PendingTask[];
   return { committed: [], remaining: text };
 }
 
-const EFFORT_LABELS: Record<number, string> = { 1: 'XS', 2: 'S', 3: 'M', 4: 'L', 5: 'XL' };
 interface InlineToast {
   message: string;
   taskIds: string[];
@@ -305,7 +309,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const [effortTypeaheadIndex, setEffortTypeaheadIndex] = useState(0);
   const [projectTypeaheadIndex, setProjectTypeaheadIndex] = useState(0);
   const [cachedTags, setCachedTags] = useState<Array<{ id: string; name: string; slug: string; color?: string | null }>>([]);
-  const [cachedProjects, setCachedProjects] = useState<QuickAddProject[]>([]);
+  const [cachedProjects, setCachedProjects] = useState<QuickAddReviewProject[]>([]);
   const [projectsLoadState, setProjectsLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const tagsFetchedRef = useRef(false);
   const projectsFetchedRef = useRef(false);
@@ -489,7 +493,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   useEffect(() => {
     if (projectsFetchedRef.current) return;
     projectsFetchedRef.current = true;
-    fetch('/api/hub-projects')
+    fetch('/api/hub-projects?includePhases=true')
       .then(response => {
         if (!response.ok) throw new Error(`Failed to load projects (${response.status})`);
         return response.json();
@@ -861,7 +865,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
             );
             // Extend timer since we now have suggestions to review
             if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-            toastTimerRef.current = setTimeout(() => setInlineToast(null), 10000);
+            toastTimerRef.current = setTimeout(() => setInlineToast(null), 30000);
           }
 
           fetchQuickAddSuggestion({}, createdTaskIds[0])
@@ -873,7 +877,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                 return { ...prev, suggestions: merged };
               });
               if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-              toastTimerRef.current = setTimeout(() => setInlineToast(null), 10000);
+              toastTimerRef.current = setTimeout(() => setInlineToast(null), 30000);
             })
             .catch((error) => {
               taskLogger.error('Failed to fetch Quick Add suggestions', { error });
@@ -1239,16 +1243,118 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     ?? (inlineToast && inlineToastPolicies.length !== inlineToast.taskIds.length
       ? 'Removal policy is unavailable for one or more created tasks'
       : undefined);
-  const suggestionBlockedReason = (() => {
-    if (!inlineToast?.suggestions || inlineToast.taskIds.length !== 1) return undefined;
+  const suggestionBlockedReasons = (() => {
+    const reasons: Partial<Record<'priority' | 'effort' | 'tags' | 'projects' | 'phases', string>> = {};
+    if (!inlineToast?.suggestions || inlineToast.taskIds.length !== 1) return reasons;
     const policy = inlineToast.editPolicies[inlineToast.taskIds[0]];
-    const fields: TaskField[] = [];
+    const fields: Array<'priority' | 'effort' | 'tags' | 'projects' | 'phases'> = [];
     if (inlineToast.suggestions.priority) fields.push('priority');
     if (inlineToast.suggestions.effort) fields.push('effort');
     if (inlineToast.suggestions.tags.length > 0) fields.push('tags');
-    const blockedField = fields.find((field) => !canEditTaskField(policy, field));
-    return blockedField ? taskFieldBlockedReason(policy, blockedField) : undefined;
+    if (inlineToast.suggestions.projects.length > 0) fields.push('projects', 'phases');
+    fields.forEach((field) => {
+      if (!canEditTaskField(policy, field)) {
+        reasons[field] = taskFieldBlockedReason(policy, field);
+      }
+    });
+    return reasons;
   })();
+
+  useEffect(() => {
+    if (!inlineToast?.suggestions || tagsFetchedRef.current) return;
+    tagsFetchedRef.current = true;
+    fetch('/api/tags')
+      .then((response) => {
+        if (!response.ok) throw new Error(`Failed to load tags (${response.status})`);
+        return response.json();
+      })
+      .then((data) => setCachedTags(data.tags || []))
+      .catch((error) => {
+        tagsFetchedRef.current = false;
+        taskLogger.error('Failed to load tags for Quick Add suggestions', { error });
+      });
+  }, [inlineToast?.suggestions]);
+
+  const closeSuggestionReview = useCallback(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setInlineToast(null);
+    setTimeout(() => inputHandleRef.current?.focus(), 0);
+  }, []);
+
+  const applySuggestionSelection = useCallback(async (
+    selection: QuickAddSuggestionSelection,
+  ) => {
+    const currentToast = inlineToast;
+    const taskId = currentToast?.taskIds[0];
+    if (!taskId || !currentToast) return;
+
+    const policy = currentToast.editPolicies[taskId];
+    const selectedFields: TaskField[] = [];
+    if (selection.priority) selectedFields.push('priority');
+    if (selection.effort) selectedFields.push('effort');
+    if (selection.tagNames.length > 0) selectedFields.push('tags');
+    if (selection.projectId) selectedFields.push('projects');
+    if (selection.phaseId) selectedFields.push('phases');
+    const blockedField = selectedFields.find((field) => !canEditTaskField(policy, field));
+    if (blockedField) {
+      throw new Error(taskFieldBlockedReason(policy, blockedField));
+    }
+
+    setInlineToast((previous) => previous
+      ? { ...previous, suggestionsApplying: true }
+      : previous);
+    try {
+      const requests: Promise<Response>[] = [];
+      const patch: Record<string, unknown> = {};
+      if (selection.priority) patch.priority = selection.priority;
+      if (selection.effort) patch.effort = selection.effort;
+      if (Object.keys(patch).length > 0) {
+        requests.push(fetch(`/api/tasks/${taskId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        }));
+      }
+      if (selection.tagNames.length > 0) {
+        requests.push(fetch(`/api/tasks/${taskId}/tags`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tags: selection.tagNames }),
+        }));
+      }
+      if (selection.projectId) {
+        requests.push(fetch(`/api/hub-projects/${selection.projectId}/tasks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            taskId,
+            phaseId: selection.phaseId ?? null,
+          }),
+        }));
+      }
+
+      const responses = await Promise.all(requests);
+      const failed = responses.find((response) => !response.ok);
+      if (failed) {
+        const payload = await failed.json().catch(() => null) as { error?: string } | null;
+        throw new Error(payload?.error ?? 'Failed to apply suggestions');
+      }
+
+      setInlineToast((previous) => previous
+        ? { ...previous, suggestionsApplied: true, suggestionsApplying: false }
+        : previous);
+      onTaskAdded?.();
+      window.dispatchEvent(new CustomEvent('mission-control:task-added'));
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(closeSuggestionReview, 1500);
+    } catch (error) {
+      setInlineToast((previous) => previous
+        ? { ...previous, suggestionsApplying: false }
+        : previous);
+      const message = error instanceof Error ? error.message : 'Failed to apply suggestions';
+      toast.error(message);
+    }
+  }, [closeSuggestionReview, inlineToast, onTaskAdded]);
 
   return (
     <>
@@ -2018,18 +2124,20 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         <AnimatePresence>
           {inlineToast && (
             <motion.div
-              className="absolute left-0 right-0 top-full mt-2 bg-green-950/80 border border-green-500/40 text-green-200 text-sm font-medium rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] z-50"
+              className="absolute left-0 right-0 top-full z-50 overflow-hidden rounded-b-[var(--radius-lg)] border border-t-0 border-[var(--border)] bg-[var(--surface-1)] text-sm shadow-[var(--shadow-lg)]"
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.15 }}
             >
               {/* Row 1: task confirmation */}
-              <div className="px-4 py-2 flex items-center gap-3">
+              <div className="flex items-center gap-3 border-b border-green-500/20 bg-green-950/45 px-3 py-2 text-green-200">
+                <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-green-400">
+                  Added
+                </span>
                 <span className="flex-1 min-w-0">
                   {inlineToast.singleTaskMeta ? (
                     <span className="flex items-center gap-2 min-w-0">
-                      <span className="shrink-0"><Check size={12} /></span>
                       <span className="truncate font-semibold">{inlineToast.singleTaskMeta.title}</span>
                       <span className="shrink-0 text-green-300/70 inline-flex items-center gap-1">→ <ConnectorIconImg type={destination.connectorType} size={12} /> {destination.label}</span>
                       {inlineToast.singleTaskMeta.priority && inlineToast.singleTaskMeta.priority !== 'none' && (
@@ -2091,78 +2199,39 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                 )}
               </div>
 
-              {/* Row 2: suggestion nudge (appears after async fetch) */}
+              {/* Row 2: independently editable suggestion review */}
               <AnimatePresence>
                 {inlineToast.suggestions && !inlineToast.suggestionsApplied && (
                   <motion.div
-                    className="px-4 py-1.5 border-t border-green-500/20 flex items-center gap-2"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <span className="shrink-0 text-xs leading-none">✨</span>
-                    <span className="flex-1 min-w-0 flex items-center gap-1.5 text-xs text-green-300/80">
-                      {inlineToast.suggestions.priority && (
-                        <span className="px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-900/20 text-amber-300">
-                          {inlineToast.suggestions.priority.value === 'critical' ? 'P0' :
-                           inlineToast.suggestions.priority.value === 'high' ? 'P1' :
-                           inlineToast.suggestions.priority.value === 'medium' ? 'P2' : 'P3'}
-                        </span>
-                      )}
-                      {inlineToast.suggestions.effort && (
-                        <span className="px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-900/20 text-sky-300">
-                          {EFFORT_LABELS[inlineToast.suggestions.effort.value] ?? `E${inlineToast.suggestions.effort.value}`}
-                        </span>
-                      )}
-                      {inlineToast.suggestions.tags.map(tag => (
-                        <span key={tag.id} className="px-1.5 py-0.5 rounded border border-purple-500/30 bg-purple-900/20 text-purple-300 truncate max-w-[80px]">
-                          {tag.name}
-                        </span>
-                      ))}
-                    </span>
-                    <button
-                      className="shrink-0 text-xs font-semibold text-amber-300 hover:text-amber-100 transition-colors disabled:opacity-50"
-                      disabled={inlineToast.suggestionsApplying || Boolean(suggestionBlockedReason)}
-                      title={suggestionBlockedReason}
-                      onClick={async () => {
-                        const taskId = inlineToast.taskIds[0];
-                        const s = inlineToast.suggestions;
-                        if (!taskId || !s) return;
-                        setInlineToast(prev => prev ? { ...prev, suggestionsApplying: true } : prev);
-                        try {
-                          const body: Record<string, unknown> = {};
-                          if (s.priority) body.priority = s.priority.value;
-                          if (s.effort) body.effort = s.effort.value;
-                          if (s.tags.length > 0) body.tags = s.tags.map(t => t.id);
-                          const response = await fetch(`/api/tasks/${taskId}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(body),
-                          });
-                          if (!response.ok) {
-                            const payload = await response.json().catch(() => null) as { error?: string } | null;
-                            throw new Error(payload?.error ?? 'Failed to apply suggestions');
-                          }
-                          setInlineToast(prev => prev ? { ...prev, suggestionsApplied: true, suggestionsApplying: false } : prev);
-                          onTaskAdded?.();
-                          window.dispatchEvent(new CustomEvent('mission-control:task-added'));
-                          // Auto-dismiss after apply
-                          if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-                          toastTimerRef.current = setTimeout(() => setInlineToast(null), 2000);
-                        } catch (error) {
-                          setInlineToast(prev => prev ? { ...prev, suggestionsApplying: false } : prev);
-                          toast.error(error instanceof Error ? error.message : 'Failed to apply suggestions');
-                        }
-                      }}
-                    >
-                      {inlineToast.suggestionsApplying ? 'Applying…' : 'Apply'}
-                    </button>
+                    <QuickAddSuggestionReview
+                      key={[
+                        inlineToast.taskIds[0],
+                        inlineToast.suggestions.priority?.value,
+                        inlineToast.suggestions.effort?.value,
+                        inlineToast.suggestions.tags.map((tag) => tag.id).join(','),
+                        inlineToast.suggestions.projects.map((project) => project.id).join(','),
+                        cachedProjects.length,
+                      ].join(':')}
+                      suggestion={inlineToast.suggestions}
+                      taskTitle={inlineToast.singleTaskMeta?.title ?? ''}
+                      projects={cachedProjects}
+                      availableTags={cachedTags}
+                      blockedReasons={suggestionBlockedReasons}
+                      applying={Boolean(inlineToast.suggestionsApplying)}
+                      onAvailableTagsChange={setCachedTags}
+                      onApply={applySuggestionSelection}
+                      onSkip={closeSuggestionReview}
+                    />
                   </motion.div>
                 )}
                 {inlineToast.suggestionsApplied && (
                   <motion.div
-                    className="px-4 py-1.5 border-t border-green-500/20 flex items-center gap-2 text-xs text-green-400"
+                    className="flex items-center gap-2 bg-[var(--surface-1)] px-3 py-2 text-xs text-green-400"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.15 }}

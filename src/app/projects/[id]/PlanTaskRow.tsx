@@ -23,6 +23,7 @@ interface PlanTaskRowProps {
   onSelect: (taskId: string) => void;
   onDoubleClick: (taskId: string) => void;
   onOpenNotes: (taskId: string, mode: 'read' | 'edit') => void;
+  onOpenSubtasks: (taskId: string) => void;
   onModifierClick?: (
     taskId: string,
     event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
@@ -49,6 +50,7 @@ export function PlanTaskRow({
   onSelect,
   onDoubleClick,
   onOpenNotes,
+  onOpenSubtasks,
   onModifierClick,
   onComplete,
   isInMyDay,
@@ -119,6 +121,7 @@ export function PlanTaskRow({
           contextMenuActions.onSetLocalDisposition?.(disposition)
         )}
         onOpenNotes={(mode) => onOpenNotes(task.id, mode)}
+        onOpenSubtasks={() => onOpenSubtasks(task.id)}
         onAddToMyDay={() => contextMenuActions.onAddToMyDay?.()}
         onRemoveFromMyDay={() => contextMenuActions.onRemoveFromMyDay?.()}
         isInMyDay={isInMyDay}

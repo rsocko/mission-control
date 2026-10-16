@@ -150,6 +150,7 @@ interface TodayMainPanelProps {
     addToProject: (taskId: string, projectId: string, phaseId?: string | null) => Promise<void>;
     saveTemplateTask: Dispatch<SetStateAction<SaveTemplateTask | null>>;
     openNotes: (taskId: string, mode: 'read' | 'edit') => void;
+    openSubtasks: (taskId: string) => void;
     addToDay?: (taskId: string) => void;
     moveToSource?: (taskId: string) => void;
   };
@@ -226,7 +227,8 @@ export function TodayMainPanel({
     setDueDate: onSetTaskDueDate, setLocalDisposition: onSetTaskLocalDisposition,
     moveToList: onMoveTaskToList, deleteTask: onDeleteTask,
     addToProject: onAddTaskToProject, saveTemplateTask: onSaveTemplateTask,
-    openNotes: onOpenTaskNotes, addToDay: onAddToDay, moveToSource: onMoveToSource,
+    openNotes: onOpenTaskNotes, openSubtasks: onOpenTaskSubtasks,
+    addToDay: onAddToDay, moveToSource: onMoveToSource,
   } = taskActions;
   const {
     selectedTaskId, selectTask: onSelectTask, doubleClickTask: onDoubleClickTask,
@@ -1020,6 +1022,7 @@ export function TodayMainPanel({
                                       onFilterPriority={filterByPriority}
                                       onFilterStatus={filterByStatus}
                                       onOpenNotes={(mode) => onOpenTaskNotes(item.taskId, mode)}
+                                      onOpenSubtasks={() => onOpenTaskSubtasks(item.taskId)}
                                       sourceLists={sourceLists}
                                       listGroups={listGroups}
                                       projects={projects}

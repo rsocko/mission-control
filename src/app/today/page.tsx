@@ -9,6 +9,7 @@ import {
   TaskDetailPanel,
   type TaskFieldUpdate,
   type TaskNotesOpenRequest,
+  type TaskSubtasksOpenRequest,
 } from '@/components/task-detail/TaskDetailPanel';
 import { TodayMainPanel } from '@/components/today/TodayMainPanel';
 import { TodayScheduleModal } from '@/components/today/TodayScheduleModal';
@@ -40,6 +41,7 @@ export default function TodayPage() {
   const [detailMode, setDetailMode] = useState<'panel' | 'dialog' | 'workspace'>('panel');
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
+  const [subtasksOpenRequest, setSubtasksOpenRequest] = useState<TaskSubtasksOpenRequest | null>(null);
   const [selectedSuggestionContext, setSelectedSuggestionContext] = useState<SuggestionTask | null>(null);
   const { items, scheduled, calendarEvents, suggestions, sourceLists, energyLevel, loading, fetchData, setItems, setSuggestions, setEnergyLevel } = useMyDayData(todayISO);
   const actions = useTodayActions({ items, setItems, suggestions, setSuggestions, scheduled, calendarEvents, sourceLists, energyLevel, setEnergyLevel, todayISO, fetchData });
@@ -66,6 +68,7 @@ export default function TodayPage() {
     selectedTaskId,
     onSelectionChange: (taskId) => {
       setNotesOpenRequest(null);
+      setSubtasksOpenRequest(null);
       setSelectedSuggestionContext(null);
       setDetailSurface('desktop');
       setDetailMode('panel');
@@ -277,12 +280,23 @@ export default function TodayPage() {
             items.find((item) => item.taskId === taskId),
           ),
           openNotes: (taskId, mode) => {
+            setSubtasksOpenRequest(null);
             setDetailSurface('desktop');
             setSelectedTaskId(taskId);
             setNotesOpenRequest((current) => ({
               requestId: (current?.requestId ?? 0) + 1,
               taskId,
               mode,
+            }));
+          },
+          openSubtasks: (taskId) => {
+            setNotesOpenRequest(null);
+            setDetailSurface('desktop');
+            setDetailMode('panel');
+            setSelectedTaskId(taskId);
+            setSubtasksOpenRequest((current) => ({
+              requestId: (current?.requestId ?? 0) + 1,
+              taskId,
             }));
           },
           moveToList: actions.moveTaskToList,
@@ -338,6 +352,7 @@ export default function TodayPage() {
               );
               setPendingMoveDialogTaskId(null);
               setNotesOpenRequest(null);
+              setSubtasksOpenRequest(null);
             }}
             onUpdate={handleTaskDetailUpdate}
             availableTags={selectedTask?.tags}
@@ -358,6 +373,7 @@ export default function TodayPage() {
             autoOpenMoveDialog={pendingMoveDialogTaskId === selectedTaskId}
             onMoveDialogDismissed={() => setPendingMoveDialogTaskId(null)}
             notesOpenRequest={notesOpenRequest}
+            subtasksOpenRequest={subtasksOpenRequest}
           />
         </div>
       )}
@@ -373,6 +389,7 @@ export default function TodayPage() {
               );
               setPendingMoveDialogTaskId(null);
               setNotesOpenRequest(null);
+              setSubtasksOpenRequest(null);
             }}
             onUpdate={handleTaskDetailUpdate}
             availableTags={selectedTask?.tags}

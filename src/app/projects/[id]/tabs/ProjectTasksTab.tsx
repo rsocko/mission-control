@@ -85,6 +85,7 @@ export function ProjectTasksTab({
     getTaskContextActions,
     myDayTaskIds,
     openTaskNotes,
+    openTaskSubtasks,
     selectedTaskId,
     selectTask,
   } = useProjectPageTaskInteractions();
@@ -245,6 +246,7 @@ export function ProjectTasksTab({
               contextActions.onSetLocalDisposition?.(disposition)
             )}
             onOpenNotes={(mode) => openTaskNotes(task.id, mode)}
+            onOpenSubtasks={() => openTaskSubtasks(task.id)}
             onAddToMyDay={() => contextActions.onAddToMyDay?.()}
             onRemoveFromMyDay={() => contextActions.onRemoveFromMyDay?.()}
             isInMyDay={myDayTaskIds.has(task.id)}

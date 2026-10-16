@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, Trash2 } from 'lucide-react';
+import { Check, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DAY_LABELS, DAY_NUMBERS, type CadenceConfig, type Routine } from './types';
 
@@ -10,6 +10,7 @@ interface WeeklyGridProps {
   weekDates: string[];
   today: string;
   onToggle: (routineId: string, date: string, isCompleted: boolean) => void;
+  onEdit: (routine: Routine) => void;
   onDelete: (id: string) => void;
 }
 
@@ -24,6 +25,7 @@ export function WeeklyGrid({
   weekDates,
   today,
   onToggle,
+  onEdit,
   onDelete,
 }: WeeklyGridProps) {
   return (
@@ -44,7 +46,7 @@ export function WeeklyGrid({
                 </th>
               ))}
               <th className="hidden px-5 py-3 text-right sm:table-cell">Streak</th>
-              <th className="hidden w-8 px-3 py-3 sm:table-cell" />
+              <th className="hidden w-16 px-3 py-3 sm:table-cell" />
             </tr>
           </thead>
           <tbody className="text-sm">
@@ -118,13 +120,26 @@ export function WeeklyGrid({
                     {routine.streak >= 7 && <span className="ml-1 text-orange-400">🔥</span>}
                   </td>
                   <td className="hidden px-3 py-3 sm:table-cell">
-                    <button
-                      onClick={() => onDelete(routine.id)}
-                      className="rounded-[var(--radius-sm)] p-1 text-[var(--text-muted)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-2)] hover:text-[var(--danger)]"
-                      title="Archive routine"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => onEdit(routine)}
+                        className="rounded-[var(--radius-sm)] p-1 text-[var(--text-muted)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                        title="Edit routine"
+                        aria-label={`Edit ${routine.name}`}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(routine.id)}
+                        className="rounded-[var(--radius-sm)] p-1 text-[var(--text-muted)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-2)] hover:text-[var(--danger)]"
+                        title="Archive routine"
+                        aria-label={`Archive ${routine.name}`}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

@@ -1,0 +1,1233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Control - Compact My Day routines</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #020617;
+      --chrome: #08101f;
+      --surface-0: #0b1220;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --border-subtle: #182235;
+      --border: #243146;
+      --border-strong: #3b4a62;
+      --text: #f8fafc;
+      --text-2: #cbd5e1;
+      --text-3: #94a3b8;
+      --muted: #718096;
+      --blue: #3b82f6;
+      --blue-soft: rgba(59, 130, 246, .14);
+      --green: #34d399;
+      --green-soft: rgba(16, 185, 129, .13);
+      --amber: #fbbf24;
+      --orange: #fb923c;
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --shadow: 0 18px 42px rgba(0, 0, 0, .3);
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--canvas); }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--canvas);
+      color: var(--text);
+      font: 14px/1.45 Inter, Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button { font: inherit; }
+    button:focus-visible {
+      outline: 2px solid #60a5fa;
+      outline-offset: 2px;
+    }
+
+    [data-tooltip] { position: relative; }
+    [data-tooltip]::before,
+    [data-tooltip]::after {
+      position: absolute;
+      left: 50%;
+      z-index: 30;
+      pointer-events: none;
+      opacity: 0;
+      transform: translate(-50%, 3px);
+      transition: opacity 80ms ease, transform 80ms ease;
+      transition-delay: 80ms;
+    }
+    [data-tooltip]::before {
+      content: attr(data-tooltip);
+      bottom: calc(100% + 8px);
+      width: max-content;
+      max-width: 220px;
+      padding: 6px 8px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      background: var(--surface-2);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .32);
+      font-size: 10px;
+      font-weight: 550;
+      line-height: 1.3;
+      text-align: center;
+    }
+    [data-tooltip]::after {
+      content: "";
+      bottom: calc(100% + 3px);
+      border: 5px solid transparent;
+      border-top-color: var(--border-strong);
+    }
+    [data-tooltip]:hover::before,
+    [data-tooltip]:hover::after,
+    [data-tooltip]:focus-visible::before,
+    [data-tooltip]:focus-visible::after {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    ::selection { background: rgba(59, 130, 246, .42); color: white; }
+    * { scrollbar-color: var(--surface-3) var(--surface-0); }
+
+    .review {
+      min-height: 88px;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      border-bottom: 1px solid var(--border);
+      background: #070d19;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .review-copy { min-width: 255px; }
+    .review h1 { margin: 0; font-size: 16px; letter-spacing: -.015em; }
+    .review p { margin: 4px 0 0; color: var(--text-3); font-size: 12px; }
+
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(170px, 1fr));
+      gap: 7px;
+      width: 100%;
+      max-width: 890px;
+    }
+
+    .tab {
+      min-height: 58px;
+      padding: 9px 11px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-0);
+      color: var(--text-3);
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+    }
+
+    .tab:hover { background: var(--surface-1); border-color: var(--border-strong); }
+    .tab:active { transform: scale(.98); }
+    .tab strong { display: flex; align-items: center; gap: 7px; color: var(--text); font-size: 12px; }
+    .tab span { display: block; margin-top: 3px; font-size: 10px; }
+    .tab.active {
+      border-color: rgba(96, 165, 250, .7);
+      background: var(--blue-soft);
+      box-shadow: inset 0 0 0 1px rgba(59, 130, 246, .1);
+    }
+
+    .recommended {
+      padding: 2px 6px;
+      border: 1px solid rgba(96, 165, 250, .32);
+      border-radius: 999px;
+      color: #93c5fd;
+      background: rgba(37, 99, 235, .18);
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .shell {
+      min-height: calc(100vh - 88px);
+      display: grid;
+      grid-template-columns: 62px minmax(0, 1fr) 300px;
+    }
+
+    .rail {
+      padding: 12px 9px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      border-right: 1px solid var(--border);
+      background: #070d19;
+    }
+
+    .brand, .rail-item {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 9px;
+    }
+
+    .brand { margin-bottom: 8px; background: #2563eb; color: white; font-weight: 800; font-size: 12px; }
+    .rail-item { color: var(--muted); font-size: 15px; }
+    .rail-item.active { color: #fbbf24; background: rgba(245, 158, 11, .12); }
+    .rail-spacer { flex: 1; }
+
+    .workspace { min-width: 0; padding: 24px; overflow: auto; }
+    .content { width: min(850px, 100%); margin: 0 auto; }
+
+    .page-head {
+      margin-bottom: 20px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .page-title { display: flex; gap: 10px; align-items: flex-start; }
+    .sun { color: var(--amber); font-size: 18px; line-height: 1.2; }
+    .page-title h2 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+    .page-title p { margin: 3px 0 0; color: var(--text-3); font-size: 12px; }
+
+    .actions { display: flex; gap: 7px; }
+    .btn {
+      height: 32px;
+      padding: 0 11px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-2);
+      background: var(--surface-1);
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .btn.primary { color: white; border-color: #2563eb; background: #2563eb; }
+
+    .overview {
+      margin-bottom: 18px;
+      min-height: 62px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface-0);
+    }
+
+    .metric { min-width: 58px; text-align: center; }
+    .metric strong { display: block; font-size: 16px; font-variant-numeric: tabular-nums; }
+    .metric span { color: var(--muted); font-size: 9px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+    .divider { width: 1px; height: 32px; background: var(--border); }
+    .progress { flex: 1; }
+    .track { height: 7px; overflow: hidden; border-radius: 999px; background: var(--surface-2); }
+    .fill { width: 38%; height: 100%; background: var(--green); border-radius: inherit; }
+    .progress small { display: block; margin-top: 5px; color: var(--text-3); font-size: 10px; }
+
+    .panels {
+      margin-bottom: 18px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .placeholder {
+      min-height: 108px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface-0);
+      overflow: hidden;
+    }
+
+    .placeholder-head {
+      height: 35px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-3);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .placeholder-lines { padding: 10px 12px; }
+    .line { height: 8px; margin: 7px 0; border-radius: 999px; background: var(--surface-2); }
+    .line:nth-child(1) { width: 68%; }
+    .line:nth-child(2) { width: 89%; }
+    .line:nth-child(3) { width: 48%; }
+
+    .section-label {
+      margin: 0 0 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-3);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .section-label .context { color: var(--muted); font-weight: 500; letter-spacing: 0; text-transform: none; }
+    .concept { display: none; }
+    .concept.active { display: block; animation: reveal 220ms cubic-bezier(.16, 1, .3, 1); }
+    @keyframes reveal { from { opacity: .25; transform: translateY(5px); } }
+
+    .routine-shell {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface-1);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, .12);
+      overflow: visible;
+    }
+
+    .routine-head {
+      min-height: 39px;
+      padding: 7px 10px 7px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .routine-title { min-width: 0; display: flex; align-items: center; gap: 8px; }
+    .routine-title .repeat { color: #60a5fa; }
+    .routine-title strong { font-size: 12px; }
+    .routine-title .count { color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+    .routine-actions { display: flex; align-items: center; gap: 5px; }
+
+    .icon-btn {
+      width: 27px;
+      height: 27px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: var(--radius-sm);
+      color: var(--text-3);
+      background: transparent;
+      cursor: pointer;
+    }
+    .icon-btn:hover { color: var(--text); background: var(--surface-2); }
+
+    .link-btn {
+      padding: 5px 7px;
+      border: 0;
+      border-radius: var(--radius-sm);
+      color: #60a5fa;
+      background: transparent;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .link-btn:hover { background: var(--blue-soft); }
+
+    .action-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+      gap: 1px;
+      background: var(--border-subtle);
+    }
+
+    .routine-item {
+      min-width: 0;
+      min-height: 43px;
+      padding: 8px 11px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      background: var(--surface-1);
+    }
+
+    .routine-item:hover { background: var(--surface-0); }
+    .completed-item .routine-name strong { color: var(--text-3); text-decoration: line-through; }
+    .completed-item .routine-name span { color: var(--muted); }
+
+    .tray-summary {
+      min-height: 58px;
+      padding: 8px 10px 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      position: relative;
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--surface-0);
+    }
+
+    .tray-toggle-hit {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      border: 0;
+      border-radius: inherit;
+      background: transparent;
+      cursor: pointer;
+    }
+    .tray-toggle-hit:hover { background: rgba(148, 163, 184, .04); }
+    .tray-toggle-hit:focus-visible { outline: 2px solid #60a5fa; outline-offset: -3px; }
+    .tray-summary > :not(.tray-toggle-hit) { position: relative; z-index: 1; }
+    .tray-summary .summary-progress, .tray-summary-copy { pointer-events: none; }
+
+    .tray-summary-copy { min-width: 0; flex: 1; }
+    .tray-summary-copy strong { display: block; color: var(--text); font-size: 12px; }
+    .tray-summary-copy span { display: block; margin-top: 2px; color: var(--text-3); font-size: 10px; }
+    .tray-summary-actions { display: flex; align-items: center; gap: 5px; }
+    .tray-quick { display: none; align-items: center; gap: 5px; }
+    .collapsed-shell .tray-quick, .complete-shell .tray-quick { display: flex; }
+
+    .header-routine {
+      width: 29px;
+      height: 29px;
+      display: grid;
+      place-items: center;
+      position: relative;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      background: var(--surface-1);
+      cursor: pointer;
+    }
+    .header-routine:hover { border-color: #60a5fa; background: var(--blue-soft); }
+    .header-routine .header-mark {
+      width: 16px;
+      height: 16px;
+      display: grid;
+      place-items: center;
+      position: absolute;
+      right: -5px;
+      bottom: -5px;
+      border: 2px solid var(--text-3);
+      border-radius: 50%;
+      color: transparent;
+      background: var(--surface-1);
+      box-shadow: 0 0 0 2px var(--surface-0);
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .header-routine.done { background: var(--green-soft); }
+    .header-routine.done .header-mark { color: #052e24; border-color: var(--green); background: var(--green); }
+    .header-more {
+      min-width: 29px;
+      height: 29px;
+      padding: 0 6px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-3);
+      background: var(--surface-1);
+      font-size: 9px;
+      cursor: pointer;
+    }
+    .header-more:hover { color: var(--text); border-color: #60a5fa; background: var(--blue-soft); }
+
+    .routine-check {
+      width: 32px;
+      height: 32px;
+      flex: 0 0 32px;
+      display: grid;
+      place-items: center;
+      position: relative;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      color: var(--text);
+      background: var(--surface-0);
+      cursor: pointer;
+      transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+    }
+
+    .routine-check:hover { border-color: #60a5fa; background: var(--blue-soft); }
+    .routine-check:active { transform: scale(.95); }
+    .routine-check .routine-icon { font-size: 14px; line-height: 1; }
+    .routine-check .mark {
+      width: 18px;
+      height: 18px;
+      display: grid;
+      place-items: center;
+      position: absolute;
+      right: -6px;
+      bottom: -6px;
+      border: 2px solid var(--text-3);
+      border-radius: 50%;
+      color: transparent;
+      background: var(--surface-1);
+      box-shadow: 0 0 0 2px var(--surface-1);
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .routine-check.done { border-color: var(--border); background: var(--green-soft); }
+    .routine-check.done .mark { color: #052e24; border-color: var(--green); background: var(--green); }
+
+    .status {
+      flex: 0 0 auto;
+      padding: 2px 6px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--text-3);
+      background: var(--surface-0);
+      font-size: 9px;
+    }
+    .status.due { color: #fde68a; border-color: var(--border-strong); background: rgba(245, 158, 11, .1); }
+
+    .disclosure-row, .overflow-row {
+      width: 100%;
+      min-height: 35px;
+      padding: 6px 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border: 0;
+      border-top: 1px solid var(--border-subtle);
+      color: var(--text-3);
+      background: var(--surface-0);
+      font-size: 10px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .disclosure-row:hover, .overflow-row:hover { color: var(--text-2); background: var(--surface-2); }
+    .disclosure-row strong { color: var(--text-2); }
+    .optional-grid { border-top: 1px solid var(--border-subtle); }
+    .optional-grid .routine-item { background: var(--surface-0); }
+    .optional-grid .routine-name strong { color: var(--text-2); }
+    .overflow-items { border-top: 1px solid var(--border-subtle); }
+
+    .check {
+      width: 23px;
+      height: 23px;
+      flex: 0 0 23px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      color: transparent;
+      background: var(--surface-0);
+      cursor: pointer;
+      transition: border-color 140ms ease, background 140ms ease, color 140ms ease, transform 140ms ease;
+    }
+
+    .check:hover { border-color: #60a5fa; color: #60a5fa; }
+    .check:active { transform: scale(.94); }
+    .check.done { color: var(--green); border-color: var(--border); background: var(--green-soft); }
+
+    .routine-name { min-width: 0; flex: 1; }
+    .routine-name strong { display: block; overflow: hidden; color: var(--text); font-size: 12px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+    .routine-name span { display: block; margin-top: 1px; color: var(--muted); font-size: 9px; }
+    .streak { flex: 0 0 auto; color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
+    .streak.hot { color: var(--orange); }
+
+    .completed-summary {
+      width: 100%;
+      min-height: 34px;
+      padding: 6px 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 0;
+      color: var(--text-3);
+      background: var(--surface-0);
+      font-size: 10px;
+      text-align: left;
+    }
+    .completed-summary strong {
+      color: #6ee7b7;
+      font-weight: 650;
+    }
+    .completed-names { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .collapsed-shell .routine-body > :not(.tray-summary) { display: none; }
+    .collapsed-shell .tray-summary { border-bottom: 0; }
+    .complete-shell .action-grid,
+    .complete-shell .overflow-row,
+    .complete-shell .disclosure-row,
+    .complete-shell .completed-summary { display: none; }
+    .complete-shell .tray-summary { border-bottom: 0; }
+
+    .rotator {
+      min-height: 98px;
+      padding: 13px;
+      display: grid;
+      grid-template-columns: 29px minmax(0, 1fr) auto 29px;
+      align-items: center;
+      gap: 10px;
+    }
+    .rotator-nav {
+      width: 29px;
+      height: 29px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-3);
+      background: var(--surface-0);
+      cursor: pointer;
+    }
+    .rotator-main { min-width: 0; }
+    .rotator-main small { color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+    .rotator-main h3 { margin: 4px 0 2px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+    .rotator-main p { margin: 0; color: var(--text-3); font-size: 10px; }
+    .rotator-check {
+      width: 70px;
+      height: 34px;
+      border: 1px solid rgba(59, 130, 246, .55);
+      border-radius: var(--radius-md);
+      color: #bfdbfe;
+      background: var(--blue-soft);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .rotator-foot {
+      min-height: 34px;
+      padding: 6px 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--border-subtle);
+      background: var(--surface-0);
+    }
+    .dots { display: flex; gap: 5px; }
+    .dot { width: 5px; height: 5px; border-radius: 999px; background: var(--surface-3); }
+    .dot.active { width: 14px; background: #60a5fa; }
+    .queue { color: var(--text-3); font-size: 10px; }
+
+    .summary-bar {
+      min-height: 52px;
+      padding: 8px 9px 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+    }
+    .summary-progress {
+      width: 32px;
+      height: 32px;
+      flex: 0 0 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: #bfdbfe;
+      background: conic-gradient(var(--blue) 0 33%, var(--surface-3) 33% 100%);
+      font-size: 9px;
+      font-weight: 800;
+      position: relative;
+    }
+    .summary-progress::after {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: 50%;
+      background: var(--surface-1);
+    }
+    .summary-progress span { position: relative; z-index: 1; }
+    .summary-progress.complete { color: #6ee7b7; }
+    .summary-copy { min-width: 0; flex: 1; }
+    .summary-copy strong { display: block; font-size: 12px; }
+    .summary-copy span { display: block; margin-top: 1px; overflow: hidden; color: var(--text-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .summary-quick { display: flex; gap: 5px; }
+    .mini-routine {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-2);
+      background: var(--surface-0);
+      cursor: pointer;
+    }
+    .mini-routine.done { color: var(--green); border-color: var(--border); background: var(--green-soft); }
+    .expand-btn {
+      height: 30px;
+      padding: 0 9px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-2);
+      background: var(--surface-2);
+      font-size: 10px;
+      cursor: pointer;
+    }
+
+    .expanded-list { border-top: 1px solid var(--border-subtle); }
+    .hidden { display: none !important; }
+
+    .open-tasks { margin-top: 18px; }
+    .task-list { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); overflow: hidden; }
+    .task {
+      min-height: 44px;
+      padding: 9px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .task:last-child { border-bottom: 0; }
+    .task-dot { width: 15px; height: 15px; border: 1px solid var(--border-strong); border-radius: 50%; }
+    .task-copy { flex: 1; color: var(--text-2); font-size: 12px; }
+    .task-meta { color: var(--muted); font-size: 9px; }
+
+    .notes {
+      padding: 20px 17px;
+      border-left: 1px solid var(--border);
+      background: var(--chrome);
+      overflow: auto;
+    }
+    .notes h2 { margin: 0 0 5px; font-size: 14px; }
+    .notes > p { margin: 0 0 18px; color: var(--text-3); font-size: 11px; }
+    .note { display: none; }
+    .note.active { display: block; }
+    .note h3 { margin: 18px 0 6px; color: var(--text-2); font-size: 11px; }
+    .note ul { margin: 0; padding-left: 17px; color: var(--text-3); font-size: 11px; }
+    .note li { margin: 7px 0; }
+    .verdict {
+      padding: 10px 11px;
+      border: 1px solid rgba(96, 165, 250, .28);
+      border-radius: var(--radius-md);
+      color: #bfdbfe;
+      background: var(--blue-soft);
+      font-size: 11px;
+    }
+    .tradeoff {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    @media (max-width: 1040px) {
+      .shell { grid-template-columns: 58px minmax(0, 1fr); }
+      .notes { display: none; }
+      .review { align-items: flex-start; flex-direction: column; gap: 10px; }
+      .review-copy { min-width: 0; }
+      .tabs { max-width: none; }
+    }
+
+    @media (max-width: 720px) {
+      .review { position: static; padding: 12px; }
+      .tabs { grid-template-columns: 1fr; }
+      .tab { min-height: 48px; }
+      .tab span { display: none; }
+      .shell { display: block; }
+      .rail { display: none; }
+      .workspace { padding: 16px 12px 36px; }
+      .page-head { align-items: stretch; flex-direction: column; }
+      .actions { width: 100%; }
+      .actions .btn { flex: 1; }
+      .overview { overflow-x: auto; }
+      .panels { grid-template-columns: 1fr; }
+      .panels .placeholder:nth-child(2) { display: none; }
+      .action-grid { grid-template-columns: 1fr; }
+      .rotator { grid-template-columns: 27px minmax(0, 1fr) 27px; }
+      .rotator-check { grid-column: 2; width: 100%; }
+      .summary-quick { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="review">
+    <div class="review-copy">
+      <h1>Compact routines on My Day</h1>
+      <p>Three interaction shapes using the current Mission Control visual system.</p>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Routine layout concepts">
+      <button class="tab active" data-concept="grid" role="tab" aria-selected="true">
+        <strong>Adaptive routine tray <span class="recommended">Recommended</span></strong>
+        <span>Donut summary, icon checks, ranked flexible routines, and bounded expansion.</span>
+      </button>
+      <button class="tab" data-concept="rotator" role="tab" aria-selected="false">
+        <strong>Focus rotator</strong>
+        <span>One routine at a time, with a small queue indicator and next/previous controls.</span>
+      </button>
+      <button class="tab" data-concept="summary" role="tab" aria-selected="false">
+        <strong>Summary bar</strong>
+        <span>Default-collapsed status with quick checks and an explicit expand action.</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <nav class="rail" aria-label="Mock application navigation">
+      <div class="brand">MC</div>
+      <div class="rail-item">⌂</div>
+      <div class="rail-item active">☀</div>
+      <div class="rail-item">✓</div>
+      <div class="rail-item">▦</div>
+      <div class="rail-spacer"></div>
+      <div class="rail-item">⚙</div>
+    </nav>
+
+    <main class="workspace">
+      <div class="content">
+        <header class="page-head">
+          <div class="page-title">
+            <span class="sun">☀</span>
+            <div>
+              <h2>My Day</h2>
+              <p>Friday, October 16 · 7 items planned</p>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn">Plan my day</button>
+            <button class="btn primary">+ Add task</button>
+          </div>
+        </header>
+
+        <section class="overview" aria-label="Day overview">
+          <div class="metric"><strong>7</strong><span>Planned</span></div>
+          <div class="divider"></div>
+          <div class="metric"><strong>2</strong><span>Done</span></div>
+          <div class="divider"></div>
+          <div class="progress">
+            <div class="track"><div class="fill"></div></div>
+            <small>38% of today complete · medium energy</small>
+          </div>
+        </section>
+
+        <div class="panels">
+          <section class="placeholder">
+            <div class="placeholder-head">◎ Focus 3</div>
+            <div class="placeholder-lines"><div class="line"></div><div class="line"></div><div class="line"></div></div>
+          </section>
+          <section class="placeholder">
+            <div class="placeholder-head">▶ In progress</div>
+            <div class="placeholder-lines"><div class="line"></div><div class="line"></div><div class="line"></div></div>
+          </section>
+        </div>
+
+        <div class="section-label">
+          <span>Today's routines</span>
+          <span class="context">Incomplete first · completed summarized</span>
+        </div>
+
+        <section class="concept active" data-panel="grid">
+          <div class="routine-shell" id="grid-shell">
+            <div class="routine-body">
+              <div class="tray-summary">
+                <button class="tray-toggle-hit" id="tray-toggle" aria-label="Collapse routines section" aria-expanded="true"></button>
+                <div class="summary-progress" id="grid-donut" style="background: conic-gradient(var(--blue) 0 11%, var(--surface-3) 11% 100%)"><span id="grid-donut-count">1/9</span></div>
+                <div class="tray-summary-copy">
+                  <strong id="grid-summary-title">8 routines left today</strong>
+                  <span id="grid-summary-detail">Daily routines plus Water plants, which is due today</span>
+                </div>
+                <div class="tray-summary-actions">
+                  <div class="tray-quick" aria-label="Quick routine completion">
+                    <button class="header-routine" data-routine-index="0" data-tooltip="Mark Morning stretch complete" aria-label="Mark Morning stretch complete">🧘<span class="header-mark"></span></button>
+                    <button class="header-routine" data-routine-index="1" data-tooltip="Mark Inbox zero complete" aria-label="Mark Inbox zero complete">📥<span class="header-mark"></span></button>
+                    <button class="header-routine" data-routine-index="2" data-tooltip="Mark Take medication complete" aria-label="Mark Take medication complete">💊<span class="header-mark"></span></button>
+                    <button class="header-routine" data-routine-index="3" data-tooltip="Mark Walk the dog complete" aria-label="Mark Walk the dog complete">🐕<span class="header-mark"></span></button>
+                    <button class="header-routine" data-routine-index="4" data-tooltip="Mark Evening journal complete" aria-label="Mark Evening journal complete">✍️<span class="header-mark"></span></button>
+                    <button class="header-routine" data-routine-index="5" data-tooltip="Mark Water plants complete" aria-label="Mark Water plants complete">🌿<span class="header-mark"></span></button>
+                    <button class="header-routine" data-routine-index="6" data-tooltip="Mark Read 20 minutes complete" aria-label="Mark Read 20 minutes complete">📖<span class="header-mark"></span></button>
+                    <button class="header-routine" data-routine-index="7" data-tooltip="Mark Clear kitchen counter complete" aria-label="Mark Clear kitchen counter complete">✨<span class="header-mark"></span></button>
+                    <button class="header-more" id="header-more" data-tooltip="Expand to show four more routines" aria-label="Expand routines to show four more">+4</button>
+                  </div>
+                  <button class="link-btn">Manage</button>
+                  <button class="icon-btn" id="grid-collapse" aria-label="Collapse routines" data-tooltip="Collapse routines">⌃</button>
+                </div>
+              </div>
+              <div class="action-grid" id="grid-items">
+                <div class="routine-item" data-name="Morning stretch">
+                  <button class="routine-check" data-promoted data-tooltip="Mark Morning stretch complete" aria-label="Mark Morning stretch complete"><span class="routine-icon">🧘</span><span class="mark"></span></button>
+                  <div class="routine-name"><strong>Morning stretch</strong><span>Daily</span></div>
+                  <span class="streak hot">🔥 12</span>
+                </div>
+                <div class="routine-item" data-name="Inbox zero">
+                  <button class="routine-check" data-promoted data-tooltip="Mark Inbox zero complete" aria-label="Mark Inbox zero complete"><span class="routine-icon">📥</span><span class="mark"></span></button>
+                  <div class="routine-name"><strong>Inbox zero</strong><span>Weekdays</span></div>
+                  <span class="streak">🔥 4</span>
+                </div>
+                <div class="routine-item" data-name="Take medication">
+                  <button class="routine-check" data-promoted data-tooltip="Mark Take medication complete" aria-label="Mark Take medication complete"><span class="routine-icon">💊</span><span class="mark"></span></button>
+                  <div class="routine-name"><strong>Take medication</strong><span>Daily</span></div>
+                  <span class="status">Daily</span>
+                </div>
+                <div class="routine-item" data-name="Walk the dog">
+                  <button class="routine-check" data-promoted data-tooltip="Mark Walk the dog complete" aria-label="Mark Walk the dog complete"><span class="routine-icon">🐕</span><span class="mark"></span></button>
+                  <div class="routine-name"><strong>Walk the dog</strong><span>Daily</span></div>
+                  <span class="streak hot">🔥 8</span>
+                </div>
+                <div class="routine-item" data-name="Evening journal">
+                  <button class="routine-check" data-promoted data-tooltip="Mark Evening journal complete" aria-label="Mark Evening journal complete"><span class="routine-icon">✍️</span><span class="mark"></span></button>
+                  <div class="routine-name"><strong>Evening journal</strong><span>Daily</span></div>
+                  <span class="status">Daily</span>
+                </div>
+                <div class="routine-item" data-name="Water plants">
+                  <button class="routine-check" data-promoted data-tooltip="Mark Water plants complete" aria-label="Mark Water plants complete"><span class="routine-icon">🌿</span><span class="mark"></span></button>
+                  <div class="routine-name"><strong>Water plants</strong><span>Every 3 days · last done 3d ago</span></div>
+                  <span class="status due">Due</span>
+                </div>
+              </div>
+              <div class="action-grid overflow-items hidden" id="grid-overflow-items">
+                <div class="routine-item">
+                  <button class="routine-check" data-promoted data-tooltip="Mark Read 20 minutes complete" aria-label="Mark Read 20 minutes complete"><span class="routine-icon">📖</span><span class="mark"></span></button>
+                  <div class="routine-name"><strong>Read 20 minutes</strong><span>Daily</span></div>
+                  <span class="streak">🔥 3</span>
+                </div>
+                <div class="routine-item">
+                  <button class="routine-check" data-promoted data-tooltip="Mark Clear kitchen counter complete" aria-label="Mark Clear kitchen counter complete"><span class="routine-icon">✨</span><span class="mark"></span></button>
+                  <div class="routine-name"><strong>Clear kitchen counter</strong><span>Daily</span></div>
+                  <span class="status">Daily</span>
+                </div>
+                <div class="routine-item completed-item">
+                  <button class="routine-check done" data-promoted data-tooltip="Mark Take vitamins incomplete" aria-label="Mark Take vitamins incomplete"><span class="routine-icon">💊</span><span class="mark">✓</span></button>
+                  <div class="routine-name"><strong>Take vitamins</strong><span>Completed at 8:12 AM</span></div>
+                  <span class="status">Done</span>
+                </div>
+              </div>
+              <button class="overflow-row" id="grid-overflow" type="button" aria-expanded="false">
+                <span><strong>3 more routines</strong> · includes 1 completed</span>
+                <span>Show all</span>
+              </button>
+              <button class="disclosure-row" id="optional-toggle" type="button" aria-expanded="false">
+                <span><strong>Other routines (2)</strong> · not due today, but available to log</span>
+                <span>Show</span>
+              </button>
+              <div class="action-grid optional-grid hidden" id="optional-grid">
+                <div class="routine-item">
+                  <button class="routine-check" data-tooltip="Mark Clean coffee maker complete" aria-label="Mark Clean coffee maker complete"><span class="routine-icon">☕</span><span class="mark"></span></button>
+                  <div class="routine-name"><strong>Clean coffee maker</strong><span>Every 3 days · done yesterday</span></div>
+                  <span class="status">On track</span>
+                </div>
+                <div class="routine-item">
+                  <button class="routine-check" data-tooltip="Mark Strength training complete" aria-label="Mark Strength training complete"><span class="routine-icon">🏋️</span><span class="mark"></span></button>
+                  <div class="routine-name"><strong>Strength training</strong><span>3× / week · 2 of 3 done</span></div>
+                  <span class="status">Optional</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="concept" data-panel="rotator">
+          <div class="routine-shell">
+            <div class="routine-head">
+              <div class="routine-title">
+                <span class="repeat">↻</span>
+                <strong>Routines</strong>
+                <span class="count">1 of 3 done</span>
+              </div>
+              <div class="routine-actions"><button class="link-btn">Manage</button></div>
+            </div>
+            <div class="rotator">
+              <button class="rotator-nav" id="rotator-prev" aria-label="Previous routine">‹</button>
+              <div class="rotator-main">
+                <small id="rotator-position">Next routine · 1 of 2</small>
+                <h3 id="rotator-name">Morning stretch</h3>
+                <p id="rotator-meta">Daily · 12 day streak</p>
+              </div>
+              <button class="rotator-check" id="rotator-done">Mark done</button>
+              <button class="rotator-nav" id="rotator-next" aria-label="Next routine">›</button>
+            </div>
+            <div class="rotator-foot">
+              <div class="dots"><span class="dot active"></span><span class="dot"></span></div>
+              <span class="queue">1 completed · Take vitamins</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="concept" data-panel="summary">
+          <div class="routine-shell">
+            <div class="summary-bar">
+              <div class="summary-progress"><span>1/3</span></div>
+              <div class="summary-copy">
+                <strong>2 routines left today</strong>
+                <span>Morning stretch · Inbox zero</span>
+              </div>
+              <div class="summary-quick" aria-label="Quick routine completion">
+                <button class="mini-routine done" title="Take vitamins completed">✓</button>
+                <button class="mini-routine" title="Complete Morning stretch">○</button>
+                <button class="mini-routine" title="Complete Inbox zero">○</button>
+              </div>
+              <button class="expand-btn" id="summary-expand">Expand</button>
+            </div>
+            <div class="expanded-list hidden" id="summary-list">
+              <div class="routine-item">
+                <button class="check" aria-label="Complete Morning stretch">+</button>
+                <div class="routine-name"><strong>Morning stretch</strong><span>Daily</span></div>
+                <span class="streak hot">🔥 12</span>
+              </div>
+              <div class="routine-item">
+                <button class="check" aria-label="Complete Inbox zero">+</button>
+                <div class="routine-name"><strong>Inbox zero</strong><span>Weekdays</span></div>
+                <span class="streak">🔥 4</span>
+              </div>
+              <div class="completed-summary"><span><strong>✓ 1 completed</strong> · Take vitamins</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="open-tasks">
+          <div class="section-label"><span>Open tasks (5)</span><span class="context">The next primary work area</span></div>
+          <div class="task-list">
+            <div class="task"><span class="task-dot"></span><span class="task-copy">Review pull request feedback</span><span class="task-meta">High</span></div>
+            <div class="task"><span class="task-dot"></span><span class="task-copy">Prepare the weekly project update</span><span class="task-meta">45 min</span></div>
+            <div class="task"><span class="task-dot"></span><span class="task-copy">Order replacement printer filament</span><span class="task-meta">Personal</span></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <aside class="notes">
+      <h2>Design recommendation</h2>
+      <p>The section should preserve awareness without competing with the task list.</p>
+
+      <article class="note active" data-note="grid">
+        <div class="verdict"><strong>Use this adaptive hybrid as the default.</strong> It combines the summary bar’s progress signal with the grid’s scanability and direct actions.</div>
+        <h3>Why it works</h3>
+        <ul>
+          <li>The donut counts only routines promoted for today, so optional completions do not distort the day’s commitment.</li>
+          <li>Routine-defined icons sit inside each completion control, preserving compactness while making the target recognizable.</li>
+          <li>The grid automatically moves between two and three columns based on available width.</li>
+          <li>Due or overdue flexible routines join the promoted list; on-track routines stay in a lower “Other routines” disclosure.</li>
+        </ul>
+        <h3>Overflow and completion</h3>
+        <ul>
+          <li>Show at most six routines initially, then reveal the remainder inline. Avoid numbered pages: pages hide checklist state and make items move unpredictably.</li>
+          <li>When every promoted routine is complete, collapse automatically to a compact “All routines complete” summary; the user can immediately reopen it.</li>
+          <li>Completed routines appear last in the full expanded grid with a muted checked treatment.</li>
+        </ul>
+        <p class="tradeoff">Ranking proposal: overdue flexible → due today flexible → scheduled daily/specific-day → other daily → on-track flexible in “Other routines.”</p>
+      </article>
+
+      <article class="note" data-note="rotator">
+        <div class="verdict"><strong>Use only if “do the next routine” is the product goal.</strong> It is compact and focused, but hides the remaining commitments.</div>
+        <h3>Strengths</h3>
+        <ul>
+          <li>Very low vertical footprint and strong single-action focus.</li>
+          <li>Works naturally on narrow screens and touch devices.</li>
+          <li>Can automatically advance after completion.</li>
+        </ul>
+        <h3>Risks</h3>
+        <ul>
+          <li>Users must rotate to understand the day’s full routine load.</li>
+          <li>Previous/next controls add interaction cost for only three items.</li>
+          <li>Auto-rotation should be avoided; it creates motion and control problems.</li>
+        </ul>
+        <p class="tradeoff">A good optional “focus mode,” not the best default overview.</p>
+      </article>
+
+      <article class="note" data-note="summary">
+        <div class="verdict"><strong>Use when routines are secondary context.</strong> This returns the most space to tasks, at the cost of making routine names less prominent.</div>
+        <h3>Strengths</h3>
+        <ul>
+          <li>Only 52px tall in its resting state.</li>
+          <li>Progress, remaining count, and routine names are still visible.</li>
+          <li>Quick-check buttons preserve one-click completion on desktop.</li>
+        </ul>
+        <h3>Risks</h3>
+        <ul>
+          <li>Icon-only quick checks need tooltips and accessible names.</li>
+          <li>Long routine names truncate quickly.</li>
+          <li>Less effective if routines are a primary daily workflow.</li>
+        </ul>
+        <p class="tradeoff">Strongest space saver; best as a user preference or remembered collapsed state.</p>
+      </article>
+    </aside>
+  </div>
+
+  <script>
+    const tabs = [...document.querySelectorAll('.tab')];
+    const panels = [...document.querySelectorAll('.concept')];
+    const notes = [...document.querySelectorAll('.note')];
+
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const concept = tab.dataset.concept;
+        tabs.forEach((item) => {
+          const active = item === tab;
+          item.classList.toggle('active', active);
+          item.setAttribute('aria-selected', String(active));
+        });
+        panels.forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === concept));
+        notes.forEach((note) => note.classList.toggle('active', note.dataset.note === concept));
+      });
+    });
+
+    document.querySelectorAll('.check, .mini-routine').forEach((button) => {
+      button.addEventListener('click', () => {
+        button.classList.toggle('done');
+        button.textContent = button.classList.contains('done') ? '✓' : '+';
+      });
+    });
+
+    const gridShell = document.querySelector('#grid-shell');
+    const gridCollapse = document.querySelector('#grid-collapse');
+    const trayToggle = document.querySelector('#tray-toggle');
+    const promotedChecks = [...document.querySelectorAll('.routine-check[data-promoted]')];
+    const gridDonut = document.querySelector('#grid-donut');
+    const gridDonutCount = document.querySelector('#grid-donut-count');
+    const gridSummaryTitle = document.querySelector('#grid-summary-title');
+    const gridSummaryDetail = document.querySelector('#grid-summary-detail');
+
+    function updateRoutineProgress() {
+      const total = promotedChecks.length;
+      const done = promotedChecks.filter((button) => button.classList.contains('done')).length;
+      const remaining = total - done;
+      const progress = Math.round((done / total) * 100);
+      const greenWeight = Math.max(0, Math.min(100, Math.round(((progress - 35) / 65) * 100)));
+      const blueWeight = 100 - greenWeight;
+      const progressColor = `color-mix(in srgb, var(--blue) ${blueWeight}%, var(--green) ${greenWeight}%)`;
+      gridDonutCount.textContent = `${done}/${total}`;
+      gridDonut.style.background = `conic-gradient(${progressColor} 0 ${progress}%, var(--surface-3) ${progress}% 100%)`;
+      gridDonut.classList.toggle('complete', done === total);
+      gridSummaryTitle.textContent = remaining === 0 ? 'All routines complete' : `${remaining} routine${remaining === 1 ? '' : 's'} left today`;
+      gridSummaryDetail.textContent = remaining === 0
+        ? 'Nice work · details collapsed automatically'
+        : 'Daily routines plus Water plants, which is due today';
+
+      if (remaining === 0) {
+        window.setTimeout(() => {
+          gridShell.classList.add('complete-shell');
+          gridCollapse.textContent = '⌄';
+          gridCollapse.setAttribute('aria-label', 'Expand completed routines');
+          gridCollapse.dataset.tooltip = 'Expand completed routines';
+          trayToggle.setAttribute('aria-label', 'Expand routines section');
+          trayToggle.setAttribute('aria-expanded', 'false');
+        }, 350);
+      } else {
+        gridShell.classList.remove('complete-shell');
+      }
+    }
+
+    document.querySelectorAll('.routine-check').forEach((button) => {
+      button.addEventListener('click', () => {
+        button.classList.toggle('done');
+        const done = button.classList.contains('done');
+        button.querySelector('.mark').textContent = done ? '✓' : '';
+        button.closest('.routine-item')?.classList.toggle('completed-item', done);
+        const promotedIndex = promotedChecks.indexOf(button);
+        if (promotedIndex >= 0) {
+          const headerButton = document.querySelector(`.header-routine[data-routine-index="${promotedIndex}"]`);
+          if (headerButton) {
+            headerButton.classList.toggle('done', done);
+            headerButton.querySelector('.header-mark').textContent = done ? '✓' : '';
+          }
+        }
+        if (button.hasAttribute('data-promoted')) updateRoutineProgress();
+      });
+    });
+
+    document.querySelectorAll('.header-routine').forEach((button) => {
+      button.addEventListener('click', () => {
+        const target = promotedChecks[Number(button.dataset.routineIndex)];
+        if (target) target.click();
+      });
+    });
+
+    const headerQuickButtons = [...document.querySelectorAll('.header-routine')];
+    const headerMore = document.querySelector('#header-more');
+    const traySummary = document.querySelector('.tray-summary');
+
+    function updateHeaderQuickActions() {
+      const width = traySummary.clientWidth;
+      const visibleCount = width >= 760 ? 6 : width >= 620 ? 4 : width >= 480 ? 3 : 2;
+      headerQuickButtons.forEach((button, index) => button.classList.toggle('hidden', index >= visibleCount));
+      const remaining = Math.max(0, headerQuickButtons.length - visibleCount);
+      headerMore.classList.toggle('hidden', remaining === 0);
+      headerMore.textContent = `+${remaining}`;
+      headerMore.dataset.tooltip = `Expand to show ${remaining} more routine${remaining === 1 ? '' : 's'}`;
+      headerMore.setAttribute('aria-label', headerMore.dataset.tooltip);
+    }
+
+    new ResizeObserver(updateHeaderQuickActions).observe(traySummary);
+    updateHeaderQuickActions();
+
+    headerMore.addEventListener('click', () => {
+      gridShell.classList.remove('collapsed-shell', 'complete-shell');
+      setOverflowExpanded(true);
+      gridCollapse.textContent = '⌃';
+      gridCollapse.setAttribute('aria-label', 'Collapse routines');
+      gridCollapse.dataset.tooltip = 'Collapse routines';
+      trayToggle.setAttribute('aria-label', 'Collapse routines section');
+      trayToggle.setAttribute('aria-expanded', 'true');
+    });
+
+    gridCollapse.addEventListener('click', () => {
+      if (gridShell.classList.contains('complete-shell')) {
+        gridShell.classList.remove('complete-shell');
+        gridCollapse.textContent = '⌃';
+        gridCollapse.setAttribute('aria-label', 'Collapse routines');
+        gridCollapse.dataset.tooltip = 'Collapse routines';
+        trayToggle.setAttribute('aria-label', 'Collapse routines section');
+        trayToggle.setAttribute('aria-expanded', 'true');
+        return;
+      }
+      gridShell.classList.toggle('collapsed-shell');
+      const collapsed = gridShell.classList.contains('collapsed-shell');
+      if (collapsed) setOverflowExpanded(false);
+      gridCollapse.textContent = collapsed ? '⌄' : '⌃';
+      gridCollapse.setAttribute('aria-label', collapsed ? 'Expand routines' : 'Collapse routines');
+      gridCollapse.dataset.tooltip = collapsed ? 'Expand routines' : 'Collapse routines';
+      trayToggle.setAttribute('aria-label', collapsed ? 'Expand routines section' : 'Collapse routines section');
+      trayToggle.setAttribute('aria-expanded', String(!collapsed));
+    });
+
+    trayToggle.addEventListener('click', () => gridCollapse.click());
+
+    const gridOverflow = document.querySelector('#grid-overflow');
+    const gridOverflowItems = document.querySelector('#grid-overflow-items');
+    function setOverflowExpanded(open) {
+      gridOverflowItems.classList.toggle('hidden', !open);
+      gridOverflow.setAttribute('aria-expanded', String(open));
+      gridOverflow.querySelector(':scope > span:first-child').innerHTML = open
+        ? '<strong>All 9 routines shown</strong>'
+        : '<strong>3 more routines</strong> · includes 1 completed';
+      gridOverflow.querySelector(':scope > span:last-child').textContent = open ? 'Show fewer' : 'Show all';
+    }
+
+    gridOverflow.addEventListener('click', () => {
+      setOverflowExpanded(gridOverflowItems.classList.contains('hidden'));
+    });
+
+    const optionalToggle = document.querySelector('#optional-toggle');
+    const optionalGrid = document.querySelector('#optional-grid');
+    optionalToggle.addEventListener('click', () => {
+      const open = optionalGrid.classList.toggle('hidden') === false;
+      optionalToggle.setAttribute('aria-expanded', String(open));
+      optionalToggle.querySelector(':scope > span:last-child').textContent = open ? 'Hide' : 'Show';
+    });
+
+    const routines = [
+      { name: 'Morning stretch', meta: 'Daily · 12 day streak' },
+      { name: 'Inbox zero', meta: 'Weekdays · 4 day streak' }
+    ];
+    let routineIndex = 0;
+    const rotatorName = document.querySelector('#rotator-name');
+    const rotatorMeta = document.querySelector('#rotator-meta');
+    const rotatorPosition = document.querySelector('#rotator-position');
+    const dots = [...document.querySelectorAll('.dot')];
+
+    function renderRotator() {
+      rotatorName.textContent = routines[routineIndex].name;
+      rotatorMeta.textContent = routines[routineIndex].meta;
+      rotatorPosition.textContent = `Next routine · ${routineIndex + 1} of ${routines.length}`;
+      dots.forEach((dot, index) => dot.classList.toggle('active', index === routineIndex));
+    }
+    document.querySelector('#rotator-prev').addEventListener('click', () => {
+      routineIndex = (routineIndex - 1 + routines.length) % routines.length;
+      renderRotator();
+    });
+    document.querySelector('#rotator-next').addEventListener('click', () => {
+      routineIndex = (routineIndex + 1) % routines.length;
+      renderRotator();
+    });
+    document.querySelector('#rotator-done').addEventListener('click', () => {
+      routineIndex = (routineIndex + 1) % routines.length;
+      renderRotator();
+    });
+
+    const summaryList = document.querySelector('#summary-list');
+    const summaryExpand = document.querySelector('#summary-expand');
+    summaryExpand.addEventListener('click', () => {
+      summaryList.classList.toggle('hidden');
+      summaryExpand.textContent = summaryList.classList.contains('hidden') ? 'Expand' : 'Collapse';
+    });
+  </script>
+</body>
+</html>

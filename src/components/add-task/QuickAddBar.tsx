@@ -138,6 +138,46 @@ export function QuickAddProjectControl({
 
 type PendingTask = QuickAddPendingTask;
 
+export type QuickAddTypeaheadKind =
+  | 'template'
+  | 'list'
+  | 'tag'
+  | 'project'
+  | 'priority'
+  | 'effort';
+
+export interface QuickAddTypeaheadDismissal {
+  kind: QuickAddTypeaheadKind;
+  triggerStart: number;
+}
+
+const QUICK_ADD_TYPEAHEAD_PATTERNS: Record<QuickAddTypeaheadKind, RegExp> = {
+  template: /(?:^|\s)t\/\S*$/,
+  list: /(?:^|\s)\/\S*$/,
+  tag: /(?:^|\s)#[a-zA-Z0-9_:./-]*$/,
+  project: /(?:^|\s)\+[^+#@!~^/]*$/,
+  priority: /(?:^|\s)![a-zA-Z0-9]*$/,
+  effort: /(?:^|\s)\^[a-zA-Z0-9]*$/,
+};
+
+export function getQuickAddTypeaheadTriggerStart(
+  input: string,
+  kind: QuickAddTypeaheadKind,
+): number | null {
+  const match = QUICK_ADD_TYPEAHEAD_PATTERNS[kind].exec(input);
+  if (!match) return null;
+  return match.index + (/^\s/.test(match[0]) ? 1 : 0);
+}
+
+export function isQuickAddTypeaheadDismissed(
+  dismissal: QuickAddTypeaheadDismissal | null,
+  input: string,
+  kind: QuickAddTypeaheadKind,
+): boolean {
+  return dismissal?.kind === kind
+    && dismissal.triggerStart === getQuickAddTypeaheadTriggerStart(input, kind);
+}
+
 export function scrollListTypeaheadSelectionIntoView(
   container: HTMLElement | null,
   index: number,
@@ -273,10 +313,17 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     setWorkflowTemplate,
     selectedTemplateId,
     setSelectedTemplateId,
-    typeahead: templateTypeahead,
+    typeahead: rawTemplateTypeahead,
     typeaheadIndex: templateTypeaheadIndex,
     setTypeaheadIndex: setTemplateTypeaheadIndex,
   } = useQuickAddTemplates(input);
+  const [dismissedTypeahead, setDismissedTypeahead] =
+    useState<QuickAddTypeaheadDismissal | null>(null);
+  const templateTypeahead = isQuickAddTypeaheadDismissed(
+    dismissedTypeahead,
+    input,
+    'template',
+  ) ? null : rawTemplateTypeahead;
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [currentInputParentTaskId, setCurrentInputParentTaskId] = useState<string>();
   const [pendingChipsRef] = useListAnimate({ duration: 150 });
@@ -325,6 +372,12 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const contextProjectIdRef = useRef<string | null>(null);
   // When true, submit the task after the next typeahead acceptance clears the dropdown
   const submitAfterTypeaheadRef = useRef(false);
+
+  const dismissTypeahead = useCallback((kind: QuickAddTypeaheadKind) => {
+    const triggerStart = getQuickAddTypeaheadTriggerStart(input, kind);
+    if (triggerStart === null) return;
+    setDismissedTypeahead({ kind, triggerStart });
+  }, [input]);
 
   const moveViewedTaskToList = useCallback(async (targetListId: string) => {
     if (!viewTaskId) return;
@@ -405,13 +458,18 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   }, [visibleContextProject?.id]);
 
   // Derive destination typeahead state from `/query`.
-  const listTypeahead = (() => {
+  const rawListTypeahead = (() => {
     const match = input.match(/(?:^|\s)\/(\S*)$/);
     if (!match) return null;
     const query = match[1].toLowerCase();
     const matches = getQuickAddSlashDestinations(destinations, query);
     return matches.length > 0 ? { query, matches } : null;
   })();
+  const listTypeahead = isQuickAddTypeaheadDismissed(
+    dismissedTypeahead,
+    input,
+    'list',
+  ) ? null : rawListTypeahead;
 
   // Accept a template typeahead selection
   const acceptTemplateTypeahead = useCallback((template: TaskTemplate) => {
@@ -426,7 +484,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   }, [parseInput, setSelectedTemplateId]);
 
   // ── Tag typeahead: active when typing `#query` ───────────────────────────
-  const tagTypeahead = useMemo(() => {
+  const rawTagTypeahead = useMemo(() => {
     const match = input.match(/(?:^|\s)#([a-zA-Z0-9_:./-]*)$/);
     if (!match) return null;
     const query = match[1].toLowerCase();
@@ -437,6 +495,11 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       : cachedTags;
     return matches.length > 0 ? { query, matches } : null;
   }, [input, cachedTags]);
+  const tagTypeahead = isQuickAddTypeaheadDismissed(
+    dismissedTypeahead,
+    input,
+    'tag',
+  ) ? null : rawTagTypeahead;
 
   // Fetch tags lazily when # typeahead activates
   useEffect(() => {
@@ -473,7 +536,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     inputHandleRef.current?.focus();
   }, [input]);
 
-  const projectTypeahead = useMemo(() => {
+  const rawProjectTypeahead = useMemo(() => {
     const match = input.match(/(?:^|\s)\+([^+#@!~^/]*)$/);
     if (!match) return null;
     const rawQuery = match[1];
@@ -485,6 +548,11 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       : cachedProjects;
     return matches.length > 0 ? { query, matches } : null;
   }, [input, cachedProjects]);
+  const projectTypeahead = isQuickAddTypeaheadDismissed(
+    dismissedTypeahead,
+    input,
+    'project',
+  ) ? null : rawProjectTypeahead;
 
   useEffect(() => {
     if (projectsFetchedRef.current) return;
@@ -524,7 +592,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     return PRIORITY_OPTIONS.filter(o => o.value !== 'none');
   }, []);
 
-  const priorityTypeahead = useMemo(() => {
+  const rawPriorityTypeahead = useMemo(() => {
     const match = input.match(/(?:^|\s)!([a-zA-Z0-9]*)$/);
     if (!match) return null;
     const query = match[1].toLowerCase();
@@ -540,6 +608,11 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       : priorityTypeaheadOptions;
     return matches.length > 0 ? { query, matches } : null;
   }, [input, priorityTypeaheadOptions]);
+  const priorityTypeahead = isQuickAddTypeaheadDismissed(
+    dismissedTypeahead,
+    input,
+    'priority',
+  ) ? null : rawPriorityTypeahead;
 
   useEffect(() => {
     setPriorityTypeaheadIndex(0);
@@ -563,7 +636,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     return getEffortOptions(DEFAULT_EFFORT_MEASURE).filter(o => o.value !== 0);
   }, []);
 
-  const effortTypeahead = useMemo(() => {
+  const rawEffortTypeahead = useMemo(() => {
     const match = input.match(/(?:^|\s)\^([a-zA-Z0-9]*)$/);
     if (!match) return null;
     const query = match[1].toLowerCase();
@@ -575,6 +648,11 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       : effortTypeaheadOptions;
     return matches.length > 0 ? { query, matches } : null;
   }, [input, effortTypeaheadOptions]);
+  const effortTypeahead = isQuickAddTypeaheadDismissed(
+    dismissedTypeahead,
+    input,
+    'effort',
+  ) ? null : rawEffortTypeahead;
 
   useEffect(() => {
     setEffortTypeaheadIndex(0);
@@ -1012,6 +1090,15 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
 
   const handleInputChange = useCallback((nextInput: string) => {
     const { committed, remaining } = extractPendingTasksForTyping(nextInput);
+    setDismissedTypeahead((current) => {
+      if (!current) return null;
+      const previousTriggerStart = getQuickAddTypeaheadTriggerStart(input, current.kind);
+      const nextTriggerStart = getQuickAddTypeaheadTriggerStart(remaining, current.kind);
+      return previousTriggerStart === current.triggerStart
+        && nextTriggerStart === current.triggerStart
+        ? current
+        : null;
+    });
     if (committed.length > 0) {
       setPendingTasks(prev => {
         const baseOffset = prev.length;
@@ -1035,7 +1122,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     } else {
       setCompoundSplitHint(null);
     }
-  }, []);
+  }, [input]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent): boolean => {
     // When template typeahead is open, arrow keys navigate and Enter/Tab select
@@ -1057,8 +1144,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        setInput('');
-        setCurrentInputParentTaskId(undefined);
+        dismissTypeahead('template');
         return true;
       }
       return false;
@@ -1090,8 +1176,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        setInput('');
-        setCurrentInputParentTaskId(undefined);
+        dismissTypeahead('list');
         return true;
       }
       return false;
@@ -1116,8 +1201,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        // Just remove the # token
-        setInput(input.replace(/(?:^|\s)#[a-zA-Z0-9_:./-]*$/, '').trim());
+        dismissTypeahead('tag');
         return true;
       }
       return false;
@@ -1141,7 +1225,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        setInput(input.replace(/(?:^|\s)\+[^+#@!~^/]*$/, '').trim());
+        dismissTypeahead('project');
         return true;
       }
       return false;
@@ -1166,7 +1250,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        setInput(input.replace(/(?:^|\s)![a-zA-Z0-9]*$/, '').trim());
+        dismissTypeahead('priority');
         return true;
       }
       return false;
@@ -1191,7 +1275,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        setInput(input.replace(/(?:^|\s)\^[a-zA-Z0-9]*$/, '').trim());
+        dismissTypeahead('effort');
         return true;
       }
       return false;
@@ -1229,7 +1313,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       return true;
     }
     return false;
-  }, [templateTypeahead, templateTypeaheadIndex, setTemplateTypeaheadIndex, acceptTemplateTypeahead, listTypeahead, listTypeaheadIndex, acceptListTypeahead, tagTypeahead, tagTypeaheadIndex, acceptTagTypeahead, projectTypeahead, projectTypeaheadIndex, acceptProjectTypeahead, priorityTypeahead, priorityTypeaheadIndex, acceptPriorityTypeahead, effortTypeahead, effortTypeaheadIndex, acceptEffortTypeahead, input, pendingTasks, commitCurrentInputToPending, handleSubmit]);
+  }, [templateTypeahead, templateTypeaheadIndex, setTemplateTypeaheadIndex, acceptTemplateTypeahead, listTypeahead, listTypeaheadIndex, acceptListTypeahead, tagTypeahead, tagTypeaheadIndex, acceptTagTypeahead, projectTypeahead, projectTypeaheadIndex, acceptProjectTypeahead, priorityTypeahead, priorityTypeaheadIndex, acceptPriorityTypeahead, effortTypeahead, effortTypeaheadIndex, acceptEffortTypeahead, dismissTypeahead, input, pendingTasks, commitCurrentInputToPending, handleSubmit]);
 
   const inlineToastPolicies = inlineToast?.taskIds
     .map((taskId) => inlineToast.editPolicies[taskId])
@@ -1450,6 +1534,14 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
               }}
               onBlur={() => setIsFocused(false)}
               onKeyDown={handleKeyDown}
+              disableEscapeToken={Boolean(
+                templateTypeahead
+                || listTypeahead
+                || tagTypeahead
+                || projectTypeahead
+                || priorityTypeahead
+                || effortTypeahead
+              )}
               placeholder={
                 quickAddCtx.placeholderOverride
                   ? quickAddCtx.placeholderOverride

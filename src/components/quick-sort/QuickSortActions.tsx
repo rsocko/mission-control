@@ -89,24 +89,75 @@ function ProjectPicker({
 }) {
   const [query, setQuery] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const projectResultsRef = useRef<HTMLDivElement>(null);
+  const projectChoicesRef = useRef<HTMLDivElement>(null);
+  const projectOnlyButtonRef = useRef<HTMLButtonElement>(null);
 
+  const normalizedQuery = query.trim().toLowerCase();
+  const projectMatchesQuery = (project: ProjectOption) => (
+    normalizedQuery.length === 0
+    || project.name.toLowerCase().includes(normalizedQuery)
+    || project.phases.some((phase) => phase.name.toLowerCase().includes(normalizedQuery))
+  );
   const filteredProjects = projects.filter((project) => (
-    project.name.toLowerCase().includes(query.trim().toLowerCase())
+    projectMatchesQuery(project)
   ));
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
   const suggestedProjects = suggestions.flatMap((suggestion) => {
     const project = projects.find((candidate) => candidate.id === suggestion.id);
-    return project ? [{ project, suggestion }] : [];
+    return project && projectMatchesQuery(project) ? [{ project, suggestion }] : [];
   });
+
+  const focusAdjacentButton = (
+    container: HTMLDivElement | null,
+    currentTarget: EventTarget | null,
+    direction: 1 | -1,
+  ) => {
+    if (!container || !(currentTarget instanceof HTMLElement)) return;
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+    const currentIndex = buttons.indexOf(currentTarget as HTMLButtonElement);
+    if (currentIndex < 0) return;
+    buttons.at((currentIndex + direction + buttons.length) % buttons.length)?.focus();
+  };
+
+  const clearSelectedProject = () => {
+    setSelectedProjectId(null);
+    searchInputRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!selectedProject) return;
+    projectOnlyButtonRef.current?.focus();
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      clearSelectedProject();
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [selectedProject]);
 
   return (
     <div className="flex min-h-0 flex-col gap-2">
       <div className="input-glow flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3">
         <Search size={14} className="flex-shrink-0 text-[var(--text-tertiary)]" />
         <input
+          ref={searchInputRef}
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowDown') return;
+            const firstResult = projectResultsRef.current
+              ?.querySelector<HTMLButtonElement>('button:not(:disabled)');
+            if (!firstResult) return;
+            event.preventDefault();
+            firstResult.focus();
+          }}
           placeholder="Find a project…"
           aria-label="Find a project"
           className="min-h-11 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
@@ -117,7 +168,7 @@ function ProjectPicker({
         <div className="rounded-xl border border-cyan-700/45 bg-cyan-950/25 p-3">
           <button
             type="button"
-            onClick={() => setSelectedProjectId(null)}
+            onClick={clearSelectedProject}
             className="mb-3 flex min-h-11 w-full items-center gap-2 text-left"
           >
             <span
@@ -129,8 +180,21 @@ function ProjectPicker({
             </span>
             <span className="text-xs text-cyan-300">Change</span>
           </button>
-          <div className="grid grid-cols-2 gap-2">
+          <div
+            ref={projectChoicesRef}
+            className="grid grid-cols-2 gap-2"
+            onKeyDown={(event) => {
+              if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
+              event.preventDefault();
+              focusAdjacentButton(
+                projectChoicesRef.current,
+                event.target,
+                event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1,
+              );
+            }}
+          >
             <button
+              ref={projectOnlyButtonRef}
               type="button"
               onClick={() => onApply(selectedProject.id, selectedProject.name)}
               disabled={busy}
@@ -168,7 +232,19 @@ function ProjectPicker({
           )}
         </div>
       ) : (
-        <div className="max-h-52 overflow-y-auto overscroll-contain pr-1">
+        <div
+          ref={projectResultsRef}
+          className="max-h-52 overflow-y-auto overscroll-contain pr-1"
+          onKeyDown={(event) => {
+            if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(event.key)) return;
+            event.preventDefault();
+            focusAdjacentButton(
+              projectResultsRef.current,
+              event.target,
+              event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : -1,
+            );
+          }}
+        >
           {suggestedProjects.length > 0 && (
             <div className="mb-3 rounded-xl border border-cyan-700/45 bg-cyan-950/25 p-2">
               <p className="px-1 pb-2 text-xs font-medium text-cyan-200">
@@ -204,24 +280,39 @@ function ProjectPicker({
           <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
           {loading && <span className="text-xs text-[var(--text-muted)]">Loading projects…</span>}
           {!loading && filteredProjects.length === 0 && (
-            <span className="text-xs text-[var(--text-muted)]">No active projects found</span>
+            <span className="text-xs text-[var(--text-muted)]">
+              {normalizedQuery ? 'No matching projects or phases found' : 'No active projects found'}
+            </span>
           )}
-          {filteredProjects.map((project) => (
-            <button
-              key={project.id}
-              type="button"
-              onClick={() => setSelectedProjectId(project.id)}
-              disabled={busy}
-              className="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-left text-sm text-[var(--text-secondary)] transition-colors hover:border-cyan-700/55 hover:bg-cyan-950/20 disabled:opacity-50"
-            >
-              <span
-                className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                style={{ backgroundColor: project.color }}
-              />
-              <span className="min-w-0 flex-1 truncate">{project.name}</span>
-              <ChartNetwork size={14} className="flex-shrink-0 text-[var(--text-muted)]" />
-            </button>
-          ))}
+          {filteredProjects.map((project) => {
+            const matchingPhases = normalizedQuery
+              ? project.phases.filter((phase) => phase.name.toLowerCase().includes(normalizedQuery))
+              : [];
+
+            return (
+              <button
+                key={project.id}
+                type="button"
+                onClick={() => setSelectedProjectId(project.id)}
+                disabled={busy}
+                className="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-left text-sm text-[var(--text-secondary)] transition-colors hover:border-cyan-700/55 hover:bg-cyan-950/20 disabled:opacity-50"
+              >
+                <span
+                  className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                  style={{ backgroundColor: project.color }}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{project.name}</span>
+                  {matchingPhases.length > 0 && (
+                    <span className="block truncate text-xs text-[var(--text-muted)]">
+                      {matchingPhases.map((phase) => phase.name).join(', ')}
+                    </span>
+                  )}
+                </span>
+                <ChartNetwork size={14} className="flex-shrink-0 text-[var(--text-muted)]" />
+              </button>
+            );
+          })}
           </div>
         </div>
       )}

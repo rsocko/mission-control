@@ -70,6 +70,7 @@ vi.mock('@/components/quick-sort/ModeSelector', () => ({
       <button disabled={disabled} onClick={() => onSelect('no_tags')}>Open no-tags queue</button>
       <button disabled={disabled} onClick={() => onSelect('no_priority')}>Open priority queue</button>
       <button disabled={disabled} onClick={() => onSelect('quadrant')}>Open quadrant queue</button>
+      <button disabled={disabled} onClick={() => onSelect('no_planning_horizon')}>Open horizon queue</button>
     </>
   ),
 }));
@@ -100,10 +101,19 @@ vi.mock('@/components/quick-sort/QuickSortCard', () => ({
   ),
 }));
 vi.mock('@/components/quick-sort/QuickSortActions', () => ({
-  default: ({ onSkip, onViewTask }: { onSkip: () => void; onViewTask: () => void }) => (
+  default: ({
+    onSkip,
+    onViewTask,
+    onApplyPlanningHorizon,
+  }: {
+    onSkip: () => void;
+    onViewTask: () => void;
+    onApplyPlanningHorizon: (planningHorizon: string) => void;
+  }) => (
     <>
       <button onClick={onViewTask}>View task</button>
       <button onClick={onSkip}>Skip task</button>
+      <button onClick={() => onApplyPlanningHorizon('soon')}>Set horizon to soon</button>
     </>
   ),
 }));
@@ -154,6 +164,23 @@ describe('QuickSortMode task drawer', () => {
 
     expect(mocks.refreshCounts).toHaveBeenCalledOnce();
     expect(mocks.refreshQueue).toHaveBeenCalledOnce();
+  });
+
+  it('shows the server conflict reason when setting a horizon fails', async () => {
+    const conflictMessage = 'Task is still syncing; try again in a moment';
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(
+      { error: conflictMessage, code: 'TASK_REVISION_CONFLICT' },
+      { status: 409 },
+    )));
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open horizon queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Set horizon to soon' }));
+
+    await waitFor(() => {
+      expect(mocks.toastError).toHaveBeenCalledWith(conflictMessage);
+    });
+    expect(mocks.dismiss).not.toHaveBeenCalled();
   });
 
   it('offers Money Quick Review from the mobile queue selector', () => {

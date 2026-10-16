@@ -5,6 +5,7 @@ import {
   TaskDetailPanel as SharedTaskDetailPanel,
   type TaskDetailCloseReason,
   type TaskFieldUpdate,
+  type TaskSubtasksOpenRequest,
 } from '@/components/task-detail/TaskDetailPanel';
 import type { KanbanTaskViewModel } from './types';
 
@@ -13,6 +14,7 @@ interface TaskDetailPanelProps {
   onClose: (reason?: TaskDetailCloseReason) => void;
   onTaskUpdate?: (taskId: string, fields: Partial<KanbanTaskViewModel>) => void;
   onRefresh?: () => void | Promise<void>;
+  subtasksOpenRequest?: TaskSubtasksOpenRequest | null;
 }
 
 export function TaskDetailPanel({
@@ -20,6 +22,7 @@ export function TaskDetailPanel({
   onClose,
   onTaskUpdate,
   onRefresh,
+  subtasksOpenRequest,
 }: TaskDetailPanelProps) {
   const handleUpdate = useCallback((fields?: TaskFieldUpdate) => {
     if (!task) return;
@@ -71,6 +74,7 @@ export function TaskDetailPanel({
           minPanelWidth={420}
           focusPanelOnMount
           portalDialog
+          subtasksOpenRequest={subtasksOpenRequest}
         />
       </div>
     </>

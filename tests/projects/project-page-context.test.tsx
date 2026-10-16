@@ -126,11 +126,15 @@ function SharedStateProbe({
       <p>{data.taskToPhase.get(task.id)?.name}</p>
       <p>{interactions.selectedTaskId ?? 'No selection'}</p>
       <p>{interactions.detailMode}</p>
+      <p>{interactions.subtasksOpenRequest?.taskId ?? 'No subtask request'}</p>
       <button type="button" onClick={() => interactions.selectTask(task.id)}>
         Select task
       </button>
       <button type="button" onDoubleClick={() => interactions.handleTaskDoubleClick(task.id)}>
         Open task fullscreen
+      </button>
+      <button type="button" onClick={() => interactions.openTaskSubtasks(task.id)}>
+        Open task subtasks
       </button>
     </div>
   );
@@ -242,6 +246,20 @@ describe('ProjectPageContext', () => {
 
     expect(screen.getByText(task.id)).toBeInTheDocument();
     expect(screen.getByText('dialog')).toBeInTheDocument();
+  });
+
+  it('opens a task in panel mode with a Subtasks reveal request', async () => {
+    render(
+      <ProjectPageProvider projectId="project-1">
+        <SharedStateProbe />
+      </ProjectPageProvider>,
+    );
+
+    await screen.findByText('Context project');
+    fireEvent.click(screen.getByRole('button', { name: 'Open task subtasks' }));
+
+    expect(screen.getAllByText(task.id)).toHaveLength(2);
+    expect(screen.getByText('panel')).toBeInTheDocument();
   });
 
   it('does not churn read or mutation contracts for selection-only updates', async () => {

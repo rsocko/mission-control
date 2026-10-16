@@ -315,7 +315,6 @@ export default function TodayPage() {
           openScheduleModal: actions.setShowScheduleModal,
           whatsNextResult: actions.whatsNextResult,
           setWhatsNextResult: actions.setWhatsNextResult,
-          getWhatsNext: actions.getWhatsNext,
           dayPlan: actions.dayPlan,
           setDayPlan: actions.setDayPlan,
           planningDay: actions.planningDay,

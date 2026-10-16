@@ -30,6 +30,10 @@ const addTaskModalSource = readFileSync(
   resolve(process.cwd(), 'src/components/add-task/AddTaskModal.tsx'),
   'utf8',
 );
+const projectAiPlanSource = readFileSync(
+  resolve(process.cwd(), 'src/app/projects/[id]/tabs/AIPlanControl.tsx'),
+  'utf8',
+);
 
 describe('My Day desktop layout', () => {
   it('labels summary metrics by what they count', () => {
@@ -76,6 +80,16 @@ describe('My Day desktop layout', () => {
     expect(pageSource).toContain('className="hidden h-full min-h-0 sm:block"');
     expect(sidebarSource).toContain('flex h-full min-h-0 w-80');
     expect(sidebarSource).toContain('min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain');
+  });
+
+  it('uses one primary next-task action and a secondary AI planning action', () => {
+    expect(sidebarSource).toContain('Suggest Next Task');
+    expect(source).not.toContain('What&apos;s Next?');
+    expect(source).toContain('variant="ai"');
+    expect(source).toContain('AI Plan Day');
+    expect(source).not.toContain('bg-purple-600');
+    expect(projectAiPlanSource).toContain("variant = 'ai'");
+    expect(projectAiPlanSource).not.toContain('border-purple-500/30');
   });
 
   it('connects Focus 3 to My Day task creation and detail interactions', () => {

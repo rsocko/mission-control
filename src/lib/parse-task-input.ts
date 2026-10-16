@@ -198,6 +198,18 @@ function removeMatchedText(text: string, matchedText: string): string {
   return text.replace(new RegExp(`(?<!\\\\)${escapeRegex(matchedText)}`, 'i'), '').trim();
 }
 
+function getTrailingMatchIndex(text: string, matchedText: string): number {
+  const normalizedText = text.trimEnd().toLowerCase();
+  const normalizedMatch = matchedText.toLowerCase();
+  const matchIndex = normalizedText.lastIndexOf(normalizedMatch);
+  return matchIndex + normalizedMatch.length === normalizedText.length ? matchIndex : -1;
+}
+
+function isTrailingMatchEscaped(text: string, matchedText: string): boolean {
+  const matchIndex = getTrailingMatchIndex(text, matchedText);
+  return matchIndex > 0 && text[matchIndex - 1] === '\\';
+}
+
 function findTrailingDate(text: string, today: Date) {
   const trimmed = text.trim();
   const matches = findAllNLPDates(trimmed, today);
@@ -248,6 +260,15 @@ function stripEscapeBackslashes(text: string, today: Date): string {
 
   for (const offset of escapedDateOffsets) {
     cleaned = cleaned.slice(0, offset) + cleaned.slice(offset + 1);
+  }
+
+  const recurrenceResult = parseRecurrence(cleaned);
+  if (
+    recurrenceResult
+    && isTrailingMatchEscaped(cleaned, recurrenceResult.matchedText)
+  ) {
+    const matchIndex = getTrailingMatchIndex(cleaned, recurrenceResult.matchedText);
+    cleaned = cleaned.slice(0, matchIndex - 1) + cleaned.slice(matchIndex);
   }
 
   return cleaned;
@@ -394,6 +415,7 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
   if (
     recurrenceResult
     && remaining.toLowerCase().endsWith(recurrenceResult.matchedText.toLowerCase())
+    && !isTrailingMatchEscaped(remaining, recurrenceResult.matchedText)
   ) {
     recurrence = recurrenceResult.result.value;
     recurrenceLabel = recurrenceResult.result.label;

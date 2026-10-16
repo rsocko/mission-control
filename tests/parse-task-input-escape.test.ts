@@ -130,6 +130,19 @@ describe('parseTaskInput – backslash escape', () => {
     });
   });
 
+  describe('escaped recurrence words', () => {
+    it.each([
+      ['review \\daily', 'review daily'],
+      ['review \\every week', 'review every week'],
+      ['review \\monthly', 'review monthly'],
+    ])('keeps %s literal without retaining the escape marker', (input, title) => {
+      const result = parseTaskInput(input);
+      expect(result.recurrence).toBeNull();
+      expect(result.recurrenceLabel).toBeNull();
+      expect(result.title).toBe(title);
+    });
+  });
+
   describe('escaped and active copies of the same token', () => {
     it('removes the active priority without persisting the escape marker', () => {
       const result = parseTaskInput('compare \\!high with !high');

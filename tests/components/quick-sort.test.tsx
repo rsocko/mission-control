@@ -172,6 +172,9 @@ describe('Quick Sort planning horizon queue', () => {
 
     expect(screen.getByRole('button', { name: /Mission Control Delivery/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Home Improvements/i })).not.toBeInTheDocument();
+    const phaseMatch = screen.getByText('Delivery');
+    expect(phaseMatch.tagName).toBe('MARK');
+    expect(phaseMatch).toHaveClass('bg-cyan-400/15', 'text-cyan-100');
 
     fireEvent.click(screen.getByRole('button', { name: /Mission Control Delivery/i }));
     expect(screen.getByRole('button', { name: /Mission Control Change/i })).toBeInTheDocument();
@@ -230,6 +233,10 @@ describe('Quick Sort planning horizon queue', () => {
     expect(screen.getByRole('button', { name: /Home Improvements/i })).toHaveFocus();
 
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    expect(search).toHaveFocus();
+
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
     fireEvent.click(document.activeElement!);
 
     expect(screen.getByRole('button', { name: 'Project only' })).toHaveFocus();

@@ -52,6 +52,7 @@ describe('GET /api/tasks/quick-sort', () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store, max-age=0');
     expect(body.tasks).toHaveLength(1);
     expect(body.tasks[0]).toMatchObject({
       hasNotes: true,
@@ -91,6 +92,7 @@ describe('GET /api/tasks/quick-sort', () => {
         no_project: 5,
       },
     });
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store, max-age=0');
     expect(taskReads.listQuickSortTasks).not.toHaveBeenCalled();
   });
 

@@ -242,7 +242,7 @@ function assertCoreInvariants(
       'tasks_removed', 'alerts_added', 'errors', 'synced_at', 'duration_ms',
       'tasks_pushed', 'local_only_protected', 'details', 'job_id', 'trigger',
       'scheduled_for', 'started_at', 'attempt', 'max_attempts', 'identity_mode',
-      'identity_mode_revision', 'activity',
+      'identity_mode_revision', 'activity', 'metrics',
     ]);
     expect(columnNames(sqlite, 'task_triage_log')).toEqual([
       'id', 'task_id', 'mode', 'action', 'triaged_at', 'operation_id', 'reversed_at',

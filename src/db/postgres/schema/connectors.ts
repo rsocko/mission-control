@@ -235,7 +235,6 @@ export const syncLog = pgTable('sync_log', {
   /** Detailed audit trail: individual task-level actions taken during this sync */
   details: jsonb('details').notNull().default([]),
   activity: jsonb('activity').$type<SyncActivityPayload>(),
-  metrics: jsonb('metrics').$type<SyncRunMetrics>(),
   syncedAt: text('synced_at').notNull(),
   durationMs: integer('duration_ms'),
   jobId: text('job_id'),
@@ -247,6 +246,7 @@ export const syncLog = pgTable('sync_log', {
   maxAttempts: integer('max_attempts'),
   identityMode: text('identity_mode'),
   identityModeRevision: integer('identity_mode_revision'),
+  metrics: jsonb('metrics').$type<SyncRunMetrics>(),
 }, (table) => [
   index('idx_sync_log_job_id').on(table.jobId),
   index('idx_sync_log_connector_success_synced_at')

@@ -18,6 +18,7 @@ describeSyncRunRepositoryContract('SQLite', () => {
       errors TEXT NOT NULL DEFAULT '[]',
       details TEXT NOT NULL DEFAULT '[]',
       activity TEXT,
+      metrics TEXT,
       synced_at TEXT NOT NULL,
       duration_ms INTEGER,
       job_id TEXT,

@@ -615,6 +615,7 @@ export function matchesSupportedSqliteColumnShape(
       'identity_mode',
       'identity_mode_revision',
       'activity',
+      'metrics',
     ]);
     return JSON.stringify(historical) === JSON.stringify(actual);
   }

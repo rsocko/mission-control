@@ -13,6 +13,7 @@ import type { SourceListRecord } from '@/db/persistence/connector-execution';
 import { initializePostgresGitHubConnectorIdentityStateInTransaction } from './github-identity-repositories';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import { normalizeSyncActivity } from '@/lib/sync/activity';
+import { normalizeSyncRunMetrics } from '@/lib/sync/metrics';
 
 type Client = Pool | PoolClient;
 
@@ -102,6 +103,7 @@ const SYNC_HISTORY_COLUMNS = `
   errors,
   details,
   activity,
+  metrics,
   synced_at AS "syncedAt",
   duration_ms AS "durationMs",
   job_id AS "jobId",
@@ -1116,6 +1118,7 @@ export function createPostgresConnectorManagementRepository(
         history: historyRows.slice(0, input.limit).map(row => ({
           ...row,
           activity: normalizeSyncActivity(row.activity),
+          metrics: normalizeSyncRunMetrics(row.metrics),
         })),
         hasMore,
       };

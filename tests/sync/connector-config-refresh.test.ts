@@ -468,6 +468,13 @@ describe('connector settings refresh before sync', () => {
         remoteSourceIds: new Set<string>(),
         identityBlocked: 0,
         identityBlockedOutcomes: {},
+        tasksReceived: 1,
+        tasksChanged: 1,
+        tasksUnchanged: 0,
+        casConflicts: 0,
+        casRetries: 0,
+        casDeferred: 0,
+        deferredSourceListIds: new Set<string>(),
       };
     });
   });

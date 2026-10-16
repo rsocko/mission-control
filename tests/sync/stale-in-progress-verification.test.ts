@@ -277,6 +277,13 @@ vi.mock('@/lib/sync/pull-manager', () => ({
       remoteSourceIds,
       identityBlocked: mockIdentityBlocked,
       identityBlockedOutcomes: mockIdentityBlocked > 0 ? { path_reuse: mockIdentityBlocked } : {},
+      tasksReceived: remoteSourceIds.size,
+      tasksChanged: 0,
+      tasksUnchanged: remoteSourceIds.size,
+      casConflicts: 0,
+      casRetries: 0,
+      casDeferred: 0,
+      deferredSourceListIds: new Set<string>(),
     };
   }),
 }));

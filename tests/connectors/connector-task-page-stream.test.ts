@@ -90,6 +90,28 @@ function graphTask(id: string, title: string) {
   };
 }
 
+function emptyChecklistBatch(options?: RequestInit) {
+  const body = JSON.parse(String(options?.body)) as {
+    requests: Array<{ id: string; url: string }>;
+  };
+  return Response.json({
+    responses: body.requests.map(({ id, url }) => ({
+      id,
+      status: 200,
+      body: {
+        value: url.endsWith('/linkedResources')
+          ? [{
+              id: 'email-link',
+              applicationName: 'Microsoft Outlook',
+              displayName: 'Flagged email',
+              webUrl: 'https://outlook.office.com/mail/deeplink/read/id',
+            }]
+          : [],
+      },
+    })),
+  });
+}
+
 function recurringGraphTask(
   id: string,
   title: string,
@@ -132,9 +154,12 @@ describe('connector task page streams', () => {
   });
 
   it('prefetches the next Microsoft Todo Graph page without accumulating the list', async () => {
-    const graphFetch = vi.fn(async (url: string) => {
+    const graphFetch = vi.fn(async (url: string, options?: RequestInit) => {
       if (url === '/me/todo/lists?$top=100') {
         return new Response(JSON.stringify({ value: [{ id: 'list-1', displayName: 'Tasks' }] }));
+      }
+      if (url === '/$batch') {
+        return emptyChecklistBatch(options);
       }
       if (url.endsWith('/checklistItems') || url.endsWith('/linkedResources')) {
         return Response.json({ value: [] });
@@ -176,8 +201,8 @@ describe('connector task page streams', () => {
     await iterator.return();
   });
 
-  it('fetches flagged email links from the dedicated endpoint when expansion is empty', async () => {
-    const graphFetch = vi.fn(async (url: string) => {
+  it('fetches flagged email links from the dedicated enrichment endpoint when expansion is empty', async () => {
+    const graphFetch = vi.fn(async (url: string, options?: RequestInit) => {
       if (url === '/me/todo/lists?$top=100') {
         return Response.json({
           value: [{
@@ -186,6 +211,9 @@ describe('connector task page streams', () => {
             wellKnownListName: 'flaggedEmails',
           }],
         });
+      }
+      if (url === '/$batch') {
+        return emptyChecklistBatch(options);
       }
       if (url.endsWith('/linkedResources')) {
         return Response.json({
@@ -220,8 +248,13 @@ describe('connector task page streams', () => {
       displayName: 'Flagged email',
       webUrl: 'https://outlook.office.com/mail/deeplink/read/id',
     }]);
-    expect(graphFetch).toHaveBeenCalledWith(
-      '/me/todo/lists/flagged-emails/tasks/flagged-task/linkedResources',
+    const batchRequest = graphFetch.mock.calls.find(([url]) => url === '/$batch');
+    expect(JSON.parse(String(batchRequest?.[1]?.body)).requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          url: '/me/todo/lists/flagged-emails/tasks/flagged-task/linkedResources',
+        }),
+      ]),
     );
     await iterator.return();
   });
@@ -271,9 +304,12 @@ describe('connector task page streams', () => {
       'list-1',
       'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=expired',
     );
-    const graphFetch = vi.fn(async (url: string) => {
+    const graphFetch = vi.fn(async (url: string, options?: RequestInit) => {
       if (url === '/me/todo/lists?$top=100') {
         return Response.json({ value: [{ id: 'list-1', displayName: 'Tasks' }] });
+      }
+      if (url === '/$batch') {
+        return emptyChecklistBatch(options);
       }
       if (url.includes('$deltatoken=expired')) {
         return new Response(null, { status: 410 });

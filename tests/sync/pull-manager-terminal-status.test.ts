@@ -374,17 +374,23 @@ describe('pull-manager terminal status sync', () => {
     )).toBe(true);
   });
 
-  it('aborts the pull when a concurrent local update rejects the remote CAS', async () => {
+  it('defers only the conflicted list when repeated remote CAS attempts fail', async () => {
     mockExistingTasks.push(makeExistingTask());
     mockRemoteUpdateFailuresRemaining = Number.POSITIVE_INFINITY;
 
-    await expect(upsertTasks(
+    const result = await upsertTasks(
       connectorId,
       mockConnector,
       [makeRemoteTask()],
       false,
       [],
-    )).rejects.toThrow('Concurrent local update prevented remote task org/repo:42');
+    );
+
+    expect(result.updated).toBe(0);
+    expect(result.casConflicts).toBe(3);
+    expect(result.casRetries).toBe(2);
+    expect(result.casDeferred).toBe(1);
+    expect(result.deferredSourceListIds).toEqual(new Set(['org/repo']));
   });
 
   it.each(['pending_push', 'pushing'])(
@@ -440,6 +446,48 @@ describe('pull-manager terminal status sync', () => {
       status: 'done',
       kanbanColumn: 'doing',
     }));
+  });
+
+  it('counts an unchanged checklist payload without writing it again', async () => {
+    const audit: import('@/lib/sync').SyncAuditEntry[] = [];
+    mockExistingTasks.push(makeExistingTask({
+      connectorType: 'microsoft-todo',
+      sourceId: 'list-1:task-1:item-1',
+      sourceListId: 'list-1',
+      title: 'Checklist item',
+      status: 'todo',
+      isChecklistItem: true,
+      parentId: 'parent-1',
+      metadata: { checklistItemId: 'item-1' },
+      updatedAt: '2026-07-25T12:00:00Z',
+      lastSyncedAt: '2026-07-25T12:00:00Z',
+    }));
+
+    const result = await upsertTasks(
+      'todo-1',
+      { ...mockConnector, type: 'microsoft-todo' },
+      [makeRemoteTask({
+        connectorType: 'microsoft-todo',
+        sourceId: 'list-1:task-1:item-1',
+        sourceListId: 'list-1',
+        title: 'Checklist item',
+        status: 'todo',
+        isChecklistItem: true,
+        parentId: 'parent-1',
+        metadata: { checklistItemId: 'item-1' },
+        updatedAt: '2026-07-25T13:00:00Z',
+      })],
+      false,
+      [],
+      audit,
+    );
+
+    expect(result.updated).toBe(0);
+    expect(result.tasksReceived).toBe(1);
+    expect(result.tasksChanged).toBe(0);
+    expect(result.tasksUnchanged).toBe(1);
+    expect(mockUpdateSets).toHaveLength(0);
+    expect(audit).toHaveLength(0);
   });
 
   it('preserves MC-local snoozes when a connector omits the field', async () => {

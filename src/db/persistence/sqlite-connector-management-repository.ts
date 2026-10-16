@@ -17,6 +17,7 @@ import { decodeLenientJsonArray, decodeLenientJsonObject } from './value-codecs'
 import { normalizeContextAppearance } from '@/lib/context-appearance';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import { normalizeSyncActivity } from '@/lib/sync/activity';
+import { normalizeSyncRunMetrics } from '@/lib/sync/metrics';
 
 type SqliteDatabase = Database.Database;
 type SqliteDrizzle = BetterSQLite3Database<typeof schema>;
@@ -39,12 +40,13 @@ interface SqliteSourceListRow extends Omit<SourceListRecord, 'hidden' | 'appeara
 
 interface SqliteSyncHistoryRow extends Omit<
   SyncHistoryRecord,
-  'success' | 'errors' | 'details' | 'activity'
+  'success' | 'errors' | 'details' | 'activity' | 'metrics'
 > {
   success: number;
   errors: unknown;
   details: unknown;
   activity: unknown;
+  metrics: unknown;
 }
 
 interface SqliteSourceListRepairRow extends Omit<
@@ -110,6 +112,7 @@ const SYNC_HISTORY_COLUMNS = `
   errors,
   details,
   activity,
+  metrics,
   synced_at AS syncedAt,
   duration_ms AS durationMs,
   job_id AS jobId,
@@ -156,6 +159,11 @@ function mapSyncHistory(row: SqliteSyncHistoryRow): SyncHistoryRecord {
       typeof row.activity === 'string'
         ? decodeLenientJsonObject(row.activity)
         : row.activity,
+    ),
+    metrics: normalizeSyncRunMetrics(
+      typeof row.metrics === 'string'
+        ? decodeLenientJsonObject(row.metrics)
+        : row.metrics,
     ),
   };
 }

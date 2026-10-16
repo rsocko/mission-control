@@ -11,6 +11,7 @@ import {
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import type { ContextAppearance } from '@/types';
 import type { SyncActivityPayload } from '@/lib/sync/activity';
+import type { SyncRunMetrics } from '@/lib/sync/metrics';
 import type { tasks } from './tasks';
 
 // ─── CONNECTOR CONFIGS ──────────────────────────────────────────────────────
@@ -245,6 +246,7 @@ export const syncLog = pgTable('sync_log', {
   maxAttempts: integer('max_attempts'),
   identityMode: text('identity_mode'),
   identityModeRevision: integer('identity_mode_revision'),
+  metrics: jsonb('metrics').$type<SyncRunMetrics>(),
 }, (table) => [
   index('idx_sync_log_job_id').on(table.jobId),
   index('idx_sync_log_connector_success_synced_at')

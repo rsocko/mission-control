@@ -772,6 +772,7 @@ export interface SyncResult {
   activity?: import('@/lib/sync/activity').SyncActivityPayload;
   domainStatus?: 'fresh' | 'stale' | 'partial' | 'unavailable';
   datasetErrors?: DomainSyncResult['datasetErrors'];
+  metrics?: import('@/lib/sync/metrics').SyncRunMetrics;
 }
 
 export interface DomainSyncContext {

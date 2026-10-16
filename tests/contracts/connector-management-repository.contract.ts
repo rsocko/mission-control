@@ -88,6 +88,7 @@ function history(
     errors: [],
     details: [{ id }],
     activity: null,
+    metrics: null,
     syncedAt,
     durationMs: 10,
     jobId: null,
@@ -530,7 +531,23 @@ export function runConnectorManagementRepositoryContract(
           success: false,
           errors: ['failed'],
         }),
-        history(`${PREFIX}-history-3`, '2099-09-04T03:00:00.000Z'),
+        history(`${PREFIX}-history-3`, '2099-09-04T03:00:00.000Z', {
+          metrics: {
+            version: 1,
+            phases: {
+              'task-upsert': { durationMs: 125, success: true },
+            },
+            reconciliation: {
+              tasksReceived: 10,
+              tasksChanged: 2,
+              tasksUnchanged: 8,
+              casConflicts: 0,
+              casRetries: 0,
+              casDeferred: 0,
+              listsDeferred: 0,
+            },
+          },
+        }),
         history(`${PREFIX}-history-4`, '2099-09-04T04:00:00.000Z'),
       ]);
 
@@ -540,6 +557,14 @@ export function runConnectorManagementRepositoryContract(
         `${PREFIX}-history-4`,
         `${PREFIX}-history-3`,
       ]);
+      expect(first.history[1].metrics).toMatchObject({
+        version: 1,
+        reconciliation: {
+          tasksReceived: 10,
+          tasksChanged: 2,
+          tasksUnchanged: 8,
+        },
+      });
 
       const second = await repository.listSyncHistory({
         limit: 1,

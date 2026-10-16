@@ -57,6 +57,14 @@ const BATCH_SIZE = 25;
 const MAX_BLOCKED_IDENTITY_AUDIT_ENTRIES = 20;
 const MAX_REMOTE_UPDATE_ATTEMPTS = 3;
 
+interface RemoteUpdateResult {
+  task: SearchableTask | null;
+  conflictCount: number;
+  retryCount: number;
+  deferred: boolean;
+  unchanged: boolean;
+}
+
 /** Minimum milliseconds to yield between batches. Must be long enough for
  *  queued macrotasks (healthcheck HTTP, cron, SSE) to run.  2 ms was too
  *  brief — healthcheck requests arriving during sync never got a window. */
@@ -192,6 +200,13 @@ export async function upsertTasks(
   remoteSourceIds: Set<string>;
   identityBlocked: number;
   identityBlockedOutcomes: Partial<Record<GitHubIdentityOutcome, number>>;
+  tasksReceived: number;
+  tasksChanged: number;
+  tasksUnchanged: number;
+  casConflicts: number;
+  casRetries: number;
+  casDeferred: number;
+  deferredSourceListIds: Set<string>;
 }> {
   let added = 0;
   let updated = 0;
@@ -200,6 +215,11 @@ export async function upsertTasks(
   let parentTasksAdded = 0;
   let subtasksAdded = 0;
   let skippedPendingPush = 0;
+  let unchanged = 0;
+  let casConflicts = 0;
+  let casRetries = 0;
+  let casDeferred = 0;
+  const deferredSourceListIds = new Set<string>();
   const identityBlocks: GitHubTaskIdentityBlockSummary = { count: 0, outcomes: {} };
   const audit = auditLog || [];
   const now = new Date().toISOString();
@@ -669,9 +689,8 @@ export async function upsertTasks(
               || replacementIds.has(remoteTask.sourceId)
             ) {
               pendingUpdates.push({ existing, remoteTask });
-              if (!countedSourceIds.has(remoteTask.sourceId)) {
-                audit.push({ action: 'updated', taskTitle: remoteTask.title, taskSourceId: remoteTask.sourceId, taskId: existing.id, listName: remoteTask.sourceListName || undefined });
-              }
+            } else {
+              unchanged++;
             }
           }
         }
@@ -696,9 +715,23 @@ export async function upsertTasks(
           tasksToIndex.push(persisted as SearchableTask);
         } else {
           const resolvedName = (remoteTask.sourceListId && listNameMap.get(remoteTask.sourceListId)) || undefined;
-          const indexedTask = await applyRemoteUpdate(persisted, remoteTask, now, canSyncTags, resolvedName, caps);
-          if (!indexedTask) continue;
-          tasksToIndex.push(indexedTask);
+          const updateResult = await applyRemoteUpdate(
+            persisted,
+            remoteTask,
+            now,
+            canSyncTags,
+            resolvedName,
+            caps,
+          );
+          casConflicts += updateResult.conflictCount;
+          casRetries += updateResult.retryCount;
+          if (updateResult.unchanged) unchanged++;
+          if (updateResult.deferred) {
+            casDeferred++;
+            if (remoteTask.sourceListId) deferredSourceListIds.add(remoteTask.sourceListId);
+          }
+          if (!updateResult.task) continue;
+          tasksToIndex.push(updateResult.task);
         }
         if (!countedSourceIds.has(remoteTask.sourceId)) {
           countedSourceIds.add(remoteTask.sourceId);
@@ -756,9 +789,23 @@ export async function upsertTasks(
             }
           } else {
             const resolvedName = (remoteTask.sourceListId && listNameMap.get(remoteTask.sourceListId)) || undefined;
-            const indexedTask = await applyRemoteUpdate(persisted, remoteTask, now, canSyncTags, resolvedName, caps);
-            if (indexedTask) tasksToIndex.push(indexedTask);
-            if (!countedSourceIds.has(remoteTask.sourceId)) {
+            const updateResult = await applyRemoteUpdate(
+              persisted,
+              remoteTask,
+              now,
+              canSyncTags,
+              resolvedName,
+              caps,
+            );
+            casConflicts += updateResult.conflictCount;
+            casRetries += updateResult.retryCount;
+            if (updateResult.unchanged) unchanged++;
+            if (updateResult.deferred) {
+              casDeferred++;
+              if (remoteTask.sourceListId) deferredSourceListIds.add(remoteTask.sourceListId);
+            }
+            if (updateResult.task) tasksToIndex.push(updateResult.task);
+            if (updateResult.task && !countedSourceIds.has(remoteTask.sourceId)) {
               countedSourceIds.add(remoteTask.sourceId);
               updated++;
               audit.push({ action: 'conflict_resolved', taskTitle: remoteTask.title, taskSourceId: remoteTask.sourceId, taskId: persisted.id, reason: 'Concurrent task insert reconciled by source identity' });
@@ -773,9 +820,23 @@ export async function upsertTasks(
         const decision = identityDecisionBySourceId.get(remoteTask.sourceId);
         if (decision) await identityRuntime?.assertDecisionsCurrent([decision]);
         const resolvedName = (remoteTask.sourceListId && listNameMap.get(remoteTask.sourceListId)) || undefined;
-        const indexedTask = await applyRemoteUpdate(existing, remoteTask, now, canSyncTags, resolvedName, caps);
-        if (!indexedTask) continue;
-        tasksToIndex.push(indexedTask);
+        const updateResult = await applyRemoteUpdate(
+          existing,
+          remoteTask,
+          now,
+          canSyncTags,
+          resolvedName,
+          caps,
+        );
+        casConflicts += updateResult.conflictCount;
+        casRetries += updateResult.retryCount;
+        if (updateResult.unchanged) unchanged++;
+        if (updateResult.deferred) {
+          casDeferred++;
+          if (remoteTask.sourceListId) deferredSourceListIds.add(remoteTask.sourceListId);
+        }
+        if (!updateResult.task) continue;
+        tasksToIndex.push(updateResult.task);
         if (existing.sourceId !== remoteTask.sourceId) {
           const refreshed = { ...existing, sourceId: remoteTask.sourceId };
           existingBySourceId.delete(existing.sourceId);
@@ -785,6 +846,13 @@ export async function upsertTasks(
         if (!countedSourceIds.has(remoteTask.sourceId)) {
           countedSourceIds.add(remoteTask.sourceId);
           updated++;
+          audit.push({
+            action: 'updated',
+            taskTitle: remoteTask.title,
+            taskSourceId: remoteTask.sourceId,
+            taskId: existing.id,
+            listName: remoteTask.sourceListName || undefined,
+          });
         }
         if ((ui + 1) % 10 === 0) await yieldToEventLoop();
       }
@@ -1083,6 +1151,13 @@ export async function upsertTasks(
     remoteSourceIds,
     identityBlocked: identityBlocks.count,
     identityBlockedOutcomes: identityBlocks.outcomes,
+    tasksReceived: totalProcessed,
+    tasksChanged: added + updated + removed,
+    tasksUnchanged: unchanged,
+    casConflicts,
+    casRetries,
+    casDeferred,
+    deferredSourceListIds,
   };
 }
 
@@ -1131,7 +1206,7 @@ async function applyRemoteUpdate(
   resolvedListName?: string | null,
   caps?: ConnectorCapabilities | null,
   attempt = 1,
-): Promise<SearchableTask | null> {
+): Promise<RemoteUpdateResult> {
   // When the connector doesn't support a field, preserve the MC-local value
   // instead of overwriting it with the remote's null/empty value.
   const connectorHasDueDate = caps?.dueDate === true;
@@ -1252,6 +1327,23 @@ async function applyRemoteUpdate(
     taskUpdate.depth = remote.depth ?? existingTask.depth;
   }
 
+  if (
+    existingTask.isChecklistItem
+    && taskUpdate.title === existingTask.title
+    && taskUpdate.status === existingTask.status
+    && taskUpdate.parentId === existingTask.parentId
+    && taskUpdate.sourceListId === existingTask.sourceListId
+    && JSON.stringify(taskUpdate.metadata) === JSON.stringify(existingTask.metadata)
+  ) {
+    return {
+      task: null,
+      conflictCount: 0,
+      retryCount: 0,
+      deferred: false,
+      unchanged: true,
+    };
+  }
+
   const persistence = (await getWorkerPersistenceRepositories()).execution.pulls;
   const applied = await persistence.applyRemoteUpdate({
     taskId: existingTask.id,
@@ -1288,11 +1380,17 @@ async function applyRemoteUpdate(
         sourceId: remote.sourceId,
         syncStatus: latestTask.syncStatus,
       }, 'Deferred remote task update after concurrent local mutation');
-      return null;
+      return {
+        task: null,
+        conflictCount: 1,
+        retryCount: attempt - 1,
+        deferred: false,
+        unchanged: false,
+      };
     }
 
     if (attempt < MAX_REMOTE_UPDATE_ATTEMPTS) {
-      return applyRemoteUpdate(
+      const result = await applyRemoteUpdate(
         latestTask,
         remote,
         now,
@@ -1301,12 +1399,32 @@ async function applyRemoteUpdate(
         caps,
         attempt + 1,
       );
+      return {
+        ...result,
+        conflictCount: result.conflictCount + 1,
+        retryCount: result.retryCount + 1,
+      };
     }
-    throw new Error(
-      `Concurrent local update prevented remote task ${remote.sourceId} from being applied`,
-    );
+    syncLogger.error({
+      taskId: latestTask.id,
+      sourceListId: remote.sourceListId,
+      attempt,
+    }, 'Deferred remote task after repeated concurrent local updates');
+    return {
+      task: null,
+      conflictCount: 1,
+      retryCount: 0,
+      deferred: true,
+      unchanged: false,
+    };
   }
-  return indexedTask;
+  return {
+    task: indexedTask,
+    conflictCount: 0,
+    retryCount: 0,
+    deferred: false,
+    unchanged: false,
+  };
 }
 
 function parseTaskMetadata(metadata: unknown): Record<string, unknown> {

@@ -37,6 +37,7 @@ async function initialize(): Promise<void> {
 
 async function cleanup(): Promise<void> {
   const pool = backend.context.pool;
+  await pool.query('DELETE FROM project_auto_include_exclusions WHERE project_id LIKE $1', ['gh-project:%']);
   await pool.query('DELETE FROM task_projects WHERE project_id LIKE $1', ['gh-project:%']);
   await pool.query('DELETE FROM hub_projects WHERE id LIKE $1', ['gh-project:%']);
   await pool.query('DELETE FROM external_entity_locators WHERE external_entity_id LIKE $1', ['gh-proj-%']);
@@ -115,11 +116,20 @@ if (connectionString) {
         );
         return { externalEntityId: entityId, bindingRevision, locatorRevision };
       },
-      seedExistingLink: async (projectIdValue, taskId) => {
+      seedExistingLink: async (projectIdValue, taskId, provenance = 'github-sync') => {
         await pool.query(
-          `INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)
-           ON CONFLICT (task_id, project_id) DO NOTHING`,
-          [taskId, projectIdValue],
+          `INSERT INTO task_projects (task_id, project_id, provenance) VALUES ($1, $2, $3)
+           ON CONFLICT (task_id, project_id) DO UPDATE SET provenance = EXCLUDED.provenance`,
+          [taskId, projectIdValue, provenance],
+        );
+      },
+      seedProjectExclusion: async (projectIdValue, taskId) => {
+        await pool.query(
+          `INSERT INTO project_auto_include_exclusions (project_id, task_id, excluded_at)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (project_id, task_id)
+           DO UPDATE SET excluded_at = EXCLUDED.excluded_at`,
+          [projectIdValue, taskId, NOW],
         );
       },
       getHubProject: async (projectIdValue) => {
@@ -144,6 +154,13 @@ if (connectionString) {
           [projectIdValue],
         );
         return result.rows.map((r) => r.taskId);
+      },
+      getLinkProvenance: async (projectIdValue, taskId) => {
+        const result = await pool.query<{ provenance: string }>(
+          'SELECT provenance FROM task_projects WHERE project_id = $1 AND task_id = $2',
+          [projectIdValue, taskId],
+        );
+        return result.rows[0]?.provenance ?? null;
       },
       close: () => undefined,
     };

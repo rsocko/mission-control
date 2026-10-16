@@ -1380,7 +1380,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(result.evidence.command.activationChanged).toBe(false);
     expect(result.evidence.source.kind).toBe('persisted-state-fixture');
     expect(result.evidence.source.sha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(result.evidence.schema.sqliteMigrationCount).toBe(255);
+    expect(result.evidence.schema.sqliteMigrationCount).toBe(256);
     expect(result.evidence.schema.importTableCount).toBe(173);
     expect(result.copiedTables).toHaveLength(173);
     expect(result.evidence.quiescence.acceptedForSyntheticFixture).toBe(true);
@@ -1421,7 +1421,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
       ).run(SQLITE_SUPERSEDED_MIGRATION_HASHES[0], historicalTimestamp);
 
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(155);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(156);
     } finally {
       sqlite.close();
     }
@@ -1432,7 +1432,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     try {
       replacePriorityEntityTable(sqlite, historicalPriorityEntityColumns);
 
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(154);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(155);
     } finally {
       sqlite.close();
     }
@@ -1488,7 +1488,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
           supportedHistoricalShape: true,
         }),
       ]));
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(255);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(256);
     } finally {
       fixture.close();
     }
@@ -1525,7 +1525,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         'reminder_nag_series_id',
         'reminder_nag_sequence',
       ]);
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(255);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(256);
     } finally {
       fixture.close();
     }
@@ -1545,7 +1545,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         actualColumnOrder: deriveTrustedTasksColumnOrders().get('continuous-production'),
         supportedHistoricalShape: true,
       }));
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(255);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(256);
     } finally {
       fixture.close();
     }
@@ -1792,7 +1792,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     const sqlite = currentSqlite();
     try {
       replaceInboundWebhookTable(sqlite, historicalInboundWebhookColumns);
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(154);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(155);
     } finally {
       sqlite.close();
     }

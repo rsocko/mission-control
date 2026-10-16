@@ -1714,8 +1714,8 @@ async function rebuildProjectPlacements(
     }
 
     await tx.execute(sql`
-      INSERT INTO task_projects (task_id, project_id)
-      SELECT ${successorTaskId}, project_id
+      INSERT INTO task_projects (task_id, project_id, provenance)
+      SELECT ${successorTaskId}, project_id, provenance
       FROM task_projects
       WHERE task_id = ${sourceTaskId}
       ON CONFLICT DO NOTHING
@@ -2257,12 +2257,16 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
           })));
         }
       }
-      const projectRows = await tx.select({ projectId: taskProjects.projectId }).from(taskProjects)
+      const projectRows = await tx.select({
+        projectId: taskProjects.projectId,
+        provenance: taskProjects.provenance,
+      }).from(taskProjects)
         .where(eq(taskProjects.taskId, input.sourceTaskId));
       if (projectRows.length) {
-        await tx.insert(taskProjects).values(projectRows.map(({ projectId }) => ({
+        await tx.insert(taskProjects).values(projectRows.map(({ projectId, provenance }) => ({
           taskId: input.newTaskId,
           projectId,
+          provenance,
         })));
       }
       return { kind: 'committed', connectorType: connector.type } as const;
@@ -3935,12 +3939,16 @@ class PostgresTaskMutationRepository implements TaskMutationRepository {
                 tagId: row.tagId,
               })));
             }
-            const sourceProjects = await tx.select({ projectId: taskProjects.projectId })
+            const sourceProjects = await tx.select({
+              projectId: taskProjects.projectId,
+              provenance: taskProjects.provenance,
+            })
               .from(taskProjects).where(eq(taskProjects.taskId, request.taskId));
             if (sourceProjects.length) {
               await tx.insert(taskProjects).values(sourceProjects.map((row) => ({
                 taskId: successor.id,
                 projectId: row.projectId,
+                provenance: row.provenance,
               })));
             }
             const phases = await tx.select().from(projectPhaseItems)

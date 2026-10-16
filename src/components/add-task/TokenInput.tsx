@@ -416,14 +416,14 @@ function escapeTokenNode(editor: LexicalEditor, node: TokenNode): void {
   }, 0);
 }
 
-function EscapeTokenPlugin(): null {
+function EscapeTokenPlugin({ disabled }: { disabled: boolean }): null {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
     return editor.registerCommand(
       KEY_DOWN_COMMAND,
       (event: KeyboardEvent) => {
-        if (event.key !== 'Escape') return false;
+        if (disabled || event.key !== 'Escape') return false;
 
         // Find the nearest TokenNode to the cursor
         const selection = $getSelection();
@@ -507,7 +507,7 @@ function EscapeTokenPlugin(): null {
       },
       COMMAND_PRIORITY_CRITICAL, // Higher than KeyboardPlugin so we intercept Escape first when tokens exist
     );
-  }, [editor]);
+  }, [disabled, editor]);
 
   return null;
 }
@@ -655,6 +655,7 @@ interface TokenInputProps {
   naturalLanguageDates?: boolean;
   projects?: QuickAddProject[];
   metadata?: ParseTaskInputOptions['metadata'];
+  disableEscapeToken?: boolean;
 }
 
 function ErrorBoundaryFallback(): React.ReactElement {
@@ -673,6 +674,7 @@ export function TokenInput({
   naturalLanguageDates = true,
   projects,
   metadata,
+  disableEscapeToken = false,
 }: TokenInputProps) {
   const editorTextRef = useRef(''); // Start empty so ExternalSyncPlugin applies initial value
   const handleRefFallback = useRef<TokenInputHandle | null>(null);
@@ -739,7 +741,7 @@ export function TokenInput({
         />
         <FocusPlugin onFocus={handleFocus} onBlur={handleBlur} />
         <KeyboardPlugin onKeyDown={handleKeyDownCb} />
-        <EscapeTokenPlugin />
+        <EscapeTokenPlugin disabled={disableEscapeToken} />
         <TokenDismissPlugin />
         <ImperativePlugin handleRef={actualHandleRef} editorTextRef={editorTextRef} />
         <ExternalSyncPlugin value={value} editorTextRef={editorTextRef} />

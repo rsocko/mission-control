@@ -22,9 +22,12 @@ import { isNotificationUnread } from '@/lib/notifications/lifecycle';
 import { NavigationBadge } from '@/components/layout/NavigationBadge';
 import { panelSlideFromRight } from '@/lib/motion';
 import { getNotificationBadgeState } from '@/lib/navigation/badges';
+import { cn } from '@/lib/utils';
 
 interface NotificationsPanelProps {
   hook: UseNotificationsReturn;
+  className?: string;
+  showHideButton?: boolean;
 }
 
 const LEVEL_FILTERS: Array<{
@@ -48,7 +51,11 @@ function getLevelBadgeOffset(count: number) {
   return '-right-3.5';
 }
 
-export function NotificationsPanel({ hook }: NotificationsPanelProps) {
+export function NotificationsPanel({
+  hook,
+  className,
+  showHideButton = true,
+}: NotificationsPanelProps) {
   const [selectedSnapshot, setSelectedSnapshot] = useState<(typeof hook.notifications)[number] | null>(null);
   const panelRef = useRef<HTMLElement>(null);
   const selectedTriggerRef = useRef<HTMLElement | null>(null);
@@ -138,7 +145,10 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
       ref={panelRef}
       key="notifications-panel"
       aria-label="Notifications"
-      className="relative flex h-full w-[360px] flex-shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface-1)]"
+      className={cn(
+        'relative flex h-full w-[360px] flex-shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface-1)]',
+        className,
+      )}
     >
       <AnimatePresence>
         {selectedNotification && (
@@ -205,13 +215,15 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
             >
               Mark all read
             </button>
-            <button
-              onClick={hook.togglePanel}
-              className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
-              aria-label="Hide notifications"
-            >
-              <PanelRightClose size={13} />
-            </button>
+            {showHideButton && (
+              <button
+                onClick={hook.togglePanel}
+                className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
+                aria-label="Hide notifications"
+              >
+                <PanelRightClose size={13} />
+              </button>
+            )}
           </div>
         </div>
 

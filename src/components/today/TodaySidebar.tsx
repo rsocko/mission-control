@@ -7,6 +7,7 @@ import type { HubProject, TaskContextMenuActions } from '@/components/task-list/
 import type { ListGroup } from '@/types/dashboard';
 import { REPLANNING_SUGGESTION, type SourceList, type SuggestionGroups, type SuggestionTask } from './types';
 import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
+import { cn } from '@/lib/utils';
 
 interface TodaySidebarProps {
   suggestions: SuggestionGroups;
@@ -21,6 +22,7 @@ interface TodaySidebarProps {
   listGroups: ListGroup[];
   projects: HubProject[];
   onGetWhatsNext: () => void;
+  className?: string;
 }
 
 export function TodaySidebar({
@@ -36,6 +38,7 @@ export function TodaySidebar({
   listGroups,
   projects,
   onGetWhatsNext,
+  className,
 }: TodaySidebarProps) {
   const interactionProps = {
     onAdd: onAddToDay,
@@ -49,7 +52,13 @@ export function TodaySidebar({
   };
 
   return (
-    <aside className="flex h-full min-h-0 w-80 flex-shrink-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface-1)]" aria-label="Plan and focus suggestions">
+    <aside
+      className={cn(
+        'flex h-full min-h-0 w-80 flex-shrink-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface-1)]',
+        className,
+      )}
+      aria-label="Plan and focus suggestions"
+    >
       <div className="p-4 border-b border-[var(--border-subtle)]">
         <h3 className="font-semibold text-[var(--text-primary)] text-sm">Plan & Focus</h3>
       </div>

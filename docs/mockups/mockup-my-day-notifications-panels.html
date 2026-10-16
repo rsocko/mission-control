@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Day + Notifications UX recommendation</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --background: #020617;
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --border: #1e293b;
+      --border-strong: #334155;
+      --text: #f8fafc;
+      --secondary: #94a3b8;
+      --muted: #8190a6;
+      --accent: #3b82f6;
+      --accent-soft: #60a5fa;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --green: #10b981;
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #050914; color: var(--text); }
+    button { color: inherit; font: inherit; }
+    button:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+    ::selection { color: white; background: #2563eb; }
+
+    .review {
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .review-header {
+      max-width: 1500px;
+      margin: 0 auto 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .review-title h1 { margin: 0 0 5px; font-size: 20px; letter-spacing: -.02em; }
+    .review-title p { margin: 0; color: var(--secondary); font-size: 13px; }
+    .controls { display: flex; align-items: center; gap: 8px; }
+    .control-group {
+      display: flex;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-0);
+    }
+    .control {
+      min-height: 32px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .control.active { background: var(--surface-2); color: var(--text); }
+    .recommendation {
+      max-width: 1500px;
+      margin: 0 auto 14px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid rgba(59, 130, 246, .35);
+      border-radius: 8px;
+      background: rgba(30, 58, 138, .16);
+      color: #bfdbfe;
+      font-size: 12px;
+    }
+    .recommendation strong {
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, .28);
+      color: white;
+      font-size: 10px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .stage-wrap {
+      max-width: 1500px;
+      margin: auto;
+      overflow: auto;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: #060a13;
+      box-shadow: 0 22px 60px rgba(0, 0, 0, .42);
+    }
+    .stage {
+      height: 820px;
+      min-width: 1180px;
+      display: flex;
+      overflow: hidden;
+      background: var(--background);
+    }
+    .stage.standard { width: 1280px; }
+    .stage.wide { width: 1500px; }
+
+    .nav {
+      width: 64px;
+      flex: 0 0 64px;
+      padding: 12px 9px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      border-right: 1px solid var(--border);
+      background: var(--surface-0);
+    }
+    .brand, .nav-item {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+    }
+    .brand { margin-bottom: 8px; background: #2563eb; font-size: 11px; font-weight: 800; }
+    .nav-item { color: var(--muted); font-size: 10px; }
+    .nav-item.active { color: #fde68a; background: rgba(245, 158, 11, .12); }
+    .nav-spacer { flex: 1; }
+
+    .app { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+    .toolbar {
+      height: 52px;
+      flex: 0 0 52px;
+      padding: 0 14px;
+      display: grid;
+      grid-template-columns: 230px minmax(280px, 680px) 1fr;
+      align-items: center;
+      gap: 18px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-0);
+    }
+    .search, .quick-add {
+      height: 32px;
+      display: flex;
+      align-items: center;
+      padding: 0 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #070c17;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .toolbar-actions { text-align: right; color: var(--muted); font-size: 12px; }
+    .workspace { min-height: 0; flex: 1; display: flex; }
+    .main {
+      min-width: 460px;
+      flex: 1;
+      overflow: hidden;
+      padding: 22px;
+    }
+    .main-inner { max-width: 880px; margin: auto; }
+    .page-head {
+      margin-bottom: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .page-head h2 { margin: 0 0 4px; font-size: 20px; letter-spacing: -.025em; }
+    .page-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .page-actions { display: flex; gap: 6px; }
+    .small-button {
+      min-height: 30px;
+      padding: 0 9px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-1);
+      color: var(--secondary);
+      font-size: 11px;
+    }
+    .summary {
+      margin-bottom: 16px;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-1);
+    }
+    .metric { padding: 12px 14px; border-right: 1px solid var(--border); }
+    .metric:last-child { border-right: 0; }
+    .metric span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; }
+    .metric strong { display: block; margin-top: 4px; font-size: 16px; }
+    .focus-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+    .focus-card, .routine {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-1);
+    }
+    .focus-card { min-height: 132px; padding: 14px; }
+    .focus-card h3, .task-section h3 { margin: 0; font-size: 13px; }
+    .focus-card p { margin: 8px 0 12px; color: var(--secondary); font-size: 12px; line-height: 1.45; }
+    .accent-button {
+      min-height: 30px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 8px;
+      background: #2563eb;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .task-section {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-1);
+    }
+    .task-header {
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+    }
+    .task-count { color: var(--muted); font-size: 11px; }
+    .task {
+      min-height: 54px;
+      padding: 10px 14px;
+      display: grid;
+      grid-template-columns: 20px 1fr auto;
+      align-items: center;
+      gap: 9px;
+      border-bottom: 1px solid var(--border);
+    }
+    .task:last-child { border-bottom: 0; }
+    .check { width: 16px; height: 16px; border: 1px solid #64748b; border-radius: 50%; }
+    .task strong { display: block; font-size: 12px; }
+    .task span { color: var(--muted); font-size: 10px; }
+    .tag { padding: 3px 6px; border-radius: 999px; background: var(--surface-2); color: var(--secondary); font-size: 9px; }
+
+    .dock, .second-dock, .detail {
+      min-width: 0;
+      flex: 0 0 340px;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid var(--border);
+      background: var(--surface-1);
+    }
+    .dock-head {
+      min-height: 50px;
+      padding: 8px 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .dock-tabs { display: flex; align-items: end; gap: 4px; }
+    .dock-tab {
+      position: relative;
+      min-height: 41px;
+      flex: 1;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .dock-tab.active { border-bottom-color: var(--accent); color: var(--text); }
+    .badge {
+      min-width: 18px;
+      height: 18px;
+      margin-left: 5px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 999px;
+      background: #dc2626;
+      color: white;
+      font-size: 9px;
+    }
+    .dock-body { min-height: 0; flex: 1; overflow: auto; padding: 14px; }
+    .dock-tools {
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .dock-tools strong { font-size: 12px; }
+    .dock-tools button {
+      min-height: 28px;
+      padding: 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-2);
+      color: var(--secondary);
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .responsive-state {
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .panel-card {
+      margin-bottom: 12px;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-2);
+    }
+    .panel-card .label { color: var(--accent-soft); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+    .panel-card h4 { margin: 7px 0 5px; font-size: 12px; }
+    .panel-card p { margin: 0; color: var(--secondary); font-size: 11px; line-height: 1.45; }
+    .suggestion { padding: 9px 0; display: flex; gap: 9px; border-bottom: 1px solid var(--border); }
+    .suggestion:last-child { border-bottom: 0; }
+    .dot { width: 7px; height: 7px; margin-top: 5px; flex: 0 0 7px; border-radius: 50%; background: var(--amber); }
+    .suggestion strong { display: block; font-size: 11px; }
+    .suggestion span { color: var(--muted); font-size: 10px; }
+    .filters { display: flex; gap: 5px; margin-bottom: 12px; }
+    .filter {
+      min-height: 25px;
+      padding: 0 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 9px;
+    }
+    .filter.active { border-color: var(--accent); color: var(--accent-soft); background: rgba(59,130,246,.1); }
+    .notification {
+      margin-bottom: 7px;
+      padding: 10px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: var(--surface-0);
+    }
+    .notification:hover { border-color: var(--border-strong); }
+    .notification .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .notification strong { font-size: 11px; line-height: 1.35; }
+    .notification p { margin: 5px 0 8px; color: var(--secondary); font-size: 10px; line-height: 1.4; }
+    .notification button {
+      min-height: 27px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 6px;
+      background: #2563eb;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .level { color: var(--amber); font-size: 9px; }
+    .second-dock { display: none; }
+
+    .detail {
+      display: none;
+      flex-basis: 380px;
+      padding: 16px;
+    }
+    .detail h3 { margin: 0 0 4px; font-size: 15px; }
+    .detail > p { margin: 0 0 18px; color: var(--muted); font-size: 11px; }
+    .detail-field { margin-bottom: 14px; }
+    .detail-field span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; text-transform: uppercase; }
+    .detail-field div { min-height: 36px; padding: 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0); font-size: 11px; }
+
+    .stage.split.wide .second-dock { display: flex; }
+    .stage.split.standard .second-dock { display: none; }
+    .stage.detail-open .detail { display: flex; }
+    .stage.detail-open .second-dock { display: none; }
+    .stage.detail-open.standard .dock { flex-basis: 48px; }
+    .stage.detail-open.standard .dock-head { padding: 4px; }
+    .stage.detail-open.standard .dock-tab { display: none; }
+    .stage.detail-open.standard .dock-tab.active { display: block; min-width: 38px; font-size: 0; }
+    .stage.detail-open.standard .dock-tab.active::after {
+      content: "P";
+      font-size: 14px;
+      color: var(--accent-soft);
+    }
+    .stage.detail-open.standard .dock[data-view="notifications"] .dock-tab.active::after { content: "N"; }
+    .stage.detail-open.standard .dock-body { display: none; }
+    .stage.detail-open.wide .dock { flex-basis: 340px; }
+
+    .plan-content, .notifications-content { display: none; }
+    .dock[data-view="plan"] .plan-content,
+    .dock[data-view="notifications"] .notifications-content { display: block; }
+    .second-dock .notifications-content { display: block; }
+
+    .stage.fixed-dual .dock { flex-basis: 320px; }
+    .stage.fixed-dual .second-dock { display: flex; flex-basis: 360px; }
+    .stage.fixed-dual.standard .main { min-width: 0; padding-left: 14px; padding-right: 14px; }
+    .stage.fixed-dual.standard .focus-grid { grid-template-columns: 1fr; }
+    .stage.fixed-dual.standard .summary .metric:nth-child(4) { display: none; }
+
+    .state-note {
+      max-width: 1500px;
+      margin: 12px auto 0;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .note {
+      padding: 11px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-0);
+      color: var(--secondary);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .note strong { color: var(--text); }
+
+    @media (max-width: 900px) {
+      .review-header { align-items: flex-start; flex-direction: column; }
+      .state-note { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="review">
+    <header class="review-header">
+      <div class="review-title">
+        <h1>My Day utility dock</h1>
+        <p>Issue #2301 · reuse the existing Plan &amp; Focus and Notifications panels without shrinking daily work by default.</p>
+      </div>
+      <div class="controls">
+        <div class="control-group" aria-label="Layout concept">
+          <button class="control active" data-layout="dock">Adaptive dock</button>
+          <button class="control" data-layout="fixed-dual">Always two panels</button>
+        </div>
+        <div class="control-group" aria-label="Viewport width">
+          <button class="control active" data-width="standard">1280</button>
+          <button class="control" data-width="wide">1500</button>
+        </div>
+        <button class="small-button" id="detail-toggle">Open task detail</button>
+      </div>
+    </header>
+
+    <div class="recommendation">
+      <strong>Recommended</strong>
+      Automatically show one or two existing utility panels according to available space. The panel visuals below are representative; retain the current application components and styling.
+    </div>
+
+    <div class="stage-wrap">
+      <section class="stage standard" id="stage">
+        <nav class="nav" aria-label="Primary navigation">
+          <div class="brand">MC</div>
+          <div class="nav-item">H</div>
+          <div class="nav-item active">DAY</div>
+          <div class="nav-item">ALL</div>
+          <div class="nav-item">PRJ</div>
+          <div class="nav-item">N</div>
+          <div class="nav-spacer"></div>
+          <div class="nav-item">S</div>
+        </nav>
+
+        <div class="app">
+          <header class="toolbar">
+            <div class="search">Search Mission Control</div>
+            <div class="quick-add">Add to My Day…</div>
+            <div class="toolbar-actions">7 completed · Sync</div>
+          </header>
+
+          <div class="workspace">
+            <section class="main">
+              <div class="main-inner">
+                <header class="page-head">
+                  <div>
+                    <h2>My Day</h2>
+                    <p>Friday, October 16</p>
+                  </div>
+                  <div class="page-actions">
+                    <button class="small-button">List</button>
+                    <button class="small-button">Timeline</button>
+                    <button class="small-button">Plan my day</button>
+                  </div>
+                </header>
+
+                <div class="summary">
+                  <div class="metric"><span>Open</span><strong>8</strong></div>
+                  <div class="metric"><span>Done</span><strong>7</strong></div>
+                  <div class="metric"><span>Cancelled</span><strong>1</strong></div>
+                  <div class="metric"><span>Scheduled time</span><strong>3h 20m</strong></div>
+                </div>
+
+                <div class="focus-grid">
+                  <article class="focus-card">
+                    <h3>Focus 3</h3>
+                    <p>Keep the day anchored around three outcomes, while the utility dock handles secondary planning and attention queues.</p>
+                    <button class="accent-button">Choose focus tasks</button>
+                  </article>
+                  <article class="focus-card">
+                    <h3>In progress</h3>
+                    <p>Review notification panel UX and prepare implementation guidance.</p>
+                    <span class="tag">Started 42m ago</span>
+                  </article>
+                </div>
+
+                <section class="task-section">
+                  <header class="task-header">
+                    <h3>Open tasks</h3>
+                    <span class="task-count">8 remaining</span>
+                  </header>
+                  <div class="task"><i class="check"></i><div><strong>Review My Day panel proposal</strong><span>Mission Control · P1</span></div><span class="tag">Today</span></div>
+                  <div class="task"><i class="check"></i><div><strong>Respond to PR review feedback</strong><span>GitHub · 30 min</span></div><span class="tag">In progress</span></div>
+                  <div class="task"><i class="check"></i><div><strong>Validate notification action labels</strong><span>Mission Control · P2</span></div><span class="tag">45 min</span></div>
+                  <div class="task"><i class="check"></i><div><strong>Check Home Assistant connector</strong><span>Personal ops · P2</span></div><span class="tag">Due 4:00</span></div>
+                  <div class="task"><i class="check"></i><div><strong>Prepare tomorrow’s focus list</strong><span>Planning · P3</span></div><span class="tag">20 min</span></div>
+                </section>
+              </div>
+            </section>
+
+            <aside class="detail" aria-label="Task detail">
+              <h3>Review My Day panel proposal</h3>
+              <p>Task details temporarily take spatial priority.</p>
+              <div class="detail-field"><span>Status</span><div>In progress</div></div>
+              <div class="detail-field"><span>Priority</span><div>P1 · High</div></div>
+              <div class="detail-field"><span>Notes</span><div>Compare tabbed dock, wide split, and fixed dual-panel behavior.</div></div>
+            </aside>
+
+            <aside class="dock" data-view="plan" aria-label="My Day utility dock">
+              <header class="dock-head">
+                <div class="dock-tabs">
+                  <button class="dock-tab active" data-tab="plan">Plan &amp; Focus</button>
+                  <button class="dock-tab" data-tab="notifications">Notifications <span class="badge">4</span></button>
+                </div>
+              </header>
+              <div class="dock-body">
+                <div class="plan-content">
+                  <div class="dock-tools"><strong>Plan &amp; Focus</strong><span class="responsive-state">Responsive layout</span></div>
+                  <article class="panel-card">
+                    <span class="label">Do next</span>
+                    <h4>Get an AI-powered focus recommendation</h4>
+                    <p>Uses priority, due date, remaining time, and current energy.</p>
+                  </article>
+                  <div class="dock-tools"><strong>Suggestions</strong><span class="task-count">12</span></div>
+                  <div class="suggestion"><i class="dot"></i><div><strong>Review outstanding PR feedback</strong><span>Overdue · 25 min</span></div></div>
+                  <div class="suggestion"><i class="dot" style="background:#ef4444"></i><div><strong>Reconnect finance source</strong><span>May need replanning</span></div></div>
+                  <div class="suggestion"><i class="dot" style="background:#38bdf8"></i><div><strong>Prepare release checklist</strong><span>AI recommended</span></div></div>
+                  <div class="suggestion"><i class="dot" style="background:#10b981"></i><div><strong>Update workshop inventory</strong><span>Recently added</span></div></div>
+                </div>
+
+                <div class="notifications-content">
+                  <div class="dock-tools"><strong>Needs attention</strong><span class="responsive-state">Responsive layout</span></div>
+                  <div class="filters">
+                    <button class="filter active">All 4</button>
+                    <button class="filter">Urgent 1</button>
+                    <button class="filter">Action 2</button>
+                    <button class="filter">Unread</button>
+                  </div>
+                  <article class="notification">
+                    <div class="top"><strong>Review requested on PR #2298</strong><span class="level">ACTION</span></div>
+                    <p>Two comments need a response before this can merge.</p>
+                    <button>Review PR</button>
+                  </article>
+                  <article class="notification">
+                    <div class="top"><strong>Home Assistant integration degraded</strong><span class="level" style="color:var(--red)">URGENT</span></div>
+                    <p>Authentication expired 18 minutes ago.</p>
+                    <button>Reconnect</button>
+                  </article>
+                  <article class="notification">
+                    <div class="top"><strong>Package arriving today</strong><span class="level" style="color:#60a5fa">HEADS UP</span></div>
+                    <p>Delivery window is 2:15–4:15 PM.</p>
+                    <button>Track package</button>
+                  </article>
+                </div>
+              </div>
+            </aside>
+
+            <aside class="second-dock" aria-label="Notifications in split view">
+              <header class="dock-head">
+                <div class="dock-tabs"><button class="dock-tab active">Notifications <span class="badge">4</span></button></div>
+              </header>
+              <div class="dock-body">
+                <div class="notifications-content">
+                  <div class="dock-tools"><strong>Needs attention</strong><span class="responsive-state">Auto expanded</span></div>
+                  <div class="filters">
+                    <button class="filter active">All 4</button>
+                    <button class="filter">Urgent 1</button>
+                    <button class="filter">Action 2</button>
+                  </div>
+                  <article class="notification">
+                    <div class="top"><strong>Review requested on PR #2298</strong><span class="level">ACTION</span></div>
+                    <p>Two comments need a response before this can merge.</p>
+                    <button>Review PR</button>
+                  </article>
+                  <article class="notification">
+                    <div class="top"><strong>Home Assistant integration degraded</strong><span class="level" style="color:var(--red)">URGENT</span></div>
+                    <p>Authentication expired 18 minutes ago.</p>
+                    <button>Reconnect</button>
+                  </article>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="state-note">
+      <div class="note"><strong>Default:</strong> remember the last selected dock tab on My Day. The notification badge remains visible while Plan &amp; Focus is active.</div>
+      <div class="note"><strong>Wide screens:</strong> both panels appear automatically when the center workspace can retain a useful minimum width; no user-facing layout preference is required.</div>
+      <div class="note"><strong>Task detail:</strong> wide layouts retain the active dock tab beside detail so suggestions can be evaluated in context. Standard layouts reduce it to a 48px rail.</div>
+    </div>
+  </main>
+
+  <script>
+    const stage = document.getElementById('stage');
+    const layoutButtons = document.querySelectorAll('[data-layout]');
+    const widthButtons = document.querySelectorAll('[data-width]');
+    const detailToggle = document.getElementById('detail-toggle');
+    const primaryDock = document.querySelector('.dock');
+
+    function selectPrimaryDockTab(view) {
+      primaryDock.dataset.view = view;
+      primaryDock.querySelectorAll('[data-tab]').forEach((tab) => {
+        tab.classList.toggle('active', tab.dataset.tab === view);
+      });
+    }
+
+    function syncResponsivePanels() {
+      const adaptive = !stage.classList.contains('fixed-dual');
+      stage.classList.toggle('split', adaptive && stage.classList.contains('wide'));
+      if (stage.classList.contains('split')) selectPrimaryDockTab('plan');
+    }
+
+    document.querySelectorAll('[data-tab]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const dock = button.closest('.dock');
+        dock.dataset.view = button.dataset.tab;
+        dock.querySelectorAll('[data-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+      });
+    });
+
+    layoutButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        stage.classList.toggle('fixed-dual', button.dataset.layout === 'fixed-dual');
+        if (button.dataset.layout === 'fixed-dual') selectPrimaryDockTab('plan');
+        syncResponsivePanels();
+        layoutButtons.forEach((item) => item.classList.toggle('active', item === button));
+      });
+    });
+
+    widthButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        stage.classList.remove('standard', 'wide', 'split');
+        stage.classList.add(button.dataset.width);
+        syncResponsivePanels();
+        widthButtons.forEach((item) => item.classList.toggle('active', item === button));
+      });
+    });
+
+    detailToggle.addEventListener('click', () => {
+      const open = stage.classList.toggle('detail-open');
+      detailToggle.textContent = open ? 'Close task detail' : 'Open task detail';
+    });
+  </script>
+</body>
+</html>

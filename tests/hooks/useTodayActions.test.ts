@@ -470,7 +470,10 @@ describe('useTodayActions completion', () => {
 
   it('removes a suggestion-only task from the suggestion groups when deleted', async () => {
     vi.useRealTimers();
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ action: 'deleted', restorable: true }),
+    })));
     const fetchData = vi.fn(async () => {});
     const { result } = renderHook(() => {
       const [suggestions, setSuggestions] = useState<SuggestionGroups>(
@@ -501,11 +504,11 @@ describe('useTodayActions completion', () => {
       });
     });
     await act(async () => {
-      result.current.actions.confirmDialog.onConfirm();
       await new Promise((resolve) => requestAnimationFrame(resolve));
     });
 
     expect(result.current.suggestions.yesterday).toHaveLength(0);
+    expect(result.current.actions.confirmDialog.open).toBe(false);
     expect(global.fetch).toHaveBeenCalledWith('/api/tasks/suggestion-2', { method: 'DELETE' });
   });
 
@@ -515,7 +518,7 @@ describe('useTodayActions completion', () => {
       ok: true,
       json: async () => input.toString().endsWith('/restore')
         ? { success: true }
-        : { success: true, restorable: true },
+        : { success: true, action: 'deleted', restorable: true },
     }));
     vi.stubGlobal('fetch', fetchMock);
     const fetchData = vi.fn(async () => {});
@@ -549,11 +552,11 @@ describe('useTodayActions completion', () => {
       void result.current.actions.deleteTask('task-to-delete');
     });
     await act(async () => {
-      result.current.actions.confirmDialog.onConfirm();
       await new Promise((resolve) => requestAnimationFrame(resolve));
     });
 
     expect(result.current.items).toEqual([]);
+    expect(result.current.actions.confirmDialog.open).toBe(false);
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-to-delete', { method: 'DELETE' });
     expect(mocks.pushUndoWithToast).toHaveBeenCalledWith('Task deleted', expect.any(Function));
 
@@ -564,5 +567,55 @@ describe('useTodayActions completion', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-to-delete/restore', { method: 'POST' });
     expect(result.current.items).toEqual([item]);
+  });
+
+  it('requires confirmation before deleting a task at its source', async () => {
+    vi.useRealTimers();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ action: 'deleted', restorable: false }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const upstreamPolicy = makeTaskEditPolicy({
+      sourceModel: 'remote-managed',
+      removalMode: 'upstream-delete',
+    });
+    const item = {
+      ...mirrorTodayItem(),
+      taskId: 'upstream-task',
+      title: 'Source task',
+      taskSourceModel: 'remote-managed' as const,
+      editPolicy: upstreamPolicy,
+    };
+    const { result } = renderHook(() => {
+      const [items, setItems] = useState([item]);
+      const actions = useTodayActions({
+        items,
+        setItems,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData: vi.fn(async () => {}),
+      });
+      return { items, actions };
+    });
+
+    act(() => {
+      void result.current.actions.deleteTask('upstream-task');
+    });
+
+    expect(result.current.actions.confirmDialog.open).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      result.current.actions.confirmDialog.onConfirm();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/upstream-task', { method: 'DELETE' });
+    expect(result.current.items).toEqual([]);
   });
 });

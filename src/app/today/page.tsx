@@ -352,10 +352,6 @@ export default function TodayPage() {
             sourceLists={sourceLists}
             onMoveToList={(targetListId) => actions.moveTaskToList(selectedTaskId, targetListId)}
             onComplete={() => completeSelectedTask(selectedTaskId)}
-            onDelete={() => {
-              void actions.deleteTask(selectedTaskId, selectedSuggestion ? { title: selectedSuggestion.title, editPolicy: selectedSuggestion.editPolicy } : undefined);
-              setSelectedTaskId(null, { history: 'replace' });
-            }}
             autoOpenMoveDialog={pendingMoveDialogTaskId === selectedTaskId}
             onMoveDialogDismissed={() => setPendingMoveDialogTaskId(null)}
             notesOpenRequest={notesOpenRequest}
@@ -387,10 +383,6 @@ export default function TodayPage() {
             sourceLists={sourceLists}
             onMoveToList={(targetListId) => actions.moveTaskToList(selectedTaskId, targetListId)}
             onComplete={() => completeSelectedTask(selectedTaskId)}
-            onDelete={() => {
-              void actions.deleteTask(selectedTaskId, selectedSuggestion ? { title: selectedSuggestion.title, editPolicy: selectedSuggestion.editPolicy } : undefined);
-              setSelectedTaskId(null, { history: 'replace' });
-            }}
             autoOpenMoveDialog={pendingMoveDialogTaskId === selectedTaskId}
             onMoveDialogDismissed={() => setPendingMoveDialogTaskId(null)}
             notesOpenRequest={notesOpenRequest}
@@ -436,10 +428,6 @@ export default function TodayPage() {
             sourceLists={sourceLists}
             onMoveToList={(targetListId) => actions.moveTaskToList(selectedTaskId, targetListId)}
             onComplete={() => completeSelectedTask(selectedTaskId)}
-            onDelete={() => {
-              void actions.deleteTask(selectedTaskId, selectedSuggestion ? { title: selectedSuggestion.title, editPolicy: selectedSuggestion.editPolicy } : undefined);
-              setSelectedTaskId(null, { history: 'replace' });
-            }}
             autoOpenMoveDialog={pendingMoveDialogTaskId === selectedTaskId}
             onMoveDialogDismissed={() => setPendingMoveDialogTaskId(null)}
           />

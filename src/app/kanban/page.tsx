@@ -19,6 +19,14 @@ import {
   selectedTaskRemovalBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
+import { toast } from '@/lib/toast';
+import { pushUndoWithToast } from '@/lib/stores/undoStore';
+import {
+  bulkTaskRemovalLabel,
+  removeTasks,
+  undoableTaskRemovals,
+  undoTaskRemovals,
+} from '@/lib/tasks/task-removal';
 
 const INITIAL_CONFIRM_DIALOG: KanbanConfirmDialogState = {
   open: false,
@@ -125,11 +133,28 @@ function KanbanPageInner() {
       onConfirm: async () => {
         setConfirmDialog(prev => ({ ...prev, open: false }));
         const ids = Array.from(bulk.bulkSelected);
-        const { failed } = await executeBulkOperation(
-          ids,
-          id => fetch(`/api/tasks/${id}`, { method: 'DELETE' }),
-          `${ids.length} task${ids.length > 1 ? 's' : ''} deleted`,
-        );
+        const tasks = tasksState.tasks
+          .filter((task) => ids.includes(task.id))
+          .map((task) => ({
+            id: task.id,
+            localDisposition: task.localDisposition,
+          }));
+        const { succeeded, failed } = await removeTasks(tasks);
+        const undoable = undoableTaskRemovals(succeeded);
+        if (failed.length > 0) {
+          toast.error(`Failed to remove ${failed.length} task${failed.length === 1 ? '' : 's'}`);
+        }
+        if (undoable.length > 0) {
+          pushUndoWithToast(
+            bulkTaskRemovalLabel(succeeded.length, undoable.length),
+            async () => {
+              await undoTaskRemovals(undoable);
+              await tasksState.fetchData();
+            },
+          );
+        } else if (succeeded.length > 0) {
+          toast.success(bulkTaskRemovalLabel(succeeded.length, 0));
+        }
         if (failed.length > 0) {
           bulk.setBulkSelected(new Set(failed));
         } else {

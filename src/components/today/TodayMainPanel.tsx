@@ -21,6 +21,13 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from '@/lib/toast';
+import { pushUndoWithToast } from '@/lib/stores/undoStore';
+import {
+  bulkTaskRemovalLabel,
+  removeTasks,
+  undoableTaskRemovals,
+  undoTaskRemovals,
+} from '@/lib/tasks/task-removal';
 import {
   DndContext,
   KeyboardSensor,
@@ -930,8 +937,26 @@ export function TodayMainPanel({
                         onConfirm: () => {
                           onSetConfirmDialog((dialog) => ({ ...dialog, open: false }));
                           requestAnimationFrame(async () => {
-                            const ids = Array.from(bulk.bulkSelected);
-                            const { failed } = await executeBulkOperation(ids, (id) => fetch(`/api/tasks/${id}`, { method: 'DELETE' }), `${ids.length} task${ids.length > 1 ? 's' : ''} deleted`);
+                            const tasks = selectedBulkItems.map((item) => ({
+                              id: item.taskId,
+                              localDisposition: item.localDisposition,
+                            }));
+                            const { succeeded, failed } = await removeTasks(tasks);
+                            const undoable = undoableTaskRemovals(succeeded);
+                            if (failed.length > 0) {
+                              toast.error(`Failed to remove ${failed.length} task${failed.length === 1 ? '' : 's'}`);
+                            }
+                            if (undoable.length > 0) {
+                              pushUndoWithToast(
+                                bulkTaskRemovalLabel(succeeded.length, undoable.length),
+                                async () => {
+                                  await undoTaskRemovals(undoable);
+                                  await fetchData();
+                                },
+                              );
+                            } else if (succeeded.length > 0) {
+                              toast.success(bulkTaskRemovalLabel(succeeded.length, 0));
+                            }
                             if (failed.length > 0) bulk.setBulkSelected(new Set(failed));
                             else bulk.clearSelection();
                             void fetchData();

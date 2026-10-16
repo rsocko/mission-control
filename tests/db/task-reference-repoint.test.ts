@@ -127,7 +127,11 @@ describe('repointTaskReferences', () => {
       updatedAt: now,
     });
     await db.insert(schema.taskProjects).values([
-      { taskId: sourceTaskId, projectId: 'inventory-project' },
+      {
+        taskId: sourceTaskId,
+        projectId: 'inventory-project',
+        provenance: 'github-sync',
+      },
     ]);
     await db.insert(schema.projectPhases).values({
       id: 'inventory-phase',
@@ -313,6 +317,9 @@ describe('repointTaskReferences', () => {
     ).get('inventory-project')).toEqual(hierarchyRevisionBefore);
     expect(queryCount('project_hierarchy_commands')).toBe(0);
     expect(queryCount('project_hierarchy_mutation_context')).toBe(0);
+    expect(sqlite.prepare(
+      'SELECT provenance FROM task_projects WHERE task_id = ? AND project_id = ?',
+    ).get(successorTaskId, 'inventory-project')).toEqual({ provenance: 'github-sync' });
     expect(sqlite.prepare(
       'SELECT parent_id AS parentId FROM tasks WHERE id = ?',
     ).get('inventory-child')).toEqual({ parentId: successorTaskId });

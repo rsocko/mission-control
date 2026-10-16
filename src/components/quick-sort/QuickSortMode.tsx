@@ -596,8 +596,8 @@ export default function QuickSortMode() {
         setStatsKey((k) => k + 1);
         setSessionSorted((n) => n + 1);
         toast.success(`Horizon set to ${planningHorizon}`);
-      } catch {
-        toast.error('Failed to set horizon');
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to set horizon');
       }
       setBusy(false);
     },

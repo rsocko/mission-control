@@ -969,7 +969,7 @@ function SourceListNavRow({
         {sourceList.taskCount > 0 && (
           <AnimatedCounter
             value={sourceList.taskCount}
-            className={`shrink-0 text-xs tabular-nums text-[var(--text-muted)] transition-opacity ${
+            className={`ml-auto w-8 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)] transition-opacity ${
               actionsVisible ? 'opacity-0' : 'opacity-100'
             }`}
           />
@@ -1099,7 +1099,7 @@ function SourceListSection({
               >
                 <span className="truncate">{group.name}</span>
                 {groupTaskCount > 0 && (
-                  <AnimatedCounter value={groupTaskCount} className="text-xs text-[var(--text-muted)] tabular-nums shrink-0 ml-auto" />
+                  <AnimatedCounter value={groupTaskCount} className="ml-auto w-8 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)]" />
                 )}
               </button>
               {isGroupActive && (

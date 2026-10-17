@@ -14,6 +14,7 @@ export const DEFAULT_SORT_OPTIONS: readonly SortOption[] = [
   { value: 'planningHorizon', label: 'Horizon' },
   { value: 'effort', label: 'Effort' },
   { value: 'smartScore', label: 'Smart Score' },
+  { value: 'smartScorePercentile', label: 'Smart Score Percentile', supportsDirection: false },
   { value: 'dueDate', label: 'Due Date' },
   { value: 'createdAt', label: 'Created Date' },
   { value: 'updated', label: 'Recently Updated' },

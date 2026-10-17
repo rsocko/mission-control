@@ -126,7 +126,7 @@ const MY_DAY_GROUP_KEY = 'mission-control:my-day-group-by';
 const MY_DAY_LAST_COMPUTED_SORT_KEY = 'mission-control:my-day-last-computed-sort';
 const MY_DAY_SORT_OPTIONS: readonly SortOption[] = [
   { value: 'manual', label: 'Manual Order', supportsDirection: false },
-  ...DEFAULT_SORT_OPTIONS,
+  ...DEFAULT_SORT_OPTIONS.filter((option) => option.value !== 'smartScorePercentile'),
 ];
 
 interface TodayMainPanelProps {

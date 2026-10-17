@@ -137,7 +137,8 @@ export type TaskListSortField =
   | 'status'
   | 'sourceList'
   | 'effort'
-  | 'smartScore';
+  | 'smartScore'
+  | 'smartScorePercentile';
 
 export interface TaskListOrder {
   readonly field: TaskListSortField;
@@ -611,8 +612,8 @@ export interface TaskCollectionResult {
   readonly availableTags: AvailableTaskTag[];
   readonly connectorContexts: TaskCollectionConnectorContext[];
   /**
-   * Present for `smartScore`: rows are the deterministic candidate set rather
-   * than a page, and callers apply domain scoring before slicing.
+   * Present when score inputs are requested. Rows cover the complete filtered
+   * scope so callers can rank and paginate after domain scoring.
    */
   readonly smartScore: TaskSmartScoreInputs | null;
 }
@@ -624,7 +625,6 @@ export interface TaskCollectionReadRepository {
     readonly includeTags: boolean;
     readonly includeScoreInputs: boolean;
     readonly countsOnly: boolean;
-    readonly smartScoreCandidateLimit: number;
   }): Promise<TaskCollectionResult>;
 }
 

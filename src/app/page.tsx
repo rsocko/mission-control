@@ -727,6 +727,9 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                     >
                       <TaskRow
                         task={task}
+                        scoreDisplayMode={state.sortBy === 'smartScorePercentile'
+                          ? 'percentile'
+                          : 'score'}
                         projects={state.projects}
                         onComplete={() => actions.completeTask(task.id)}
                         onSnoozeUntil={(until) => actions.snoozeTask(task.id, until)}

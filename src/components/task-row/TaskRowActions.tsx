@@ -16,7 +16,7 @@ import {
   Sun,
   XCircle,
 } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { DayPicker } from 'react-day-picker';
 import { PlanningHorizonBadge } from '@/components/task-list/PlanningHorizonBadge';
 import { SmartScoreBadge } from '@/components/smart-score/SmartScoreBadge';
@@ -553,6 +553,7 @@ function DispositionMenu({
 export interface TaskRowActionsProps {
   smartScore?: number | null;
   scoreBreakdown?: ScoreBreakdown;
+  scoreDisplayMode?: 'score' | 'percentile';
   planningHorizon?: PlanningHorizon | null;
   effort?: number | null;
   dueDate: string | null;
@@ -587,6 +588,7 @@ export interface TaskRowActionsProps {
 export function TaskRowActions({
   smartScore,
   scoreBreakdown,
+  scoreDisplayMode = 'score',
   planningHorizon,
   effort,
   dueDate,
@@ -622,17 +624,25 @@ export function TaskRowActions({
   return (
     <div
       data-testid="task-row-properties"
+      style={{
+        '--score-column-width': scoreDisplayMode === 'percentile' ? '60px' : '32px',
+      } as CSSProperties}
       className={cn(
         'grid shrink-0 items-center gap-0.5',
         dense
           ? 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[32px_30px_32px_56px_32px_32px_96px]'
-          : 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[960px]:grid-cols-[32px_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[32px_44px_32px_30px_32px_56px_32px_32px_96px]',
+          : 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]',
       )}
     >
       {!dense && (
         <span className="hidden h-7 items-center justify-center @min-[960px]:flex">
           {smartScore != null && (
-            <SmartScoreBadge score={smartScore} breakdown={scoreBreakdown} size="sm" />
+            <SmartScoreBadge
+              score={smartScore}
+              breakdown={scoreBreakdown}
+              size="sm"
+              displayMode={scoreDisplayMode}
+            />
           )}
         </span>
       )}

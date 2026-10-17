@@ -14,6 +14,8 @@ vi.mock('@/lib/utils/date', () => ({
 vi.mock('@/lib/smart-score', () => ({
   createScoreInput: vi.fn(),
   computeBatchSmartScores: vi.fn(() => []),
+  rankSmartScores: vi.fn((tasks: unknown[]) => tasks),
+  addOverallSmartScoreRankings: vi.fn((tasks: unknown[]) => tasks),
 }));
 vi.mock('@/lib/logger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
@@ -251,13 +253,23 @@ describe('GET /api/tasks — sortBy=createdAt support (PR #307)', () => {
 });
 
 describe('GET /api/tasks — sort updates task list (PR #295)', () => {
-  it('accepts smartScore and requests the bounded candidate set', async () => {
+  it('accepts smartScore without a candidate ceiling', async () => {
     const { GET } = await import('@/app/api/tasks/route');
     const response = await GET(new Request(`${BASE}/api/tasks?sortBy=smartScore`));
     expect(response.status).toBe(200);
     expect(readTaskCollection).toHaveBeenCalledWith(expect.objectContaining({
       page: expect.objectContaining({ order: { field: 'smartScore', direction: 'asc' } }),
-      smartScoreCandidateLimit: 1000,
+    }));
+  });
+
+  it('accepts percentile sorting through the same complete score ordering', async () => {
+    const { GET } = await import('@/app/api/tasks/route');
+    const response = await GET(new Request(`${BASE}/api/tasks?sortBy=smartScorePercentile`));
+    expect(response.status).toBe(200);
+    expect(readTaskCollection).toHaveBeenCalledWith(expect.objectContaining({
+      page: expect.objectContaining({
+        order: { field: 'smartScorePercentile', direction: 'asc' },
+      }),
     }));
   });
 
@@ -314,11 +326,13 @@ describe('GET /api/tasks — bounded pagination', () => {
     expect(readTaskCollection).not.toHaveBeenCalled();
   });
 
-  it('rejects smart-score offsets outside the candidate budget', async () => {
+  it('allows smart-score pagination beyond the former candidate budget', async () => {
     const { GET } = await import('@/app/api/tasks/route');
     const response = await GET(new Request(`${BASE}/api/tasks?sortBy=smartScore&offset=1000`));
-    expect(response.status).toBe(400);
-    expect(readTaskCollection).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(readTaskCollection).toHaveBeenCalledWith(expect.objectContaining({
+      page: expect.objectContaining({ offset: 1000 }),
+    }));
   });
 
   it('reports effective pagination values', async () => {

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import Image from 'next/image';
-import { Calendar, Check, CheckSquare, ClipboardList, Flame, AlertCircle, Clock, Repeat, Ellipsis, Maximize2, Sparkles, Sun, GitBranch, Mic, Square } from 'lucide-react';
+import { Calendar, Check, CheckSquare, ClipboardList, Flame, AlertCircle, Clock, Repeat, Ellipsis, Maximize2, Sparkles, Sun, GitBranch, LoaderCircle, Mic, Square } from 'lucide-react';
 import { CONNECTOR_ICON_PATHS, CONNECTOR_LABELS } from '@/lib/constants/colors';
 import { cn } from '@/lib/utils';
 import { PRIORITY_OPTIONS, getEffortOptions, DEFAULT_EFFORT_MEASURE, getTaskPriorityVisual } from '@/lib/constants/task-formatting';
@@ -288,6 +288,8 @@ interface InlineToast {
   };
   /** AI-suggested metadata from quick sort suggestions API */
   suggestions?: QuickSortSuggestion | null;
+  /** Current state of the async suggestion check for single-task additions */
+  suggestionStatus?: 'loading' | 'ready' | 'empty' | 'error';
   /** Whether suggestion apply is in-flight */
   suggestionsApplying?: boolean;
   /** Whether suggestions were already applied */
@@ -855,6 +857,47 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     }
   }, [showPlusMenu]);
 
+  const scheduleInlineToastDismiss = useCallback((delay: number) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setInlineToast(null), delay);
+  }, []);
+
+  const loadQuickAddSuggestions = useCallback(async (
+    taskId: string,
+    baseSuggestions: QuickSortSuggestion | null = null,
+  ) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setInlineToast((previous) => {
+      if (!previous || previous.taskIds[0] !== taskId) return previous;
+      return { ...previous, suggestionStatus: 'loading' };
+    });
+
+    try {
+      const fetched = await fetchQuickAddSuggestion({}, taskId);
+      const merged = mergeQuickAddSuggestions(baseSuggestions, fetched);
+      setInlineToast((previous) => {
+        if (!previous || previous.taskIds[0] !== taskId) return previous;
+        return {
+          ...previous,
+          suggestions: merged,
+          suggestionStatus: merged ? 'ready' : 'empty',
+        };
+      });
+      scheduleInlineToastDismiss(merged ? 30000 : 5000);
+    } catch (error) {
+      taskLogger.error('Failed to fetch Quick Add suggestions', { error, taskId });
+      setInlineToast((previous) => {
+        if (!previous || previous.taskIds[0] !== taskId) return previous;
+        return {
+          ...previous,
+          suggestions: baseSuggestions,
+          suggestionStatus: baseSuggestions ? 'ready' : 'error',
+        };
+      });
+      scheduleInlineToastDismiss(baseSuggestions ? 30000 : 15000);
+    }
+  }, [scheduleInlineToastDismiss]);
+
   const handleSubmit = useCallback(async () => {
     if (isSubmitting) return;
 
@@ -928,8 +971,11 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
           editPolicies: createdTaskPolicies,
           destSuffix: toastDestSuffix,
           singleTaskMeta: result.singleTaskMeta,
+          suggestionStatus: createdTaskIds.length === 1 ? 'loading' : undefined,
         });
-        toastTimerRef.current = setTimeout(() => setInlineToast(null), 6000);
+        if (createdTaskIds.length !== 1) {
+          scheduleInlineToastDismiss(6000);
+        }
         onTaskAdded?.();
         window.dispatchEvent(new CustomEvent('mission-control:task-added'));
 
@@ -938,28 +984,12 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
           const nlpHints = parseNlpHints(cleanTitle, cachedTags);
           if (nlpHints) {
             setInlineToast(prev => prev && prev.taskIds[0] === createdTaskIds[0]
-              ? { ...prev, suggestions: nlpHints }
+              ? { ...prev, suggestions: nlpHints, suggestionStatus: 'loading' }
               : prev
             );
-            // Extend timer since we now have suggestions to review
-            if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-            toastTimerRef.current = setTimeout(() => setInlineToast(null), 30000);
           }
 
-          fetchQuickAddSuggestion({}, createdTaskIds[0])
-            .then((suggestion) => {
-              if (!suggestion) return;
-              setInlineToast(prev => {
-                if (!prev || prev.taskIds[0] !== createdTaskIds[0]) return prev;
-                const merged = mergeQuickAddSuggestions(prev.suggestions, suggestion);
-                return { ...prev, suggestions: merged };
-              });
-              if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-              toastTimerRef.current = setTimeout(() => setInlineToast(null), 30000);
-            })
-            .catch((error) => {
-              taskLogger.error('Failed to fetch Quick Add suggestions', { error });
-            });
+          void loadQuickAddSuggestions(createdTaskIds[0], nlpHints);
         }
       } else {
         if (result.retryTasks.length > 0) {
@@ -1006,6 +1036,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     destination,
     input,
     isSubmitting,
+    loadQuickAddSuggestions,
     myDayActive,
     onTaskAdded,
     pendingTasks,
@@ -1014,6 +1045,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     quickAddCtx.listFilter,
     quickAddCtx.listFilterName,
     quickAddPreferences,
+    scheduleInlineToastDismiss,
     visibleContextProject,
   ]);
 
@@ -2297,8 +2329,67 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
 
               {/* Row 2: independently editable suggestion review */}
               <AnimatePresence>
+                {inlineToast.suggestionStatus === 'loading' && !inlineToast.suggestions && (
+                  <motion.div
+                    key="suggestions-loading"
+                    className="flex items-center gap-2 bg-[var(--surface-1)] px-3 py-2.5 text-xs text-[var(--text-secondary)]"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <LoaderCircle size={13} className="animate-spin text-amber-300" />
+                    <span className="font-medium">Checking for suggestions…</span>
+                  </motion.div>
+                )}
+                {inlineToast.suggestionStatus === 'empty' && (
+                  <motion.div
+                    key="suggestions-empty"
+                    className="flex items-center gap-2 bg-[var(--surface-1)] px-3 py-2.5 text-xs text-[var(--text-muted)]"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <Sparkles size={13} className="text-[var(--text-muted)]" />
+                    <span>No suggestions for this task</span>
+                  </motion.div>
+                )}
+                {inlineToast.suggestionStatus === 'error' && (
+                  <motion.div
+                    key="suggestions-error"
+                    className="flex items-center gap-2 bg-[var(--surface-1)] px-3 py-2.5 text-xs text-red-300"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <AlertCircle size={13} />
+                    <span>Couldn&apos;t check suggestions</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const taskId = inlineToast.taskIds[0];
+                        if (taskId) {
+                          void loadQuickAddSuggestions(taskId, inlineToast.suggestions ?? null);
+                        }
+                      }}
+                      className="ml-auto font-semibold text-amber-300 transition-colors hover:text-amber-100"
+                    >
+                      Retry
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeSuggestionReview}
+                      className="font-medium text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+                    >
+                      Dismiss
+                    </button>
+                  </motion.div>
+                )}
                 {inlineToast.suggestions && !inlineToast.suggestionsApplied && (
                   <motion.div
+                    key="suggestions-review"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}

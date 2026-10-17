@@ -232,6 +232,13 @@
       "when": 1792170872941,
       "tag": "0032_right_daimon_hellstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792210338180,
+      "tag": "0033_chilly_freak",
+      "breakpoints": true
     }
   ]
 }

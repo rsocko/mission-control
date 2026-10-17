@@ -2,6 +2,7 @@
 
 import { Check, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { RoutineIcon } from './RoutineIcon';
 import { DAY_LABELS, DAY_NUMBERS, type CadenceConfig, type Routine } from './types';
 
 interface WeeklyGridProps {
@@ -64,7 +65,7 @@ export function WeeklyGrid({
                   className={cn(index < routines.length - 1 && 'border-b border-[var(--border-subtle)]')}
                 >
                   <td className="max-w-[100px] truncate px-3 py-3 font-medium text-[var(--text-primary)] sm:max-w-none sm:truncate-none sm:px-5">
-                    {routine.icon && <span className="mr-2">{routine.icon}</span>}
+                    <RoutineIcon routine={routine} size={17} className="mr-2 align-text-bottom" />
                     {routine.name}
                     {routine.cadenceType === 'specific_days' && (
                       <span className="ml-2 hidden text-xs text-[var(--text-muted)] sm:inline">

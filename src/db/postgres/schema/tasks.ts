@@ -569,6 +569,8 @@ export const routines = pgTable('routines', {
   cadenceConfig: jsonb('cadence_config').notNull().default({}),
   /** Emoji or icon name */
   icon: text('icon'),
+  /** Optional color for tintable icons */
+  iconColor: text('icon_color'),
   /** Sort order within the cadence group */
   sortOrder: real('sort_order').notNull().default(0),
   /** Whether the routine is currently active */

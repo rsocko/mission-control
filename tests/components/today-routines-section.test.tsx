@@ -54,6 +54,7 @@ function routine(index: number, overrides: Partial<TodayRoutine> = {}): TodayRou
     id: `routine-${index}`,
     name: `Routine ${index}`,
     icon: index === 1 ? null : `icon-${index}`,
+    iconColor: null,
     cadenceType: 'daily',
     cadenceConfig: {},
     sortOrder: index,
@@ -133,6 +134,29 @@ describe('TodayRoutinesSection', () => {
     expect(screen.getByTestId('routine-fallback-icon')).toBeInTheDocument();
     const tooltip = screen.getByRole('button', { name: 'Mark Routine 1 complete' }).parentElement;
     expect(tooltip).toHaveAttribute('data-delay', '80');
+  });
+
+  it('renders routine cards with compact typography and spacing', async () => {
+    mockFetch([routine(2)]);
+    render(<TodayRoutinesSection />);
+
+    const title = await screen.findByText('Routine 2');
+    const toggle = screen.getByRole('button', { name: 'Mark Routine 2 complete' });
+
+    expect(title).toHaveClass('text-xs', 'leading-4');
+    expect(toggle).toHaveClass('size-8');
+    expect(title.parentElement?.parentElement).toHaveClass('min-h-[43px]', 'gap-[9px]', 'px-[11px]', 'py-2');
+  });
+
+  it('balances four routines into a two-column grid', async () => {
+    mockFetch(Array.from({ length: 4 }, (_, index) => routine(index + 1)));
+    render(<TodayRoutinesSection />);
+
+    const title = await screen.findByText('Routine 1');
+    const grid = title.parentElement?.parentElement?.parentElement;
+
+    expect(grid).toHaveClass('sm:grid-cols-2');
+    expect(grid).not.toHaveClass('xl:grid-cols-3');
   });
 
   it('keeps on-track flexible routines under Other routines', async () => {

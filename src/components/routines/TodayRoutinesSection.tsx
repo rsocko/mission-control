@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Check, ChevronDown, ChevronUp, Flame, Repeat, RotateCcw } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Flame, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from '@/lib/toast';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
@@ -16,8 +16,15 @@ import {
   isRoutineComplete,
   type TodayRoutine,
 } from './today-routines';
+import { RoutineIcon as RenderedRoutineIcon } from './RoutineIcon';
 
 const INITIAL_VISIBLE_ROUTINES = 6;
+
+function getRoutineGridColumns(itemCount: number) {
+  if (itemCount === 1) return 'grid-cols-1';
+  if (itemCount === 2 || itemCount === 4) return 'grid-cols-1 sm:grid-cols-2';
+  return 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3';
+}
 
 /**
  * "Today's Routines" section for the My Day view with inline check-off.
@@ -135,26 +142,26 @@ export function TodayRoutinesSection() {
   const quickHiddenCount = Math.max(0, promoted.length - quickRoutines.length);
 
   return (
-    <section ref={sectionRef} className="mb-6" aria-label="Routines">
+    <section ref={sectionRef} className="mb-5" aria-label="Routines">
       <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
-        <div className="flex min-h-16 items-center gap-2 px-3 py-2 sm:px-4">
+        <div className="flex min-h-[58px] items-center gap-2.5 px-3 py-2">
           <button
             type="button"
             onClick={() => setSectionExpanded(!expanded)}
             aria-expanded={expanded}
-            className="group flex min-w-0 flex-1 items-center gap-3 rounded-[var(--radius-md)] text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
+            className="group flex min-w-0 flex-1 items-center gap-2.5 rounded-[var(--radius-md)] text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
           >
             <span
-              className="relative grid size-11 shrink-0 place-items-center rounded-full"
+              className="relative grid size-8 shrink-0 place-items-center rounded-full"
               style={{ background: `conic-gradient(${progressColor} 0 ${progress}%, var(--surface-3) ${progress}% 100%)` }}
               aria-hidden="true"
             >
-              <span className="grid size-8 place-items-center rounded-full bg-[var(--surface-1)] text-[11px] font-semibold tabular-nums text-[var(--text-primary)]">
+              <span className="grid size-6 place-items-center rounded-full bg-[var(--surface-1)] text-[9px] font-semibold tabular-nums text-[var(--text-primary)]">
                 {doneCount}/{promoted.length}
               </span>
             </span>
             <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold text-[var(--text-primary)]">
+              <span className="block truncate text-xs font-semibold text-[var(--text-primary)]">
                 {error
                   ? 'Routines unavailable'
                   : allComplete
@@ -163,7 +170,7 @@ export function TodayRoutinesSection() {
                     ? 'No routines due today'
                     : `${remainingCount} routine${remainingCount === 1 ? '' : 's'} left today`}
               </span>
-              <span className="block truncate text-xs text-[var(--text-muted)]">
+              <span className="mt-0.5 block truncate text-[10px] text-[var(--text-muted)]">
                 {error
                   ? "Retry to restore today's routine list"
                   : allComplete
@@ -207,7 +214,7 @@ export function TodayRoutinesSection() {
 
           <Link
             href="/routines"
-            className="hidden rounded-[var(--radius-md)] px-2 py-1.5 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)] sm:block"
+            className="hidden rounded-[var(--radius-sm)] px-2 py-1.5 text-[10px] font-medium text-[var(--accent-400)] transition-colors hover:bg-[var(--accent-500)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)] sm:block"
           >
             Manage
           </Link>
@@ -215,7 +222,7 @@ export function TodayRoutinesSection() {
             <button
               type="button"
               onClick={() => setSectionExpanded(!expanded)}
-              className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-md)] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
+              className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
               aria-label={expanded ? 'Collapse routines' : 'Expand routines'}
               aria-expanded={expanded}
             >
@@ -225,9 +232,9 @@ export function TodayRoutinesSection() {
         </div>
 
         {expanded && (
-          <div className="border-t border-[var(--border-subtle)] px-3 pb-3 pt-2.5 sm:px-4 sm:pb-4">
+          <div className="border-t border-[var(--border-subtle)]">
             {error ? (
-              <div className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] bg-[var(--surface-0)] px-3 py-2.5">
+              <div className="m-2.5 flex items-center justify-between gap-3 rounded-[var(--radius-md)] bg-[var(--surface-0)] px-3 py-2.5">
                 <span className="text-sm text-[var(--text-secondary)]">Routines could not load.</span>
                 <button
                   type="button"
@@ -247,7 +254,10 @@ export function TodayRoutinesSection() {
               <>
                 {visiblePromoted.length > 0 && (
                   <motion.div
-                    className="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-2"
+                    className={cn(
+                      'grid gap-px bg-[var(--border-subtle)]',
+                      getRoutineGridColumns(visiblePromoted.length),
+                    )}
                     variants={staggerContainer}
                     initial="hidden"
                     animate="show"
@@ -269,7 +279,7 @@ export function TodayRoutinesSection() {
                     type="button"
                     onClick={() => setShowAll(!showAll)}
                     aria-expanded={showAll}
-                    className="mt-2 flex w-full items-center justify-between gap-3 rounded-[var(--radius-md)] px-3 py-2 text-left text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-0)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
+                    className="flex min-h-[35px] w-full items-center justify-between gap-3 border-t border-[var(--border-subtle)] bg-[var(--surface-0)] px-[11px] py-1.5 text-left text-[10px] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-500)]"
                   >
                     <span>
                       <strong className="font-medium text-[var(--text-secondary)]">
@@ -289,7 +299,7 @@ export function TodayRoutinesSection() {
                       type="button"
                       onClick={() => setShowOther(!showOther)}
                       aria-expanded={showOther}
-                      className="mt-2 flex w-full items-center justify-between gap-3 rounded-[var(--radius-md)] px-3 py-2 text-left text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-0)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
+                      className="flex min-h-[35px] w-full items-center justify-between gap-3 border-t border-[var(--border-subtle)] bg-[var(--surface-0)] px-[11px] py-1.5 text-left text-[10px] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-500)]"
                     >
                       <span>
                         <strong className="font-medium text-[var(--text-secondary)]">Other routines ({other.length})</strong>
@@ -299,7 +309,10 @@ export function TodayRoutinesSection() {
                     </button>
                     {showOther && (
                       <motion.div
-                        className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-2"
+                        className={cn(
+                          'grid gap-px border-t border-[var(--border-subtle)] bg-[var(--border-subtle)]',
+                          getRoutineGridColumns(other.length),
+                        )}
                         variants={staggerContainer}
                         initial="hidden"
                         animate="show"
@@ -333,21 +346,7 @@ function RoutineIcon({
   routine: TodayRoutine;
   size?: 'compact' | 'regular';
 }) {
-  if (routine.icon) {
-    return (
-      <span className={cn('leading-none', size === 'compact' ? 'text-sm' : 'text-xl')} aria-hidden="true">
-        {routine.icon}
-      </span>
-    );
-  }
-
-  return (
-    <Repeat
-      size={size === 'compact' ? 15 : 20}
-      className="text-emerald-400"
-      aria-hidden="true"
-    />
-  );
+  return <RenderedRoutineIcon routine={routine} size={size === 'compact' ? 13 : 15} />;
 }
 
 function RoutineIconButton({
@@ -374,7 +373,7 @@ function RoutineIconButton({
         aria-label={action}
         className={cn(
           'relative grid shrink-0 place-items-center rounded-[var(--radius-md)] border bg-[var(--surface-2)] transition-[border-color,background-color,transform,opacity] active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)] disabled:cursor-wait disabled:opacity-60',
-          compact ? 'size-8' : 'size-11',
+          compact ? 'size-[29px]' : 'size-8',
           completed
             ? 'border-emerald-700/60 bg-emerald-950/35'
             : 'border-[var(--border)] hover:border-[var(--accent-500)] hover:bg-[var(--surface-3)]',
@@ -383,15 +382,15 @@ function RoutineIconButton({
         <RoutineIcon routine={routine} size={compact ? 'compact' : 'regular'} />
         <span
           className={cn(
-            'absolute -right-1 -top-1 grid rounded-full border-2 border-[var(--surface-1)]',
-            compact ? 'size-4' : 'size-5',
+            'absolute grid rounded-full border-2 border-[var(--surface-1)]',
+            compact ? '-bottom-1 -right-1 size-4' : '-bottom-1.5 -right-1.5 size-[18px]',
             completed
               ? 'place-items-center bg-emerald-500 text-white'
               : 'bg-[var(--surface-1)] ring-1 ring-inset ring-[var(--border-strong)]',
           )}
           aria-hidden="true"
         >
-          {completed && <Check size={compact ? 10 : 12} strokeWidth={3} />}
+          {completed && <Check size={10} strokeWidth={3} />}
         </span>
       </button>
     </Tooltip>
@@ -413,10 +412,7 @@ function RoutineCard({
     <motion.div
       variants={fadeSlideUp}
       className={cn(
-        'flex min-w-0 items-center gap-3 rounded-[var(--radius-md)] border px-3 py-2.5 transition-colors',
-        completed
-          ? 'border-emerald-900/50 bg-emerald-950/15'
-          : 'border-[var(--border-subtle)] bg-[var(--surface-0)] hover:border-[var(--border)]',
+        'flex min-h-[43px] min-w-0 items-center gap-[9px] bg-[var(--surface-1)] px-[11px] py-2 transition-colors hover:bg-[var(--surface-0)]',
       )}
     >
       <RoutineIconButton
@@ -428,19 +424,19 @@ function RoutineCard({
       <div className="min-w-0 flex-1">
         <span
           className={cn(
-            'block truncate text-sm font-medium',
+            'block truncate text-xs font-medium leading-4',
             completed ? 'text-[var(--text-muted)] line-through' : 'text-[var(--text-primary)]',
           )}
         >
           {routine.name}
         </span>
-        <span className="block truncate text-xs text-[var(--text-muted)]">
+        <span className="mt-px block truncate text-[9px] leading-3 text-[var(--text-muted)]">
           {getRoutineDetail(routine, completed)}
         </span>
       </div>
       {routine.streak > 0 && (
         <span
-          className="flex shrink-0 items-center gap-1 rounded-full bg-[var(--surface-2)] px-2 py-1 text-xs tabular-nums text-[var(--text-muted)]"
+          className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums text-[var(--text-muted)]"
           aria-label={`${routine.streak} day streak`}
         >
           <Flame size={11} className={routine.streak >= 7 ? 'text-orange-400' : ''} />

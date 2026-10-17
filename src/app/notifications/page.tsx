@@ -9,7 +9,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   Bell, Archive, CheckCheck, Trash2,
   AlertTriangle, ArrowUpDown, ClipboardCheck, Mail,
-  RefreshCw, Loader2, Zap,
+  RefreshCw, Loader2, Zap, ChevronDown,
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -34,6 +34,18 @@ import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 import type {
   NotificationRestoreSnapshot,
 } from '@/lib/hooks/useNotifications';
+
+interface FailedWriteback {
+  id: string;
+  notificationId: string;
+  connectorInstanceId: string;
+  actionType: string;
+  retryable: boolean | number;
+  attemptCount: number;
+  maxAttempts: number;
+  lastError: string | null;
+  updatedAt: string;
+}
 
 function restoreSnapshot(
   notification: (ReturnType<typeof useNotifications>['notifications'])[number],
@@ -80,6 +92,7 @@ function DesktopNotificationsPage() {
     executeAction,
     loadMore,
     notifications,
+    refresh: refreshNotifications,
     replaceFilters,
     setSelectedId,
   } = hook;
@@ -88,6 +101,11 @@ function DesktopNotificationsPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedSnapshot, setSelectedSnapshot] = useState<(typeof hook.notifications)[number] | null>(null);
   const [announcement, setAnnouncement] = useState('');
+  const [writebackDetailsOpen, setWritebackDetailsOpen] = useState(false);
+  const [writebackFailures, setWritebackFailures] = useState<FailedWriteback[]>([]);
+  const [writebackDetailsLoading, setWritebackDetailsLoading] = useState(false);
+  const [writebackDetailsError, setWritebackDetailsError] = useState<string | null>(null);
+  const [retryingWritebackId, setRetryingWritebackId] = useState<string | null>(null);
   const [undoState, setUndoState] = useState<{
     snapshots: NotificationRestoreSnapshot[];
     focusId: string | null;
@@ -523,6 +541,45 @@ function DesktopNotificationsPage() {
     setAnnouncement(`Applied view ${view.name}.`);
   }, [replaceFilters, router]);
 
+  const loadWritebackFailures = useCallback(async () => {
+    setWritebackDetailsLoading(true);
+    setWritebackDetailsError(null);
+    try {
+      const response = await fetch('/api/notifications/writebacks');
+      if (!response.ok) throw new Error(`Writeback status HTTP ${response.status}`);
+      const result = await response.json() as { failed?: FailedWriteback[] };
+      setWritebackFailures(Array.isArray(result.failed) ? result.failed : []);
+    } catch (error) {
+      setWritebackDetailsError(
+        error instanceof Error ? error.message : 'Writeback details are unavailable',
+      );
+    } finally {
+      setWritebackDetailsLoading(false);
+    }
+  }, []);
+
+  const retryWriteback = useCallback(async (job: FailedWriteback) => {
+    setRetryingWritebackId(job.id);
+    try {
+      const response = await fetch('/api/notifications/writebacks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [job.id] }),
+      });
+      const result = await response.json() as { success?: boolean };
+      if (!response.ok || !result.success) {
+        throw new Error('This provider update is no longer retryable');
+      }
+      setAnnouncement('Provider update queued for retry.');
+      await loadWritebackFailures();
+      refreshNotifications();
+    } catch (error) {
+      setAnnouncement(error instanceof Error ? error.message : 'Could not retry provider update.');
+    } finally {
+      setRetryingWritebackId(null);
+    }
+  }, [loadWritebackFailures, refreshNotifications]);
+
   const status = hook.operationalStatus;
   const visibleStatus = status.failedWritebacks > 0
     ? `${status.failedWritebacks} writeback${status.failedWritebacks === 1 ? '' : 's'} failed`
@@ -658,6 +715,26 @@ function DesktopNotificationsPage() {
             }`}
           >
             {status.error ? 'Synchronization status unavailable' : visibleStatus}
+            {status.failedWritebacks > 0 && !status.error && (
+              <button
+                type="button"
+                aria-expanded={writebackDetailsOpen}
+                aria-controls="writeback-failure-details"
+                onClick={() => {
+                  const nextOpen = !writebackDetailsOpen;
+                  setWritebackDetailsOpen(nextOpen);
+                  if (nextOpen) void loadWritebackFailures();
+                }}
+                className="ml-2 inline-flex items-center gap-1 font-medium underline decoration-red-300/50 underline-offset-2 hover:text-red-200"
+              >
+                Review failures
+                <ChevronDown
+                  size={12}
+                  className={`transition-transform ${writebackDetailsOpen ? 'rotate-180' : ''}`}
+                  aria-hidden="true"
+                />
+              </button>
+            )}
             {undoState && (
               <button
                 type="button"
@@ -674,6 +751,81 @@ function DesktopNotificationsPage() {
               </button>
             )}
           </div>
+
+          {writebackDetailsOpen && (
+            <div
+              id="writeback-failure-details"
+              className="mt-3 rounded-lg border border-red-800/40 bg-red-950/20 p-3"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-sm font-medium text-red-200">Provider update failures</h2>
+                  <p className="mt-0.5 text-xs text-red-200/70">
+                    These local notification changes could not be applied to their source.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void loadWritebackFailures()}
+                  disabled={writebackDetailsLoading}
+                  className="inline-flex items-center gap-1 rounded-md border border-red-800/50 px-2 py-1 text-xs text-red-200 hover:bg-red-900/30 disabled:opacity-60"
+                >
+                  <RefreshCw size={11} className={writebackDetailsLoading ? 'animate-spin' : ''} />
+                  Refresh
+                </button>
+              </div>
+
+              {writebackDetailsError ? (
+                <p className="mt-3 text-xs text-red-200" role="alert">
+                  Couldn&apos;t load failure details: {writebackDetailsError}
+                </p>
+              ) : writebackDetailsLoading && writebackFailures.length === 0 ? (
+                <p className="mt-3 text-xs text-red-200/70" role="status">
+                  Loading failure details…
+                </p>
+              ) : writebackFailures.length === 0 ? (
+                <p className="mt-3 text-xs text-red-200/70">
+                  No current failures. Refresh notifications to clear the summary.
+                </p>
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {writebackFailures.map(job => (
+                    <li
+                      key={job.id}
+                      className="flex items-start justify-between gap-4 rounded-md border border-red-900/40 bg-[var(--surface-1)] px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-[var(--text-primary)]">
+                          {job.actionType.replaceAll('_', ' ')} · {job.connectorInstanceId}
+                        </p>
+                        <p className="mt-1 break-words text-xs text-red-200">
+                          {job.lastError || 'The provider did not return an error message.'}
+                        </p>
+                        <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                          Attempt {job.attemptCount} of {job.maxAttempts} ·{' '}
+                          {new Date(job.updatedAt).toLocaleString()}
+                        </p>
+                      </div>
+                      {Boolean(job.retryable) && (
+                        <button
+                          type="button"
+                          onClick={() => void retryWriteback(job)}
+                          disabled={retryingWritebackId === job.id}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-red-900/40 px-2 py-1 text-xs font-medium text-red-200 hover:bg-red-900/60 disabled:opacity-60"
+                        >
+                          <RefreshCw
+                            size={11}
+                            className={retryingWritebackId === job.id ? 'animate-spin' : ''}
+                          />
+                          Retry
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           {quickFilters.length > 0 && (
             <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Notification quick filters">

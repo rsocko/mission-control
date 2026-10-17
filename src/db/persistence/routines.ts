@@ -20,6 +20,7 @@ export interface RoutineRecord {
   cadenceType: RoutineCadenceType;
   cadenceConfig: PersistenceJson;
   icon: string | null;
+  iconColor: string | null;
   sortOrder: number;
   isActive: boolean;
   isArchived: boolean;
@@ -42,6 +43,7 @@ export interface CreateRoutineCommand {
   cadenceType: RoutineCadenceType;
   cadenceConfig: PersistenceJson;
   icon: string | null;
+  iconColor: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -52,6 +54,7 @@ export interface RoutineUpdate {
   cadenceConfig?: PersistenceJson;
   description?: string | null;
   icon?: string | null;
+  iconColor?: string | null;
   isActive?: boolean;
   isArchived?: boolean;
   sortOrder?: number;

@@ -91,11 +91,12 @@ export function prepareQuickAddTasks(
   input: string,
   pendingTasks: QuickAddPendingTask[],
   currentInputParentTaskId?: string,
+  splitCompoundTasks = true,
 ): QuickAddPendingTask[] {
   const cleanInput = normalizePendingTaskText(input.replace(/^\/\S+\s/, ''));
   if (!cleanInput) return [...pendingTasks];
 
-  const compoundParts = splitCompoundTask(cleanInput);
+  const compoundParts = splitCompoundTasks ? splitCompoundTask(cleanInput) : null;
   const currentTasks = (compoundParts && compoundParts.length >= 2 ? compoundParts : [cleanInput])
     .map((text, index): QuickAddPendingTask => ({
       id: compoundParts ? `current-${index}` : 'current',
@@ -132,6 +133,7 @@ export function planQuickAddSubmission({
   parseOptions,
   projectsLoadState,
   currentInputParentTaskId,
+  splitCompoundTasks,
 }: {
   input: string;
   pendingTasks: QuickAddPendingTask[];
@@ -141,8 +143,14 @@ export function planQuickAddSubmission({
   parseOptions?: ParseTaskInputOptions;
   projectsLoadState: QuickAddProjectLoadState;
   currentInputParentTaskId?: string;
+  splitCompoundTasks?: boolean;
 }): QuickAddSubmissionPlan {
-  const tasks = prepareQuickAddTasks(input, pendingTasks, currentInputParentTaskId);
+  const tasks = prepareQuickAddTasks(
+    input,
+    pendingTasks,
+    currentInputParentTaskId,
+    splitCompoundTasks,
+  );
   const resolvedDestination = resolveQuickAddDestination(
     destination,
     contextListId,

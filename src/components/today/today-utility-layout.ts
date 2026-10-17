@@ -1,15 +1,51 @@
-export type TodayUtilityLayout = 'dual' | 'single' | 'detail-single' | 'rail';
-
-export const TODAY_DUAL_PANEL_MIN_WIDTH = 1320;
 export const TODAY_DETAIL_PANEL_MIN_WIDTH = 1320;
 
-export function resolveTodayUtilityLayout(
+export type TodayUtilityPanel = 'plan' | 'notifications';
+
+export interface TodayUtilityPreferences {
+  planOpen: boolean;
+  notificationsOpen: boolean;
+  activePanel: TodayUtilityPanel;
+}
+
+export interface TodayUtilityVisibility {
+  plan: boolean;
+  notifications: boolean;
+  constrainedDetail: boolean;
+}
+
+export function resolveTodayUtilityVisibility(
+  preferences: TodayUtilityPreferences,
   availableWidth: number,
   detailOpen: boolean,
-): TodayUtilityLayout {
-  if (detailOpen) {
-    return availableWidth >= TODAY_DETAIL_PANEL_MIN_WIDTH ? 'detail-single' : 'rail';
+): TodayUtilityVisibility {
+  if (!detailOpen) {
+    return {
+      plan: preferences.planOpen,
+      notifications: preferences.notificationsOpen,
+      constrainedDetail: false,
+    };
   }
 
-  return availableWidth >= TODAY_DUAL_PANEL_MIN_WIDTH ? 'dual' : 'single';
+  if (availableWidth < TODAY_DETAIL_PANEL_MIN_WIDTH) {
+    return {
+      plan: false,
+      notifications: false,
+      constrainedDetail: true,
+    };
+  }
+
+  if (preferences.planOpen && preferences.notificationsOpen) {
+    return {
+      plan: preferences.activePanel === 'plan',
+      notifications: preferences.activePanel === 'notifications',
+      constrainedDetail: false,
+    };
+  }
+
+  return {
+    plan: preferences.planOpen,
+    notifications: preferences.notificationsOpen,
+    constrainedDetail: false,
+  };
 }

@@ -125,6 +125,14 @@ interface ProjectPageTaskInteractionsContextValue {
   allProjects: HubProject[];
   completingIds: Set<string>;
   myDayTaskIds: Set<string>;
+  pendingTaskRemoval: {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    variant: 'danger';
+  } | null;
+  cancelPendingTaskRemoval: () => void;
+  confirmPendingTaskRemoval: () => void;
   getTaskContextActions: (task: ProjectTask) => TaskContextMenuActions;
   handleCompleteTask: (taskId: string) => Promise<void>;
   handleAddToMyDay: (taskId: string) => Promise<void>;
@@ -430,15 +438,40 @@ export function ProjectPageProvider({
   }, [setSelectedTaskId]);
 
   const stageProjectTaskRemoval = useCallback((taskId: string) => {
-    const previousTasks = tasks;
-    const previousPhaseItems = phaseItemsByPhase;
+    const taskIndex = tasks.findIndex((task) => task.id === taskId);
+    const removedTask = taskIndex >= 0 ? tasks[taskIndex] : null;
+    const removedPhaseItems = Object.fromEntries(
+      Object.entries(phaseItemsByPhase).flatMap(([phaseId, items]) => {
+        const itemIndex = items.findIndex((item) => item.taskId === taskId);
+        return itemIndex >= 0 ? [[phaseId, { item: items[itemIndex], itemIndex }]] : [];
+      }),
+    );
     const previousSelectedTaskId = selectedTaskId;
 
     removeTaskFromView(taskId);
     return () => {
-      setTasks(previousTasks);
-      setPhaseItemsByPhase(previousPhaseItems);
-      setSelectedTaskId(previousSelectedTaskId);
+      if (removedTask) {
+        setTasks((current) => {
+          if (current.some((task) => task.id === taskId)) return current;
+          const next = [...current];
+          next.splice(Math.min(taskIndex, next.length), 0, removedTask);
+          return next;
+        });
+      }
+      setPhaseItemsByPhase((current) => {
+        const next = { ...current };
+        for (const [phaseId, removed] of Object.entries(removedPhaseItems)) {
+          const items = next[phaseId] ?? [];
+          if (items.some((item) => item.taskId === taskId)) continue;
+          const restored = [...items];
+          restored.splice(Math.min(removed.itemIndex, restored.length), 0, removed.item);
+          next[phaseId] = restored;
+        }
+        return next;
+      });
+      if (previousSelectedTaskId === taskId) {
+        setSelectedTaskId(taskId);
+      }
     };
   }, [
     phaseItemsByPhase,
@@ -455,7 +488,6 @@ export function ProjectPageProvider({
     phases,
     phaseItemsByPhase,
     projects: allProjects,
-    removeTaskFromView,
     stageProjectTaskRemoval,
     refreshProjectHierarchy,
     runHierarchyCommand,
@@ -630,6 +662,9 @@ export function ProjectPageProvider({
     allProjects,
     completingIds: taskActions.completingIds,
     myDayTaskIds: taskActions.myDayTaskIds,
+    pendingTaskRemoval: taskActions.pendingTaskRemoval,
+    cancelPendingTaskRemoval: taskActions.cancelPendingTaskRemoval,
+    confirmPendingTaskRemoval: taskActions.confirmPendingTaskRemoval,
     getTaskContextActions: taskActions.getTaskContextActions,
     handleCompleteTask: taskActions.handleCompleteTask,
     handleAddToMyDay: taskActions.handleAddToMyDay,
@@ -648,11 +683,14 @@ export function ProjectPageProvider({
     selectedTaskId,
     setSelectedTaskId,
     taskActions.completingIds,
+    taskActions.cancelPendingTaskRemoval,
+    taskActions.confirmPendingTaskRemoval,
     taskActions.getTaskContextActions,
     taskActions.handleAddToMyDay,
     taskActions.handleCompleteTask,
     taskActions.handleRemoveFromMyDay,
     taskActions.myDayTaskIds,
+    taskActions.pendingTaskRemoval,
     selectTask,
     subtasksOpenRequest,
   ]);

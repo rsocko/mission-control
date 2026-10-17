@@ -25,7 +25,14 @@ import {
   taskDispositionBlockedReason,
   taskFieldBlockedReason,
   taskRemovalConfirmation,
+  taskRemovalRequiresConfirmation,
 } from '@/lib/tasks/client-edit-policy';
+import {
+  canUndoTaskRemoval,
+  removeTask as removeTaskRequest,
+  taskRemovalResultLabel,
+  undoTaskRemoval,
+} from '@/lib/tasks/task-removal';
 import type { LocalDisposition, TaskField } from '@/types';
 import type {
   DashboardProjectViewModel as HubProject,
@@ -309,9 +316,19 @@ export function useDashboardTaskActions(
       notifyTaskChanged(taskId);
       if (data.writeBack?.attempted && !data.writeBack?.success) {
         toast.warning('Removed from My Day locally, but failed to sync to Microsoft To Do');
-      } else {
-        toast.success('Removed from My Day');
       }
+      pushUndoWithToast('Removed from My Day', async () => {
+        const restoreResponse = await fetch('/api/my-day', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId, date: getClientToday() }),
+        });
+        if (!restoreResponse.ok) throw new Error('Failed to restore task to My Day');
+        dependencies.setMyDayTaskIds((previous) => new Set(previous).add(taskId));
+        notifyTaskChanged(taskId);
+        window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
+        void optionsRef.current.fetchData(false, true);
+      });
       void optionsRef.current.fetchData(false, true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to remove task from My Day');
@@ -464,6 +481,41 @@ export function useDashboardTaskActions(
       return;
     }
     const taskIndex = dependencies.taskResponse.tasks.findIndex((candidate) => candidate.id === taskId);
+    const performRemoval = () => {
+      requestAnimationFrame(() => {
+        animateTaskExit(taskId, task.title);
+        dependencies.setTaskResponse((current) => removeTaskFromResponse(current, taskId, task));
+        void (async () => {
+          try {
+            const result = await removeTaskRequest(taskId);
+            notifyTaskChanged(taskId);
+            const label = taskRemovalResultLabel(result);
+
+            if (canUndoTaskRemoval(result)) {
+              pushUndoWithToast(label, async () => {
+                await undoTaskRemoval(taskId, result, task.localDisposition);
+                dependencies.setTaskResponse((current) =>
+                  restoreTaskToResponse(current, task, taskIndex));
+                notifyTaskChanged(taskId);
+                void optionsRef.current.fetchData(false, true);
+              });
+            } else {
+              toast.success(label);
+            }
+          } catch (error) {
+            dependencies.setTaskResponse((current) =>
+              restoreTaskToResponse(current, task, taskIndex));
+            toast.error(error instanceof Error ? error.message : 'Failed to remove task');
+          }
+        })();
+      });
+    };
+
+    if (!taskRemovalRequiresConfirmation(task.editPolicy)) {
+      performRemoval();
+      return;
+    }
+
     const confirmation = taskRemovalConfirmation(task.editPolicy, task.title);
     dependencies.setConfirmDialog({
       open: true,
@@ -471,41 +523,7 @@ export function useDashboardTaskActions(
       variant: 'danger',
       onConfirm: () => {
         dependencies.setConfirmDialog((dialog) => ({ ...dialog, open: false }));
-        requestAnimationFrame(() => {
-          animateTaskExit(taskId, task.title);
-          dependencies.setTaskResponse((current) => removeTaskFromResponse(current, taskId, task));
-          void (async () => {
-            try {
-              const response = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
-              const data = await response.json().catch(() => ({})) as {
-                error?: string;
-                restorable?: boolean;
-              };
-              if (!response.ok) throw new Error(data.error || 'Failed to delete task');
-              notifyTaskChanged(taskId);
-
-              if (data.restorable) {
-                pushUndoWithToast('Task deleted', async () => {
-                  const restore = await fetch(`/api/tasks/${taskId}/restore`, { method: 'POST' });
-                  if (!restore.ok) {
-                    const restoreData = await restore.json().catch(() => ({})) as { error?: string };
-                    throw new Error(restoreData.error || 'Failed to restore task');
-                  }
-                  dependencies.setTaskResponse((current) =>
-                    restoreTaskToResponse(current, task, taskIndex));
-                  notifyTaskChanged(taskId);
-                  void optionsRef.current.fetchData(false, true);
-                });
-              } else {
-                toast.success('Task deleted');
-              }
-            } catch (error) {
-              dependencies.setTaskResponse((current) =>
-                restoreTaskToResponse(current, task, taskIndex));
-              toast.error(error instanceof Error ? error.message : 'Failed to delete task');
-            }
-          })();
-        });
+        performRemoval();
       },
     });
   }, [animateTaskExit]);

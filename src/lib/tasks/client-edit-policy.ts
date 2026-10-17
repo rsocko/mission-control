@@ -153,6 +153,14 @@ export function taskRemovalLabel(policy: TaskEditPolicy | null | undefined): str
   }
 }
 
+export function taskRemovalRequiresConfirmation(
+  policy: TaskEditPolicy | null | undefined,
+): boolean {
+  return policy?.removalMode === 'local-cancel'
+    || policy?.removalMode === 'upstream-close'
+    || policy?.removalMode === 'upstream-delete';
+}
+
 export function taskRemovalConfirmation(
   policy: TaskEditPolicy,
   taskTitle: string,
@@ -185,7 +193,7 @@ export function taskRemovalConfirmation(
     case 'local-delete':
       return {
         title: 'Delete task?',
-        message: `This will permanently delete "${taskTitle}" from Mission Control.`,
+        message: `This will remove "${taskTitle}" from Mission Control. You can undo this briefly after deletion.`,
         confirmLabel: 'Delete task',
       };
     default:

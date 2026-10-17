@@ -147,6 +147,9 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     handleRemoveFromMyDay,
     myDayTaskIds,
     notesOpenRequest,
+    pendingTaskRemoval,
+    cancelPendingTaskRemoval,
+    confirmPendingTaskRemoval,
     subtasksOpenRequest,
     selectedTaskId,
     setDetailMode,
@@ -714,6 +717,15 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         confirmVariant={confirmation.request.variant}
         onConfirm={() => { void confirmation.request.onConfirm(closeConfirmation); }}
         onCancel={closeConfirmation}
+      />
+      <ConfirmDialog
+        open={pendingTaskRemoval !== null}
+        title={pendingTaskRemoval?.title ?? ''}
+        message={pendingTaskRemoval?.message ?? ''}
+        confirmLabel={pendingTaskRemoval?.confirmLabel ?? ''}
+        confirmVariant="danger"
+        onConfirm={confirmPendingTaskRemoval}
+        onCancel={cancelPendingTaskRemoval}
       />
     </motion.div>
 

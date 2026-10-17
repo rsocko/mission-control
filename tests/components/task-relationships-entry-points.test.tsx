@@ -258,12 +258,8 @@ describe('task relationship detail entry points', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Task details' })).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Today mobile task' }));
-    fireEvent.click(within(screen.getByRole('dialog', { name: 'Task details' })).getByRole('button', { name: 'Delete through host' }));
-    expect(mocks.deleteTask).toHaveBeenCalledWith('today-task', undefined);
-    expect(screen.queryByRole('dialog', { name: 'Task details' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open Today mobile task' }));
     const reopenedSheet = screen.getByRole('dialog', { name: 'Task details' });
+    expect(within(reopenedSheet).queryByRole('button', { name: 'Delete through host' })).not.toBeInTheDocument();
     fireEvent.click(within(reopenedSheet).getByRole('button', { name: 'Toggle My Day' }));
     expect(mocks.removeFromDay).toHaveBeenCalledWith('today-task');
     expect(screen.queryByRole('dialog', { name: 'Task details' })).not.toBeInTheDocument();

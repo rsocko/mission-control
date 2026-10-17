@@ -37,6 +37,12 @@ import {
   selectedTaskRemovalBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import { createTaskRowInteractionHandlers } from '@/lib/tasks/task-row-interactions';
+import {
+  bulkTaskRemovalLabel,
+  removeTasks,
+  undoableTaskRemovals,
+  undoTaskRemovals,
+} from '@/lib/tasks/task-removal';
 
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
@@ -1174,41 +1180,28 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
                 actions.setBulkSelected(new Set()); actions.setBulkMode(false);
                 actions.setRefreshTrigger((n) => n + 1);
                 void (async () => {
-                  const results = await Promise.all(ids.map(async (id) => {
-                    try {
-                      const response = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
-                      const body = await response.json().catch(() => ({})) as {
-                        restorable?: boolean;
-                      };
-                      return { id, ok: response.ok, restorable: body.restorable === true };
-                    } catch {
-                      return { id, ok: false, restorable: false };
-                    }
-                  }));
-                  const failed = results.filter((result) => !result.ok);
-                  const restorableIds = results
-                    .filter((result) => result.ok && result.restorable)
-                    .map((result) => result.id);
+                  const selectedTasks = state.taskResponse.tasks
+                    .filter((task) => ids.includes(task.id))
+                    .map((task) => ({
+                      id: task.id,
+                      localDisposition: task.localDisposition,
+                    }));
+                  const { succeeded, failed } = await removeTasks(selectedTasks);
+                  const undoable = undoableTaskRemovals(succeeded);
                   if (failed.length > 0) {
-                    toast.error(`Failed to delete ${failed.length} task${failed.length > 1 ? 's' : ''}`);
+                    toast.error(`Failed to remove ${failed.length} task${failed.length > 1 ? 's' : ''}`);
                   }
                   actions.setRefreshTrigger((n) => n + 1);
-                  if (restorableIds.length > 0) {
+                  if (undoable.length > 0) {
                     pushUndoWithToast(
-                      `${results.length - failed.length} task${results.length - failed.length > 1 ? 's' : ''} deleted`,
+                      bulkTaskRemovalLabel(succeeded.length, undoable.length),
                       async () => {
-                        const restores = await Promise.all(restorableIds.map((id) =>
-                          fetch(`/api/tasks/${id}/restore`, { method: 'POST' }),
-                        ));
-                        const restoreFailures = restores.filter((response) => !response.ok).length;
+                        await undoTaskRemovals(undoable);
                         actions.setRefreshTrigger((n) => n + 1);
-                        if (restoreFailures > 0) {
-                          throw new Error(`Failed to restore ${restoreFailures} task${restoreFailures > 1 ? 's' : ''}`);
-                        }
                       },
                     );
-                  } else if (failed.length < results.length) {
-                    toast.success(`${results.length - failed.length} task${results.length - failed.length > 1 ? 's' : ''} deleted`);
+                  } else if (succeeded.length > 0) {
+                    toast.success(bulkTaskRemovalLabel(succeeded.length, 0));
                   }
                 })();
               });

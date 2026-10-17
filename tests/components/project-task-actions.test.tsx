@@ -9,6 +9,7 @@ import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 const mocks = vi.hoisted(() => ({
   executeHierarchyCommand: vi.fn(),
   loadHierarchy: vi.fn(),
+  pushUndoWithToast: vi.fn(() => 'undo-entry-1'),
   toastDismiss: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
@@ -50,7 +51,7 @@ vi.mock('@/lib/hooks/useQuickAddContext', () => ({
 }));
 
 vi.mock('@/lib/stores/undoStore', () => ({
-  pushUndoWithToast: vi.fn(() => 'undo-entry-1'),
+  pushUndoWithToast: mocks.pushUndoWithToast,
   useUndoStore: {
     getState: () => ({ removeEntry: vi.fn() }),
   },
@@ -322,6 +323,9 @@ describe('project task action orchestration', () => {
         });
       }
       if (url === '/api/my-day' && !init?.method) return jsonResponse({ items: [] });
+      if (url === '/api/tasks/task-1' && init?.method === 'DELETE') {
+        return jsonResponse({ action: 'deleted', restorable: true });
+      }
       return jsonResponse();
     }));
   });
@@ -362,7 +366,7 @@ describe('project task action orchestration', () => {
     });
     expect(fetch).toHaveBeenCalledWith('/api/tasks/task-1', { method: 'DELETE' });
     expect(mocks.loadHierarchy).toHaveBeenCalledTimes(hierarchyLoadsBeforeDelete + 1);
-    expect(mocks.toastSuccess).toHaveBeenCalledWith('Task deleted');
+    expect(mocks.pushUndoWithToast).toHaveBeenCalledWith('Task deleted', expect.any(Function));
   });
 
   it('restores the complete project view when deferred removal is undone', async () => {

@@ -5,6 +5,10 @@ import type {
   TaskTag,
   WritableConnector,
 } from './task-detail-types';
+import {
+  removeTask,
+  type TaskRemovalResult,
+} from '@/lib/tasks/task-removal';
 import type { DuplicateCandidate } from './DuplicateTaskPreview';
 
 /**
@@ -102,10 +106,9 @@ export async function patchTask(
   return { ok: response.ok, data: await readJson(response) };
 }
 
-/** Permanently remove a task. Throws when the API rejects the request. */
-export async function deleteTask(taskId: string): Promise<void> {
-  const response = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
-  if (!response.ok) throw new Error('Failed to delete task');
+/** Remove a task according to its source policy. */
+export async function deleteTask(taskId: string): Promise<TaskRemovalResult> {
+  return removeTask(taskId);
 }
 
 /** Build the `/api/tags` URL for the task's tag scope and write-back support. */

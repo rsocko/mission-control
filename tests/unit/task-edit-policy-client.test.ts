@@ -8,7 +8,9 @@ import {
   taskFieldAllowedValues,
   taskFieldBlockedReason,
   taskFieldSaveLabel,
+  taskRemovalConfirmation,
   taskRemovalLabel,
+  taskRemovalRequiresConfirmation,
 } from '@/lib/tasks/client-edit-policy';
 import { makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
@@ -90,6 +92,25 @@ describe('task edit-policy client contract', () => {
 
     expect(taskFieldSaveLabel(policy, 'status')).toBe('Synced to source');
     expect(taskFieldSaveLabel(policy, 'effort')).toBe('Saved in Mission Control');
+  });
+
+  it.each([
+    ['local-delete', false],
+    ['local-dismiss', false],
+    ['local-cancel', true],
+    ['upstream-close', true],
+    ['upstream-delete', true],
+  ] as const)('requires confirmation for %s removal when it is not locally reversible', (removalMode, expected) => {
+    const policy = makeTaskEditPolicy({ removalMode });
+
+    expect(taskRemovalRequiresConfirmation(policy)).toBe(expected);
+  });
+
+  it('does not describe restorable local deletion as permanent', () => {
+    const policy = makeTaskEditPolicy({ removalMode: 'local-delete' });
+
+    expect(taskRemovalConfirmation(policy, 'Draft task').message).toContain('undo');
+    expect(taskRemovalConfirmation(policy, 'Draft task').message).not.toContain('permanent');
   });
 
   it('fails closed when a policy is missing and blocks mixed bulk fields', () => {

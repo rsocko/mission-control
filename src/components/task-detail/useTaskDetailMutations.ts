@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from '@/lib/toast';
+import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import { taskLogger } from '@/lib/client-logger';
 import { getLocalToday } from '@/lib/utils/client-date';
 import type { MyDayItemAddedEventDetail } from '@/components/today/types';
@@ -14,7 +15,13 @@ import {
   taskDispositionBlockedReason,
   taskFieldBlockedReason,
   taskRemovalConfirmation,
+  taskRemovalRequiresConfirmation,
 } from '@/lib/tasks/client-edit-policy';
+import {
+  canUndoTaskRemoval,
+  taskRemovalResultLabel,
+  undoTaskRemoval,
+} from '@/lib/tasks/task-removal';
 import {
   executeProjectHierarchyCommand,
   ProjectHierarchyClientError,
@@ -465,23 +472,39 @@ export function useTaskDetailMutations({
       void onDelete();
       return;
     }
+    const performRemoval = () => {
+      void (async () => {
+        try {
+          const result = await deleteTaskRequest(task.id);
+          const label = taskRemovalResultLabel(result);
+          if (canUndoTaskRemoval(result)) {
+            pushUndoWithToast(label, async () => {
+              await undoTaskRemoval(task.id, result, task.localDisposition);
+              onUpdate?.();
+              notifyNavigationCountsChanged();
+            });
+          } else {
+            toast.success(label);
+          }
+          onUpdate?.();
+          notifyNavigationCountsChanged();
+          onClose('task-removed');
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Failed to remove task');
+        }
+      })();
+    };
+
+    if (!taskRemovalRequiresConfirmation(task.editPolicy)) {
+      performRemoval();
+      return;
+    }
+
     const confirmation = taskRemovalConfirmation(task.editPolicy, task.title);
     requestConfirm({
       ...confirmation,
       variant: 'danger',
-      onConfirm: () => {
-        void (async () => {
-          try {
-            await deleteTaskRequest(task.id);
-            toast.success('Task deleted');
-            onUpdate?.();
-            notifyNavigationCountsChanged();
-            onClose('task-removed');
-          } catch {
-            toast.error('Failed to delete task');
-          }
-        })();
-      },
+      onConfirm: performRemoval,
     });
   }, [onClose, onDelete, onUpdate, requestConfirm, task]);
 

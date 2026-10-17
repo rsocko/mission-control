@@ -1,37 +1,24 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Check, Sparkles, X } from 'lucide-react';
+import { Check, Sparkles } from 'lucide-react';
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { EffortSelect } from '@/components/EffortBadge';
+import { PrioritySelect } from '@/components/PriorityBadge';
+import { ProjectSelect } from '@/components/projects/ProjectSelect';
+import { TagPickerMenu, TagPill } from '@/components/tags/TagPickerMenu';
 import type { QuickSortSuggestion } from '@/lib/hooks/useQuickSortData';
 import {
   getQuickAddSuggestionConfidenceBand,
   type QuickAddSuggestionField,
 } from '@/lib/quick-add/submission';
 import { cn } from '@/lib/utils';
-
-const PRIORITIES = [
-  { value: 'critical', label: 'P0 · Critical' },
-  { value: 'high', label: 'P1 · High' },
-  { value: 'medium', label: 'P2 · Medium' },
-  { value: 'low', label: 'P3 · Low' },
-] as const;
-
-const EFFORTS = [
-  { value: 1, label: 'XS' },
-  { value: 2, label: 'S' },
-  { value: 3, label: 'M' },
-  { value: 4, label: 'L' },
-  { value: 5, label: 'XL' },
-] as const;
 
 const EMPTY_SELECT_VALUE = '__none__';
 
@@ -54,16 +41,17 @@ interface ReviewTag {
   id: string;
   name: string;
   confidence: number;
+  color?: string | null;
 }
 
 interface QuickAddSuggestionReviewProps {
   suggestion: QuickSortSuggestion;
   taskTitle: string;
   projects: QuickAddReviewProject[];
-  availableTags: Array<{ id: string; name: string; slug: string }>;
+  availableTags: Array<{ id: string; name: string; slug: string; color?: string | null }>;
   blockedReasons?: Partial<Record<'priority' | 'effort' | 'tags' | 'projects' | 'phases', string>>;
   applying: boolean;
-  onAvailableTagsChange: (tags: Array<{ id: string; name: string; slug: string }>) => void;
+  onAvailableTagsChange: (tags: Array<{ id: string; name: string; slug: string; color?: string | null }>) => void;
   onApply: (selection: QuickAddSuggestionSelection) => Promise<void>;
   onSkip: () => void;
 }
@@ -206,7 +194,10 @@ export function QuickAddSuggestionReview({
     && initialPhaseSuggestion
     && defaultSelected('phase', initialPhaseSuggestion.confidence),
   ));
-  const [tags, setTags] = useState<ReviewTag[]>(suggestion.tags);
+  const [tags, setTags] = useState<ReviewTag[]>(() => suggestion.tags.map((tag) => ({
+    ...tag,
+    color: availableTags.find((candidate) => candidate.id === tag.id)?.color,
+  })));
   const [selectedTagIds, setSelectedTagIds] = useState(() => new Set(
     suggestion.tags
       .filter((tag) => defaultSelected('tag', tag.confidence))
@@ -233,16 +224,6 @@ export function QuickAddSuggestionReview({
     || getQuickAddSuggestionConfidenceBand('tag', tag.confidence) !== 'low'
   ));
   const hiddenTagCount = tags.length - visibleTags.length;
-  const matchingTags = availableTags
-    .filter((tag) => !tags.some((candidate) => candidate.id === tag.id))
-    .filter((tag) => (
-      !tagQuery.trim()
-      || tag.name.toLowerCase().includes(tagQuery.trim().toLowerCase())
-    ))
-    .slice(0, 6);
-  const canCreateTag = tagQuery.trim().length > 0
-    && !availableTags.some((tag) => tag.name.toLowerCase() === tagQuery.trim().toLowerCase());
-
   const effectivePrioritySelected = prioritySelected && !blockedReasons.priority;
   const effectiveEffortSelected = effortSelected && !blockedReasons.effort;
   const effectiveProjectSelected = projectSelected && !blockedReasons.projects;
@@ -311,8 +292,13 @@ export function QuickAddSuggestionReview({
     }
   };
 
-  const addExistingTag = (tag: { id: string; name: string; slug: string }) => {
-    setTags((current) => [...current, { id: tag.id, name: tag.name, confidence: 1 }]);
+  const addExistingTag = (tag: { id: string; name: string; slug?: string; color?: string | null }) => {
+    setTags((current) => [...current, {
+      id: tag.id,
+      name: tag.name,
+      confidence: 1,
+      color: tag.color,
+    }]);
     setSelectedTagIds((current) => new Set(current).add(tag.id));
     setTagQuery('');
     setShowTagPicker(false);
@@ -331,7 +317,12 @@ export function QuickAddSuggestionReview({
       const payload = await response.json().catch(() => null) as { error?: string } | null;
       throw new Error(payload?.error ?? 'Failed to create tag');
     }
-    const tag = await response.json() as { id: string; name: string; slug: string };
+    const tag = await response.json() as {
+      id: string;
+      name: string;
+      slug: string;
+      color?: string | null;
+    };
     onAvailableTagsChange([...availableTags.filter((candidate) => candidate.id !== tag.id), tag]);
     addExistingTag(tag);
   };
@@ -368,19 +359,17 @@ export function QuickAddSuggestionReview({
               onChange={() => setPrioritySelected((selected) => !selected)}
             />
             <span className="w-14 shrink-0 text-[11px] font-medium text-[var(--text-muted)]">Priority</span>
-            <SelectControl
-              value={priority}
-              label="Suggested priority"
+            <PrioritySelect
+              priority={priority}
+              includeNone={false}
+              ariaLabel="Suggested priority"
               disabled={Boolean(blockedReasons.priority)}
+              triggerClassName="h-8 min-h-0 max-w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2.5 py-1 text-xs"
               onChange={(value) => {
                 setPriority(value);
                 setPrioritySelected(true);
               }}
-            >
-              {PRIORITIES.map((option) => (
-                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-              ))}
-            </SelectControl>
+            />
             <span className="ml-auto hidden truncate text-[11px] text-[var(--text-muted)] md:block">
               {prioritySuggestion.reason} · {confidenceLabel('priority', prioritySuggestion.confidence)}
             </span>
@@ -396,19 +385,18 @@ export function QuickAddSuggestionReview({
               onChange={() => setEffortSelected((selected) => !selected)}
             />
             <span className="w-14 shrink-0 text-[11px] font-medium text-[var(--text-muted)]">Effort</span>
-            <SelectControl
-              value={String(effort)}
-              label="Suggested effort"
+            <EffortSelect
+              effort={effort}
+              includeNone={false}
+              ariaLabel="Suggested effort"
               disabled={Boolean(blockedReasons.effort)}
+              triggerClassName="h-8 min-h-0 max-w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2.5 py-1 text-xs"
               onChange={(value) => {
-                setEffort(Number(value));
+                if (value == null) return;
+                setEffort(value);
                 setEffortSelected(true);
               }}
-            >
-              {EFFORTS.map((option) => (
-                <SelectItem key={option.value} value={String(option.value)}>{option.label}</SelectItem>
-              ))}
-            </SelectControl>
+            />
             <span className="ml-auto hidden truncate text-[11px] text-[var(--text-muted)] md:block">
               {effortSuggestion.reason} · {confidenceLabel('effort', effortSuggestion.confidence)}
             </span>
@@ -424,11 +412,16 @@ export function QuickAddSuggestionReview({
               onChange={() => setProjectSelected((selected) => !selected)}
             />
             <span className="w-14 shrink-0 text-[11px] font-medium text-[var(--text-muted)]">Project</span>
-            <SelectControl
+            <ProjectSelect
               value={projectId}
-              label="Project"
+              projects={projects}
+              suggestedProjectIds={suggestion.projects.map((project) => project.id)}
+              includeEmptyOption
+              emptyLabel="No project"
+              ariaLabel="Project"
               disabled={Boolean(blockedReasons.projects)}
-              onChange={(value) => {
+              triggerClassName="max-w-52"
+              onValueChange={(value) => {
                 setProjectId(value);
                 setProjectSelected(Boolean(value));
                 const nextProject = projects.find((project) => project.id === value);
@@ -438,25 +431,7 @@ export function QuickAddSuggestionReview({
                   nextPhase && defaultSelected('phase', nextPhase.confidence),
                 ));
               }}
-            >
-              <SelectItem value={EMPTY_SELECT_VALUE}>No project</SelectItem>
-              {suggestion.projects.length > 0 && (
-                <SelectGroup>
-                  <SelectLabel>Suggested</SelectLabel>
-                  {suggestion.projects.map((project) => (
-                    <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
-                  ))}
-                </SelectGroup>
-              )}
-              <SelectGroup>
-                <SelectLabel>All projects</SelectLabel>
-                {projects
-                  .filter((project) => !suggestion.projects.some((candidate) => candidate.id === project.id))
-                  .map((project) => (
-                    <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
-                  ))}
-              </SelectGroup>
-            </SelectControl>
+            />
             {projectSuggestion && projectId === projectSuggestion.id && (
               <span className="hidden truncate text-[11px] text-[var(--text-muted)] md:block">
                 {projectSuggestion.reason} · {confidenceLabel('project', projectSuggestion.confidence)}
@@ -501,36 +476,18 @@ export function QuickAddSuggestionReview({
             {visibleTags.map((tag) => {
               const selected = selectedTagIds.has(tag.id);
               return (
-                <span
+                <TagPill
                   key={tag.id}
-                  className={cn(
-                    'inline-flex h-7 items-center rounded-md border text-[11px] font-medium transition-colors',
-                    selected
-                      ? 'border-purple-500/50 bg-purple-500/15 text-purple-200'
-                      : 'border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]',
-                  )}
-                >
-                  <button
-                    data-suggestion-control
-                    type="button"
-                    disabled={Boolean(blockedReasons.tags)}
-                    aria-pressed={selected}
-                    onClick={() => setSelectedTagIds((current) => {
+                  tag={tag}
+                  selected={selected}
+                  disabled={Boolean(blockedReasons.tags)}
+                  onToggle={() => setSelectedTagIds((current) => {
                       const next = new Set(current);
                       if (next.has(tag.id)) next.delete(tag.id);
                       else next.add(tag.id);
                       return next;
                     })}
-                    className="inline-flex h-full items-center gap-1 rounded-l-md pl-2 pr-1 hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {selected && <Check size={11} />}
-                    {tag.name}
-                  </button>
-                  <button
-                    data-suggestion-control
-                    type="button"
-                    aria-label={`Remove ${tag.name}`}
-                    onClick={() => {
+                  onRemove={() => {
                       setTags((current) => current.filter((candidate) => candidate.id !== tag.id));
                       setSelectedTagIds((current) => {
                         const next = new Set(current);
@@ -538,11 +495,7 @@ export function QuickAddSuggestionReview({
                         return next;
                       });
                     }}
-                    className="flex h-full items-center rounded-r-md px-1.5 hover:bg-purple-500/10 hover:text-[var(--text-primary)]"
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
+                />
               );
             })}
             {hiddenTagCount > 0 && (
@@ -555,54 +508,23 @@ export function QuickAddSuggestionReview({
                 +{hiddenTagCount} more
               </button>
             )}
-            <button
-              data-suggestion-control
-              data-enter-native
-              type="button"
+            <TagPickerMenu
+              open={showTagPicker}
+              onOpenChange={setShowTagPicker}
+              tags={availableTags}
+              selectedTagIds={tags.map((tag) => tag.id)}
+              query={tagQuery}
+              onQueryChange={setTagQuery}
+              onSelect={addExistingTag}
+              allowCreate
+              onCreate={() => void createTag().catch((error) => {
+                setTagError(error instanceof Error ? error.message : 'Failed to create tag');
+              })}
               disabled={Boolean(blockedReasons.tags)}
-              onClick={() => setShowTagPicker((open) => !open)}
-              className="h-7 rounded-md border border-dashed border-[var(--border)] px-2 text-[11px] text-[var(--text-muted)] hover:border-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              + Add tag
-            </button>
-            {showTagPicker && (
-              <div className="absolute left-20 top-10 z-20 w-64 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2 shadow-[var(--shadow-lg)]">
-                <input
-                  autoFocus
-                  value={tagQuery}
-                  onChange={(event) => setTagQuery(event.target.value)}
-                  onKeyDown={(event) => event.stopPropagation()}
-                  placeholder="Search or create tag…"
-                  className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2.5 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--border-focus)]"
-                />
-                {tagError && (
-                  <p className="px-2 pt-1.5 text-[11px] text-red-300">{tagError}</p>
-                )}
-                <div className="mt-1 max-h-36 overflow-y-auto">
-                  {matchingTags.map((tag) => (
-                    <button
-                      key={tag.id}
-                      type="button"
-                      onClick={() => addExistingTag(tag)}
-                      className="block w-full rounded px-2 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
-                    >
-                      {tag.name}
-                    </button>
-                  ))}
-                  {canCreateTag && (
-                    <button
-                      type="button"
-                      onClick={() => void createTag().catch((error) => {
-                        setTagError(error instanceof Error ? error.message : 'Failed to create tag');
-                      })}
-                      className="block w-full rounded px-2 py-1.5 text-left text-xs font-medium text-[var(--accent-400)] hover:bg-[var(--surface-2)]"
-                    >
-                      Create “{tagQuery.trim()}”
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
+              error={tagError}
+              triggerLabel="Add tag"
+              triggerClassName="rounded-md bg-transparent text-[11px]"
+            />
           </div>
         )}
       </div>

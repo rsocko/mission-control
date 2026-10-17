@@ -7,7 +7,11 @@ import {
   SelectItem,
   SelectValue,
 } from '@/components/ui/select';
-import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
+import { cn } from '@/lib/utils';
+import {
+  getTaskPriorityVisual,
+  TASK_PRIORITY_VISUALS,
+} from '@/lib/constants/task-formatting';
 
 /**
  * PriorityBadge — Displays P0–P3 priority labels with color coding.
@@ -49,20 +53,49 @@ interface PrioritySelectProps {
   priority: string;
   onChange: (newPriority: string) => void;
   disabled?: boolean;
+  allowedPriorities?: readonly string[];
+  includeNone?: boolean;
+  ariaLabel?: string;
+  title?: string;
+  triggerClassName?: string;
+  labelStyle?: 'full' | 'name';
 }
 
-export function PrioritySelect({ priority, onChange, disabled }: PrioritySelectProps) {
+export function PrioritySelect({
+  priority,
+  onChange,
+  disabled,
+  allowedPriorities,
+  includeNone = true,
+  ariaLabel = 'Task priority',
+  title = 'Change priority',
+  triggerClassName,
+  labelStyle = 'full',
+}: PrioritySelectProps) {
+  const options = Object.entries(TASK_PRIORITY_VISUALS)
+    .filter(([value]) => includeNone || value !== 'none')
+    .filter(([value]) => !allowedPriorities || allowedPriorities.includes(value));
+
   return (
     <Select value={priority} onValueChange={(v) => onChange(v)} disabled={disabled}>
-      <SelectTrigger className="text-xs border border-[var(--border-strong)] rounded px-1.5 py-0.5 bg-[var(--surface-2)] text-[var(--text-primary)] w-auto" title="Change priority">
+      <SelectTrigger
+        aria-label={ariaLabel}
+        variant="inline"
+        className={cn(
+          'w-auto',
+          getTaskPriorityVisual(priority).textClass,
+          triggerClassName,
+        )}
+        title={title}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="none">— None</SelectItem>
-        <SelectItem value="critical">P0 · Critical</SelectItem>
-        <SelectItem value="high">P1 · High</SelectItem>
-        <SelectItem value="medium">P2 · Medium</SelectItem>
-        <SelectItem value="low">P3 · Low</SelectItem>
+        {options.map(([value, visual]) => (
+          <SelectItem key={value} value={value} className={visual.textClass}>
+            {labelStyle === 'full' ? `${visual.shortLabel} · ${visual.label}` : visual.label}
+          </SelectItem>
+        ))}
       </SelectContent>
     </Select>
   );

@@ -1411,6 +1411,12 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(screen.getByText('Work')).toBeInTheDocument();
     expect(screen.getByText('Uncategorized')).toBeInTheDocument();
 
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search projects' }), {
+      target: { value: 'work' },
+    });
+    expect(screen.getByRole('option', { name: 'Work project' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Personal project' })).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('option', { name: /Work project/ }));
     expect(JSON.parse(localStorage.getItem('mission-control:recent-project-targets') ?? '[]')).toEqual([
       'project-work',

@@ -1,22 +1,10 @@
 'use client';
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Check, ChevronDown, Clock, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react';
-import {
-  Select,
-  SelectGroup,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectLabel,
-  SelectSeparator,
-} from '@/components/ui/select';
+import { Check, ChevronDown, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react';
 import { IconRenderer } from '@rsocko/icon-picker/renderer';
+import { ProjectSelect } from '@/components/projects/ProjectSelect';
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
-import {
-  groupProjectTargets,
-  saveRecentProjectTarget,
-} from '@/lib/projects/project-targets';
 import { cn } from '@/lib/utils';
 import { taskPhaseInProject } from './useTaskDetailData';
 import type { HubProject, TaskDetailMode } from './task-detail-types';
@@ -63,23 +51,9 @@ export function TaskProjectAssignmentSection({
 }: TaskProjectAssignmentSectionProps) {
   const allProjectsAdded = assignableProjects.every((project) => projectIds.includes(project.id));
   const availableProjects = assignableProjects.filter((project) => !projectIds.includes(project.id));
-  const { recentProjects, categories } = groupProjectTargets(availableProjects);
 
   function handleAddProject(projectId: string) {
-    saveRecentProjectTarget(projectId);
     onAddProject(projectId);
-  }
-
-  function renderProject(project: HubProject, recent = false) {
-    return (
-      <SelectItem key={project.id} value={project.id}>
-        <span className="inline-flex items-center gap-1.5">
-          {recent && <Clock size={11} className="shrink-0 text-[var(--text-muted)]" />}
-          <IconRenderer value={project.icon} size={14} color={project.color} fallback={<span>📁</span>} />
-          {project.name}
-        </span>
-      </SelectItem>
-    );
   }
 
   return (
@@ -91,44 +65,21 @@ export function TaskProjectAssignmentSection({
     )}>
       <div className="flex min-h-11 items-center justify-between border-b border-[var(--border-subtle)] px-3">
         <h3 className="text-sm font-semibold text-[var(--text-heading)]">Projects &amp; phases</h3>
-        <Select
+        <ProjectSelect
           value=""
+          projects={availableProjects}
           onValueChange={handleAddProject}
+          ariaLabel="Add project"
           disabled={!canEditProjects || allProjectsAdded}
-        >
-          <SelectTrigger
-            aria-label="Add project"
-            variant="inline"
-            className="min-h-8"
-            title={!canEditProjects
-              ? projectsBlockedReason
-              : allProjectsAdded
-                ? 'All projects added'
-                : projectsSaveLabel}
-          >
-            <span className="flex items-center gap-1"><Plus size={11} />Add project</span>
-          </SelectTrigger>
-          <SelectContent>
-            {recentProjects.length > 0 && (
-              <>
-                <SelectGroup>
-                  <SelectLabel className="text-xs uppercase tracking-wider">Recent</SelectLabel>
-                  {recentProjects.map((project) => renderProject(project, true))}
-                </SelectGroup>
-                <SelectSeparator />
-              </>
-            )}
-            {categories.map(({ category, projects: categoryProjects }, index) => (
-              <SelectGroup key={category || '__uncategorized'}>
-                {index > 0 && <SelectSeparator />}
-                <SelectLabel className="text-xs uppercase tracking-wider">
-                  {category || 'Uncategorized'}
-                </SelectLabel>
-                {categoryProjects.map((project) => renderProject(project))}
-              </SelectGroup>
-            ))}
-          </SelectContent>
-        </Select>
+          emptyLabel="Add project"
+          triggerPrefix={<Plus size={11} aria-hidden="true" />}
+          triggerClassName="min-h-8 border-transparent bg-transparent text-[var(--text-secondary)] hover:border-transparent hover:bg-[var(--surface-2)]"
+          title={!canEditProjects
+            ? projectsBlockedReason
+            : allProjectsAdded
+              ? 'All projects added'
+              : projectsSaveLabel}
+        />
       </div>
       <div className="space-y-2 p-3">
         {projectIds.length === 0 ? (

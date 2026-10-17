@@ -2,19 +2,15 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Check, CheckSquare, Clock, FileText, Link2, Repeat, ChevronDown, Maximize2, Minimize2, ClipboardList, Search, X } from 'lucide-react';
+import { CheckSquare, Clock, FileText, Link2, Repeat, ChevronDown, Maximize2, Minimize2, ClipboardList, Search, X } from 'lucide-react';
 import Image from 'next/image';
-import {
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectValue,
-} from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { PlanningHorizonFieldLabel, PlanningHorizonOption } from '@/components/PlanningHorizonVisuals';
-import { IconRenderer } from '@rsocko/icon-picker/renderer';
-import { getTagPillStyle, CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
+import { PlanningHorizonFieldLabel, PlanningHorizonSelect } from '@/components/PlanningHorizonVisuals';
+import { PrioritySelect } from '@/components/PriorityBadge';
+import { ProjectSelect } from '@/components/projects/ProjectSelect';
+import { TagPickerMenu, TagPill } from '@/components/tags/TagPickerMenu';
+import { DurationPicker } from '@/components/task-detail/DurationPicker';
+import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { modalOverlay, modalContent } from '@/lib/motion';
 import { ParsedTask, parseTaskInputForSubmission } from '@/lib/parse-task-input';
 import RecurrencePicker from '@/components/ui/RecurrencePicker';
@@ -30,7 +26,6 @@ import {
 } from '@/lib/quick-add-preferences';
 import type { QuickAddDestination } from './quick-add-types';
 import type { PlanningHorizon } from '@/types';
-import { PLANNING_HORIZONS } from '@/lib/tasks/planning-horizon';
 import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 import {
   groupSourceLists,
@@ -196,7 +191,6 @@ export function AddTaskModal({
   );
   const titleRef = useRef<HTMLInputElement>(null);
   const descRef = useRef<HTMLTextAreaElement>(null);
-  const tagInputRef = useRef<HTMLInputElement>(null);
   const listDropdownRef = useRef<HTMLDivElement>(null);
   const submitInFlightRef = useRef(false);
   const captureSemantics = useMemo(() => {
@@ -812,42 +806,21 @@ export function AddTaskModal({
             <div className="space-y-3">
               <div>
               <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Priority</label>
-              <Select value={priority} onValueChange={(v) => setPriority(v)}>
-                <SelectTrigger className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">⚪ None</SelectItem>
-                  <SelectItem value="low">🟡 Low</SelectItem>
-                  <SelectItem value="medium">🟠 Medium</SelectItem>
-                  <SelectItem value="high">🔴 High</SelectItem>
-                  <SelectItem value="critical">🔥 Critical</SelectItem>
-                </SelectContent>
-              </Select>
+              <PrioritySelect
+                priority={priority}
+                onChange={setPriority}
+                ariaLabel="Priority"
+                labelStyle="name"
+                triggerClassName="min-h-9 w-full justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-xs"
+              />
               </div>
               <div>
                 <PlanningHorizonFieldLabel className="mb-1 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]" />
-                <Select
-                  value={planningHorizon ?? 'none'}
-                  onValueChange={(value) => setPlanningHorizon(
-                    value === 'none' ? null : value as PlanningHorizon,
-                  )}
-                >
-                  <SelectTrigger
-                    aria-label="Horizon"
-                    className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]"
-                  >
-                    <PlanningHorizonOption value={planningHorizon} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none"><PlanningHorizonOption value={null} /></SelectItem>
-                    {PLANNING_HORIZONS.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        <PlanningHorizonOption value={value} />
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <PlanningHorizonSelect
+                  value={planningHorizon}
+                  onChange={setPlanningHorizon}
+                  triggerClassName="min-h-9 w-full justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-xs text-[var(--text-primary)]"
+                />
               </div>
             </div>
 
@@ -858,6 +831,7 @@ export function AddTaskModal({
                 <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Effort</label>
                 <EffortSelect
                   effort={effort}
+                  triggerClassName="min-h-9 w-full justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-xs"
                   onChange={(newEffort) => {
                     setEffort(newEffort);
                     if (newEffort && !estimatedDuration && EFFORT_TO_DURATION[newEffort]) {
@@ -878,28 +852,18 @@ export function AddTaskModal({
                     </span>
                   )}
                 </label>
-                <div className="flex gap-1 flex-wrap">
-                  {[15, 30, 60, 120, 240, 480, 1440, 2400].map(d => (
-                    <button
-                      key={d}
-                      type="button"
-                      onClick={() => {
-                        const newDuration = estimatedDuration === d ? null : d;
-                        setEstimatedDuration(newDuration);
-                        if (newDuration && !effort) {
-                          const suggested = durationToEffort(newDuration);
-                          if (suggested) setEffort(suggested);
-                        }
-                      }}
-                      className={`px-2 py-1.5 text-xs rounded-md border transition-colors ${
-                        estimatedDuration === d
-                          ? 'border-blue-400 bg-blue-900/30 text-blue-300 font-medium'
-                          : 'border-[var(--border)] bg-[var(--surface-0)] text-[var(--text-tertiary)] hover:bg-[var(--surface-2)]'
-                      }`}
-                    >
-                      {d >= 2400 ? '1w' : d >= 480 ? `${Math.floor(d / 480)}d` : d >= 60 ? `${d / 60}h` : `${d}m`}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center gap-1">
+                  <DurationPicker
+                    value={estimatedDuration}
+                    onChange={(newDuration) => {
+                      setEstimatedDuration(newDuration);
+                      if (newDuration && !effort) {
+                        const suggested = durationToEffort(newDuration);
+                        if (suggested) setEffort(suggested);
+                      }
+                    }}
+                    className="flex-wrap"
+                  />
                   <input
                     type="number"
                     min="1"
@@ -973,91 +937,36 @@ export function AddTaskModal({
             {/* Hub Project */}
             <div>
               <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Project</label>
-              <Select value={selectedProjectId} onValueChange={(v) => setSelectedProjectId(v)}>
-                <SelectTrigger className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">— None —</SelectItem>
-                  {projects.map(p => (
-                    <SelectItem key={p.id} value={p.id}>
-                      <span className="inline-flex items-center gap-1.5">
-                        <IconRenderer value={p.icon} size={14} color={p.color} fallback={<span>📁</span>} />
-                        {p.name}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <ProjectSelect
+                value={selectedProjectId}
+                projects={projects}
+                onValueChange={setSelectedProjectId}
+                ariaLabel="Project"
+                includeEmptyOption
+                emptyLabel="No project"
+                triggerClassName="min-h-9 w-full rounded-lg px-3 py-2"
+              />
             </div>
 
-            {/* Tags — type-ahead */}
-            <div className="relative">
+            {/* Tags */}
+            <div>
               <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Tags</label>
-              <input
-                ref={tagInputRef}
-                type="text"
-                value={tagSearchQuery}
-                onChange={(e) => {
-                  setTagSearchQuery(e.target.value);
-                  setShowTagDropdown(true);
+              <TagPickerMenu
+                open={showTagDropdown}
+                onOpenChange={setShowTagDropdown}
+                tags={availableTags.filter((tag) => !isSyntheticTag(tag.name))}
+                selectedTagIds={selectedTags.map((tag) => tag.id)}
+                query={tagSearchQuery}
+                onQueryChange={setTagSearchQuery}
+                onSelect={(tag) => {
+                  const selectedTag = availableTags.find((candidate) => candidate.id === tag.id);
+                  if (selectedTag) setSelectedTags((current) => [...current, selectedTag]);
+                  setTagSearchQuery('');
                 }}
-                onFocus={() => setShowTagDropdown(true)}
-                onBlur={() => setTimeout(() => setShowTagDropdown(false), 200)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && tagSearchQuery.trim()) {
-                    e.preventDefault();
-                    const filtered = availableTags.filter(t =>
-                      !selectedTags.find(st => st.id === t.id) &&
-                      !isSyntheticTag(t.name) &&
-                      t.name.toLowerCase().includes(tagSearchQuery.toLowerCase())
-                    );
-                    if (filtered.length > 0) {
-                      setSelectedTags([...selectedTags, filtered[0]]);
-                      setTagSearchQuery('');
-                      setShowTagDropdown(false);
-                      // Keep focus on input for rapid tagging
-                      setTimeout(() => tagInputRef.current?.focus(), 0);
-                    }
-                  }
-                  if (e.key === 'Backspace' && !tagSearchQuery && selectedTags.length > 0) {
-                    setSelectedTags(selectedTags.slice(0, -1));
-                  }
-                }}
-                placeholder="Search tags..."
-                className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none"
+                loading={tagsLoading}
+                triggerLabel="Select tags"
+                triggerClassName="min-h-9 w-full justify-start rounded-lg border-solid bg-[var(--surface-0)] px-3 py-2"
               />
-              {showTagDropdown && (() => {
-                const filtered = availableTags.filter(t =>
-                  !selectedTags.find(st => st.id === t.id) &&
-                  !isSyntheticTag(t.name) &&
-                  (!tagSearchQuery || t.name.toLowerCase().includes(tagSearchQuery.toLowerCase()))
-                );
-                if (filtered.length === 0) return null;
-                return (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface-1)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] z-10 max-h-40 overflow-y-auto">
-                    {filtered.map(t => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          setSelectedTags([...selectedTags, t]);
-                          setTagSearchQuery('');
-                          setShowTagDropdown(false);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-[var(--surface-0)] transition-colors"
-                      >
-                        <span
-                          className="inline-block h-2 w-2 flex-shrink-0 rounded-full bg-[var(--text-muted)]"
-                          style={t.color ? { backgroundColor: t.color } : undefined}
-                        />
-                        <span className="text-[var(--text-secondary)]">{t.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                );
-              })()}
             </div>
           </div>
 
@@ -1065,17 +974,11 @@ export function AddTaskModal({
           {selectedTags.length > 0 && (
             <div className="flex gap-1.5 flex-wrap">
               {selectedTags.map(tag => (
-                <span
+                <TagPill
                   key={tag.id}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium"
-                  style={getTagPillStyle(tag.color)}
-                >
-                  {tag.name}
-                  <button
-                    onClick={() => setSelectedTags(selectedTags.filter(t => t.id !== tag.id))}
-                    className="opacity-60 hover:opacity-100"
-                  ><X size={10} /></button>
-                </span>
+                  tag={tag}
+                  onRemove={() => setSelectedTags(selectedTags.filter((candidate) => candidate.id !== tag.id))}
+                />
               ))}
             </div>
           )}

@@ -18,6 +18,8 @@ import {
   Orbit,
   ShieldCheck,
   Coins,
+  ChevronDown,
+  PinOff,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
@@ -31,6 +33,13 @@ import {
   type NavBadgeTone,
   type NavigationCounts,
 } from '@/lib/navigation/badges';
+import { useTaskShortcuts } from '@/lib/hooks/useTaskShortcuts';
+import {
+  buildTaskShortcutHref,
+  recordRecentTaskShortcut,
+  type TaskShortcut,
+} from '@/lib/navigation/task-shortcuts';
+import { TaskShortcutIcon } from '@/components/layout/TaskShortcutsNavItem';
 
 interface DrawerNavItem {
   href: string;
@@ -56,6 +65,62 @@ const drawerNavItems: DrawerNavItem[] = [
   { href: '/settings', label: 'Settings', icon: Settings, iconColor: 'text-slate-400' },
 ];
 
+function MobileTaskShortcutSection({
+  label,
+  shortcuts,
+  empty,
+  pinned = false,
+  onNavigate,
+  onUnpin,
+}: {
+  label: string;
+  shortcuts: TaskShortcut[];
+  empty: string;
+  pinned?: boolean;
+  onNavigate: () => void;
+  onUnpin?: (shortcut: TaskShortcut) => boolean;
+}) {
+  return (
+    <div className="py-1">
+      <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+        {label}
+      </p>
+      {shortcuts.length === 0 ? (
+        <p className="px-3 py-1.5 text-xs leading-5 text-[var(--text-muted)]">{empty}</p>
+      ) : shortcuts.map((shortcut) => (
+        <div key={shortcut.id} className="flex items-center rounded-lg">
+          <Link
+            href={buildTaskShortcutHref(shortcut)}
+            onClick={() => {
+              recordRecentTaskShortcut(shortcut);
+              onNavigate();
+            }}
+            className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2.5 rounded-lg px-3 text-sm text-[var(--text-secondary)] active:bg-[var(--surface-2)]"
+          >
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <TaskShortcutIcon shortcut={shortcut} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{shortcut.label}</span>
+              <span className="block truncate text-xs text-[var(--text-muted)]">{shortcut.detail}</span>
+            </span>
+          </Link>
+          {pinned && onUnpin ? (
+            <button
+              type="button"
+              onClick={() => onUnpin(shortcut)}
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-[var(--text-muted)] active:bg-[var(--surface-2)]"
+              aria-label={`Unpin ${shortcut.label}`}
+            >
+              <PinOff size={15} />
+            </button>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export interface MobileDrawerProps {
   isOpen: boolean;
   onClose: () => void;
@@ -79,6 +144,11 @@ export function MobileDrawer({
   const hasOpenedRef = useRef(false);
   const prefersReducedMotion = useReducedMotion();
   const { preferences } = useNavigationBadgePreferences();
+  const { pinned, recent, pinnedIds, togglePinned } = useTaskShortcuts();
+  const [taskShortcutsOpen, setTaskShortcutsOpen] = useState(
+    () => pathname.startsWith('/all-tasks'),
+  );
+  const unpinnedRecent = recent.filter((shortcut) => !pinnedIds.has(shortcut.id));
 
   useEffect(() => {
     if (isOpen) hasOpenedRef.current = true;
@@ -254,6 +324,63 @@ export function MobileDrawer({
                 const badgeTone = item.badgeKey === 'notifications'
                   ? counts.notificationTone
                   : item.badgeTone;
+                if (item.href === '/all-tasks') {
+                  return (
+                    <div key={item.href}>
+                      <div
+                        className={cn(
+                          'relative flex items-center rounded-lg text-sm font-medium transition-colors',
+                          active
+                            ? 'bg-[var(--surface-2)] text-[var(--text-primary)]'
+                            : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]',
+                        )}
+                      >
+                        {active && (
+                          <span className="absolute left-0 h-5 w-[3px] rounded-r-sm bg-[var(--accent)]" />
+                        )}
+                        <Link
+                          href={item.href}
+                          aria-current={active ? 'page' : undefined}
+                          className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 px-3"
+                        >
+                          <Icon size={20} className={cn('flex-shrink-0', active ? item.iconColor.replace('400', '300') : item.iconColor)} />
+                          <span>All Tasks</span>
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setTaskShortcutsOpen((value) => !value)}
+                          className="mr-1 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-[var(--text-tertiary)]"
+                          aria-expanded={taskShortcutsOpen}
+                          aria-controls="mobile-task-shortcuts"
+                          aria-label={`${taskShortcutsOpen ? 'Hide' : 'Show'} task shortcuts`}
+                        >
+                          <ChevronDown
+                            size={17}
+                            className={cn('transition-transform', taskShortcutsOpen && 'rotate-180')}
+                          />
+                        </button>
+                      </div>
+                      {taskShortcutsOpen ? (
+                        <div id="mobile-task-shortcuts" className="mb-2 ml-6 border-l border-[var(--border)] py-1 pl-2">
+                          <MobileTaskShortcutSection
+                            label="Pinned"
+                            shortcuts={pinned}
+                            empty="Pin a source, list, or saved view from the task sidebar."
+                            pinned
+                            onNavigate={onClose}
+                            onUnpin={togglePinned}
+                          />
+                          <MobileTaskShortcutSection
+                            label="Recent"
+                            shortcuts={unpinnedRecent}
+                            empty="Lists you open will appear here."
+                            onNavigate={onClose}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                }
                 return (
                   <Link
                     key={item.href}

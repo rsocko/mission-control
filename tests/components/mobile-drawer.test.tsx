@@ -107,11 +107,16 @@ vi.mock('@/lib/hooks/useSyncStream', () => ({
 import { MobileDrawer } from '@/components/layout/MobileDrawer';
 import { MobileHeader, useNotificationDotColor } from '@/components/layout/MobileHeader';
 import { EMPTY_NAVIGATION_COUNTS } from '@/lib/navigation/badges';
+import {
+  PINNED_TASK_SHORTCUTS_STORAGE_KEY,
+  taskShortcutFromSource,
+} from '@/lib/navigation/task-shortcuts';
 
 const unusedReturnFocusRef = React.createRef<HTMLElement>();
 
 beforeEach(() => {
   mockPathname = '/today';
+  localStorage.clear();
   mockFetch.mockReset();
   mockFetch.mockResolvedValue({
     ok: true,
@@ -165,6 +170,23 @@ describe('MobileDrawer', () => {
     expect(screen.getByText('Insights')).toBeDefined();
     expect(screen.getByText('Money')).toBeDefined();
     expect(screen.getByText('Settings')).toBeDefined();
+  });
+
+  it('shows pinned task shortcuts in the mobile drawer', async () => {
+    localStorage.setItem(PINNED_TASK_SHORTCUTS_STORAGE_KEY, JSON.stringify([
+      taskShortcutFromSource({
+        type: 'microsoft-todo',
+        name: 'Personal tasks',
+        icon: 'todo',
+      }),
+    ]));
+    render(<MobileDrawer isOpen={true} onClose={vi.fn()} returnFocusRef={unusedReturnFocusRef} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show task shortcuts' }));
+
+    const shortcut = await screen.findByRole('link', { name: /Personal tasks/ });
+    expect(shortcut).toHaveAttribute('href', expect.stringContaining('/all-tasks?tf='));
+    expect(screen.getByRole('button', { name: 'Unpin Personal tasks' })).toBeInTheDocument();
   });
 
   it('includes user avatar section (F-7)', () => {

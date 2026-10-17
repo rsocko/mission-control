@@ -574,4 +574,13 @@ describe('Quick Add follow-up workflows', () => {
     expect(getQuickAddSuggestionConfidenceBand('effort', 0.6)).toBe('high');
     expect(getQuickAddSuggestionConfidenceBand('project', 0.67)).toBe('medium');
   });
+
+  it('distinguishes suggestion request failures from an empty result', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => jsonResponse({
+      error: 'Suggestion service unavailable',
+    }, 503));
+
+    await expect(fetchQuickAddSuggestion({ fetcher }, 'task-1'))
+      .rejects.toThrow('Suggestion service unavailable');
+  });
 });

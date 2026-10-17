@@ -1444,13 +1444,15 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     <>
       <div ref={barRef} className="quick-add-bar relative z-10">
         <div
-          className={`relative flex flex-wrap items-center gap-2 border bg-[var(--surface-1)] px-1 py-1 transition-[background-color,border-color,box-shadow] duration-150 ${
-            inlineToast ? 'rounded-t-xl rounded-b-none' : 'rounded-xl'
-          } ${
+          className={`relative flex flex-wrap items-center gap-2 rounded-xl border bg-[var(--surface-1)] px-1 py-1 transition-[background-color,border-color,box-shadow] duration-150 ${
             isFocused
               ? 'border-[var(--border-focus)] shadow-[var(--shadow-focus-glow)]'
               : 'border-[var(--border)] shadow-[var(--shadow-sm)]'
           }`}
+          style={inlineToast ? {
+            borderBottomLeftRadius: 0,
+            borderBottomRightRadius: 0,
+          } : undefined}
         >
           <div className="flex w-full min-w-0 items-center gap-2">
           {/* Overflow actions menu */}

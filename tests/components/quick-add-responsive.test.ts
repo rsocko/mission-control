@@ -51,9 +51,9 @@ describe('Quick Entry responsive layout', () => {
   });
 
   it('connects the Quick Add row to the Added review surface', () => {
-    expect(quickAddSource).toContain(
-      "inlineToast ? 'rounded-t-xl rounded-b-none' : 'rounded-xl'",
-    );
+    expect(quickAddSource).toContain('style={inlineToast ? {');
+    expect(quickAddSource).toContain('borderBottomLeftRadius: 0');
+    expect(quickAddSource).toContain('borderBottomRightRadius: 0');
     expect(quickAddSource).toContain(
       'top-full z-50 overflow-hidden rounded-b-[var(--radius-lg)] border border-t-0',
     );

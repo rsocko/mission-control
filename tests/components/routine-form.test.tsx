@@ -13,14 +13,25 @@ vi.mock('@rsocko/icon-picker/picker', () => ({
   IconPickerButton: ({
     value,
     onChange,
+    color,
+    onColorChange,
     label,
   }: {
     value: string | null;
     onChange: (value: string) => void;
+    color?: string;
+    onColorChange?: (value: string) => void;
     label?: string;
   }) => (
-    <button type="button" aria-label={label} onClick={() => onChange('lucide:activity')}>
-      {value ?? 'No icon'}
+    <button
+      type="button"
+      aria-label={label}
+      onClick={() => {
+        onChange('lucide:activity');
+        onColorChange?.('#3b82f6');
+      }}
+    >
+      {value ?? 'No icon'} {color}
     </button>
   ),
 }));
@@ -30,6 +41,7 @@ const routine: Routine = {
   name: 'Morning walk',
   description: 'Before work',
   icon: '🚶',
+  iconColor: null,
   cadenceType: 'daily',
   cadenceConfig: {},
   sortOrder: 0,
@@ -113,6 +125,7 @@ describe('RoutineForm', () => {
     const request = vi.mocked(global.fetch).mock.calls[0][1] as RequestInit;
     expect(JSON.parse(String(request.body))).toMatchObject({
       icon: 'lucide:activity',
+      iconColor: '#3b82f6',
     });
   });
 });

@@ -117,12 +117,12 @@ export async function GET(request: Request) {
 
 /**
  * POST /api/routines — Create a new routine
- * Body: { name, cadenceType, cadenceConfig?, description?, icon? }
+ * Body: { name, cadenceType, cadenceConfig?, description?, icon?, iconColor? }
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, cadenceType, cadenceConfig, description, icon } = body;
+    const { name, cadenceType, cadenceConfig, description, icon, iconColor } = body;
 
     if (!name || !cadenceType) {
       return ApiErrors.badRequest('name and cadenceType are required');
@@ -132,6 +132,12 @@ export async function POST(request: Request) {
       return ApiErrors.badRequest(
         `Invalid cadenceType. Must be one of: ${ROUTINE_CADENCE_TYPES.join(', ')}`,
       );
+    }
+    if (icon !== undefined && icon !== null && typeof icon !== 'string') {
+      return ApiErrors.badRequest('icon must be a string or null');
+    }
+    if (iconColor !== undefined && iconColor !== null && typeof iconColor !== 'string') {
+      return ApiErrors.badRequest('iconColor must be a string or null');
     }
 
     const id = `routine-${crypto.randomUUID().slice(0, 8)}`;
@@ -143,7 +149,8 @@ export async function POST(request: Request) {
       cadenceType: cadenceType as RoutineCadenceType,
       cadenceConfig: cadenceConfig || {},
       description: description || null,
-      icon: icon || null,
+      icon: icon?.trim() || null,
+      iconColor: iconColor?.trim() || null,
       createdAt: now,
       updatedAt: now,
     });

@@ -54,6 +54,7 @@ function routine(index: number, overrides: Partial<TodayRoutine> = {}): TodayRou
     id: `routine-${index}`,
     name: `Routine ${index}`,
     icon: index === 1 ? null : `icon-${index}`,
+    iconColor: null,
     cadenceType: 'daily',
     cadenceConfig: {},
     sortOrder: index,

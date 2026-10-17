@@ -8,11 +8,13 @@ import { fadeSlideUp } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import Link from 'next/link';
+import { RoutineIcon } from './RoutineIcon';
 
 interface RoutineSnapshot {
   id: string;
   name: string;
   icon: string | null;
+  iconColor: string | null;
   cadenceType: string;
   cadenceConfig: { days?: number[]; target?: number; minDays?: number; maxDays?: number };
   streak: number;
@@ -120,11 +122,11 @@ export function RoutineSnapshotWidget({ embedded, collapsed, onToggleCollapse }:
                   {isCompleted ? <Check size={11} /> : <Plus size={11} />}
                 </button>
                 <span className={cn(
-                  'text-sm truncate',
+                  'flex min-w-0 items-center text-sm',
                   isCompleted ? 'text-[var(--text-muted)] line-through' : 'text-[var(--text-primary)]',
                 )}>
-                  {routine.icon && <span className="mr-1.5">{routine.icon}</span>}
-                  {routine.name}
+                  <RoutineIcon routine={routine} size={16} className="mr-1.5" />
+                  <span className="truncate">{routine.name}</span>
                 </span>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0 ml-3">

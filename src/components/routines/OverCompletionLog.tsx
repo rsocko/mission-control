@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { fadeSlideUp } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { formatWeekRange, getWeekMonday } from '@/lib/utils/date-format';
+import { RoutineIcon } from './RoutineIcon';
 import { type HeatmapCompletion, type Routine } from './types';
 
 interface OverCompletionLogProps {
@@ -65,7 +66,7 @@ export function OverCompletionLog({
               'rounded-[var(--radius-md)] bg-[var(--surface-0)] px-4 py-3 text-sm text-[var(--text-secondary)]',
             )}
           >
-            {entry.routine.icon && <span className="mr-1.5">{entry.routine.icon}</span>}
+            <RoutineIcon routine={entry.routine} size={16} className="mr-1.5 align-text-bottom" />
             {entry.routine.name}:{' '}
             <span className="font-medium text-[var(--text-primary)]">
               {entry.count}x this week (target: {entry.target})

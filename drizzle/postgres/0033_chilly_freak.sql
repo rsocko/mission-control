@@ -1,0 +1,1 @@
+ALTER TABLE "routines" ADD COLUMN "icon_color" text;

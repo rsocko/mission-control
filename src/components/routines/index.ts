@@ -3,6 +3,7 @@ export * from './CadenceInsightsView';
 export * from './FlexibleRoutineCard';
 export * from './OverCompletionLog';
 export * from './RoutineForm';
+export * from './RoutineIcon';
 export * from './RoutineSnapshotWidget';
 export * from './TodayRoutinesSection';
 export * from './types';

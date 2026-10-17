@@ -5,6 +5,7 @@ export type TodayRoutine = Pick<
   | 'id'
   | 'name'
   | 'icon'
+  | 'iconColor'
   | 'cadenceType'
   | 'cadenceConfig'
   | 'sortOrder'

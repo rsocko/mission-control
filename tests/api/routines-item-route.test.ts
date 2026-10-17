@@ -19,6 +19,7 @@ const existing = {
   name: 'Morning walk',
   description: null,
   icon: null,
+  iconColor: null,
   cadenceType: 'daily' as const,
   cadenceConfig: {},
   sortOrder: 0,

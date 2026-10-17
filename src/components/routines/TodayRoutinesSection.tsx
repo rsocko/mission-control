@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Check, ChevronDown, ChevronUp, Flame, Repeat, RotateCcw } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Flame, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from '@/lib/toast';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
@@ -16,6 +16,7 @@ import {
   isRoutineComplete,
   type TodayRoutine,
 } from './today-routines';
+import { RoutineIcon as RenderedRoutineIcon } from './RoutineIcon';
 
 const INITIAL_VISIBLE_ROUTINES = 6;
 
@@ -345,21 +346,7 @@ function RoutineIcon({
   routine: TodayRoutine;
   size?: 'compact' | 'regular';
 }) {
-  if (routine.icon) {
-    return (
-      <span className={cn('leading-none', size === 'compact' ? 'text-[13px]' : 'text-sm')} aria-hidden="true">
-        {routine.icon}
-      </span>
-    );
-  }
-
-  return (
-    <Repeat
-      size={size === 'compact' ? 14 : 15}
-      className="text-emerald-400"
-      aria-hidden="true"
-    />
-  );
+  return <RenderedRoutineIcon routine={routine} size={size === 'compact' ? 13 : 15} />;
 }
 
 function RoutineIconButton({

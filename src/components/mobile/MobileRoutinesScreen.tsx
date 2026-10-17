@@ -4,17 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   ArrowLeft,
-  CalendarDays,
   Check,
   Flame,
   Loader2,
-  Moon,
   Pencil,
   Plus,
   Repeat,
-  Sun,
 } from 'lucide-react';
-import { RoutineForm, type Routine } from '@/components/routines';
+import { RoutineForm, RoutineIcon, type Routine } from '@/components/routines';
 import { PullToRefreshIndicator } from '@/components/ui/PullToRefreshIndicator';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { cn } from '@/lib/utils';
@@ -127,24 +124,6 @@ function applyCompletionState(routines: Routine[], routineId: string, date: stri
   });
 }
 
-function getRoutineIcon(routine: Routine) {
-  const keyword = `${routine.icon ?? ''} ${routine.name}`.toLowerCase();
-
-  if (/sun|morning|wake|rise|startup|start/.test(keyword)) {
-    return { Icon: Sun, className: 'text-amber-400' };
-  }
-
-  if (/moon|evening|night|sleep|shutdown|wind down/.test(keyword)) {
-    return { Icon: Moon, className: 'text-violet-400' };
-  }
-
-  if (/calendar|schedule|plan/.test(keyword)) {
-    return { Icon: CalendarDays, className: 'text-sky-400' };
-  }
-
-  return { Icon: Repeat, className: 'text-sky-400' };
-}
-
 function getHeaderProgress(routine: Routine, completedToday: boolean) {
   if (routine.weeklyProgress) {
     return routine.weeklyProgress.done > 0
@@ -178,7 +157,6 @@ function DailyRoutineCard({
 }) {
   const completedToday = routine.weekCompletions.some((completion) => completion.date === today);
   const progress = getHeaderProgress(routine, completedToday);
-  const { Icon, className } = getRoutineIcon(routine);
 
   return (
     <motion.section
@@ -189,7 +167,7 @@ function DailyRoutineCard({
     >
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Icon className={cn('h-3 w-3 shrink-0', className)} />
+          <RoutineIcon routine={routine} size={14} />
           <span className="truncate text-sm font-semibold text-white">{routine.name}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -264,7 +242,6 @@ function WeeklyRoutineCard({
 }) {
   const completedToday = routine.weekCompletions.some((completion) => completion.date === today);
   const progress = getHeaderProgress(routine, completedToday);
-  const { Icon, className } = getRoutineIcon(routine);
 
   return (
     <motion.section
@@ -275,7 +252,7 @@ function WeeklyRoutineCard({
     >
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Icon className={cn('h-3 w-3 shrink-0', className)} />
+          <RoutineIcon routine={routine} size={14} />
           <span className="truncate text-sm font-semibold text-white">{routine.name}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">

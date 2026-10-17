@@ -20,7 +20,7 @@ interface SqliteRoutineRow extends Omit<
 
 const ROUTINE_COLUMNS = `
   id, name, description, cadence_type AS cadenceType,
-  cadence_config AS cadenceConfig, icon, sort_order AS sortOrder,
+  cadence_config AS cadenceConfig, icon, icon_color AS iconColor, sort_order AS sortOrder,
   is_active AS isActive, is_archived AS isArchived,
   created_at AS createdAt, updated_at AS updatedAt
 `;
@@ -35,6 +35,7 @@ const UPDATE_COLUMNS: Record<keyof RoutineUpdate, string> = {
   cadenceConfig: 'cadence_config',
   description: 'description',
   icon: 'icon',
+  iconColor: 'icon_color',
   isActive: 'is_active',
   isArchived: 'is_archived',
   sortOrder: 'sort_order',
@@ -92,9 +93,9 @@ export function createSqliteRoutinesRepository(
         const sortOrder = max ? (max.sortOrder ?? 0) + 1 : 0;
         sqlite.prepare(`
           INSERT INTO routines (
-            id, name, description, cadence_type, cadence_config, icon, sort_order,
+            id, name, description, cadence_type, cadence_config, icon, icon_color, sort_order,
             is_active, is_archived, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
         `).run(
           command.id,
           command.name,
@@ -102,6 +103,7 @@ export function createSqliteRoutinesRepository(
           command.cadenceType,
           JSON.stringify(command.cadenceConfig),
           command.icon,
+          command.iconColor,
           sortOrder,
           command.createdAt,
           command.updatedAt,

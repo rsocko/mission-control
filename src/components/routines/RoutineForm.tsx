@@ -36,6 +36,7 @@ export function RoutineForm({ routine, onClose, onSaved }: RoutineFormProps) {
   const [name, setName] = useState(routine?.name ?? '');
   const [description, setDescription] = useState(routine?.description ?? '');
   const [icon, setIcon] = useState(routine?.icon ?? '');
+  const [iconColor, setIconColor] = useState(routine?.iconColor ?? '');
   const [cadenceType, setCadenceType] = useState<CadenceType>(routine?.cadenceType ?? 'daily');
   const [selectedDays, setSelectedDays] = useState<number[]>(routine?.cadenceConfig.days ?? [1, 3, 5]);
   const [targetPerWeek, setTargetPerWeek] = useState(routine?.cadenceConfig.target ?? 3);
@@ -86,6 +87,7 @@ export function RoutineForm({ routine, onClose, onSaved }: RoutineFormProps) {
           name: trimmedName,
           description: description.trim() || null,
           icon: icon.trim() || null,
+          iconColor: iconColor.trim() || null,
           cadenceType,
           cadenceConfig,
         }),
@@ -139,6 +141,8 @@ export function RoutineForm({ routine, onClose, onSaved }: RoutineFormProps) {
             value={icon || null}
             onChange={setIcon}
             size="md"
+            color={iconColor || undefined}
+            onColorChange={setIconColor}
             label="Choose routine icon"
           />
         </div>

@@ -53,7 +53,7 @@ export function SmartScoreBadge({
 
   const sizeClass = size === 'sm'
     ? showPercentile
-      ? 'min-w-14 h-7 px-1.5 text-[11px] rounded-lg'
+      ? 'min-w-11 h-7 px-1.5 text-[11px] rounded-lg'
       : 'w-9 h-7 text-xs rounded-lg'
     : showPercentile
       ? 'min-w-16 h-9 px-2 text-xs rounded-xl'
@@ -68,7 +68,7 @@ export function SmartScoreBadge({
         <div tabIndex={0} role="group" aria-label={accessibleLabel}>
           <div className={`${sizeClass} ${colorClass} flex items-center justify-center font-bold tabular-nums shadow-inner`}>
             {showPercentile
-              ? `Top ${formatTopPercent(scopeRanking.topPercent)}%`
+              ? `${formatTopPercent(scopeRanking.topPercent)}%`
               : <AnimatedCounter value={score} />}
           </div>
         </div>

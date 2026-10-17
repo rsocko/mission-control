@@ -554,6 +554,7 @@ export interface TaskRowActionsProps {
   smartScore?: number | null;
   scoreBreakdown?: ScoreBreakdown;
   scoreDisplayMode?: 'score' | 'percentile';
+  activeSortField?: string;
   planningHorizon?: PlanningHorizon | null;
   effort?: number | null;
   dueDate: string | null;
@@ -589,6 +590,7 @@ export function TaskRowActions({
   smartScore,
   scoreBreakdown,
   scoreDisplayMode = 'score',
+  activeSortField,
   planningHorizon,
   effort,
   dueDate,
@@ -620,22 +622,43 @@ export function TaskRowActions({
   const canEditSnooze = canEditTaskField(editPolicy, 'snoozedUntil');
   const canEditStatus = canEditTaskField(editPolicy, 'status');
   const validEffort = effort != null && effort >= 1 && effort <= 5 ? effort : null;
+  const prioritizeSmartScore = activeSortField === 'smartScore'
+    || activeSortField === 'smartScorePercentile';
+  const prioritizePlanningHorizon = activeSortField === 'planningHorizon';
+  const prioritizeEffort = activeSortField === 'effort';
+  const prioritizeDueDate = activeSortField === 'dueDate';
+  const forceResponsiveProperty = prioritizeSmartScore
+    || prioritizePlanningHorizon
+    || prioritizeEffort
+    || prioritizeDueDate;
+  const propertyGridClass = dense
+    ? 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[32px_30px_32px_56px_32px_32px_96px]'
+    : prioritizeSmartScore
+      ? 'grid-cols-[var(--score-column-width)_32px_32px_32px] @min-[640px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px] @min-[720px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]'
+      : prioritizePlanningHorizon
+        ? 'grid-cols-[44px_32px_32px_32px] @min-[640px]:grid-cols-[44px_32px_32px_56px_32px] @min-[720px]:grid-cols-[44px_32px_32px_56px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_44px_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]'
+        : prioritizeEffort
+          ? 'grid-cols-[32px_30px_32px_32px] @min-[640px]:grid-cols-[32px_30px_32px_56px_32px] @min-[720px]:grid-cols-[32px_30px_32px_56px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_30px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]'
+          : prioritizeDueDate
+            ? 'grid-cols-[32px_32px_56px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]'
+            : 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]';
 
   return (
     <div
       data-testid="task-row-properties"
       style={{
-        '--score-column-width': scoreDisplayMode === 'percentile' ? '60px' : '32px',
+        '--score-column-width': scoreDisplayMode === 'percentile' ? '48px' : '36px',
       } as CSSProperties}
       className={cn(
         'grid shrink-0 items-center gap-0.5',
-        dense
-          ? 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[32px_30px_32px_56px_32px_32px_96px]'
-          : 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]',
+        propertyGridClass,
       )}
     >
       {!dense && (
-        <span className="hidden h-7 items-center justify-center @min-[960px]:flex">
+        <span className={cn(
+          'h-7 items-center justify-center',
+          prioritizeSmartScore ? 'flex' : 'hidden @min-[960px]:flex',
+        )}>
           {smartScore != null && (
             <SmartScoreBadge
               score={smartScore}
@@ -644,14 +667,29 @@ export function TaskRowActions({
               displayMode={scoreDisplayMode}
             />
           )}
+          {prioritizeSmartScore && smartScore == null && (
+            <span
+              aria-label="Smart score unavailable"
+              className="text-xs font-medium tabular-nums text-[var(--text-muted)]"
+            >
+              &mdash;
+            </span>
+          )}
         </span>
       )}
 
       {!dense && (
-        <span className="hidden h-6 items-center justify-center @min-[1280px]:flex">
-          {planningHorizon && (
+        <span className={cn(
+          'h-6 items-center justify-center',
+          prioritizePlanningHorizon ? 'flex' : 'hidden @min-[1280px]:flex',
+        )}>
+          {planningHorizon ? (
             <PlanningHorizonBadge planningHorizon={planningHorizon} />
-          )}
+          ) : prioritizePlanningHorizon ? (
+            <span aria-label="Planning horizon unavailable" className="text-xs text-[var(--text-muted)]">
+              &mdash;
+            </span>
+          ) : null}
         </span>
       )}
 
@@ -667,10 +705,10 @@ export function TaskRowActions({
       </span>
 
       <span className={cn(
-        'hidden h-6 items-center justify-center',
-        '@min-[1280px]:flex',
+        'h-6 items-center justify-center',
+        prioritizeEffort ? 'flex' : 'hidden @min-[1280px]:flex',
       )}>
-        {validEffort && (
+        {validEffort ? (
           <span
             className={cn(
               'inline-flex h-6 min-w-[30px] items-center justify-center rounded border px-1 text-xs font-semibold',
@@ -680,7 +718,11 @@ export function TaskRowActions({
           >
             {EFFORT_LABELS[validEffort]}
           </span>
-        )}
+        ) : prioritizeEffort ? (
+          <span aria-label="Effort unavailable" className="text-xs text-[var(--text-muted)]">
+            &mdash;
+          </span>
+        ) : null}
       </span>
 
       <span className="flex h-8 w-8 items-center justify-center">
@@ -695,8 +737,12 @@ export function TaskRowActions({
 
       <span className={cn(
         'h-9 flex-col items-center justify-center',
-        dense ? 'hidden @min-[720px]:flex' : 'hidden @min-[640px]:flex',
-        !dueDate && EMPTY_PROPERTY_ACTION_CLASS,
+        dense
+          ? 'hidden @min-[720px]:flex'
+          : prioritizeDueDate
+            ? 'flex'
+            : 'hidden @min-[640px]:flex',
+        !dueDate && !prioritizeDueDate && EMPTY_PROPERTY_ACTION_CLASS,
       )}>
         <DateMenu
           dueDate={dueDate}
@@ -717,7 +763,8 @@ export function TaskRowActions({
       </span>
 
       <span className={cn(
-        'hidden h-8 w-8 items-center justify-center @min-[480px]:flex',
+        'hidden h-8 w-8 items-center justify-center',
+        forceResponsiveProperty ? '@min-[960px]:flex' : '@min-[480px]:flex',
         !isInMyDay && EMPTY_PROPERTY_ACTION_CLASS,
       )}>
         <Tooltip content={isInMyDay ? 'Remove from My Day' : 'Add to My Day'}>

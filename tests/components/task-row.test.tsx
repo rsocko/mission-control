@@ -72,6 +72,7 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
     status: string;
     onFilterPriority?: (priority: string) => void;
     onFilterStatus?: (status: string) => void;
+    activeSortField?: string;
   }) => (
     <span
       data-testid="task-row-actions"
@@ -81,6 +82,7 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
       data-recurrence={props.recurrence}
       data-priority={props.priority}
       data-status={props.status}
+      data-sort-field={props.activeSortField}
     >
       <button type="button" onClick={() => props.onFilterPriority?.(props.priority)}>Filter row priority</button>
       <button type="button" onClick={() => props.onFilterStatus?.(props.status)}>Filter row status</button>

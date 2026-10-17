@@ -56,6 +56,7 @@ import { useQuickAddDestinations } from '@/lib/hooks/useQuickAddDestinations';
 import { useQuickAddTemplates } from '@/lib/hooks/useQuickAddTemplates';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { recordTagRecommendationFeedback } from '@/lib/tags/recommendation-feedback';
 import {
   fetchQuickAddSuggestion,
   getQuickAddProjectAffordance,
@@ -883,6 +884,16 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
           suggestionStatus: merged ? 'ready' : 'empty',
         };
       });
+      if (merged?.tags.length) {
+        recordTagRecommendationFeedback({
+          surface: 'quick-add',
+          action: 'shown',
+          taskId,
+          suggestedTagIds: merged.tags.map((tag) => tag.id),
+          acceptedTagIds: [],
+          removedTagIds: [],
+        });
+      }
       scheduleInlineToastDismiss(merged ? 30000 : 5000);
     } catch (error) {
       taskLogger.error('Failed to fetch Quick Add suggestions', { error, taskId });
@@ -1397,6 +1408,22 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     setTimeout(() => inputHandleRef.current?.focus(), 0);
   }, []);
 
+  const skipSuggestionReview = useCallback(() => {
+    const taskId = inlineToast?.taskIds[0];
+    const tags = inlineToast?.suggestions?.tags ?? [];
+    if (taskId && tags.length > 0) {
+      recordTagRecommendationFeedback({
+        surface: 'quick-add',
+        action: 'dismissed',
+        taskId,
+        suggestedTagIds: tags.map((tag) => tag.id),
+        acceptedTagIds: [],
+        removedTagIds: tags.map((tag) => tag.id),
+      });
+    }
+    closeSuggestionReview();
+  }, [closeSuggestionReview, inlineToast]);
+
   const applySuggestionSelection = useCallback(async (
     selection: QuickAddSuggestionSelection,
   ) => {
@@ -1454,6 +1481,23 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       if (failed) {
         const payload = await failed.json().catch(() => null) as { error?: string } | null;
         throw new Error(payload?.error ?? 'Failed to apply suggestions');
+      }
+      const suggestedTags = currentToast.suggestions?.tags ?? [];
+      if (suggestedTags.length > 0) {
+        const acceptedNames = new Set(selection.tagNames.map((name) => name.toLowerCase()));
+        const acceptedTagIds = suggestedTags
+          .filter((tag) => acceptedNames.has(tag.name.toLowerCase()))
+          .map((tag) => tag.id);
+        recordTagRecommendationFeedback({
+          surface: 'quick-add',
+          action: 'applied',
+          taskId,
+          suggestedTagIds: suggestedTags.map((tag) => tag.id),
+          acceptedTagIds,
+          removedTagIds: suggestedTags
+            .filter((tag) => !acceptedTagIds.includes(tag.id))
+            .map((tag) => tag.id),
+        });
       }
 
       setInlineToast((previous) => previous
@@ -2412,7 +2456,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                       applying={Boolean(inlineToast.suggestionsApplying)}
                       onAvailableTagsChange={setCachedTags}
                       onApply={applySuggestionSelection}
-                      onSkip={closeSuggestionReview}
+                      onSkip={skipSuggestionReview}
                     />
                   </motion.div>
                 )}

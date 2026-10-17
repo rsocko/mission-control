@@ -63,6 +63,7 @@ interface SortableTaskRowProps {
   sortableId?: string;
   activeTagFilters?: string[];
   onToggleTagFilter?: (tagSlug: string) => void;
+  activeSortField?: string;
 }
 
 export function SortableTaskRow({
@@ -96,6 +97,7 @@ export function SortableTaskRow({
   sortableId,
   activeTagFilters,
   onToggleTagFilter,
+  activeSortField,
 }: SortableTaskRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: sortableId ?? item.id,
@@ -266,6 +268,7 @@ export function SortableTaskRow({
       <TaskRowActions
         smartScore={item.smartScore}
         scoreBreakdown={item.scoreBreakdown ?? undefined}
+        activeSortField={activeSortField}
         planningHorizon={item.planningHorizon}
         effort={item.effort}
         dueDate={item.dueDate}

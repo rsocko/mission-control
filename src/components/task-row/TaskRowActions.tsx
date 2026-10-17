@@ -632,22 +632,23 @@ export function TaskRowActions({
     || prioritizeEffort
     || prioritizeDueDate;
   const propertyGridClass = dense
-    ? 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[32px_30px_32px_56px_32px_32px_96px]'
+    ? 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_var(--due-date-column-width)_32px_32px] @min-[720px]:grid-cols-[32px_32px_var(--due-date-column-width)_32px_32px_32px] @min-[1280px]:grid-cols-[32px_30px_32px_var(--due-date-column-width)_32px_32px_96px]'
     : prioritizeSmartScore
-      ? 'grid-cols-[var(--score-column-width)_32px_32px_32px] @min-[640px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px] @min-[720px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]'
+      ? 'grid-cols-[var(--score-column-width)_32px_32px_32px] @min-[640px]:grid-cols-[var(--score-column-width)_32px_32px_var(--due-date-column-width)_32px] @min-[720px]:grid-cols-[var(--score-column-width)_32px_32px_var(--due-date-column-width)_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_var(--due-date-column-width)_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_var(--due-date-column-width)_32px_32px_96px]'
       : prioritizePlanningHorizon
-        ? 'grid-cols-[44px_32px_32px_32px] @min-[640px]:grid-cols-[44px_32px_32px_56px_32px] @min-[720px]:grid-cols-[44px_32px_32px_56px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_44px_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]'
+        ? 'grid-cols-[44px_32px_32px_32px] @min-[640px]:grid-cols-[44px_32px_32px_var(--due-date-column-width)_32px] @min-[720px]:grid-cols-[44px_32px_32px_var(--due-date-column-width)_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_44px_32px_32px_var(--due-date-column-width)_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_var(--due-date-column-width)_32px_32px_96px]'
         : prioritizeEffort
-          ? 'grid-cols-[32px_30px_32px_32px] @min-[640px]:grid-cols-[32px_30px_32px_56px_32px] @min-[720px]:grid-cols-[32px_30px_32px_56px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_30px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]'
+          ? 'grid-cols-[32px_30px_32px_32px] @min-[640px]:grid-cols-[32px_30px_32px_var(--due-date-column-width)_32px] @min-[720px]:grid-cols-[32px_30px_32px_var(--due-date-column-width)_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_30px_32px_var(--due-date-column-width)_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_var(--due-date-column-width)_32px_32px_96px]'
           : prioritizeDueDate
-            ? 'grid-cols-[32px_32px_56px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]'
-            : 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]';
+            ? 'grid-cols-[32px_32px_var(--due-date-column-width)_32px] @min-[720px]:grid-cols-[32px_32px_var(--due-date-column-width)_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_var(--due-date-column-width)_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_var(--due-date-column-width)_32px_32px_96px]'
+            : 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_var(--due-date-column-width)_32px_32px] @min-[720px]:grid-cols-[32px_32px_var(--due-date-column-width)_32px_32px_32px] @min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_var(--due-date-column-width)_32px_32px_32px] @min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_var(--due-date-column-width)_32px_32px_96px]';
 
   return (
     <div
       data-testid="task-row-properties"
       style={{
         '--score-column-width': scoreDisplayMode === 'percentile' ? '48px' : '36px',
+        '--due-date-column-width': '104px',
       } as CSSProperties}
       className={cn(
         'grid shrink-0 items-center gap-0.5',

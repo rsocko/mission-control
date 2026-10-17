@@ -49,4 +49,13 @@ describe('Quick Entry responsive layout', () => {
     expect(quickAddSource).toContain("contextProjectActive ? 'Remove from' : 'Add to'");
     expect(quickAddSource).toContain("isVoiceActive ? 'Stop dictation' : 'Dictate task'");
   });
+
+  it('connects the Quick Add row to the Added review surface', () => {
+    expect(quickAddSource).toContain(
+      "inlineToast ? 'rounded-t-xl rounded-b-none' : 'rounded-xl'",
+    );
+    expect(quickAddSource).toContain(
+      'top-full z-50 overflow-hidden rounded-b-[var(--radius-lg)] border border-t-0',
+    );
+  });
 });

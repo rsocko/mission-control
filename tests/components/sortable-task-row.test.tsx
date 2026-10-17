@@ -72,6 +72,7 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
     planningHorizon?: string | null;
     effort?: number | null;
     recurrence?: string | null;
+    activeSortField?: string;
     priority: string;
     status: string;
     onFilterPriority?: (priority: string) => void;
@@ -84,6 +85,7 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
         data-horizon={props.planningHorizon}
         data-effort={props.effort}
         data-recurrence={props.recurrence}
+        data-sort-field={props.activeSortField}
         data-priority={props.priority}
         data-status={props.status}
       />
@@ -180,6 +182,28 @@ describe('SortableTaskRow aligned properties', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Filter status' }));
     expect(onFilterPriority).toHaveBeenCalledWith('high');
     expect(onFilterStatus).toHaveBeenCalledWith('in_progress');
+  });
+
+  it('passes the active My Day sort field to the shared property rail', () => {
+    render(
+      <SortableTaskRow
+        item={item}
+        activeSortField="effort"
+        onComplete={vi.fn()}
+        onFocus={vi.fn()}
+        onSchedule={vi.fn()}
+        onRemove={vi.fn()}
+        onSelect={vi.fn()}
+        isSelected={false}
+        onSetDueDate={vi.fn()}
+        onSetPriority={vi.fn()}
+        onSetStatus={vi.fn()}
+        onOpenNotes={vi.fn()}
+        draggable={false}
+      />,
+    );
+
+    expect(screen.getByTestId('task-row-actions')).toHaveAttribute('data-sort-field', 'effort');
   });
 
   it('prioritizes the title and collapses the status reason to its icon in narrow rows', () => {

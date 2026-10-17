@@ -1444,7 +1444,9 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     <>
       <div ref={barRef} className="quick-add-bar relative z-10">
         <div
-          className={`relative flex flex-wrap items-center gap-2 rounded-xl border bg-[var(--surface-1)] px-1 py-1 transition-[background-color,border-color,box-shadow] duration-150 ${
+          className={`relative flex flex-wrap items-center gap-2 border bg-[var(--surface-1)] px-1 py-1 transition-[background-color,border-color,box-shadow] duration-150 ${
+            inlineToast ? 'rounded-t-xl rounded-b-none' : 'rounded-xl'
+          } ${
             isFocused
               ? 'border-[var(--border-focus)] shadow-[var(--shadow-focus-glow)]'
               : 'border-[var(--border)] shadow-[var(--shadow-sm)]'

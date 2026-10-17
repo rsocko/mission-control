@@ -5,7 +5,11 @@ import Image from 'next/image';
 import { Bot, Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Filter, Pencil, Pin, PinOff, Plus, Repeat, Trash2 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@rsocko/icon-picker/renderer';
-import { ConnectorIcon, SourceListIcon } from '@/components/sources/SourceIcons';
+import {
+  ConnectorIcon,
+  resolveSourceListIconValue,
+  SourceListIcon,
+} from '@/components/sources/SourceIcons';
 import {
   Select,
   SelectContent,
@@ -402,7 +406,6 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                   listFilter={listFilter}
                   listGroupFilter={listGroupFilter}
                   collapsedListGroups={collapsedListGroups}
-                  sidebarExpanded={sidebarExpanded}
                   setListSearch={setListSearch}
                   setSourceFilter={setSourceFilter}
                   setListFilter={setListFilter}
@@ -930,6 +933,8 @@ function SourceListNavRow({
   onTogglePinned: (shortcut: TaskShortcut) => boolean;
 }) {
   const shortcut = taskShortcutFromList(source, sourceList);
+  const showDedicatedIcon = Boolean(resolveSourceListIconValue(sourceList))
+    || (source.type === 'github-issues' && sourceList.type === 'repo');
   return (
     <div className="group/list relative flex items-center">
       <button
@@ -941,8 +946,10 @@ function SourceListNavRow({
             : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]'
         }`}
       >
-        <span className="inline-flex min-w-0 items-center gap-1.5">
-          <SourceListIcon connectorType={source.type} list={sourceList} />
+        <span className="inline-flex min-w-0 items-center gap-1">
+          {showDedicatedIcon && (
+            <SourceListIcon connectorType={source.type} list={sourceList} />
+          )}
           <span className="truncate">{sourceList.name}</span>
           {sourceList.selectedForSync === false && (
             <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-400">
@@ -982,7 +989,6 @@ function SourceListSection({
   listFilter,
   listGroupFilter,
   collapsedListGroups,
-  sidebarExpanded,
   setListSearch,
   setSourceFilter,
   setListFilter,
@@ -998,7 +1004,6 @@ function SourceListSection({
   listFilter: string | null;
   listGroupFilter: string | null;
   collapsedListGroups: Set<string>;
-  sidebarExpanded: boolean;
   setListSearch: (v: string) => void;
   setSourceFilter: (v: string | null) => void;
   setListFilter: (v: string | null) => void;
@@ -1027,7 +1032,7 @@ function SourceListSection({
     }));
 
   return (
-    <div className="ml-2 mt-1 space-y-1">
+    <div className="ml-1 mt-1 space-y-0.5">
       <div className="relative mb-2">
         <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
         <input
@@ -1047,22 +1052,30 @@ function SourceListSection({
         const isGroupActive = listGroupFilter === group.id;
         const groupTaskCount = groupedLists.reduce((sum, sl) => sum + sl.taskCount, 0);
         return (
-          <div key={group.id} className="space-y-0.5">
-            <div className={`flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-bold uppercase tracking-[0.06em] transition-colors border-b border-[var(--border-subtle)] ${
+          <div key={group.id} className="space-y-px">
+            <div className={`flex w-full items-center gap-1 px-1 py-1 text-xs font-medium transition-colors border-b border-[var(--border-subtle)] ${
               isGroupActive ? 'bg-[var(--accent)]/10 text-[var(--accent)]' : 'text-[var(--text-primary)] hover:text-[var(--accent)]'
             }`}>
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   const next = new Set(collapsedListGroups);
-                  isCollapsed ? next.delete(group.id) : next.add(group.id);
+                  if (isCollapsed) {
+                    next.delete(group.id);
+                  } else {
+                    next.add(group.id);
+                  }
                   setCollapsedListGroups(next);
                 }}
-                className="shrink-0 p-0.5 -ml-0.5 rounded hover:bg-[var(--surface-2)]"
+                className="shrink-0 rounded p-0.5 hover:bg-[var(--surface-2)]"
+                aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${group.name}`}
+                aria-expanded={!isCollapsed}
               >
                 <ChevronRight size={10} className={`transition-transform duration-150 ${isCollapsed ? '' : 'rotate-90'}`} />
               </button>
               <button
+                type="button"
                 onClick={() => {
                   if (isGroupActive) {
                     setListGroupFilter(null);
@@ -1073,10 +1086,10 @@ function SourceListSection({
                     setListFilter(null);
                   }
                 }}
-                className="flex items-center gap-1.5 flex-1 min-w-0"
+                className="flex min-w-0 flex-1 items-center"
+                aria-pressed={isGroupActive}
               >
-                <span className="text-xs leading-none">{group.icon ? <IconRenderer value={group.icon} size={12} color={group.iconColor || undefined} /> : <FolderOpen size={11} className="inline" />}</span>
-                <span className={sidebarExpanded ? '' : 'truncate'}>{group.name}</span>
+                <span className="truncate">{group.name}</span>
                 {groupTaskCount > 0 && (
                   <AnimatedCounter value={groupTaskCount} className="text-xs text-[var(--text-muted)] tabular-nums shrink-0 ml-auto" />
                 )}
@@ -1093,7 +1106,7 @@ function SourceListSection({
               )}
             </div>
             {!isCollapsed && (
-              <div className="pl-7 space-y-0.5">
+              <div className="space-y-px pl-5">
                 {filteredLists.map((sl) => (
                   <SourceListNavRow
                     key={sl.id}
@@ -1122,23 +1135,28 @@ function SourceListSection({
         if (filteredUngrouped.length === 0) return null;
         const isCollapsed = listSearch ? false : (groups.length > 0 && collapsedListGroups.has('__ungrouped__'));
         return (
-          <div className="space-y-0.5">
+          <div className="space-y-px">
             {groups.length > 0 && (
               <button
+                type="button"
                 onClick={() => {
                   const next = new Set(collapsedListGroups);
-                  isCollapsed ? next.delete('__ungrouped__') : next.add('__ungrouped__');
+                  if (isCollapsed) {
+                    next.delete('__ungrouped__');
+                  } else {
+                    next.add('__ungrouped__');
+                  }
                   setCollapsedListGroups(next);
                 }}
-                className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors border-b border-[var(--border-subtle)]"
+                className="flex w-full items-center gap-1 border-b border-[var(--border-subtle)] px-1 py-1 text-xs font-medium text-[var(--text-primary)] transition-colors hover:text-[var(--accent)]"
+                aria-expanded={!isCollapsed}
               >
                 <ChevronRight size={10} className={`shrink-0 transition-transform duration-150 ${isCollapsed ? '' : 'rotate-90'}`} />
-                <span className="text-xs leading-none"><List size={11} className="inline" /></span>
                 <span>Other</span>
               </button>
             )}
             {!isCollapsed && (
-              <div className={`${groups.length > 0 ? 'pl-7' : ''} space-y-0.5`}>
+              <div className={`${groups.length > 0 ? 'pl-5' : ''} space-y-px`}>
                 {filteredUngrouped.map((sl) => (
                   <SourceListNavRow
                     key={sl.id}

@@ -181,8 +181,8 @@ describe('TaskRowActions', () => {
       'grid',
       'gap-0.5',
       'grid-cols-[32px_32px_32px]',
-      '@min-[960px]:grid-cols-[32px_32px_32px_56px_32px_32px_32px]',
-      '@min-[1280px]:grid-cols-[32px_44px_32px_30px_32px_56px_32px_32px_96px]',
+      '@min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px]',
+      '@min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]',
     );
     expect(screen.getByRole('button', { name: 'Add to My Day' }).parentElement).toHaveClass('hidden', '@min-[480px]:flex', 'opacity-0');
     expect(screen.getByRole('button', { name: 'Add due date' }).parentElement).toHaveClass('hidden', '@min-[640px]:flex', 'opacity-0');

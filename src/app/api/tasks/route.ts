@@ -7,8 +7,11 @@ import { ApiErrors } from '@/lib/api-error';
 import { getResolvedPriorityEntities } from '@/lib/priority-entities';
 import logger from '@/lib/logger';
 import {
+  addOverallSmartScoreRankings,
   computeBatchSmartScores,
   createScoreInput,
+  rankSmartScores,
+  type PriorityEntity,
   type ScoredTask,
   type ScoreInputTask,
   type SourceRanking,
@@ -46,7 +49,6 @@ import {
 import { evaluateRulesForTasks } from '@/lib/rules';
 import {
   MAX_TASK_PAGE_SIZE,
-  SMART_SCORE_CANDIDATE_LIMIT,
   parseTaskPagination,
 } from './pagination';
 import { normalizedCsv, TaskQueryValidationError, validateTaskQueryParams } from './query-input';
@@ -55,7 +57,16 @@ import {
   buildTaskFilterSpec,
   taskCollectionGroupReturnsEmpty,
 } from '@/lib/tasks/core/filter-spec';
-import type { TaskCoreTaskRow, TaskListSortField } from '@/lib/tasks/core/contracts';
+import {
+  buildOverallSmartScoreSpec,
+  describeSmartScoreScope,
+  isOverallSmartScoreScope,
+} from '@/lib/tasks/core/smart-score-scope';
+import type {
+  TaskCoreTaskRow,
+  TaskListSortField,
+  TaskSmartScoreInputs,
+} from '@/lib/tasks/core/contracts';
 import {
   buildSubtaskTask,
   writeThroughSubtask,
@@ -105,7 +116,42 @@ const TASK_SORT_FIELDS = new Set<TaskListSortField>([
   'sourceList',
   'effort',
   'smartScore',
+  'smartScorePercentile',
 ]);
+
+function scoreSnapshot(
+  scoreInputs: TaskSmartScoreInputs,
+  entities: PriorityEntity[],
+  currentDate: string,
+): ScoredTask[] {
+  const momentumByTaskId = new Map(
+    scoreInputs.momentumSignals.map((signal) => [signal.taskId, signal]),
+  );
+  return computeBatchSmartScores(
+    scoreInputs.rows.map((task) => createScoreInput(
+      {
+        ...task,
+        priority: task.priority as ScoreInputTask['priority'],
+        estimatedDuration: task.estimatedDuration ?? undefined,
+      },
+      task.tags.map((tag) => ({ id: tag.unifiedInto || tag.id, name: tag.name })),
+      task.projectPhaseMemberships
+        .filter((membership, index, all) => all.findIndex(
+          (candidate) => candidate.projectId === membership.projectId,
+        ) === index)
+        .map((membership) => ({
+          id: membership.projectId,
+          name: membership.projectName,
+        })),
+      {
+        currentDate,
+        ...momentumByTaskId.get(task.id),
+      },
+    )),
+    entities,
+    scoreInputs.sourceRankings as SourceRanking[],
+  );
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -138,16 +184,7 @@ export async function GET(request: Request) {
   const includeTags = searchParams.get('includeTags') !== 'false';
   const countsOnly = searchParams.get('countsOnly') === 'true';
   const includeScoreBreakdown = searchParams.get('includeScoreBreakdown') === 'true';
-  if (sortBy === 'smartScore' && offset >= SMART_SCORE_CANDIDATE_LIMIT) {
-    logger.warn({
-      event: 'smart_score_budget_rejected',
-      offset,
-      candidateLimit: SMART_SCORE_CANDIDATE_LIMIT,
-    }, 'Rejected smart-score offset outside candidate budget');
-    return ApiErrors.badRequest(
-      `offset must be less than ${SMART_SCORE_CANDIDATE_LIMIT} for smart-score sorting`,
-    );
-  }
+  const isSmartScoreSort = sortBy === 'smartScore' || sortBy === 'smartScorePercentile';
 
   try {
     const persistence = await getTaskCorePersistence();
@@ -189,7 +226,6 @@ export async function GET(request: Request) {
       includeTags,
       includeScoreInputs: includeScoreBreakdown,
       countsOnly,
-      smartScoreCandidateLimit: SMART_SCORE_CANDIDATE_LIMIT,
     });
 
     if (countsOnly) {
@@ -234,43 +270,40 @@ export async function GET(request: Request) {
       }
     }
 
-    const entities = sortBy === 'smartScore' || includeScoreBreakdown
+    const entities = isSmartScoreSort || includeScoreBreakdown
       ? await getResolvedPriorityEntities()
       : [];
     const scoreInputs = collection.smartScore;
-    const momentumByTaskId = new Map(
-      scoreInputs?.momentumSignals.map((signal) => [signal.taskId, signal]) ?? [],
-    );
     const smartScoreDate = getLocalToday();
-    const scoredRows = scoreInputs
-      ? computeBatchSmartScores(
-          scoreInputs.rows.map((task) => createScoreInput(
-            {
-              ...task,
-              priority: task.priority as ScoreInputTask['priority'],
-              estimatedDuration: task.estimatedDuration ?? undefined,
-            },
-            task.tags.map((tag) => ({ id: tag.unifiedInto || tag.id, name: tag.name })),
-            task.projectPhaseMemberships
-              .filter((membership, index, all) => all.findIndex(
-                (candidate) => candidate.projectId === membership.projectId,
-              ) === index)
-              .map((membership) => ({
-                id: membership.projectId,
-                name: membership.projectName,
-              })),
-            {
-              currentDate: smartScoreDate,
-              ...momentumByTaskId.get(task.id),
-            },
-          )),
-          entities,
-          scoreInputs.sourceRankings as SourceRanking[],
+    let scoredRows = scoreInputs
+      ? rankSmartScores(
+          scoreSnapshot(scoreInputs, entities, smartScoreDate),
+          describeSmartScoreScope(spec, scoreInputs.rows),
         )
       : [];
+    if (scoreInputs && !isOverallSmartScoreScope(spec)) {
+      const overallCollection = await persistence.collections.readTaskCollection({
+        spec: buildOverallSmartScoreSpec(spec),
+        page: {
+          order: { field: 'smartScore', direction: 'desc' },
+          limit: MAX_TASK_PAGE_SIZE,
+          offset: 0,
+        },
+        includeTags: false,
+        includeScoreInputs: true,
+        countsOnly: false,
+      });
+      if (overallCollection.smartScore) {
+        const overallScores = rankSmartScores(
+          scoreSnapshot(overallCollection.smartScore, entities, smartScoreDate),
+          'all open tasks',
+        );
+        scoredRows = addOverallSmartScoreRankings(scoredRows, overallScores);
+      }
+    }
     const scoredById = new Map<string, ScoredTask>();
     let result = collection.rows;
-    if (sortBy === 'smartScore') {
+    if (isSmartScoreSort) {
       const pageScores = scoredRows.slice(offset, offset + limit);
       for (const score of pageScores) scoredById.set(score.taskId, score);
       const byId = new Map(collection.rows.map((task) => [task.id, task]));
@@ -283,16 +316,6 @@ export async function GET(request: Request) {
       resolveTaskEditPolicies(result, connectorEditPolicyContexts),
       listTaskDelegationSummaries(result.map(({ id }) => id)),
     ]);
-    const smartScoreBudgetReached = sortBy === 'smartScore'
-      && collection.total > SMART_SCORE_CANDIDATE_LIMIT;
-    if (smartScoreBudgetReached) {
-      logger.warn({
-        event: 'smart_score_budget_reached',
-        total: collection.total,
-        candidateLimit: SMART_SCORE_CANDIDATE_LIMIT,
-      }, 'Smart-score candidate budget reached');
-    }
-
     return NextResponse.json({
       tasks: result.map((task) => {
         const scored = scoredById.get(task.id);
@@ -336,21 +359,11 @@ export async function GET(request: Request) {
       }),
       total: collection.total,
       stats: collection.stats,
-      hasMore: offset + result.length < (
-        sortBy === 'smartScore'
-          ? Math.min(collection.total, SMART_SCORE_CANDIDATE_LIMIT)
-          : collection.total
-      ),
+      hasMore: offset + result.length < collection.total,
       sourceCounts: collection.sourceCounts,
       facetCounts: collection.facetCounts,
       availableTags: collection.availableTags,
       pagination: { limit, offset, maxLimit: MAX_TASK_PAGE_SIZE },
-      ...(sortBy === 'smartScore' ? {
-        smartScoreBudget: {
-          candidateLimit: SMART_SCORE_CANDIDATE_LIMIT,
-          reached: smartScoreBudgetReached,
-        },
-      } : {}),
     });
   } catch (error) {
     return ApiErrors.internal('Failed to fetch tasks', error);

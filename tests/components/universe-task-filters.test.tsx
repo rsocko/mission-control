@@ -217,6 +217,26 @@ describe('Universe task filter surfaces', () => {
     expect(screen.getByTestId('sidebar-context')).toHaveTextContent('"priorities":["high"]');
   });
 
+  it('keeps list hierarchy compact without redundant fallback icons', () => {
+    render(<SidebarHarness />);
+
+    fireEvent.click(screen.getByText('GitHub'));
+
+    const groupFilterButton = screen.getByText('Work').closest('button');
+    expect(groupFilterButton).not.toBeNull();
+    expect(groupFilterButton?.querySelector('svg')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Collapse Work' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+
+    fireEvent.click(screen.getByText('Local'));
+
+    const localListButton = screen.getByText('Personal Repository').closest('button');
+    expect(localListButton).not.toBeNull();
+    expect(localListButton?.querySelector('svg')).toBeNull();
+  });
+
   it('keeps canonical multi-value filters out of the controlled query', async () => {
     function MultiValueHarness() {
       const [context, setContext] = useState(() => normalizeTaskFilterContext({

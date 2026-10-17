@@ -235,6 +235,7 @@ export function ProjectTasksTab({
         >
           <TaskRow
             task={task}
+            activeSortField={taskSortBy}
             onComplete={contextActions.onComplete}
             onSetDueDate={(date) => {
               if (date) contextActions.onPickDate(date);

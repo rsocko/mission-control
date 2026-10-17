@@ -47,6 +47,7 @@ import { getConnectorIconPath } from '@/lib/constants/colors';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 import { getShortcutPage } from '@/lib/navigation/shortcut-catalog';
 import { RecentProjectsNavItem } from '@/components/layout/RecentProjectsNavItem';
+import { TaskShortcutsNavItem } from '@/components/layout/TaskShortcutsNavItem';
 import {
   AdaptiveNavGroup,
   type AdaptiveNavItem,
@@ -193,6 +194,7 @@ export function NavRail({
   const { pinned, togglePinned } = useNavRailPrefs();
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [taskMenuOpen, setTaskMenuOpen] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [groupMenuOpen, setGroupMenuOpen] = useState<AdaptiveGroupKey | null>(null);
   const { preferences } = useNavigationBadgePreferences();
@@ -212,6 +214,7 @@ export function NavRail({
   const expanded = pinned
     || hovered
     || focused
+    || taskMenuOpen
     || projectMenuOpen
     || groupMenuOpen !== null
     || syncPopoverOpen;
@@ -270,10 +273,11 @@ export function NavRail({
     }
   }, []);
 
-  const handleProjectNavigate = useCallback(() => {
+  const handleMenuNavigate = useCallback(() => {
     pointerDown.current = true;
     setFocused(false);
     setHovered(false);
+    setTaskMenuOpen(false);
     setProjectMenuOpen(false);
     clickSuppressUntil.current = Date.now() + 800;
     if (pointerFocusTimer.current) clearTimeout(pointerFocusTimer.current);
@@ -361,6 +365,20 @@ export function NavRail({
   const renderNavItem = (item: NavRailItem) => {
     const active = isActive(item.href);
     const Icon = item.icon;
+    if (item.href === '/all-tasks') {
+      return (
+        <TaskShortcutsNavItem
+          key={item.href}
+          active={active}
+          expanded={expanded}
+          icon={Icon}
+          iconColor={item.iconColor}
+          open={taskMenuOpen}
+          onNavigate={handleMenuNavigate}
+          onOpenChange={setTaskMenuOpen}
+        />
+      );
+    }
     if (item.href === '/projects') {
       return (
         <RecentProjectsNavItem
@@ -371,7 +389,7 @@ export function NavRail({
           iconColor={item.iconColor}
           open={projectMenuOpen}
           pathname={pathname}
-          onNavigate={handleProjectNavigate}
+          onNavigate={handleMenuNavigate}
           onOpenChange={setProjectMenuOpen}
         />
       );

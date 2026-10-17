@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SidebarFilters } from '@/components/sidebar/SidebarFilters';
 import { MobileTodayList } from '@/components/today/MobileTodayList';
 import { TodayViewSwitcher } from '@/components/today/TodayMainPanel';
@@ -7,34 +7,55 @@ import {
   normalizeTaskFilterContext,
   serializeTaskFilterContext,
 } from '@/lib/task-filter-context';
+import {
+  PINNED_TASK_SHORTCUTS_STORAGE_KEY,
+  taskShortcutFromList,
+} from '@/lib/navigation/task-shortcuts';
 import { EMPTY_TASK_RESPONSE } from '@/types/dashboard';
 
+vi.mock('@/components/ui/AnimatedCounter', () => ({
+  AnimatedCounter: ({ value, className }: { value: number; className?: string }) => (
+    <span className={className}>{value}</span>
+  ),
+}));
+
+afterEach(() => {
+  localStorage.removeItem(PINNED_TASK_SHORTCUTS_STORAGE_KEY);
+});
+
 describe('View in Graph collection surfaces', () => {
-  it('reveals only the hovered source-list pin action', () => {
+  it('reveals only the hovered GitHub list pin action, even when pinned', async () => {
+    const source = { type: 'github-issues', name: 'GitHub', icon: '' };
     const sourceLists = [
       {
         id: 'list-one',
         sourceId: 'one',
-        connectorInstanceId: 'todo',
+        connectorInstanceId: 'github',
         name: 'First list',
         taskCount: 4,
         groupId: 'home',
+        type: 'repo',
       },
       {
         id: 'list-two',
         sourceId: 'two',
-        connectorInstanceId: 'todo',
+        connectorInstanceId: 'github',
         name: 'Second list',
         taskCount: 7,
         groupId: 'home',
+        type: 'repo',
       },
     ];
+    localStorage.setItem(
+      PINNED_TASK_SHORTCUTS_STORAGE_KEY,
+      JSON.stringify([taskShortcutFromList(source, sourceLists[0])]),
+    );
 
     render(
       <SidebarFilters
         data={{
           taskResponse: EMPTY_TASK_RESPONSE,
-          enabledSources: [{ type: 'microsoft-todo', name: 'To Do', icon: '' }],
+          enabledSources: [source],
           sourceLists,
           listGroups: [{
             id: 'home',
@@ -47,11 +68,11 @@ describe('View in Graph collection surfaces', () => {
           allTags: [],
           projects: [],
           savedViews: [],
-          allSourceCounts: { 'microsoft-todo': 11 },
+          allSourceCounts: { 'github-issues': 11 },
           loading: false,
         }}
         filters={{
-          sourceFilter: 'microsoft-todo',
+          sourceFilter: 'github-issues',
           listFilter: null,
           listGroupFilter: null,
           tagFilter: [],
@@ -67,7 +88,7 @@ describe('View in Graph collection surfaces', () => {
           sidebarExpanded: false,
           sidebarMode: 'normal',
           collapsedSections: new Set(),
-          expandedSourceLists: new Set(['microsoft-todo']),
+          expandedSourceLists: new Set(['github-issues']),
           collapsedListGroups: new Set(),
           listSearch: '',
           tagSearch: '',
@@ -107,16 +128,19 @@ describe('View in Graph collection surfaces', () => {
       />,
     );
 
-    const firstPin = screen.getByRole('button', { name: 'Pin First list' });
+    const firstPin = await screen.findByRole('button', { name: 'Unpin First list' });
     const secondPin = screen.getByRole('button', { name: 'Pin Second list' });
+    const firstCount = screen.getByText('4');
 
     expect(firstPin).toHaveClass('opacity-0');
     expect(secondPin).toHaveClass('opacity-0');
+    expect(firstCount).toHaveClass('opacity-100');
 
     fireEvent.mouseEnter(screen.getByRole('button', { name: /^First list/ }));
 
-    expect(firstPin).toHaveClass('opacity-100');
+    await waitFor(() => expect(firstPin).toHaveClass('opacity-100'));
     expect(secondPin).toHaveClass('opacity-0');
+    expect(firstCount).toHaveClass('opacity-0');
   });
 
   it('links the desktop My Day switcher with explicit date semantics', () => {

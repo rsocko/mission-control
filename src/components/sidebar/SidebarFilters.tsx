@@ -375,7 +375,6 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                     revealClassName="group-hover/nav:opacity-100 group-focus-within/nav:opacity-100"
                   />
                 )}
-                overlayActionVisible={pinnedIds.has(sourceShortcut.id)}
                 action={hasLists ? (
                   <div className="flex shrink-0 items-center pr-1">
                     <button
@@ -602,7 +601,6 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                         revealClassName="group-hover/nav:opacity-100 group-focus-within/nav:opacity-100"
                       />
                     )}
-                    overlayActionVisible={pinnedIds.has(`saved-view:${view.id}`)}
                     action={graphOrigin ? (
                       <ViewInGraphLink
                         context={view.filterContext ?? taskFilterContextFromSavedView(view.filters)}
@@ -907,10 +905,8 @@ function TaskShortcutPinButton({
         onToggle(shortcut);
       }}
       className={`shrink-0 rounded p-1 transition-[color,opacity] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:opacity-100 ${
-        pinned
-          ? 'text-[var(--accent)] opacity-100'
-          : `text-[var(--text-muted)] ${visible ? 'opacity-100' : `opacity-0 ${revealClassName}`}`
-      }`}
+        pinned ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
+      } ${visible ? 'opacity-100' : `opacity-0 ${revealClassName}`}`}
       aria-label={`${pinned ? 'Unpin' : 'Pin'} ${shortcut.label}`}
       title={`${pinned ? 'Unpin' : 'Pin'} ${shortcut.label} in task navigation`}
     >
@@ -974,7 +970,7 @@ function SourceListNavRow({
           <AnimatedCounter
             value={sourceList.taskCount}
             className={`shrink-0 text-xs tabular-nums text-[var(--text-muted)] transition-opacity ${
-              pinned || actionsVisible ? 'opacity-0' : 'opacity-100'
+              actionsVisible ? 'opacity-0' : 'opacity-100'
             }`}
           />
         )}

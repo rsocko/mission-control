@@ -890,11 +890,13 @@ function TaskShortcutPinButton({
   shortcut,
   pinned,
   onToggle,
+  visible = false,
   revealClassName = 'group-hover:opacity-100 group-focus-within:opacity-100',
 }: {
   shortcut: TaskShortcut;
   pinned: boolean;
   onToggle: (shortcut: TaskShortcut) => boolean;
+  visible?: boolean;
   revealClassName?: string;
 }) {
   return (
@@ -907,7 +909,7 @@ function TaskShortcutPinButton({
       className={`shrink-0 rounded p-1 transition-[color,opacity] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:opacity-100 ${
         pinned
           ? 'text-[var(--accent)] opacity-100'
-          : `text-[var(--text-muted)] opacity-0 ${revealClassName}`
+          : `text-[var(--text-muted)] ${visible ? 'opacity-100' : `opacity-0 ${revealClassName}`}`
       }`}
       aria-label={`${pinned ? 'Unpin' : 'Pin'} ${shortcut.label}`}
       title={`${pinned ? 'Unpin' : 'Pin'} ${shortcut.label} in task navigation`}
@@ -935,8 +937,19 @@ function SourceListNavRow({
   const shortcut = taskShortcutFromList(source, sourceList);
   const showDedicatedIcon = Boolean(resolveSourceListIconValue(sourceList))
     || (source.type === 'github-issues' && sourceList.type === 'repo');
+  const [actionsVisible, setActionsVisible] = React.useState(false);
   return (
-    <div className="group/list relative flex items-center">
+    <div
+      className="relative flex items-center"
+      onMouseEnter={() => setActionsVisible(true)}
+      onMouseLeave={() => setActionsVisible(false)}
+      onFocusCapture={() => setActionsVisible(true)}
+      onBlurCapture={(event) => {
+        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+          setActionsVisible(false);
+        }
+      }}
+    >
       <button
         type="button"
         onClick={onSelect}
@@ -961,9 +974,7 @@ function SourceListNavRow({
           <AnimatedCounter
             value={sourceList.taskCount}
             className={`shrink-0 text-xs tabular-nums text-[var(--text-muted)] transition-opacity ${
-              pinned
-                ? 'opacity-0'
-                : 'group-hover/list:opacity-0 group-focus-within/list:opacity-0'
+              pinned || actionsVisible ? 'opacity-0' : 'opacity-100'
             }`}
           />
         )}
@@ -973,7 +984,8 @@ function SourceListNavRow({
           shortcut={shortcut}
           pinned={pinned}
           onToggle={onTogglePinned}
-          revealClassName="group-hover/list:opacity-100 group-focus-within/list:opacity-100"
+          visible={actionsVisible}
+          revealClassName=""
         />
       </div>
     </div>

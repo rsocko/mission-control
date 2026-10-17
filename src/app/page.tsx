@@ -727,6 +727,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                     >
                       <TaskRow
                         task={task}
+                        activeSortField={state.sortBy}
                         scoreDisplayMode={state.sortBy === 'smartScorePercentile'
                           ? 'percentile'
                           : 'score'}

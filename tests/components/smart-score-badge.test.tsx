@@ -112,7 +112,7 @@ describe('SmartScoreBadge', () => {
 
     expect(screen.getByRole('group', {
       name: 'Smart score percentile: top 0.5 percent in current view',
-    })).toHaveTextContent('Top 0.5%');
-    expect(screen.getByText('Top 0.5%').className).toContain('text-emerald-950');
+    })).toHaveTextContent('0.5%');
+    expect(screen.getByText('0.5%').className).toContain('text-emerald-950');
   });
 });

@@ -208,7 +208,7 @@ describe('Universe task filter surfaces', () => {
     render(<SidebarHarness />);
 
     expect(screen.getByRole('complementary', { name: 'Task filters' })).toBeInTheDocument();
-    const githubButton = screen.getByRole('button', { name: /GitHub/ });
+    const githubButton = screen.getByRole('button', { name: /^GitHub \d+$/ });
     expect(githubButton.tagName).toBe('BUTTON');
     fireEvent.click(githubButton);
     fireEvent.click(screen.getByRole('button', { name: /P1 high/i }));

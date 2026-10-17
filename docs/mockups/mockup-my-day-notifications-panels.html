@@ -241,30 +241,42 @@
     .dock, .second-dock, .detail {
       min-width: 0;
       flex: 0 0 340px;
-      display: flex;
+      display: none;
       flex-direction: column;
       border-left: 1px solid var(--border);
       background: var(--surface-1);
     }
+    .dock { flex-basis: 320px; }
+    .second-dock { flex-basis: 360px; }
     .dock-head {
-      min-height: 50px;
-      padding: 8px 10px 0;
+      min-height: 48px;
+      padding: 0 10px 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
       border-bottom: 1px solid var(--border);
     }
-    .dock-tabs { display: flex; align-items: end; gap: 4px; }
-    .dock-tab {
-      position: relative;
-      min-height: 41px;
-      flex: 1;
-      border: 0;
-      border-bottom: 2px solid transparent;
+    .dock-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .dock-title svg { color: var(--accent-soft); }
+    .collapse-pane {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 6px;
       background: transparent;
       color: var(--muted);
       cursor: pointer;
-      font-size: 12px;
-      font-weight: 600;
     }
-    .dock-tab.active { border-bottom-color: var(--accent); color: var(--text); }
+    .collapse-pane:hover { border-color: var(--border); background: var(--surface-2); color: var(--text); }
     .badge {
       min-width: 18px;
       height: 18px;
@@ -349,46 +361,73 @@
       cursor: pointer;
     }
     .level { color: var(--amber); font-size: 9px; }
-    .second-dock { display: none; }
 
     .detail {
       display: none;
       flex-basis: 380px;
       padding: 16px;
     }
-    .detail h3 { margin: 0 0 4px; font-size: 15px; }
+    .detail h3 { margin: 0 0 4px; font-size: 16px; }
     .detail > p { margin: 0 0 18px; color: var(--muted); font-size: 11px; }
     .detail-field { margin-bottom: 14px; }
     .detail-field span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; text-transform: uppercase; }
     .detail-field div { min-height: 36px; padding: 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0); font-size: 11px; }
 
-    .stage.split.wide .second-dock { display: flex; }
-    .stage.split.standard .second-dock { display: none; }
+    .stage.plan-open .dock { display: flex; }
+    .stage.notifications-open .second-dock { display: flex; }
     .stage.detail-open .detail { display: flex; }
-    .stage.detail-open .second-dock { display: none; }
-    .stage.detail-open.standard .dock { flex-basis: 48px; }
-    .stage.detail-open.standard .dock-head { padding: 4px; }
-    .stage.detail-open.standard .dock-tab { display: none; }
-    .stage.detail-open.standard .dock-tab.active { display: block; min-width: 38px; font-size: 0; }
-    .stage.detail-open.standard .dock-tab.active::after {
-      content: "P";
-      font-size: 14px;
-      color: var(--accent-soft);
-    }
-    .stage.detail-open.standard .dock[data-view="notifications"] .dock-tab.active::after { content: "N"; }
-    .stage.detail-open.standard .dock-body { display: none; }
-    .stage.detail-open.wide .dock { flex-basis: 340px; }
-
-    .plan-content, .notifications-content { display: none; }
-    .dock[data-view="plan"] .plan-content,
-    .dock[data-view="notifications"] .notifications-content { display: block; }
+    .stage.detail-open.standard .dock,
+    .stage.detail-open.standard .second-dock { display: none; }
+    .stage.detail-open.wide.plan-open.notifications-open .second-dock { display: none; }
+    .dock .notifications-content { display: none; }
     .second-dock .notifications-content { display: block; }
 
-    .stage.fixed-dual .dock { flex-basis: 320px; }
-    .stage.fixed-dual .second-dock { display: flex; flex-basis: 360px; }
-    .stage.fixed-dual.standard .main { min-width: 0; padding-left: 14px; padding-right: 14px; }
-    .stage.fixed-dual.standard .focus-grid { grid-template-columns: 1fr; }
-    .stage.fixed-dual.standard .summary .metric:nth-child(4) { display: none; }
+    .utility-rail {
+      width: 48px;
+      flex: 0 0 48px;
+      padding: 9px 7px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      border-left: 1px solid var(--border);
+      background: var(--surface-0);
+    }
+    .rail-toggle {
+      position: relative;
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .rail-toggle:hover { border-color: var(--border); background: var(--surface-2); color: var(--text); }
+    .rail-toggle.active {
+      border-color: rgba(59, 130, 246, .42);
+      background: rgba(59, 130, 246, .13);
+      color: var(--accent-soft);
+    }
+    .rail-toggle .badge {
+      position: absolute;
+      top: -5px;
+      right: -6px;
+      min-width: 17px;
+      height: 17px;
+      margin: 0;
+      border: 2px solid var(--surface-0);
+    }
+    .rail-rule { width: 22px; height: 1px; margin: 2px 0; background: var(--border); }
+    .rail-reset {
+      margin-top: auto;
+      color: var(--muted);
+      font-size: 9px;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+    }
 
     .state-note {
       max-width: 1500px;
@@ -419,12 +458,14 @@
     <header class="review-header">
       <div class="review-title">
         <h1>My Day utility dock</h1>
-        <p>Issue #2301 · reuse the existing Plan &amp; Focus and Notifications panels without shrinking daily work by default.</p>
+        <p>Issue #2301 · keep Suggested and Notifications available without making My Day feel permanently crowded.</p>
       </div>
       <div class="controls">
-        <div class="control-group" aria-label="Layout concept">
-          <button class="control active" data-layout="dock">Adaptive dock</button>
-          <button class="control" data-layout="fixed-dual">Always two panels</button>
+        <div class="control-group" aria-label="Pane state">
+          <button class="control active" data-preset="suggested">Suggested</button>
+          <button class="control" data-preset="notifications">Notifications</button>
+          <button class="control" data-preset="both">Both</button>
+          <button class="control" data-preset="neither">Neither</button>
         </div>
         <div class="control-group" aria-label="Viewport width">
           <button class="control active" data-width="standard">1280</button>
@@ -436,11 +477,11 @@
 
     <div class="recommendation">
       <strong>Recommended</strong>
-      Automatically show one or two existing utility panels according to available space. The panel visuals below are representative; retain the current application components and styling.
+      Suggested opens by default and Notifications stays collapsed with its badge visible. Each pane can be opened or collapsed independently; both-open is an explicit user choice.
     </div>
 
     <div class="stage-wrap">
-      <section class="stage standard" id="stage">
+      <section class="stage standard plan-open" id="stage">
         <nav class="nav" aria-label="Primary navigation">
           <div class="brand">MC</div>
           <div class="nav-item">H</div>
@@ -513,19 +554,22 @@
               <p>Task details temporarily take spatial priority.</p>
               <div class="detail-field"><span>Status</span><div>In progress</div></div>
               <div class="detail-field"><span>Priority</span><div>P1 · High</div></div>
-              <div class="detail-field"><span>Notes</span><div>Compare tabbed dock, wide split, and fixed dual-panel behavior.</div></div>
+              <div class="detail-field"><span>Notes</span><div>Compare Suggested and Notifications while keeping the daily task list in view.</div></div>
             </aside>
 
-            <aside class="dock" data-view="plan" aria-label="My Day utility dock">
+            <aside class="dock" aria-label="Suggested tasks">
               <header class="dock-head">
-                <div class="dock-tabs">
-                  <button class="dock-tab active" data-tab="plan">Plan &amp; Focus</button>
-                  <button class="dock-tab" data-tab="notifications">Notifications <span class="badge">4</span></button>
+                <div class="dock-title">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>
+                  Suggested
                 </div>
+                <button class="collapse-pane" data-close-pane="plan" aria-label="Collapse Suggested" title="Collapse Suggested">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 18-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
               </header>
               <div class="dock-body">
                 <div class="plan-content">
-                  <div class="dock-tools"><strong>Plan &amp; Focus</strong><span class="responsive-state">Responsive layout</span></div>
+                  <div class="dock-tools"><strong>Plan &amp; Focus</strong><span class="responsive-state">Open by default</span></div>
                   <article class="panel-card">
                     <span class="label">Do next</span>
                     <h4>Get an AI-powered focus recommendation</h4>
@@ -565,13 +609,19 @@
               </div>
             </aside>
 
-            <aside class="second-dock" aria-label="Notifications in split view">
+            <aside class="second-dock" aria-label="Notifications">
               <header class="dock-head">
-                <div class="dock-tabs"><button class="dock-tab active">Notifications <span class="badge">4</span></button></div>
+                <div class="dock-title">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  Notifications <span class="badge">4</span>
+                </div>
+                <button class="collapse-pane" data-close-pane="notifications" aria-label="Collapse Notifications" title="Collapse Notifications">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 18-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
               </header>
               <div class="dock-body">
                 <div class="notifications-content">
-                  <div class="dock-tools"><strong>Needs attention</strong><span class="responsive-state">Auto expanded</span></div>
+                  <div class="dock-tools"><strong>Needs attention</strong><span class="responsive-state">User opened</span></div>
                   <div class="filters">
                     <button class="filter active">All 4</button>
                     <button class="filter">Urgent 1</button>
@@ -590,60 +640,82 @@
                 </div>
               </div>
             </aside>
+
+            <aside class="utility-rail" aria-label="My Day utility panes">
+              <button class="rail-toggle active" data-pane="plan" aria-pressed="true" aria-label="Toggle Suggested pane" title="Suggested">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>
+              </button>
+              <button class="rail-toggle" data-pane="notifications" aria-pressed="false" aria-label="Toggle Notifications pane" title="Notifications">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="badge" aria-hidden="true">4</span>
+              </button>
+              <div class="rail-rule"></div>
+              <span class="rail-reset">Independent panes</span>
+            </aside>
           </div>
         </div>
       </section>
     </div>
 
     <div class="state-note">
-      <div class="note"><strong>Default:</strong> remember the last selected dock tab on My Day. The notification badge remains visible while Plan &amp; Focus is active.</div>
-      <div class="note"><strong>Wide screens:</strong> both panels appear automatically when the center workspace can retain a useful minimum width; no user-facing layout preference is required.</div>
-      <div class="note"><strong>Task detail:</strong> wide layouts retain the active dock tab beside detail so suggestions can be evaluated in context. Standard layouts reduce it to a 48px rail.</div>
+      <div class="note"><strong>Default:</strong> Suggested is open; Notifications is collapsed to the rail with its attention badge still visible.</div>
+      <div class="note"><strong>User control:</strong> either pane, both panes, or neither pane can be open. The choice is remembered instead of being inferred from screen width.</div>
+      <div class="note"><strong>Task detail:</strong> one chosen pane remains beside detail on wide layouts. Standard layouts temporarily protect the workspace and restore the saved pane state when detail closes.</div>
     </div>
   </main>
 
   <script>
     const stage = document.getElementById('stage');
-    const layoutButtons = document.querySelectorAll('[data-layout]');
+    const presetButtons = document.querySelectorAll('[data-preset]');
     const widthButtons = document.querySelectorAll('[data-width]');
     const detailToggle = document.getElementById('detail-toggle');
-    const primaryDock = document.querySelector('.dock');
 
-    function selectPrimaryDockTab(view) {
-      primaryDock.dataset.view = view;
-      primaryDock.querySelectorAll('[data-tab]').forEach((tab) => {
-        tab.classList.toggle('active', tab.dataset.tab === view);
+    function setPane(pane, open) {
+      stage.classList.toggle(`${pane}-open`, open);
+      document.querySelectorAll(`[data-pane="${pane}"]`).forEach((button) => {
+        button.classList.toggle('active', open);
+        button.setAttribute('aria-pressed', String(open));
+      });
+      syncPreset();
+    }
+
+    function syncPreset() {
+      const planOpen = stage.classList.contains('plan-open');
+      const notificationsOpen = stage.classList.contains('notifications-open');
+      const state = planOpen && notificationsOpen
+        ? 'both'
+        : planOpen
+          ? 'suggested'
+          : notificationsOpen
+            ? 'notifications'
+            : 'neither';
+      presetButtons.forEach((button) => {
+        button.classList.toggle('active', button.dataset.preset === state);
       });
     }
 
-    function syncResponsivePanels() {
-      const adaptive = !stage.classList.contains('fixed-dual');
-      stage.classList.toggle('split', adaptive && stage.classList.contains('wide'));
-      if (stage.classList.contains('split')) selectPrimaryDockTab('plan');
-    }
-
-    document.querySelectorAll('[data-tab]').forEach((button) => {
+    document.querySelectorAll('[data-pane]').forEach((button) => {
       button.addEventListener('click', () => {
-        const dock = button.closest('.dock');
-        dock.dataset.view = button.dataset.tab;
-        dock.querySelectorAll('[data-tab]').forEach((tab) => tab.classList.toggle('active', tab === button));
+        const pane = button.dataset.pane;
+        setPane(pane, !stage.classList.contains(`${pane}-open`));
       });
     });
 
-    layoutButtons.forEach((button) => {
+    document.querySelectorAll('[data-close-pane]').forEach((button) => {
+      button.addEventListener('click', () => setPane(button.dataset.closePane, false));
+    });
+
+    presetButtons.forEach((button) => {
       button.addEventListener('click', () => {
-        stage.classList.toggle('fixed-dual', button.dataset.layout === 'fixed-dual');
-        if (button.dataset.layout === 'fixed-dual') selectPrimaryDockTab('plan');
-        syncResponsivePanels();
-        layoutButtons.forEach((item) => item.classList.toggle('active', item === button));
+        setPane('plan', button.dataset.preset === 'suggested' || button.dataset.preset === 'both');
+        setPane('notifications', button.dataset.preset === 'notifications' || button.dataset.preset === 'both');
       });
     });
 
     widthButtons.forEach((button) => {
       button.addEventListener('click', () => {
-        stage.classList.remove('standard', 'wide', 'split');
+        stage.classList.remove('standard', 'wide');
         stage.classList.add(button.dataset.width);
-        syncResponsivePanels();
         widthButtons.forEach((item) => item.classList.toggle('active', item === button));
       });
     });

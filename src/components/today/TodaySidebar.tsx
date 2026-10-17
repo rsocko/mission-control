@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { AlertCircle, Brain, Calendar, CalendarClock, Clock, Flame, History, Plus, RotateCcw, Sparkles, Target, TimerReset } from 'lucide-react';
+import { AlertCircle, Brain, Calendar, CalendarClock, Clock, Flame, History, PanelRightClose, Plus, RotateCcw, Sparkles, Target, TimerReset } from 'lucide-react';
 import { SuggestionGroup } from './SuggestionGroup';
 import { Button } from '@/components/ui/button';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
@@ -22,6 +22,7 @@ interface TodaySidebarProps {
   listGroups: ListGroup[];
   projects: HubProject[];
   onGetWhatsNext: () => void;
+  onCollapse?: () => void;
   className?: string;
 }
 
@@ -38,6 +39,7 @@ export function TodaySidebar({
   listGroups,
   projects,
   onGetWhatsNext,
+  onCollapse,
   className,
 }: TodaySidebarProps) {
   const interactionProps = {
@@ -59,8 +61,19 @@ export function TodaySidebar({
       )}
       aria-label="Plan and focus suggestions"
     >
-      <div className="p-4 border-b border-[var(--border-subtle)]">
+      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] p-4">
         <h3 className="font-semibold text-[var(--text-primary)] text-sm">Plan & Focus</h3>
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+            aria-label="Collapse Suggested"
+            title="Collapse Suggested"
+          >
+            <PanelRightClose size={14} />
+          </button>
+        )}
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
         <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-2)] p-3">

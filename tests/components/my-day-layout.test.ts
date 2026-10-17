@@ -86,11 +86,12 @@ describe('My Day desktop layout', () => {
     expect(sidebarSource).toContain('min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain');
   });
 
-  it('adapts suggestions and notifications to the available desktop width', () => {
+  it('persists independent utility panes while protecting constrained task detail', () => {
     expect(utilityPanelsSource).toContain('new ResizeObserver');
-    expect(utilityPanelsSource).toContain("layout === 'dual'");
-    expect(utilityPanelsSource).toContain("layout === 'detail-single'");
-    expect(utilityPanelsSource).toContain("layout === 'rail'");
+    expect(utilityPanelsSource).toContain('UTILITY_PREFERENCES_STORAGE_KEY');
+    expect(utilityPanelsSource).toContain('resolveTodayUtilityVisibility');
+    expect(utilityPanelsSource).toContain('visibility.constrainedDetail');
+    expect(utilityPanelsSource).toContain('aria-label="My Day utility panes"');
     expect(utilityPanelsSource).toContain('<TodaySidebar');
     expect(utilityPanelsSource).toContain('<NotificationsPanel');
     expect(utilityPanelsSource).toContain('showHideButton={false}');

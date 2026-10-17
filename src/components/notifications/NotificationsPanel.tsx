@@ -28,6 +28,7 @@ interface NotificationsPanelProps {
   hook: UseNotificationsReturn;
   className?: string;
   showHideButton?: boolean;
+  onCollapse?: () => void;
 }
 
 const LEVEL_FILTERS: Array<{
@@ -55,6 +56,7 @@ export function NotificationsPanel({
   hook,
   className,
   showHideButton = true,
+  onCollapse,
 }: NotificationsPanelProps) {
   const [selectedSnapshot, setSelectedSnapshot] = useState<(typeof hook.notifications)[number] | null>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -215,11 +217,13 @@ export function NotificationsPanel({
             >
               Mark all read
             </button>
-            {showHideButton && (
+            {(onCollapse || showHideButton) && (
               <button
-                onClick={hook.togglePanel}
+                type="button"
+                onClick={onCollapse ?? hook.togglePanel}
                 className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
-                aria-label="Hide notifications"
+                aria-label={onCollapse ? 'Collapse Notifications' : 'Hide notifications'}
+                title={onCollapse ? 'Collapse Notifications' : undefined}
               >
                 <PanelRightClose size={13} />
               </button>

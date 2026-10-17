@@ -51,14 +51,16 @@ describe('parseTaskInput – backslash escape', () => {
   });
 
   describe('escaped duration', () => {
-    it('does not extract \\~30m as a duration', () => {
-      const result = parseTaskInput('read \\~30m of content');
+    it.each(['\\30m', '\\~30m'])('does not extract %s as a duration', (duration) => {
+      const result = parseTaskInput(`read ${duration} of content`);
       expect(result.estimatedDuration).toBeNull();
     });
 
-    it('strips the backslash from the title when duration is escaped', () => {
-      const result = parseTaskInput('read \\~30m of content');
-      expect(result.title).toBe('read ~30m of content');
+    it.each([
+      ['read \\30m of content', 'read 30m of content'],
+      ['read \\~30m of content', 'read ~30m of content'],
+    ])('strips the duration escape in "%s"', (input, title) => {
+      expect(parseTaskInput(input).title).toBe(title);
     });
   });
 
@@ -99,7 +101,7 @@ describe('parseTaskInput – backslash escape', () => {
 
     it('strips escape markers from every escaped token in one title', () => {
       const result = parseTaskInput(
-        'literal \\#tag \\@work \\!high \\~30m \\^3 \\+API \\* \\/due:tomorrow \\next friday \\aug 15',
+        'literal \\#tag \\@work \\!high \\30m \\^3 \\+API \\* \\/due:tomorrow \\next friday \\aug 15',
       );
       expect(result.tags).toHaveLength(0);
       expect(result.priority).toBeNull();
@@ -110,7 +112,7 @@ describe('parseTaskInput – backslash escape', () => {
       expect(result.dueDate).toBeNull();
       expect(result.dateSuggestion).toBeNull();
       expect(result.title).toBe(
-        'literal #tag @work !high ~30m ^3 +API * /due:tomorrow next friday aug 15',
+        'literal #tag @work !high 30m ^3 +API * /due:tomorrow next friday aug 15',
       );
     });
 
@@ -151,9 +153,9 @@ describe('parseTaskInput – backslash escape', () => {
     });
 
     it('removes the active duration without persisting the escape marker', () => {
-      const result = parseTaskInput('compare \\~30m with ~30m');
+      const result = parseTaskInput('compare \\30m with 30m');
       expect(result.estimatedDuration).toBe(30);
-      expect(result.title).toBe('compare ~30m with');
+      expect(result.title).toBe('compare 30m with');
     });
 
     it('removes the active effort without persisting the escape marker', () => {

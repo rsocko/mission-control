@@ -147,8 +147,8 @@ export function findTokens(text: string, options: TokenDetectionOptions): TokenM
     tokens.push({ start: m.index, end: m.index + m[0].length, type });
   }
 
-  // #tags (not escaped with \)
-  const tagRegex = /(?<!\\)#[a-zA-Z0-9_:./-]+/g;
+  // #tags at the start of the input or after whitespace
+  const tagRegex = /(?<!\S)#[a-zA-Z0-9_:./-]+/g;
   while (metadataEnabled('tags') && (m = tagRegex.exec(text)) !== null) {
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'tag' });
   }
@@ -170,8 +170,8 @@ export function findTokens(text: string, options: TokenDetectionOptions): TokenM
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'project' });
   }
 
-  // ~duration (not escaped with \)
-  const durRegex = /(?<!\\)~\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b/gi;
+  // Raw or ~-prefixed duration at a token boundary (not escaped with \)
+  const durRegex = /(?<!\S)~?\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b/gi;
   while (metadataEnabled('estimatedDuration') && (m = durRegex.exec(text)) !== null) {
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'duration' });
   }

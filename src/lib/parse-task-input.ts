@@ -6,6 +6,7 @@
  *   "jun 25", "end of month", "aug 15 2025", "3pm tomorrow", etc.
  * - Priority: "!critical", "!high", "!medium", "!low", "!0" (critical), "!1" (high), "!2" (medium), "!3" (low)
  * - Effort: "^1" (XS), "^2" (S), "^3" (M), "^4" (L), "^5" (XL)
+ * - Estimated duration: "30m", "1.5h" (legacy "~30m" remains supported)
  * - Planning horizon: "~next", "~soon", "~later", "~someday"
  * - Tags: "#tagname"
  * - Project: "+Project" or '+"Project with spaces"'
@@ -61,7 +62,7 @@ export interface ParsedTask {
     label: string;
     matchedText: string;
   } | null;
-  estimatedDuration: number | null; // minutes, parsed from ~30m, ~1h, ~2h etc.
+  estimatedDuration: number | null; // minutes, parsed from 30m, 1h, ~30m, etc.
   effort: number | null;   // 1–5, parsed from ^1, ^2, ^3, ^4, ^5
   planningHorizon: PlanningHorizon | null;
   recurrence: string | null; // Recurrence pattern value (e.g. 'daily', 'weekly', 'every 3 days', 'weekly (monday, wednesday)')
@@ -254,6 +255,10 @@ function maskEscapedDateExpressions(text: string, today: Date): string {
 
 function stripEscapeBackslashes(text: string, today: Date): string {
   let cleaned = text.replace(/\\([#@!~^/+*])/g, '$1');
+  cleaned = cleaned.replace(
+    /(^|\s)\\(?=\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b)/gi,
+    '$1',
+  );
   const escapedDateOffsets = findEscapedDateRanges(cleaned, today)
     .flatMap((range) => range.escapeOffsets)
     .sort((a, b) => b - a);
@@ -327,9 +332,9 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     }
   }
 
-  // Extract estimated duration: ~30m, ~1h, ~1.5h, ~90m, ~2h (not escaped with \)
+  // Extract estimated duration: 30m, 1h, 1.5h, ~30m, etc. (not escaped with \)
   const durationMatches = metadataEnabled('estimatedDuration')
-    ? [...remaining.matchAll(/(?<!\\)~(\d+(?:\.\d+)?)\s*(m|min|mins|h|hr|hrs|hour|hours)\b/gi)]
+    ? [...remaining.matchAll(/(?<!\S)~?(\d+(?:\.\d+)?)\s*(m|min|mins|h|hr|hrs|hour|hours)\b/gi)]
     : [];
   if (durationMatches.length > 0) {
     const durationMatch = durationMatches[durationMatches.length - 1];
@@ -340,9 +345,9 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     } else {
       estimatedDuration = Math.round(value);
     }
-    remaining = remaining.replace(/(?<!\\)~\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b/gi, '').trim();
+    remaining = remaining.replace(/(?<!\S)~?\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b/gi, '').trim();
     if (!preserveText) {
-      title = title.replace(/(?<!\\)~\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b/gi, '').trim();
+      title = title.replace(/(?<!\S)~?\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b/gi, '').trim();
     }
   }
 
@@ -385,15 +390,15 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     if (!preserveText) title = title.replace(myDayTokenRegex, '$1').trim();
   }
 
-  // Extract tags: #tagname (not escaped with \)
+  // Extract tags: #tagname at the start of the input or after whitespace.
   // Colons and dots are allowed so namespaced tags like "area:projects" or "v2.0" work
   if (metadataEnabled('tags')) {
-    const tagMatches = remaining.matchAll(/(?<!\\)#([a-zA-Z0-9_:./-]+)/g);
+    const tagMatches = remaining.matchAll(/(?<!\S)#([a-zA-Z0-9_:./-]+)/g);
     for (const match of tagMatches) {
       foundTags.push(match[1]);
     }
-    remaining = remaining.replace(/(?<!\\)#[a-zA-Z0-9_:./-]+/g, '').trim();
-    if (!preserveText) title = title.replace(/(?<!\\)#[a-zA-Z0-9_:./-]+/g, '').trim();
+    remaining = remaining.replace(/(?<!\S)#[a-zA-Z0-9_:./-]+/g, '').trim();
+    if (!preserveText) title = title.replace(/(?<!\S)#[a-zA-Z0-9_:./-]+/g, '').trim();
   }
 
   // Extract project: +Project or +"Project with spaces"

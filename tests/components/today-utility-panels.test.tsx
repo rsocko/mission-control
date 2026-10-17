@@ -5,11 +5,21 @@ import { TodayUtilityPanels } from '@/components/today/TodayUtilityPanels';
 let resizeObserverCallback: ResizeObserverCallback | null = null;
 
 vi.mock('@/components/today/TodaySidebar', () => ({
-  TodaySidebar: () => <aside aria-label="Plan and focus suggestions">Plan panel</aside>,
+  TodaySidebar: ({ onCollapse }: { onCollapse?: () => void }) => (
+    <aside aria-label="Plan and focus suggestions">
+      Plan panel
+      {onCollapse && <button onClick={onCollapse}>Collapse Suggested</button>}
+    </aside>
+  ),
 }));
 
 vi.mock('@/components/notifications/NotificationsPanel', () => ({
-  NotificationsPanel: () => <aside aria-label="Notifications">Notifications panel</aside>,
+  NotificationsPanel: ({ onCollapse }: { onCollapse?: () => void }) => (
+    <aside aria-label="Notifications">
+      Notifications panel
+      {onCollapse && <button onClick={onCollapse}>Collapse Notifications</button>}
+    </aside>
+  ),
 }));
 
 vi.mock('@/components/layout/NavigationBadge', () => ({
@@ -75,47 +85,82 @@ describe('TodayUtilityPanels', () => {
     vi.unstubAllGlobals();
   });
 
-  it('uses tabs when only one utility panel fits', () => {
+  it('defaults to Suggested open with Notifications collapsed to the rail', () => {
     renderPanels();
-    resizeWorkspace(1200);
 
-    expect(screen.getByRole('tablist', { name: 'My Day utility panel' })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Plan and focus suggestions' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Notifications' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('tab', { name: /notifications/i }));
-
-    expect(screen.getByRole('complementary', { name: 'Notifications' })).toBeInTheDocument();
-    expect(screen.queryByRole('complementary', { name: 'Plan and focus suggestions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'My Day utility panes' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Collapse Suggested' })[1]).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Open Notifications' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('shows both existing panels automatically when the workspace is wide', () => {
+  it('allows either, both, or neither pane to remain open', () => {
     renderPanels();
-    resizeWorkspace(1400);
 
-    expect(screen.queryByRole('tablist', { name: 'My Day utility panel' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Notifications' }));
     expect(screen.getByRole('complementary', { name: 'Plan and focus suggestions' })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Notifications' })).toBeInTheDocument();
-  });
 
-  it('keeps one active panel beside task detail on wide workspaces', () => {
-    renderPanels(true);
-    resizeWorkspace(1400);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Collapse Suggested' })[0]);
+    expect(screen.queryByRole('complementary', { name: 'Plan and focus suggestions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Notifications' })).toBeInTheDocument();
 
-    expect(screen.getByRole('tablist', { name: 'My Day utility panel' })).toBeInTheDocument();
-    expect(screen.getByRole('complementary', { name: 'Plan and focus suggestions' })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Collapse Notifications' })[0]);
+    expect(screen.queryByRole('complementary', { name: 'Plan and focus suggestions' })).not.toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Notifications' })).not.toBeInTheDocument();
   });
 
-  it('collapses to a rail with a temporary panel on constrained detail layouts', () => {
-    renderPanels(true);
+  it('rehydrates the saved pane choices', () => {
+    const { unmount } = renderPanels();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Notifications' }));
+    unmount();
+
+    renderPanels();
+    expect(screen.getByRole('complementary', { name: 'Plan and focus suggestions' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Notifications' })).toBeInTheDocument();
+  });
+
+  it('keeps the last-used open pane beside task detail on wide workspaces', () => {
+    const { rerender } = renderPanels();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Notifications' }));
+
+    rerender(
+      <div>
+        <TodayUtilityPanels detailOpen todaySidebarProps={{} as never} />
+      </div>,
+    );
+    resizeWorkspace(1400);
+
+    expect(screen.queryByRole('complementary', { name: 'Plan and focus suggestions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Notifications' })).toBeInTheDocument();
+  });
+
+  it('uses temporary overlays for constrained task detail without changing saved choices', () => {
+    const { rerender } = renderPanels();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Notifications' }));
+
+    rerender(
+      <div>
+        <TodayUtilityPanels detailOpen todaySidebarProps={{} as never} />
+      </div>,
+    );
     resizeWorkspace(1200);
 
-    expect(screen.getByRole('complementary', { name: 'My Day utility panels (collapsed)' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Plan and focus suggestions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Notifications' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show Plan & Focus' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Temporarily show Suggested' }));
+    expect(screen.getByRole('complementary', { name: 'Plan and focus suggestions' })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Collapse Suggested' })[0]);
+
+    rerender(
+      <div>
+        <TodayUtilityPanels detailOpen={false} todaySidebarProps={{} as never} />
+      </div>,
+    );
 
     expect(screen.getByRole('complementary', { name: 'Plan and focus suggestions' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Notifications' })).toBeInTheDocument();
   });
 });

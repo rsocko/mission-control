@@ -16,50 +16,71 @@ import { NavigationBadge } from '@/components/layout/NavigationBadge';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 import { getNotificationBadgeState } from '@/lib/navigation/badges';
 import { cn } from '@/lib/utils';
-import { resolveTodayUtilityLayout } from './today-utility-layout';
+import {
+  resolveTodayUtilityVisibility,
+  type TodayUtilityPanel,
+  type TodayUtilityPreferences,
+} from './today-utility-layout';
 
-type UtilityPanel = 'plan' | 'notifications';
-
-const ACTIVE_PANEL_STORAGE_KEY = 'mission-control:my-day-utility-panel';
-const ACTIVE_PANEL_CHANGE_EVENT = 'mission-control:my-day-utility-panel-change';
-let inMemoryPanel: UtilityPanel = 'plan';
+const UTILITY_PREFERENCES_STORAGE_KEY = 'mission-control:my-day-utility-panes';
+const UTILITY_PREFERENCES_CHANGE_EVENT = 'mission-control:my-day-utility-panes-change';
+const DEFAULT_UTILITY_STATE = '10:plan';
+const VALID_UTILITY_STATE = /^[01][01]:(plan|notifications)$/;
+let inMemoryUtilityState = DEFAULT_UTILITY_STATE;
 
 interface TodayUtilityPanelsProps {
   detailOpen: boolean;
   todaySidebarProps: ComponentProps<typeof TodaySidebar>;
 }
 
-function readStoredPanel(): UtilityPanel {
-  if (typeof window === 'undefined') return inMemoryPanel;
+function readStoredUtilityState(): string {
+  if (typeof window === 'undefined') return inMemoryUtilityState;
   try {
-    const panel = window.localStorage.getItem(ACTIVE_PANEL_STORAGE_KEY) === 'notifications'
-      ? 'notifications'
-      : 'plan';
-    inMemoryPanel = panel;
-    return panel;
+    const stored = window.localStorage.getItem(UTILITY_PREFERENCES_STORAGE_KEY);
+    inMemoryUtilityState = stored && VALID_UTILITY_STATE.test(stored)
+      ? stored
+      : DEFAULT_UTILITY_STATE;
   } catch {
-    return inMemoryPanel;
+    // Preferences remain available for this page load when storage is unavailable.
   }
+  return inMemoryUtilityState;
 }
 
-function storePanel(panel: UtilityPanel) {
-  if (panel === readStoredPanel()) return;
-  inMemoryPanel = panel;
+function decodeUtilityState(state: string): TodayUtilityPreferences {
+  const [visibility, activePanel] = state.split(':') as [
+    string,
+    TodayUtilityPanel,
+  ];
+  return {
+    planOpen: visibility[0] === '1',
+    notificationsOpen: visibility[1] === '1',
+    activePanel,
+  };
+}
+
+function encodeUtilityState(preferences: TodayUtilityPreferences): string {
+  return `${preferences.planOpen ? '1' : '0'}${preferences.notificationsOpen ? '1' : '0'}:${preferences.activePanel}`;
+}
+
+function storeUtilityPreferences(preferences: TodayUtilityPreferences) {
+  const state = encodeUtilityState(preferences);
+  if (state === readStoredUtilityState()) return;
+  inMemoryUtilityState = state;
   try {
-    window.localStorage.setItem(ACTIVE_PANEL_STORAGE_KEY, panel);
+    window.localStorage.setItem(UTILITY_PREFERENCES_STORAGE_KEY, state);
   } catch {
     // The preference is optional when storage is unavailable.
   }
-  window.dispatchEvent(new Event(ACTIVE_PANEL_CHANGE_EVENT));
+  window.dispatchEvent(new Event(UTILITY_PREFERENCES_CHANGE_EVENT));
 }
 
-function subscribeToStoredPanel(onStoreChange: () => void) {
+function subscribeToUtilityPreferences(onStoreChange: () => void) {
   const handleChange = () => onStoreChange();
   window.addEventListener('storage', handleChange);
-  window.addEventListener(ACTIVE_PANEL_CHANGE_EVENT, handleChange);
+  window.addEventListener(UTILITY_PREFERENCES_CHANGE_EVENT, handleChange);
   return () => {
     window.removeEventListener('storage', handleChange);
-    window.removeEventListener(ACTIVE_PANEL_CHANGE_EVENT, handleChange);
+    window.removeEventListener(UTILITY_PREFERENCES_CHANGE_EVENT, handleChange);
   };
 }
 
@@ -69,13 +90,18 @@ export function TodayUtilityPanels({
 }: TodayUtilityPanelsProps) {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const notificationsHook = useNotifications();
-  const activePanel = useSyncExternalStore<UtilityPanel>(
-    subscribeToStoredPanel,
-    readStoredPanel,
-    () => 'plan',
+  const storedState = useSyncExternalStore(
+    subscribeToUtilityPreferences,
+    readStoredUtilityState,
+    () => DEFAULT_UTILITY_STATE,
   );
+  const preferences = decodeUtilityState(storedState);
   const [availableWidth, setAvailableWidth] = useState(0);
-  const layout = resolveTodayUtilityLayout(availableWidth, detailOpen);
+  const visibility = resolveTodayUtilityVisibility(
+    preferences,
+    availableWidth,
+    detailOpen,
+  );
   const notificationBadge = getNotificationBadgeState(notificationsHook.stats);
 
   useLayoutEffect(() => {
@@ -97,18 +123,46 @@ export function TodayUtilityPanels({
     return () => observer.disconnect();
   }, []);
 
-  const selectPanel = (panel: UtilityPanel) => {
-    storePanel(panel);
+  const setPanelOpen = (panel: TodayUtilityPanel, open: boolean) => {
+    const otherPanel: TodayUtilityPanel = panel === 'plan' ? 'notifications' : 'plan';
+    const otherOpen = otherPanel === 'plan'
+      ? preferences.planOpen
+      : preferences.notificationsOpen;
+    storeUtilityPreferences({
+      ...preferences,
+      planOpen: panel === 'plan' ? open : preferences.planOpen,
+      notificationsOpen: panel === 'notifications' ? open : preferences.notificationsOpen,
+      activePanel: open ? panel : otherOpen ? otherPanel : preferences.activePanel,
+    });
   };
 
-  const planPanel = (className?: string) => (
-    <TodaySidebar {...todaySidebarProps} className={className} />
+  const togglePanel = (panel: TodayUtilityPanel) => {
+    const isOpen = panel === 'plan'
+      ? preferences.planOpen
+      : preferences.notificationsOpen;
+    const bothOpen = preferences.planOpen && preferences.notificationsOpen;
+
+    if (detailOpen && !visibility.constrainedDetail && bothOpen && preferences.activePanel !== panel) {
+      storeUtilityPreferences({ ...preferences, activePanel: panel });
+      return;
+    }
+
+    setPanelOpen(panel, !isOpen);
+  };
+
+  const planPanel = (className?: string, onCollapse?: () => void) => (
+    <TodaySidebar
+      {...todaySidebarProps}
+      className={className}
+      onCollapse={onCollapse}
+    />
   );
-  const notificationsPanel = (className?: string) => (
+  const notificationsPanel = (className?: string, onCollapse?: () => void) => (
     <NotificationsPanel
       hook={notificationsHook}
       className={className}
       showHideButton={false}
+      onCollapse={onCollapse}
     />
   );
 
@@ -116,160 +170,109 @@ export function TodayUtilityPanels({
     <>
       <span ref={anchorRef} className="hidden" aria-hidden="true" />
 
-      {layout === 'dual' && (
-        <>
-          <div
-            className="hidden h-full min-h-0 shrink-0 sm:block"
-            onFocusCapture={() => selectPanel('plan')}
-            onPointerDownCapture={() => selectPanel('plan')}
-          >
-            {planPanel()}
-          </div>
-          <div
-            className="hidden h-full min-h-0 shrink-0 sm:block"
-            onFocusCapture={() => selectPanel('notifications')}
-            onPointerDownCapture={() => selectPanel('notifications')}
-          >
-            {notificationsPanel()}
-          </div>
-        </>
-      )}
-
-      {(layout === 'single' || layout === 'detail-single') && (
-        <section
-          aria-label="My Day utility panels"
-          className="hidden h-full min-h-0 w-[360px] shrink-0 flex-col border-l border-[var(--border)] bg-[var(--surface-1)] sm:flex"
+      {visibility.plan && (
+        <div
+          className="hidden h-full min-h-0 shrink-0 sm:block"
+          onFocusCapture={() => storeUtilityPreferences({ ...preferences, activePanel: 'plan' })}
+          onPointerDownCapture={() => storeUtilityPreferences({ ...preferences, activePanel: 'plan' })}
         >
-          <div
-            role="tablist"
-            aria-label="My Day utility panel"
-            className="flex h-11 shrink-0 border-b border-[var(--border)] px-2"
-          >
-            <UtilityTab
-              active={activePanel === 'plan'}
-              icon={<Target size={14} aria-hidden="true" />}
-              label="Plan & Focus"
-              onSelect={() => selectPanel('plan')}
-            />
-            <UtilityTab
-              active={activePanel === 'notifications'}
-              badge={notificationBadge}
-              icon={<Bell size={14} aria-hidden="true" />}
-              label="Notifications"
-              onSelect={() => selectPanel('notifications')}
-            />
-          </div>
-          <div className="min-h-0 flex-1">
-            {activePanel === 'plan'
-              ? planPanel('w-full border-l-0')
-              : notificationsPanel('w-full border-l-0')}
-          </div>
-        </section>
+          {planPanel(undefined, () => setPanelOpen('plan', false))}
+        </div>
       )}
 
-      {layout === 'rail' && (
-        <CollapsedUtilityRail
-          activePanel={activePanel}
-          notificationBadge={notificationBadge}
-          onSelectPanel={selectPanel}
-          planPanel={() => planPanel('w-full')}
-          notificationsPanel={() => notificationsPanel('w-full')}
-        />
+      {visibility.notifications && (
+        <div
+          className="hidden h-full min-h-0 shrink-0 sm:block"
+          onFocusCapture={() => storeUtilityPreferences({ ...preferences, activePanel: 'notifications' })}
+          onPointerDownCapture={() => storeUtilityPreferences({ ...preferences, activePanel: 'notifications' })}
+        >
+          {notificationsPanel(undefined, () => setPanelOpen('notifications', false))}
+        </div>
       )}
+
+      <UtilityRail
+        key={visibility.constrainedDetail ? 'temporary' : 'persistent'}
+        constrainedDetail={visibility.constrainedDetail}
+        notificationBadge={notificationBadge}
+        notificationsOpen={preferences.notificationsOpen}
+        onTogglePanel={togglePanel}
+        planOpen={preferences.planOpen}
+        renderNotificationsPanel={(onCollapse) => notificationsPanel('w-full border-l-0', onCollapse)}
+        renderPlanPanel={(onCollapse) => planPanel('w-full border-l-0', onCollapse)}
+      />
     </>
   );
 }
 
-function CollapsedUtilityRail({
-  activePanel,
+function UtilityRail({
+  constrainedDetail,
   notificationBadge,
-  notificationsPanel,
-  onSelectPanel,
-  planPanel,
+  notificationsOpen,
+  onTogglePanel,
+  planOpen,
+  renderNotificationsPanel,
+  renderPlanPanel,
 }: {
-  activePanel: UtilityPanel;
+  constrainedDetail: boolean;
   notificationBadge: ReturnType<typeof getNotificationBadgeState>;
-  notificationsPanel: () => ReactNode;
-  onSelectPanel: (panel: UtilityPanel) => void;
-  planPanel: () => ReactNode;
+  notificationsOpen: boolean;
+  onTogglePanel: (panel: TodayUtilityPanel) => void;
+  planOpen: boolean;
+  renderNotificationsPanel: (onCollapse: () => void) => ReactNode;
+  renderPlanPanel: (onCollapse: () => void) => ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [temporaryPanel, setTemporaryPanel] = useState<TodayUtilityPanel | null>(null);
 
   useEffect(() => {
-    if (!expanded) return;
+    if (!temporaryPanel) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setExpanded(false);
+      if (event.key === 'Escape') setTemporaryPanel(null);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [expanded]);
+  }, [temporaryPanel]);
 
-  const togglePanel = (panel: UtilityPanel) => {
-    if (expanded && activePanel === panel) {
-      setExpanded(false);
+  const handleToggle = (panel: TodayUtilityPanel) => {
+    if (constrainedDetail) {
+      setTemporaryPanel((current) => current === panel ? null : panel);
       return;
     }
-    onSelectPanel(panel);
-    setExpanded(true);
+    onTogglePanel(panel);
   };
 
   return (
     <aside
-      aria-label="My Day utility panels (collapsed)"
-      className="relative hidden h-full w-12 shrink-0 flex-col items-center gap-1 border-l border-[var(--border)] bg-[var(--surface-1)] py-3 sm:flex"
+      aria-label="My Day utility panes"
+      className="relative hidden h-full w-12 shrink-0 flex-col items-center gap-1 border-l border-[var(--border)] bg-[var(--surface-0)] py-3 sm:flex"
     >
       <UtilityRailButton
-        active={activePanel === 'plan' && expanded}
-        icon={<Target size={16} />}
-        label="Show Plan & Focus"
-        onClick={() => togglePanel('plan')}
+        active={constrainedDetail ? temporaryPanel === 'plan' : planOpen}
+        icon={<Target size={16} aria-hidden="true" />}
+        label={constrainedDetail
+          ? 'Temporarily show Suggested'
+          : planOpen ? 'Collapse Suggested' : 'Open Suggested'}
+        onClick={() => handleToggle('plan')}
+        pressed={constrainedDetail ? temporaryPanel === 'plan' : planOpen}
       />
       <UtilityRailButton
-        active={activePanel === 'notifications' && expanded}
+        active={constrainedDetail ? temporaryPanel === 'notifications' : notificationsOpen}
         badge={notificationBadge}
-        icon={<Bell size={16} />}
-        label="Show notifications"
-        onClick={() => togglePanel('notifications')}
+        icon={<Bell size={16} aria-hidden="true" />}
+        label={constrainedDetail
+          ? 'Temporarily show Notifications'
+          : notificationsOpen ? 'Collapse Notifications' : 'Open Notifications'}
+        onClick={() => handleToggle('notifications')}
+        pressed={constrainedDetail ? temporaryPanel === 'notifications' : notificationsOpen}
       />
-      {expanded && (
+
+      {constrainedDetail && temporaryPanel && (
         <div className="absolute inset-y-0 right-full z-30 w-[360px] shadow-[var(--shadow-lg)]">
-          {activePanel === 'plan' ? planPanel() : notificationsPanel()}
+          {temporaryPanel === 'plan'
+            ? renderPlanPanel(() => setTemporaryPanel(null))
+            : renderNotificationsPanel(() => setTemporaryPanel(null))}
         </div>
       )}
     </aside>
-  );
-}
-
-function UtilityTab({
-  active,
-  badge,
-  icon,
-  label,
-  onSelect,
-}: {
-  active: boolean;
-  badge?: ReturnType<typeof getNotificationBadgeState>;
-  icon: ReactNode;
-  label: string;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onSelect}
-      className={cn(
-        'relative flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]',
-        active
-          ? 'border-[var(--accent)] text-[var(--text-primary)]'
-          : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
-      )}
-    >
-      {icon}
-      <span>{label}</span>
-      {badge && <NavigationBadge count={badge.count} tone={badge.tone} />}
-    </button>
   );
 }
 
@@ -279,12 +282,14 @@ function UtilityRailButton({
   icon,
   label,
   onClick,
+  pressed,
 }: {
   active: boolean;
   badge?: ReturnType<typeof getNotificationBadgeState>;
   icon: ReactNode;
   label: string;
   onClick: () => void;
+  pressed: boolean;
 }) {
   return (
     <button
@@ -297,6 +302,7 @@ function UtilityRailButton({
           : 'text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]',
       )}
       aria-label={label}
+      aria-pressed={pressed}
       title={label}
     >
       {icon}

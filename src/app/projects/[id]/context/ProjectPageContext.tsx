@@ -271,7 +271,7 @@ export function ProjectPageProvider({
 
   const loadProjectTasks = useCallback(async () => {
     return fetchAllTasks<ProjectTask>(
-      `/api/tasks?projectId=${projectId}&parentOnly=true&sortBy=updated`,
+      `/api/tasks?projectId=${projectId}&parentOnly=true&sortBy=updated&includeScoreBreakdown=true`,
     );
   }, [projectId]);
 

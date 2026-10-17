@@ -492,17 +492,50 @@ export function getTimelineRange(rows: GanttPhaseRow[]) {
   };
 }
 
-export function sortTasks<T extends Pick<ProjectTask, 'priority' | 'dueDate' | 'updatedAt' | 'title'>>(
+export function sortTasks<T extends Pick<
+  ProjectTask,
+  'priority' | 'dueDate' | 'updatedAt' | 'title'
+> & Partial<Pick<
+  ProjectTask,
+  'planningHorizon' | 'effort' | 'smartScore' | 'scoreBreakdown' | 'sourceListName'
+>> & { createdAt?: string | null }>(
   tasks: T[],
   sortBy: string,
   sortDir: 'asc' | 'desc',
 ): T[] {
   const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, none: 4 };
+  const planningHorizonOrder: Record<string, number> = {
+    next: 0,
+    soon: 1,
+    later: 2,
+    someday: 3,
+  };
   const dir = sortDir === 'asc' ? 1 : -1;
   return [...tasks].sort((a, b) => {
     switch (sortBy) {
       case 'priority': return dir * ((priorityOrder[a.priority] ?? 4) - (priorityOrder[b.priority] ?? 4));
+      case 'planningHorizon':
+        return dir * (
+          (planningHorizonOrder[a.planningHorizon ?? ''] ?? 4)
+          - (planningHorizonOrder[b.planningHorizon ?? ''] ?? 4)
+        );
+      case 'effort':
+        return dir * (
+          (a.effort ?? Number.MAX_SAFE_INTEGER)
+          - (b.effort ?? Number.MAX_SAFE_INTEGER)
+        );
+      case 'smartScore':
+        return dir * ((b.smartScore ?? -1) - (a.smartScore ?? -1));
+      case 'smartScorePercentile': {
+        const aPercentile = a.scoreBreakdown?.audit.ranking?.scope.topPercent;
+        const bPercentile = b.scoreBreakdown?.audit.ranking?.scope.topPercent;
+        if (aPercentile == null) return bPercentile == null ? 0 : 1;
+        if (bPercentile == null) return -1;
+        return aPercentile - bPercentile;
+      }
       case 'dueDate': return dir * ((a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
+      case 'createdAt':
+        return dir * (b.createdAt ?? '').localeCompare(a.createdAt ?? '');
       case 'updated': {
         const timeA = new Date(a.updatedAt).getTime();
         const timeB = new Date(b.updatedAt).getTime();
@@ -512,6 +545,8 @@ export function sortTasks<T extends Pick<ProjectTask, 'priority' | 'dueDate' | '
         return dir * (timeB - timeA);
       }
       case 'title': return dir * a.title.localeCompare(b.title);
+      case 'sourceList':
+        return dir * (a.sourceListName ?? '\uffff').localeCompare(b.sourceListName ?? '\uffff');
       default: return 0;
     }
   });

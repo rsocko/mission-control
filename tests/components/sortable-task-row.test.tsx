@@ -73,6 +73,7 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
     effort?: number | null;
     recurrence?: string | null;
     activeSortField?: string;
+    scoreDisplayMode?: 'score' | 'percentile';
     priority: string;
     status: string;
     onFilterPriority?: (priority: string) => void;
@@ -86,6 +87,7 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
         data-effort={props.effort}
         data-recurrence={props.recurrence}
         data-sort-field={props.activeSortField}
+        data-score-display-mode={props.scoreDisplayMode}
         data-priority={props.priority}
         data-status={props.status}
       />
@@ -204,6 +206,31 @@ describe('SortableTaskRow aligned properties', () => {
     );
 
     expect(screen.getByTestId('task-row-actions')).toHaveAttribute('data-sort-field', 'effort');
+  });
+
+  it('uses percentile display mode for the My Day percentile sort', () => {
+    render(
+      <SortableTaskRow
+        item={item}
+        activeSortField="smartScorePercentile"
+        onComplete={vi.fn()}
+        onFocus={vi.fn()}
+        onSchedule={vi.fn()}
+        onRemove={vi.fn()}
+        onSelect={vi.fn()}
+        isSelected={false}
+        onSetDueDate={vi.fn()}
+        onSetPriority={vi.fn()}
+        onSetStatus={vi.fn()}
+        onOpenNotes={vi.fn()}
+        draggable={false}
+      />,
+    );
+
+    expect(screen.getByTestId('task-row-actions')).toHaveAttribute(
+      'data-score-display-mode',
+      'percentile',
+    );
   });
 
   it('prioritizes the title and collapses the status reason to its icon in narrow rows', () => {

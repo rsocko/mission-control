@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useDashboardQueries } from '@/lib/hooks/useDashboardQueries';
+import { useDashboardQueries, useMyDayQueries } from '@/lib/hooks/useDashboardQueries';
 import { notifyNavigationCountsChanged } from '@/lib/navigation/badges';
 import { notifyTaskChanged } from '@/lib/task-change-events';
 
@@ -101,5 +101,70 @@ describe('useDashboardQueries', () => {
     });
     expect(connectorRequests).toBe(4);
     expect(sourceCountRequests).toBe(4);
+  });
+});
+
+describe('useMyDayQueries', () => {
+  it('loads and merges canonical Smart Score data for My Day rows', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/my-day?date=2026-05-20') {
+        return new Response(JSON.stringify({
+          items: [{
+            id: 'my-day-1',
+            taskId: 'task-1',
+            title: 'Ranked task',
+          }],
+          suggestions: [],
+        }));
+      }
+      if (url.startsWith('/api/tasks?quickFilter=myDay&myDayDate=2026-05-20')) {
+        const requestUrl = new URL(url, window.location.origin);
+        expect(requestUrl.searchParams.get('sortBy')).toBe('smartScorePercentile');
+        expect(requestUrl.searchParams.get('includeScoreBreakdown')).toBe('true');
+        return new Response(JSON.stringify({
+          tasks: [{
+            id: 'task-1',
+            smartScore: 91,
+            scoreBreakdown: {
+              audit: {
+                ranking: {
+                  scope: {
+                    label: 'My Day',
+                    rank: 1,
+                    total: 20,
+                    topPercent: 5,
+                  },
+                },
+              },
+            },
+          }],
+          hasMore: false,
+        }));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useMyDayQueries('2026-05-20'), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.itemsQuery.data?.items[0]).toMatchObject({
+        taskId: 'task-1',
+        smartScore: 91,
+        scoreBreakdown: {
+          audit: {
+            ranking: {
+              scope: { topPercent: 5 },
+            },
+          },
+        },
+      });
+    });
   });
 });

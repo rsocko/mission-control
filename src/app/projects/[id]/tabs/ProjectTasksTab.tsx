@@ -11,7 +11,7 @@ import {
   GroupByDropdown,
   type GroupOption,
 } from '@/components/toolbar/GroupByDropdown';
-import { SortDropdown, type SortOption } from '@/components/toolbar/SortDropdown';
+import { DEFAULT_SORT_OPTIONS, SortDropdown, type SortOption } from '@/components/toolbar/SortDropdown';
 import {
   ViewDensityToggle,
   type ViewDensity,
@@ -43,7 +43,17 @@ import {
 import type { ProjectTaskOverlayActions } from './contracts';
 import { useProjectTaskFilterOptions } from './useProjectTaskFilterOptions';
 
-type TaskSortField = 'priority' | 'dueDate' | 'updated' | 'title';
+type TaskSortField =
+  | 'priority'
+  | 'planningHorizon'
+  | 'effort'
+  | 'smartScore'
+  | 'smartScorePercentile'
+  | 'dueDate'
+  | 'createdAt'
+  | 'updated'
+  | 'title'
+  | 'sourceList';
 
 const PROJECT_GROUP_OPTIONS: readonly GroupOption[] = DEFAULT_GROUP_OPTIONS.map((option) => (
   option.value === 'project'
@@ -51,12 +61,7 @@ const PROJECT_GROUP_OPTIONS: readonly GroupOption[] = DEFAULT_GROUP_OPTIONS.map(
     : option
 ));
 
-const PROJECT_SORT_OPTIONS: readonly SortOption[] = [
-  { value: 'priority', label: 'Priority' },
-  { value: 'dueDate', label: 'Due Date' },
-  { value: 'updated', label: 'Recently Updated' },
-  { value: 'title', label: 'Alphabetical' },
-];
+const PROJECT_SORT_OPTIONS: readonly SortOption[] = DEFAULT_SORT_OPTIONS;
 
 interface ProjectTasksTabProps {
   /** True while this tab is the visible Activity boundary. */
@@ -236,6 +241,7 @@ export function ProjectTasksTab({
           <TaskRow
             task={task}
             activeSortField={taskSortBy}
+            scoreDisplayMode={taskSortBy === 'smartScorePercentile' ? 'percentile' : 'score'}
             onComplete={contextActions.onComplete}
             onSetDueDate={(date) => {
               if (date) contextActions.onPickDate(date);

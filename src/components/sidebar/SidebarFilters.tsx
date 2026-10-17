@@ -363,33 +363,35 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                     });
                   }
                 }}
-                action={(
-                  <div className="flex shrink-0 items-center gap-0.5 pr-1">
-                    <TaskShortcutPinButton
-                      shortcut={sourceShortcut}
-                      pinned={pinnedIds.has(sourceShortcut.id)}
-                      onToggle={togglePinned}
-                    />
-                    {hasLists ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setExpandedSourceLists((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(source.type)) next.delete(source.type);
-                            else next.add(source.type);
-                            return next;
-                          });
-                        }}
-                        className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors duration-100 shrink-0"
-                        aria-label={isListsExpanded ? 'Collapse lists' : 'Expand lists'}
-                        title={isListsExpanded ? 'Collapse lists' : 'Expand lists'}
-                      >
-                        {isListsExpanded ? <ChevronsDownUp size={12} /> : <ChevronsUpDown size={12} />}
-                      </button>
-                    ) : null}
-                  </div>
+                overlayAction={(
+                  <TaskShortcutPinButton
+                    shortcut={sourceShortcut}
+                    pinned={pinnedIds.has(sourceShortcut.id)}
+                    onToggle={togglePinned}
+                    revealClassName="group-hover/nav:opacity-100 group-focus-within/nav:opacity-100"
+                  />
                 )}
+                overlayActionVisible={pinnedIds.has(sourceShortcut.id)}
+                action={hasLists ? (
+                  <div className="flex shrink-0 items-center pr-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedSourceLists((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(source.type)) next.delete(source.type);
+                          else next.add(source.type);
+                          return next;
+                        });
+                      }}
+                      className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors duration-100 shrink-0"
+                      aria-label={isListsExpanded ? 'Collapse lists' : 'Expand lists'}
+                      title={isListsExpanded ? 'Collapse lists' : 'Expand lists'}
+                    >
+                      {isListsExpanded ? <ChevronsDownUp size={12} /> : <ChevronsUpDown size={12} />}
+                    </button>
+                  </div>
+                ) : undefined}
               />
               {showLists && currentSourceLists.length > 0 && (
                 <SourceListSection
@@ -589,6 +591,15 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                       recordRecentTaskShortcut(taskShortcutFromSavedView(view));
                       applyView(view);
                     }}
+                    overlayAction={(
+                      <TaskShortcutPinButton
+                        shortcut={taskShortcutFromSavedView(view)}
+                        pinned={pinnedIds.has(`saved-view:${view.id}`)}
+                        onToggle={togglePinned}
+                        revealClassName="group-hover/nav:opacity-100 group-focus-within/nav:opacity-100"
+                      />
+                    )}
+                    overlayActionVisible={pinnedIds.has(`saved-view:${view.id}`)}
                     action={graphOrigin ? (
                       <ViewInGraphLink
                         context={view.filterContext ?? taskFilterContextFromSavedView(view.filters)}
@@ -603,11 +614,6 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                     ) : undefined}
                   />
                 </div>
-                <TaskShortcutPinButton
-                  shortcut={taskShortcutFromSavedView(view)}
-                  pinned={pinnedIds.has(`saved-view:${view.id}`)}
-                  onToggle={togglePinned}
-                />
                 {editView ? (
                   <button
                     type="button"
@@ -881,10 +887,12 @@ function TaskShortcutPinButton({
   shortcut,
   pinned,
   onToggle,
+  revealClassName = 'group-hover:opacity-100 group-focus-within:opacity-100',
 }: {
   shortcut: TaskShortcut;
   pinned: boolean;
   onToggle: (shortcut: TaskShortcut) => boolean;
+  revealClassName?: string;
 }) {
   return (
     <button
@@ -896,7 +904,7 @@ function TaskShortcutPinButton({
       className={`shrink-0 rounded p-1 transition-[color,opacity] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:opacity-100 ${
         pinned
           ? 'text-[var(--accent)] opacity-100'
-          : 'text-[var(--text-muted)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+          : `text-[var(--text-muted)] opacity-0 ${revealClassName}`
       }`}
       aria-label={`${pinned ? 'Unpin' : 'Pin'} ${shortcut.label}`}
       title={`${pinned ? 'Unpin' : 'Pin'} ${shortcut.label} in task navigation`}
@@ -923,7 +931,7 @@ function SourceListNavRow({
 }) {
   const shortcut = taskShortcutFromList(source, sourceList);
   return (
-    <div className="group flex items-center">
+    <div className="group/list relative flex items-center">
       <button
         type="button"
         onClick={onSelect}
@@ -943,14 +951,24 @@ function SourceListNavRow({
           )}
         </span>
         {sourceList.taskCount > 0 && (
-          <AnimatedCounter value={sourceList.taskCount} className="shrink-0 text-xs tabular-nums text-[var(--text-muted)]" />
+          <AnimatedCounter
+            value={sourceList.taskCount}
+            className={`shrink-0 text-xs tabular-nums text-[var(--text-muted)] transition-opacity ${
+              pinned
+                ? 'opacity-0'
+                : 'group-hover/list:opacity-0 group-focus-within/list:opacity-0'
+            }`}
+          />
         )}
       </button>
-      <TaskShortcutPinButton
-        shortcut={shortcut}
-        pinned={pinned}
-        onToggle={onTogglePinned}
-      />
+      <div className="absolute inset-y-0 right-1 flex items-center">
+        <TaskShortcutPinButton
+          shortcut={shortcut}
+          pinned={pinned}
+          onToggle={onTogglePinned}
+          revealClassName="group-hover/list:opacity-100 group-focus-within/list:opacity-100"
+        />
+      </div>
     </div>
   );
 }

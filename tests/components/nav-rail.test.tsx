@@ -8,7 +8,13 @@ import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 import type { NavigationCounts } from '@/lib/navigation/badges';
 import { RECENT_PROJECT_IDS_STORAGE_KEY } from '@/lib/navigation/recent-projects';
 import { RecentProjectsNavItem } from '@/components/layout/RecentProjectsNavItem';
-import { ChartNetwork } from 'lucide-react';
+import { ChartNetwork, ListChecks } from 'lucide-react';
+import {
+  PINNED_TASK_SHORTCUTS_STORAGE_KEY,
+  RECENT_TASK_SHORTCUTS_STORAGE_KEY,
+  taskShortcutFromSource,
+} from '@/lib/navigation/task-shortcuts';
+import { TaskShortcutsNavItem } from '@/components/layout/TaskShortcutsNavItem';
 
 function renderNavRail({
   isAiActive = false,
@@ -224,6 +230,39 @@ describe('NavRail', () => {
       'href',
       '/projects',
     );
+  });
+
+  it('opens pinned and recent task shortcuts without changing the All Tasks destination', async () => {
+    vi.useRealTimers();
+    const pinned = taskShortcutFromSource({
+      type: 'microsoft-todo',
+      name: 'Personal tasks',
+      icon: 'todo',
+    });
+    const recent = taskShortcutFromSource({
+      type: 'github',
+      name: 'GitHub issues',
+      icon: 'github',
+    });
+    localStorage.setItem(PINNED_TASK_SHORTCUTS_STORAGE_KEY, JSON.stringify([pinned]));
+    localStorage.setItem(RECENT_TASK_SHORTCUTS_STORAGE_KEY, JSON.stringify([pinned, recent]));
+    render(
+      <TooltipProvider>
+        <TaskShortcutsNavItem
+          active
+          expanded
+          icon={ListChecks}
+          open
+          onNavigate={() => {}}
+          onOpenChange={() => {}}
+        />
+      </TooltipProvider>,
+    );
+
+    const menu = await screen.findByRole('menu', { name: 'Task shortcuts' });
+    expect(within(menu).getByRole('menuitem', { name: 'Personal tasks Source' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'GitHub issues Source' })).toBeInTheDocument();
+    expect(within(menu).getAllByText('Personal tasks')).toHaveLength(1);
   });
 
   it('records project detail visits as recently viewed', async () => {

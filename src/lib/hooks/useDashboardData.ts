@@ -52,6 +52,10 @@ import {
   updateGroupCountsForTaskChange,
 } from '@/lib/tasks/task-grouping';
 import { TASKS_REFRESH_REQUESTED_EVENT } from '@/lib/tasks/task-refresh-events';
+import {
+  parseTaskShortcutPresentation,
+  TASK_SHORTCUT_PRESENTATION_PARAM,
+} from '@/lib/navigation/task-shortcuts';
 
 function isRecentQuickFilter(quickFilter: string | null): boolean {
   return quickFilter === 'recentlyCreated' || quickFilter === 'recentlyClosed';
@@ -342,6 +346,9 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
 
     const hydration = parseTaskFilterContext(serialized);
     const restored = taskFilterContextToDashboard(hydration.context);
+    const presentation = parseTaskShortcutPresentation(
+      searchParams.get(TASK_SHORTCUT_PRESENTATION_PARAM),
+    );
     useDashboardViewStore.setState({
       sourceFilter: restored.sourceFilter,
       listFilter: restored.listFilter,
@@ -354,9 +361,16 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       textFilter: restored.textFilter,
       showCompleted: restored.showCompleted,
     });
+    if (presentation) {
+      setSortBy(presentation.sortBy);
+      setSortDirection(presentation.sortDirection);
+      setGroupBy(presentation.groupBy);
+      setViewDensity(presentation.viewDensity);
+    }
 
     const next = new URLSearchParams(searchParams.toString());
     next.delete(TASK_FILTER_CONTEXT_PARAM);
+    next.delete(TASK_SHORTCUT_PRESENTATION_PARAM);
     setOptionalSearchParam(next, 'ageMin', hydration.context.ageMinDays);
     setOptionalSearchParam(next, 'ageMax', hydration.context.ageMaxDays);
     if (hydration.context.quickFilter === 'myDay' && hydration.context.myDayDate) {
@@ -368,7 +382,15 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       toast.warning(`Some saved filters could not be restored: ${hydration.issues.join('; ')}`);
     }
     router.replace(next.size ? `${pathname}?${next.toString()}` : pathname, { scroll: false });
-  }, [pathname, router, searchParams]);
+  }, [
+    pathname,
+    router,
+    searchParams,
+    setGroupBy,
+    setSortBy,
+    setSortDirection,
+    setViewDensity,
+  ]);
 
   useDashboardUrlFilters(searchParams, {
     setSourceFilter,

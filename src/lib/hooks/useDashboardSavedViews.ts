@@ -18,6 +18,11 @@ import type {
 import clientLogger from '@/lib/client-logger';
 import { toast } from '@/lib/toast';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
+import {
+  removeStoredTaskShortcut,
+  taskShortcutFromSavedView,
+  updateStoredTaskShortcut,
+} from '@/lib/navigation/task-shortcuts';
 
 const SAVED_VIEWS_STORAGE_KEY = 'mission-control:saved-views';
 const SAVED_QUICK_FILTERS_STORAGE_KEY = 'mission-control:saved-quick-filters';
@@ -121,11 +126,21 @@ export function useDashboardSavedViews({
 
     try {
       if (editorKind === 'view') {
-        const updated = editingItemId
-          ? savedViews.map((view) => view.id === editingItemId
-            ? { ...view, name, icon: itemIcon, iconColor }
-            : view)
-          : [...savedViews, {
+        const existingView = editingItemId
+          ? savedViews.find((view) => view.id === editingItemId)
+          : null;
+        if (editingItemId && !existingView) {
+          toast.error('Could not update saved view');
+          return;
+        }
+        const savedView: SavedView = existingView
+          ? {
+              ...existingView,
+              name,
+              icon: itemIcon,
+              iconColor,
+            }
+          : {
               id: `view-${Date.now()}`,
               name,
               icon: itemIcon,
@@ -133,9 +148,13 @@ export function useDashboardSavedViews({
               filters: taskFilterContextToSavedView(taskFilterContext),
               filterContext: taskFilterContext,
               presentation: presentationState,
-            }];
+            };
+        const updated = editingItemId
+          ? savedViews.map((view) => view.id === editingItemId ? savedView : view)
+          : [...savedViews, savedView];
         localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(updated));
         setSavedViews(updated);
+        updateStoredTaskShortcut(taskShortcutFromSavedView(savedView));
       } else {
         const filterContext = taskFilterContextForQuickFilter(taskFilterContext);
         const updated = editingItemId
@@ -243,6 +262,7 @@ export function useDashboardSavedViews({
     try {
       localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(updated));
       setSavedViews(updated);
+      removeStoredTaskShortcut(`saved-view:${id}`);
       if (editorKind === 'view' && editingItemId === id) resetViewEditor();
     } catch (error) {
       clientLogger.error('Failed to delete saved view', { error, id });

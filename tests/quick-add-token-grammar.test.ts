@@ -61,10 +61,35 @@ describe('Quick Add token grammar', () => {
   });
 
   it('uses the last effort and duration tokens', () => {
-    const result = parseTaskInput('Task ^2 ^4 ~15m ~1h');
+    const result = parseTaskInput('Task ^2 ^4 15m 1h');
     expect(result.effort).toBe(4);
     expect(result.estimatedDuration).toBe(60);
     expect(result.title).toBe('Task');
+  });
+
+  it.each([
+    ['Review proposal 30m', 30],
+    ['Run workshop 1.5h', 90],
+    ['Keep prefixed duration ~45m', 45],
+  ])('parses duration syntax in "%s"', (input, minutes) => {
+    const result = parseTaskInput(input);
+    expect(result.estimatedDuration).toBe(minutes);
+  });
+
+  it('requires a token boundary before raw durations', () => {
+    const result = parseTaskInput('Review version30m and phase1.5h labels');
+    expect(result.estimatedDuration).toBeNull();
+    expect(result.title).toBe('Review version30m and phase1.5h labels');
+  });
+
+  it.each([
+    'Investigate issue#123',
+    'Document C# API behavior',
+    'Review https://example.com/page#section',
+  ])('keeps embedded hash text in the title: %s', (input) => {
+    const result = parseTaskInput(input);
+    expect(result.tags).toEqual([]);
+    expect(result.title).toBe(input);
   });
 
   it('keeps retired @ destination syntax as ordinary title text', () => {

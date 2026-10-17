@@ -67,13 +67,15 @@ suggestions.
 
 | Syntax | Meaning |
 | --- | --- |
-| Natural date text | Due date, including `tomorrow`, `next Friday`, and `in 3 days` |
+| Trailing natural date text | Suggested due date, including `tomorrow`, `next Friday`, and `in 3 days` |
+| `/due:<date>` | Explicit due date |
 | `!critical`, `!high`, `!medium`, `!low`, `!0`-`!3` | Priority |
 | `#tag` | One or more tag slugs |
-| `@work`, `@personal`, `@github`, `@todo` | Destination family |
-| `/project-name` | Project or list hint |
-| `~30m`, `~1.5h` | Estimated duration |
+| `/destination` | Source or list selection |
+| `+Project` | Existing hub project |
+| `30m`, `1.5h` (`~30m` remains supported) | Estimated duration |
 | `^1`-`^5` | Effort |
+| `*` | My Day |
 | `daily`, `weekly`, `every 3 days`, weekday lists | Recurrence |
 | `\` before a token trigger or date word | Literal text escape |
 

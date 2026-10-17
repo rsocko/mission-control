@@ -625,11 +625,35 @@ describe('useTaskDetailMutations', () => {
     expect(toast.error).toHaveBeenCalledWith('My Day is unavailable');
   });
 
-  it('confirms before deleting and closes the panel afterwards', async () => {
+  it('deletes a recoverable local task immediately and closes the panel afterwards', async () => {
     const onClose = vi.fn();
     const onUpdate = vi.fn();
-    const fetchMock = stubFetch(() => jsonResponse({}));
+    const fetchMock = stubFetch(() => jsonResponse({ action: 'deleted', restorable: true }));
     const { result, confirmRequests } = renderMutations({ onClose, onUpdate });
+
+    act(() => { result.current.mutations.handleDelete(); });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledWith('task-removed'));
+    expect(confirmRequests).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', { method: 'DELETE' });
+    expect(toast.success).toHaveBeenCalledWith(
+      'Task deleted',
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) }),
+    );
+    expect(onUpdate).toHaveBeenCalled();
+  });
+
+  it('confirms before deleting a task from its upstream source', async () => {
+    const onClose = vi.fn();
+    const fetchMock = stubFetch(() => jsonResponse({ action: 'deleted', restorable: false }));
+    const { result, confirmRequests } = renderMutations({
+      onClose,
+      task: {
+        ...baseTask,
+        taskSourceModel: 'remote-managed',
+        editPolicy: makeTaskEditPolicy({ sourceModel: 'remote-managed' }),
+      },
+    });
 
     act(() => { result.current.mutations.handleDelete(); });
 
@@ -643,8 +667,7 @@ describe('useTaskDetailMutations', () => {
 
     await waitFor(() => expect(onClose).toHaveBeenCalledWith('task-removed'));
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', { method: 'DELETE' });
-    expect(toast.success).toHaveBeenCalledWith('Task deleted');
-    expect(onUpdate).toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith('Task deleted from source');
   });
 
   it('rolls back a Mission Control disposition that was not persisted', async () => {

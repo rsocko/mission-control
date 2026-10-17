@@ -9,6 +9,7 @@ import {
   type SetStateAction,
 } from 'react';
 import { toast } from '@/lib/toast';
+import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import type {
   HubProject,
   TaskContextMenuActions,
@@ -24,7 +25,15 @@ import {
   canSetTaskLocalDisposition,
   taskDispositionBlockedReason,
   taskFieldBlockedReason,
+  taskRemovalConfirmation,
+  taskRemovalRequiresConfirmation,
 } from '@/lib/tasks/client-edit-policy';
+import {
+  canUndoTaskRemoval,
+  removeTask as removeTaskRequest,
+  taskRemovalResultLabel,
+  undoTaskRemoval,
+} from '@/lib/tasks/task-removal';
 import {
   getLocalToday as getClientToday,
   getLocalTomorrow as getClientTomorrow,
@@ -53,7 +62,6 @@ interface UseProjectTaskActionsOptions {
   phases: ProjectPhase[];
   phaseItemsByPhase: Record<string, PhaseItem[]>;
   projects: HubProject[];
-  removeTaskFromView: (taskId: string) => void;
   stageProjectTaskRemoval: (taskId: string) => () => void;
   refreshProjectHierarchy: () => Promise<void>;
   runHierarchyCommand: RunProjectHierarchyCommand;
@@ -66,13 +74,13 @@ export function useProjectTaskActions({
   phases,
   phaseItemsByPhase,
   projects,
-  removeTaskFromView,
   stageProjectTaskRemoval,
   refreshProjectHierarchy,
   runHierarchyCommand,
 }: UseProjectTaskActionsOptions) {
   const { completingIds, runTaskCompletion } = useTaskCompletion();
   const [myDayTaskIds, setMyDayTaskIds] = useState<Set<string>>(new Set());
+  const [pendingTaskRemoval, setPendingTaskRemoval] = useState<ProjectTask | null>(null);
   const fieldMutationVersionsRef = useRef<Record<string, number>>({});
 
   const beginFieldMutation = (taskId: string, field: 'priority' | 'status' | 'dueDate') => {
@@ -297,7 +305,30 @@ export function useProjectTaskActions({
     }
   }, [setTasks, tasks]);
 
-  const handleDeleteTask = useCallback(async (taskId: string) => {
+  const performTaskRemoval = useCallback(async (task: ProjectTask) => {
+    const rollback = stageProjectTaskRemoval(task.id);
+    try {
+      const result = await removeTaskRequest(task.id);
+      await refreshProjectHierarchy();
+      notifyTaskChanged(task.id);
+      const label = taskRemovalResultLabel(result);
+      if (canUndoTaskRemoval(result)) {
+        pushUndoWithToast(label, async () => {
+          await undoTaskRemoval(task.id, result, task.localDisposition);
+          rollback();
+          await refreshProjectHierarchy();
+          notifyTaskChanged(task.id);
+        });
+      } else {
+        toast.success(label);
+      }
+    } catch (error) {
+      rollback();
+      toast.error(error instanceof Error ? error.message : 'Failed to remove task');
+    }
+  }, [refreshProjectHierarchy, stageProjectTaskRemoval]);
+
+  const handleDeleteTask = useCallback((taskId: string) => {
     const task = tasks.find((candidate) => candidate.id === taskId);
     if (!task || !canRemoveTask(task.editPolicy)) {
       toast.error(
@@ -305,18 +336,23 @@ export function useProjectTaskActions({
       );
       return;
     }
-    try {
-      const response = await fetch(`/api/tasks/${taskId}`, {
-        method: 'DELETE',
-      });
-      if (!response.ok) throw new Error('Failed to delete task');
-      removeTaskFromView(taskId);
-      await refreshProjectHierarchy();
-      toast.success('Task deleted');
-    } catch {
-      toast.error('Failed to delete task');
+    if (taskRemovalRequiresConfirmation(task.editPolicy)) {
+      setPendingTaskRemoval(task);
+      return;
     }
-  }, [refreshProjectHierarchy, removeTaskFromView, tasks]);
+    void performTaskRemoval(task);
+  }, [performTaskRemoval, tasks]);
+
+  const confirmPendingTaskRemoval = useCallback(() => {
+    if (!pendingTaskRemoval) return;
+    const task = pendingTaskRemoval;
+    setPendingTaskRemoval(null);
+    void performTaskRemoval(task);
+  }, [pendingTaskRemoval, performTaskRemoval]);
+
+  const cancelPendingTaskRemoval = useCallback(() => {
+    setPendingTaskRemoval(null);
+  }, []);
 
   const handleRemoveFromProject = useCallback((taskId: string) => {
     const rollback = stageProjectTaskRemoval(taskId);
@@ -478,7 +514,16 @@ export function useProjectTaskActions({
         next.delete(taskId);
         return next;
       });
-      toast.success('Removed from My Day');
+      pushUndoWithToast('Removed from My Day', async () => {
+        const restoreResponse = await fetch('/api/my-day', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId }),
+        });
+        if (!restoreResponse.ok) throw new Error('Failed to restore task to My Day');
+        notifyTaskChanged(taskId);
+        setMyDayTaskIds((current) => new Set(current).add(taskId));
+      });
     } catch {
       toast.error('Failed to remove from My Day');
     }
@@ -536,6 +581,12 @@ export function useProjectTaskActions({
   return {
     completingIds,
     myDayTaskIds,
+    pendingTaskRemoval: pendingTaskRemoval ? {
+      ...taskRemovalConfirmation(pendingTaskRemoval.editPolicy, pendingTaskRemoval.title),
+      variant: 'danger' as const,
+    } : null,
+    cancelPendingTaskRemoval,
+    confirmPendingTaskRemoval,
     getTaskContextActions,
     handleCompleteTask,
     handleSetTaskPriority,

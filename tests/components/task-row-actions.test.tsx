@@ -7,6 +7,12 @@ vi.mock('@/components/ui/Tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock('@/components/smart-score/SmartScoreBadge', () => ({
+  SmartScoreBadge: ({ score }: { score: number }) => (
+    <span role="group" aria-label={`Smart score: ${score} out of 100`}>{score}</span>
+  ),
+}));
+
 const noop = vi.fn();
 
 afterEach(() => {
@@ -181,8 +187,8 @@ describe('TaskRowActions', () => {
       'grid',
       'gap-0.5',
       'grid-cols-[32px_32px_32px]',
-      '@min-[960px]:grid-cols-[32px_32px_32px_56px_32px_32px_32px]',
-      '@min-[1280px]:grid-cols-[32px_44px_32px_30px_32px_56px_32px_32px_96px]',
+      '@min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px]',
+      '@min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]',
     );
     expect(screen.getByRole('button', { name: 'Add to My Day' }).parentElement).toHaveClass('hidden', '@min-[480px]:flex', 'opacity-0');
     expect(screen.getByRole('button', { name: 'Add due date' }).parentElement).toHaveClass('hidden', '@min-[640px]:flex', 'opacity-0');
@@ -213,6 +219,93 @@ describe('TaskRowActions', () => {
     expect(screen.getByRole('button', { name: 'Remove from My Day' }).parentElement).toHaveClass('@min-[480px]:flex');
     expect(screen.getByRole('button', { name: /^Change due date/ }).parentElement).toHaveClass('@min-[640px]:flex');
     expect(screen.getByRole('button', { name: 'Open notes' }).parentElement).toHaveClass('@min-[720px]:flex');
+  });
+
+  it('keeps Smart Score visible and defers My Day when the score controls ordering', () => {
+    renderActions({
+      smartScore: 82,
+      activeSortField: 'smartScore',
+      hasDescription: true,
+      isInMyDay: true,
+    });
+
+    expect(screen.getByTestId('task-row-properties')).toHaveClass(
+      'grid-cols-[var(--score-column-width)_32px_32px_32px]',
+      '@min-[720px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px]',
+      '@min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px]',
+    );
+    expect(screen.getByRole('group', { name: 'Smart score: 82 out of 100' }).parentElement).toHaveClass('flex');
+    expect(screen.getByRole('button', { name: 'Remove from My Day' }).parentElement).toHaveClass(
+      'hidden',
+      '@min-[960px]:flex',
+    );
+    expect(screen.getByRole('button', { name: 'Open notes' }).parentElement).toHaveClass(
+      'hidden',
+      '@min-[720px]:flex',
+    );
+  });
+
+  it('marks a missing prioritized Smart Score as unavailable', () => {
+    renderActions({ activeSortField: 'smartScore' });
+
+    expect(screen.getByLabelText('Smart score unavailable')).toHaveTextContent('—');
+  });
+
+  it('forces dedicated sorted fields into their established columns', () => {
+    const { rerender } = renderActions({
+      activeSortField: 'planningHorizon',
+      planningHorizon: 'next',
+    });
+
+    expect(screen.getByLabelText('Horizon: Next')).toBeInTheDocument();
+    expect(screen.getByTestId('task-row-properties')).toHaveClass(
+      'grid-cols-[44px_32px_32px_32px]',
+    );
+
+    rerender(
+      <TaskRowActions
+        activeSortField="effort"
+        effort={4}
+        dueDate={null}
+        hasDescription={false}
+        isInMyDay={false}
+        priority="none"
+        status="todo"
+        editPolicy={editableTaskPolicy}
+        surface="dashboard"
+        onSetDueDate={noop}
+        onSetPriority={noop}
+        onSetStatus={noop}
+        onToggleMyDay={noop}
+        onOpenNotes={noop}
+      />,
+    );
+
+    expect(screen.getByTitle('Effort: L')).toBeInTheDocument();
+    expect(screen.getByTestId('task-row-properties')).toHaveClass(
+      'grid-cols-[32px_30px_32px_32px]',
+    );
+
+    rerender(
+      <TaskRowActions
+        activeSortField="dueDate"
+        dueDate={null}
+        hasDescription={false}
+        isInMyDay={false}
+        priority="none"
+        status="todo"
+        editPolicy={editableTaskPolicy}
+        surface="dashboard"
+        onSetDueDate={noop}
+        onSetPriority={noop}
+        onSetStatus={noop}
+        onToggleMyDay={noop}
+        onOpenNotes={noop}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Add due date' }).parentElement).toHaveClass('flex');
+    expect(screen.getByRole('button', { name: 'Add due date' }).parentElement).not.toHaveClass('opacity-0');
   });
 
   it('keeps active My Day status and priority controls visible at narrow widths', () => {

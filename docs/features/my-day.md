@@ -36,18 +36,19 @@ Answer "what should I work on today?" without scanning every list. My Day surfac
 ### Responsive Utility Panels
 
 Desktop My Day reuses the existing **Plan & Focus** and **Notifications**
-panels as an adaptive utility region:
+panels as independently collapsible utility panes:
 
-- Standard desktop widths show one tabbed utility panel.
-- Wide workspaces show both panels automatically when the task workspace can
-  retain a useful minimum width.
-- When task detail is open, wide workspaces keep the active utility panel
-  visible beside the detail panel so suggested tasks can be evaluated before
-  adding them to My Day.
-- Constrained workspaces collapse the utilities to a narrow rail; either panel
-  can be opened temporarily over the workspace.
-- The layout responds to measured workspace width rather than a user-managed
-  "show both" preference.
+- Plan & Focus (shown as **Suggested** in the utility rail) is open by default;
+  Notifications starts collapsed with its attention badge visible.
+- Either pane, both panes, or neither pane can remain open. The saved choice is
+  restored on later visits.
+- The utility rail remains available on desktop so either pane can be opened or
+  collapsed without navigating away from My Day.
+- When task detail is open, wide workspaces keep the last-used open pane visible
+  beside the detail panel so suggested tasks can be evaluated before adding them
+  to My Day.
+- Constrained task-detail layouts temporarily hide saved panes and let either
+  one open as an overlay. Closing task detail restores the saved pane choices.
 
 The interaction reference is
 [`docs/mockups/mockup-my-day-notifications-panels.html`](../mockups/mockup-my-day-notifications-panels.html).

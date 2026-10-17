@@ -147,7 +147,6 @@ function renderActions({
   phaseItems = phaseItemsByPhase,
 }: HookSetup = {}) {
   const rollbackProjectRemoval = vi.fn();
-  const removeTaskFromView = vi.fn();
   const stageProjectTaskRemoval = vi.fn(() => rollbackProjectRemoval);
   const refreshProjectHierarchy = vi.fn(async () => {});
   const runHierarchyCommand = vi.fn(async (
@@ -173,7 +172,6 @@ function renderActions({
       phases,
       phaseItemsByPhase: phaseItems,
       projects,
-      removeTaskFromView,
       stageProjectTaskRemoval,
       refreshProjectHierarchy,
       runHierarchyCommand,
@@ -184,7 +182,6 @@ function renderActions({
   return {
     ...hook,
     refreshProjectHierarchy,
-    removeTaskFromView,
     rollbackProjectRemoval,
     runHierarchyCommand,
     stageProjectTaskRemoval,
@@ -203,6 +200,9 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input) === '/api/my-day' && !init?.method) {
       return jsonResponse({ items: [] });
+    }
+    if (init?.method === 'DELETE') {
+      return jsonResponse({ action: 'deleted', restorable: true });
     }
     return jsonResponse();
   }));
@@ -453,7 +453,7 @@ describe('useProjectTaskActions local disposition and deletion', () => {
       await blocked.result.current.handleDeleteTask('task-1');
     });
     expect(fetch).not.toHaveBeenCalled();
-    expect(blocked.removeTaskFromView).not.toHaveBeenCalled();
+    expect(blocked.stageProjectTaskRemoval).not.toHaveBeenCalled();
     expect(toastMocks.error).toHaveBeenCalledWith('Deletion is unavailable');
 
     const allowed = renderActions();
@@ -461,9 +461,11 @@ describe('useProjectTaskActions local disposition and deletion', () => {
       await allowed.result.current.handleDeleteTask('task-1');
     });
     expect(fetch).toHaveBeenCalledWith('/api/tasks/task-1', { method: 'DELETE' });
-    expect(allowed.removeTaskFromView).toHaveBeenCalledWith('task-1');
+    expect(allowed.stageProjectTaskRemoval).toHaveBeenCalledWith('task-1');
     expect(allowed.refreshProjectHierarchy).toHaveBeenCalledOnce();
-    expect(toastMocks.success).toHaveBeenCalledWith('Task deleted');
+    expect(toastMocks.success).toHaveBeenCalledWith('Task deleted', expect.objectContaining({
+      action: expect.objectContaining({ label: 'Undo' }),
+    }));
   });
 
   it('does not mutate the view or refresh hierarchy after failed deletion', async () => {
@@ -478,9 +480,10 @@ describe('useProjectTaskActions local disposition and deletion', () => {
       await setup.result.current.handleDeleteTask('task-1');
     });
 
-    expect(setup.removeTaskFromView).not.toHaveBeenCalled();
+    expect(setup.stageProjectTaskRemoval).toHaveBeenCalledWith('task-1');
+    expect(setup.rollbackProjectRemoval).toHaveBeenCalledOnce();
     expect(setup.refreshProjectHierarchy).not.toHaveBeenCalled();
-    expect(toastMocks.error).toHaveBeenCalledWith('Failed to delete task');
+    expect(toastMocks.error).toHaveBeenCalledWith('Failed to remove task');
   });
 });
 

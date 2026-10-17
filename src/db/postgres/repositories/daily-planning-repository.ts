@@ -62,6 +62,12 @@ function visibleTask(alias: string): string {
   return `${alias}.connector_instance_id NOT IN (
       SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
     )
+    AND NOT EXISTS (
+      SELECT 1 FROM source_lists
+      WHERE source_lists.connector_instance_id = ${alias}.connector_instance_id
+        AND source_lists.source_id = ${alias}.source_list_id
+        AND source_lists.hidden = true
+    )
     AND ${alias}.connector_type NOT IN (${NOTIFICATION_ONLY_LIST})`;
 }
 
@@ -710,16 +716,20 @@ export function createPostgresDailyPlanningPersistence(
               FROM task_schedules WHERE task_id = ANY($1::text[])
             `, [batch]),
             query<{ taskId: string; projectId: string }>(pool, `
-              SELECT task_id AS "taskId", project_id AS "projectId"
-              FROM task_projects WHERE task_id = ANY($1::text[])
-              ORDER BY task_id, project_id
+              SELECT tp.task_id AS "taskId", tp.project_id AS "projectId"
+              FROM task_projects tp
+              INNER JOIN hub_projects hp ON hp.id = tp.project_id
+              WHERE tp.task_id = ANY($1::text[]) AND hp.hidden = false
+              ORDER BY tp.task_id, tp.project_id
             `, [batch]),
             query<MyDayPhaseMembershipRecord & { taskId: string }>(pool, `
               SELECT i.task_id AS "taskId", p.project_id AS "projectId",
                      p.id AS "phaseId", p.name AS "phaseName"
               FROM project_phase_items i
               INNER JOIN project_phases p ON p.id = i.phase_id
+              INNER JOIN hub_projects hp ON hp.id = p.project_id
               WHERE i.task_id = ANY($1::text[]) AND p.project_id IS NOT NULL
+                AND hp.hidden = false
               ORDER BY i.task_id, p.project_id, p.id
             `, [batch]),
           ]);

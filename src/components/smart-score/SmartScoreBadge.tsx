@@ -14,6 +14,7 @@ interface SmartScoreBadgeProps {
   score: number;
   breakdown?: ScoreBreakdown;
   size?: 'sm' | 'md';
+  displayMode?: 'score' | 'percentile';
 }
 
 const SCORE_COLORS = {
@@ -22,20 +23,53 @@ const SCORE_COLORS = {
   low: 'bg-slate-700 text-slate-500',
 };
 
-export function SmartScoreBadge({ score, breakdown, size = 'md' }: SmartScoreBadgeProps) {
+function percentileColor(topPercent: number): string {
+  if (topPercent <= 1) return 'bg-emerald-500 text-emerald-950';
+  if (topPercent <= 5) return 'bg-cyan-500/20 text-cyan-200';
+  if (topPercent <= 15) return 'bg-violet-500/20 text-violet-200';
+  return 'bg-slate-700 text-slate-400';
+}
+
+function formatTopPercent(topPercent: number): string {
+  return topPercent < 1
+    ? topPercent.toFixed(1)
+    : Number.isInteger(topPercent)
+      ? topPercent.toFixed(0)
+      : topPercent.toFixed(1);
+}
+
+export function SmartScoreBadge({
+  score,
+  breakdown,
+  size = 'md',
+  displayMode = 'score',
+}: SmartScoreBadgeProps) {
   const tier = getScoreTier(score);
-  const colorClass = SCORE_COLORS[tier];
+  const scopeRanking = breakdown?.audit.ranking?.scope;
+  const showPercentile = displayMode === 'percentile' && scopeRanking;
+  const colorClass = showPercentile
+    ? percentileColor(scopeRanking.topPercent)
+    : SCORE_COLORS[tier];
 
   const sizeClass = size === 'sm'
-    ? 'w-9 h-7 text-xs rounded-lg'
-    : 'w-11 h-9 text-sm rounded-xl';
+    ? showPercentile
+      ? 'min-w-11 h-7 px-1.5 text-[11px] rounded-lg'
+      : 'w-9 h-7 text-xs rounded-lg'
+    : showPercentile
+      ? 'min-w-16 h-9 px-2 text-xs rounded-xl'
+      : 'w-11 h-9 text-sm rounded-xl';
+  const accessibleLabel = showPercentile
+    ? `Smart score percentile: top ${formatTopPercent(scopeRanking.topPercent)} percent in ${scopeRanking.label}`
+    : `Smart score: ${score} out of 100`;
 
   return (
     <RadixTooltip.Root delayDuration={200}>
       <RadixTooltip.Trigger asChild>
-        <div tabIndex={0} role="group" aria-label={`Smart score: ${score} out of 100`}>
+        <div tabIndex={0} role="group" aria-label={accessibleLabel}>
           <div className={`${sizeClass} ${colorClass} flex items-center justify-center font-bold tabular-nums shadow-inner`}>
-            <AnimatedCounter value={score} />
+            {showPercentile
+              ? `${formatTopPercent(scopeRanking.topPercent)}%`
+              : <AnimatedCounter value={score} />}
           </div>
         </div>
       </RadixTooltip.Trigger>
@@ -81,6 +115,21 @@ export function SmartScoreBadge({ score, breakdown, size = 'md' }: SmartScoreBad
                     <BreakdownRow label="Snooze penalty" value={breakdown.snoozePenalty} max={SMART_SCORE_FACTOR_MAX.snoozePenalty} color="bg-amber-400" isPenalty />
                   )}
                 </div>
+
+                {breakdown.audit.ranking && (
+                  <div className="mt-3 border-t border-slate-800 pt-2.5">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      Relative position
+                    </div>
+                    <div className="mt-1.5 space-y-1 text-xs text-slate-300">
+                      <RankingLine ranking={breakdown.audit.ranking.scope} />
+                      {breakdown.audit.ranking.overall
+                        && breakdown.audit.ranking.overall.label !== breakdown.audit.ranking.scope.label && (
+                        <RankingLine ranking={breakdown.audit.ranking.overall} />
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-3 border-t border-slate-800 pt-2.5">
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -128,6 +177,22 @@ export function SmartScoreBadge({ score, breakdown, size = 'md' }: SmartScoreBad
         </RadixTooltip.Portal>
       )}
     </RadixTooltip.Root>
+  );
+}
+
+function RankingLine({ ranking }: {
+  ranking: NonNullable<ScoreBreakdown['audit']['ranking']>['scope'];
+}) {
+  const formattedPercent = formatTopPercent(ranking.topPercent);
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="min-w-0 truncate" title={ranking.label}>
+        {ranking.label}
+      </span>
+      <span className="shrink-0 text-right font-medium tabular-nums text-slate-200">
+        #{ranking.rank.toLocaleString()} of {ranking.total.toLocaleString()} · Top {formattedPercent}%
+      </span>
+    </div>
   );
 }
 

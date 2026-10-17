@@ -450,6 +450,10 @@ export function describeSqliteGraphReportingRepositoryContract(): void {
         capabilities TEXT NOT NULL DEFAULT '{}', deleted_at TEXT,
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
+      CREATE TABLE source_lists (
+        connector_instance_id TEXT NOT NULL, source_id TEXT NOT NULL,
+        hidden INTEGER NOT NULL DEFAULT 0
+      );
       CREATE TABLE tasks (
         id TEXT PRIMARY KEY, source_id TEXT NOT NULL, connector_type TEXT NOT NULL,
         connector_instance_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT,

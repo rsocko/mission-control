@@ -1161,11 +1161,11 @@ function ListRow({
               </button>
             </Tooltip>
           ) : null}
-          <Tooltip content={list.hidden ? 'Show in navigation' : 'Hide from navigation'}>
+          <Tooltip content={list.hidden ? 'Include in workspace' : 'Exclude from workspace'}>
             <button
               type="button"
               onClick={onToggleHidden}
-              aria-label={list.hidden ? `Show ${list.name} in navigation` : `Hide ${list.name} from navigation`}
+              aria-label={list.hidden ? `Include ${list.name} in workspace` : `Exclude ${list.name} from workspace`}
               className={`flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] ${
                 list.hidden ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'
               }`}

@@ -67,6 +67,7 @@ import {
   compileQuickFilterCondition,
   enabledGitHubConnectorCondition,
   getCanonicalTaskSourceCondition,
+  getNoVisibleProjectCondition,
   getTaskSourceVisibilityConditions,
   withCondition,
   type PostgresCanonicalTaskFilterInputs,
@@ -445,6 +446,7 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       : column;
 
     const smartOrder = page.order.field === 'smartScore'
+      || page.order.field === 'smartScorePercentile'
       ? [
           asc(PRIORITY_ORDER_EXPRESSION),
           asc(sql`CASE WHEN ${tasks.dueDate} IS NULL THEN 1 ELSE 0 END`),
@@ -912,7 +914,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       }).from(tasks)
         .innerJoin(taskProjects, eq(taskProjects.taskId, tasks.id))
         .innerJoin(hubProjects, eq(hubProjects.id, taskProjects.projectId))
-        .where(taskWhere);
+        .where(and(taskWhere, eq(hubProjects.hidden, false)));
       const taskIds = [...new Set(projectRows.map((row) => row.taskId))];
       const phaseRows = taskIds.length > 0
         ? await this.db.select({
@@ -949,7 +951,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
         .from(tasks)
         .where(and(
           taskWhere,
-          sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`,
+          getNoVisibleProjectCondition(),
         ));
       const unprojectedCount = Number(unprojected?.count ?? 0);
       if (unprojectedCount > 0) counts['No Project'] = unprojectedCount;
@@ -2802,8 +2804,11 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
           taskId: taskProjects.taskId,
           projectId: taskProjects.projectId,
           projectName: hubProjects.name,
-        }).from(taskProjects).leftJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
-          .where(inArray(taskProjects.taskId, uniqueIds))
+        }).from(taskProjects).innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+          .where(and(
+            inArray(taskProjects.taskId, uniqueIds),
+            eq(hubProjects.hidden, false),
+          ))
           .orderBy(asc(taskProjects.taskId), asc(taskProjects.projectId)),
         this.db.select({
           taskId: projectPhaseItems.taskId,
@@ -2812,7 +2817,11 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
           projectId: projectPhases.projectId,
         }).from(projectPhaseItems)
           .innerJoin(projectPhases, eq(projectPhaseItems.phaseId, projectPhases.id))
-          .where(inArray(projectPhaseItems.taskId, uniqueIds))
+          .innerJoin(hubProjects, eq(projectPhases.projectId, hubProjects.id))
+          .where(and(
+            inArray(projectPhaseItems.taskId, uniqueIds),
+            eq(hubProjects.hidden, false),
+          ))
           .orderBy(
             asc(projectPhaseItems.taskId),
             asc(projectPhases.projectId),
@@ -2953,9 +2962,9 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
     includeTags: boolean;
     includeScoreInputs: boolean;
     countsOnly: boolean;
-    smartScoreCandidateLimit: number;
   }): Promise<TaskCollectionResult> {
-    const smart = input.page.order.field === 'smartScore';
+    const smart = input.page.order.field === 'smartScore'
+      || input.page.order.field === 'smartScorePercentile';
     const [stats, sourceCounts, facetCounts, availableTags, total] = await Promise.all([
       this.queries.getStats(input.spec),
       this.queries.getSourceCounts(input.spec),
@@ -2975,26 +2984,39 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
         smartScore: null,
       };
     }
-    const ids = await this.queries.listTaskIds(input.spec, smart
-      ? { order: input.page.order, limit: input.smartScoreCandidateLimit, offset: 0 }
-      : input.page);
-    const hydrated = await this.hydrate(ids, input.includeTags || input.includeScoreInputs || smart);
-    const [rankings, momentumSignals] = smart || input.includeScoreInputs
+    const includeScores = smart || input.includeScoreInputs;
+    const scoreIds = includeScores && total > 0
+      ? await this.queries.listTaskIds(input.spec, {
+          order: { field: 'smartScore', direction: 'desc' },
+          limit: total,
+          offset: 0,
+        })
+      : [];
+    const pageIds = smart
+      ? scoreIds
+      : await this.queries.listTaskIds(input.spec, input.page);
+    const scoreHydrated = includeScores
+      ? await this.hydrate(scoreIds, true)
+      : null;
+    const pageHydrated = smart
+      ? scoreHydrated!
+      : await this.hydrate(pageIds, input.includeTags);
+    const [rankings, momentumSignals] = includeScores
       ? await Promise.all([
           this.db.select().from(sourceRankings)
             .orderBy(asc(sourceRankings.rank), asc(sourceRankings.id)),
-          readSmartScoreMomentum(this.db, ids),
+          readSmartScoreMomentum(this.db, scoreIds),
         ])
       : [[], []];
     return {
-      ...hydrated,
+      ...pageHydrated,
       total,
       stats,
       sourceCounts,
       facetCounts,
       availableTags,
-      smartScore: smart || input.includeScoreInputs
-        ? { rows: hydrated.rows, sourceRankings: rankings, momentumSignals }
+      smartScore: includeScores
+        ? { rows: scoreHydrated!.rows, sourceRankings: rankings, momentumSignals }
         : null,
     };
   }

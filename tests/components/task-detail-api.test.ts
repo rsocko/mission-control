@@ -218,7 +218,16 @@ describe('task mutations', () => {
   it('throws when a delete is rejected', async () => {
     stubFetch(() => jsonResponse({}, false));
 
-    await expect(deleteTask('task-1')).rejects.toThrow('Failed to delete task');
+    await expect(deleteTask('task-1')).rejects.toThrow('Failed to remove task');
+  });
+
+  it('returns the server removal action and restorability', async () => {
+    stubFetch(() => jsonResponse({ action: 'dismissed', restorable: false }));
+
+    await expect(deleteTask('task-1')).resolves.toEqual({
+      action: 'dismissed',
+      restorable: false,
+    });
   });
 
   it('adds and removes project membership', async () => {

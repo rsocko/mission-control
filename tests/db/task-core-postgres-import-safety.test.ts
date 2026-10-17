@@ -595,7 +595,7 @@ describe('task-core under PostgreSQL with a poisoned SQLite module', () => {
       new URLSearchParams(''),
     );
     expect(where.baseWhere).toBeDefined();
-    expect(modules.canonicalFilter.getTaskSourceVisibilityConditions()).toHaveLength(3);
+    expect(modules.canonicalFilter.getTaskSourceVisibilityConditions()).toHaveLength(4);
   });
 
   it('builds identity-aware quick filters from the registered composition', async () => {

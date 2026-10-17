@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { computeSmartScore, createScoreInput, type PriorityEntity } from '@/lib/smart-score';
+import {
+  addOverallSmartScoreRankings,
+  computeSmartScore,
+  createScoreInput,
+  rankSmartScores,
+  type PriorityEntity,
+} from '@/lib/smart-score';
 
 const task = {
   id: 'task-1',
@@ -221,6 +227,43 @@ describe('createScoreInput', () => {
       { name: 'Renamed project', tier: 'critical', rank: 1 },
     ]);
     expect(computeSmartScore(input, [{ ...entity, referenceId: 'tag-1' }], []).matchedEntities).toEqual([]);
+  });
+
+  it('ranks equal scores together and attaches a separate overall position', () => {
+    const scoped = rankSmartScores([
+      computeSmartScore(createScoreInput({ ...task, id: 'a' }), [], []),
+      computeSmartScore(createScoreInput({ ...task, id: 'b' }), [], []),
+      computeSmartScore(createScoreInput({
+        ...task,
+        id: 'c',
+        priority: 'none',
+        planningHorizon: null,
+        dueDate: null,
+      }), [], []),
+    ], 'this project');
+    const overall = rankSmartScores([
+      scoped[0],
+      scoped[1],
+      scoped[2],
+    ], 'all open tasks');
+
+    const ranked = addOverallSmartScoreRankings(scoped, overall);
+
+    expect(ranked.map((entry) => entry.score.audit.ranking?.scope.rank)).toEqual([1, 1, 3]);
+    expect(ranked[0].score.audit.ranking).toEqual({
+      scope: {
+        label: 'this project',
+        rank: 1,
+        total: 3,
+        topPercent: 33.4,
+      },
+      overall: {
+        label: 'all open tasks',
+        rank: 1,
+        total: 3,
+        topPercent: 33.4,
+      },
+    });
   });
 
   it('matches people mentioned in task content without requiring assignment', () => {

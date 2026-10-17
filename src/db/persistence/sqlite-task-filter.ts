@@ -77,11 +77,17 @@ export function containsLiteral(column: AnyColumn, value: string): SQL {
   return sql`${column} LIKE ${literalContainsPattern(value)} ESCAPE '!'`;
 }
 
-/** Never surface tasks from soft-deleted connectors or notification-only sources. */
+/** Never surface tasks from hidden lists, soft-deleted connectors, or notification-only sources. */
 export function getTaskSourceVisibilityConditions(): SQL[] {
   return [
     isNull(tasks.deletedAt),
     sql`${tasks.connectorInstanceId} NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
+    sql`NOT EXISTS (
+      SELECT 1 FROM ${sourceLists}
+      WHERE ${sourceLists.connectorInstanceId} = ${tasks.connectorInstanceId}
+        AND ${sourceLists.sourceId} = ${tasks.sourceListId}
+        AND ${sourceLists.hidden} = true
+    )`,
     notInArray(tasks.connectorType, [...NOTIFICATION_ONLY_CONNECTOR_TYPES]),
   ];
 }
@@ -164,7 +170,18 @@ export function getTagIdsFilterCondition(tagIds: string[]): SQL {
 export function getProjectFilterCondition(projectId: string): SQL {
   return sql`${tasks.id} IN (
     SELECT ${taskProjects.taskId} FROM ${taskProjects}
+    INNER JOIN ${hubProjects} ON ${hubProjects.id} = ${taskProjects.projectId}
     WHERE ${taskProjects.projectId} = ${projectId}
+      AND ${hubProjects.hidden} = false
+  )`;
+}
+
+/** Match tasks with no membership in a visible project. */
+export function getNoVisibleProjectCondition(): SQL {
+  return sql`${tasks.id} NOT IN (
+    SELECT ${taskProjects.taskId} FROM ${taskProjects}
+    INNER JOIN ${hubProjects} ON ${hubProjects.id} = ${taskProjects.projectId}
+    WHERE ${hubProjects.hidden} = false
   )`;
 }
 
@@ -247,7 +264,7 @@ function getCollectionGroupCondition(spec: TaskFilterSpec): SQL | undefined {
     )`;
   }
   if (value === 'No Project') {
-    return sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`;
+    return getNoVisibleProjectCondition();
   }
   const separator = value.lastIndexOf(' › ');
   if (separator < 0) return sql`1 = 0`;
@@ -259,12 +276,14 @@ function getCollectionGroupCondition(spec: TaskFilterSpec): SQL | undefined {
         SELECT ${taskProjects.taskId} FROM ${taskProjects}
         INNER JOIN ${hubProjects} ON ${taskProjects.projectId} = ${hubProjects.id}
         WHERE ${hubProjects.name} = ${projectName}
+          AND ${hubProjects.hidden} = false
       )`,
       sql`${tasks.id} NOT IN (
         SELECT ${projectPhaseItems.taskId} FROM ${projectPhaseItems}
         INNER JOIN ${projectPhases} ON ${projectPhaseItems.phaseId} = ${projectPhases.id}
         INNER JOIN ${hubProjects} ON ${projectPhases.projectId} = ${hubProjects.id}
         WHERE ${hubProjects.name} = ${projectName}
+          AND ${hubProjects.hidden} = false
       )`,
     );
   }
@@ -275,7 +294,9 @@ function getCollectionGroupCondition(spec: TaskFilterSpec): SQL | undefined {
     INNER JOIN ${taskProjects}
       ON ${taskProjects.taskId} = ${projectPhaseItems.taskId}
       AND ${taskProjects.projectId} = ${projectPhases.projectId}
-    WHERE ${hubProjects.name} = ${projectName} AND ${projectPhases.name} = ${phaseName}
+    WHERE ${hubProjects.name} = ${projectName}
+      AND ${hubProjects.hidden} = false
+      AND ${projectPhases.name} = ${phaseName}
   )`;
 }
 
@@ -408,10 +429,7 @@ export function getInboxFilterCondition(
     and(
       eq(tasks.connectorType, 'local'),
       isNull(tasks.planningHorizon),
-      sql`NOT EXISTS (
-        SELECT 1 FROM ${taskProjects}
-        WHERE ${taskProjects.taskId} = ${tasks.id}
-      )`,
+      getNoVisibleProjectCondition(),
     )!,
   ];
 
@@ -425,10 +443,7 @@ export function getInboxFilterCondition(
             : []),
           eq(tasks.sourceListId, entry.sourceListId),
           isNull(tasks.planningHorizon),
-          sql`NOT EXISTS (
-            SELECT 1 FROM ${taskProjects}
-            WHERE ${taskProjects.taskId} = ${tasks.id}
-          )`,
+          getNoVisibleProjectCondition(),
         )!,
       );
     } else if (entry.sourceListName) {
@@ -440,10 +455,7 @@ export function getInboxFilterCondition(
             : []),
           eq(tasks.sourceListName, entry.sourceListName),
           isNull(tasks.planningHorizon),
-          sql`NOT EXISTS (
-            SELECT 1 FROM ${taskProjects}
-            WHERE ${taskProjects.taskId} = ${tasks.id}
-          )`,
+          getNoVisibleProjectCondition(),
         )!,
       );
     }
@@ -560,11 +572,13 @@ function getProjectTokenCondition(values: string[]): SQL {
   if (projectIds.length > 0) {
     conditions.push(sql`${tasks.id} IN (
       SELECT ${taskProjects.taskId} FROM ${taskProjects}
+      INNER JOIN ${hubProjects} ON ${hubProjects.id} = ${taskProjects.projectId}
       WHERE ${inArray(taskProjects.projectId, projectIds)}
+        AND ${hubProjects.hidden} = false
     )`);
   }
   if (values.includes('none')) {
-    conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`);
+    conditions.push(getNoVisibleProjectCondition());
   }
   return conditions.length > 0 ? or(...conditions)! : sql`1 = 0`;
 }
@@ -575,13 +589,19 @@ function getPhaseTokenCondition(values: string[]): SQL {
   if (phaseIds.length > 0) {
     conditions.push(sql`${tasks.id} IN (
       SELECT ${projectPhaseItems.taskId} FROM ${projectPhaseItems}
+      INNER JOIN ${projectPhases} ON ${projectPhases.id} = ${projectPhaseItems.phaseId}
+      INNER JOIN ${hubProjects} ON ${hubProjects.id} = ${projectPhases.projectId}
       WHERE ${inArray(projectPhaseItems.phaseId, phaseIds)}
+        AND ${hubProjects.hidden} = false
     )`);
   }
   if (values.includes('none')) {
-    conditions.push(
-      sql`${tasks.id} NOT IN (SELECT ${projectPhaseItems.taskId} FROM ${projectPhaseItems})`,
-    );
+    conditions.push(sql`${tasks.id} NOT IN (
+      SELECT ${projectPhaseItems.taskId} FROM ${projectPhaseItems}
+      INNER JOIN ${projectPhases} ON ${projectPhases.id} = ${projectPhaseItems.phaseId}
+      INNER JOIN ${hubProjects} ON ${hubProjects.id} = ${projectPhases.projectId}
+      WHERE ${hubProjects.hidden} = false
+    )`);
   }
   return conditions.length > 0 ? or(...conditions)! : sql`1 = 0`;
 }
@@ -972,7 +992,7 @@ export function compileCanonicalTaskFilter(
   }
   if (spec.tagIds?.length) conditions.push(getTagIdsFilterCondition([...spec.tagIds]));
   if (spec.noProject) {
-    conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`);
+    conditions.push(getNoVisibleProjectCondition());
   }
   const groupCondition = getCollectionGroupCondition(spec);
   if (groupCondition) conditions.push(groupCondition);

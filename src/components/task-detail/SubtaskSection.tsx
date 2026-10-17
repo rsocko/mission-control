@@ -21,6 +21,13 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Plus, CheckCircle2, Circle, Trash2, ArrowUpFromLine, Sparkles, GripVertical } from 'lucide-react';
 import { toast } from '@/lib/toast';
+import { pushUndoWithToast } from '@/lib/stores/undoStore';
+import {
+  canUndoTaskRemoval,
+  removeTask,
+  taskRemovalResultLabel,
+  undoTaskRemoval,
+} from '@/lib/tasks/task-removal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import dynamic from 'next/dynamic';
 
@@ -262,17 +269,28 @@ export function SubtaskSection({
     setConfirmDialog({
       open: true,
       title: 'Delete subtask?',
-      message: `This will permanently delete "${subtaskTitle || 'this subtask'}". This cannot be undone.`,
+      message: `This will remove "${subtaskTitle || 'this subtask'}". If the source supports recovery, you can undo it briefly afterward.`,
       confirmLabel: 'Delete',
       variant: 'danger',
       onConfirm: async () => {
         setConfirmDialog((d) => ({ ...d, open: false }));
         try {
-          await fetch(`/api/tasks/${subtaskId}`, { method: 'DELETE' });
+          const removedSubtask = subtasks.find((subtask) => subtask.id === subtaskId);
+          const result = await removeTask(subtaskId);
           onSubtasksChange(subtasks.filter((st) => st.id !== subtaskId));
           onUpdate?.();
-        } catch {
-          toast.error('Failed to delete subtask');
+          const label = taskRemovalResultLabel(result).replace('Task', 'Subtask');
+          if (canUndoTaskRemoval(result) && removedSubtask) {
+            pushUndoWithToast(label, async () => {
+              await undoTaskRemoval(subtaskId, result, 'active');
+              onSubtasksChange(subtasks);
+              onUpdate?.();
+            });
+          } else {
+            toast.success(label);
+          }
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Failed to remove subtask');
         }
       },
     });

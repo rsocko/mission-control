@@ -162,6 +162,8 @@ interface TaskRowProps {
     event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
   ) => void;
   filterController?: false | TaskRowFilterController;
+  scoreDisplayMode?: 'score' | 'percentile';
+  activeSortField?: string;
 }
 
 export function TaskRow({
@@ -196,6 +198,8 @@ export function TaskRow({
   onDoubleClickTask,
   onModifierClick,
   filterController,
+  scoreDisplayMode = 'score',
+  activeSortField,
 }: TaskRowProps) {
   const {
     tagFilter,
@@ -411,6 +415,8 @@ export function TaskRow({
       <TaskRowActions
         smartScore={task.smartScore}
         scoreBreakdown={task.scoreBreakdown ?? undefined}
+        scoreDisplayMode={scoreDisplayMode}
+        activeSortField={activeSortField}
         planningHorizon={task.planningHorizon}
         effort={task.effort}
         dueDate={task.dueDate}

@@ -125,6 +125,17 @@ export interface ScoreAudit {
     status: string;
     note: string;
   };
+  ranking?: {
+    scope: ScoreRanking;
+    overall?: ScoreRanking;
+  };
+}
+
+export interface ScoreRanking {
+  label: string;
+  rank: number;
+  total: number;
+  topPercent: number;
 }
 
 export interface ScoreBreakdown {
@@ -640,7 +651,78 @@ export function computeBatchSmartScores(
 ): ScoredTask[] {
   return tasks
     .map((task) => computeSmartScore(task, entities, rankings))
-    .sort((a, b) => b.score.total - a.score.total);
+    .sort((a, b) => b.score.total - a.score.total || a.taskId.localeCompare(b.taskId));
+}
+
+function rankingForPosition(label: string, rank: number, total: number): ScoreRanking {
+  return {
+    label,
+    rank,
+    total,
+    topPercent: Math.max(0.1, Math.ceil((rank / total) * 1_000) / 10),
+  };
+}
+
+/**
+ * Add relative position metadata without changing any task's Smart Score.
+ * Equal scores share a competition rank (1, 1, 3).
+ */
+export function rankSmartScores(
+  scoredTasks: readonly ScoredTask[],
+  label: string,
+): ScoredTask[] {
+  const total = scoredTasks.length;
+  let previousScore: number | null = null;
+  let rank = 0;
+
+  return scoredTasks.map((task, index) => {
+    if (task.score.total !== previousScore) {
+      rank = index + 1;
+      previousScore = task.score.total;
+    }
+    return {
+      ...task,
+      score: {
+        ...task.score,
+        audit: {
+          ...task.score.audit,
+          ranking: {
+            scope: rankingForPosition(label, rank, total),
+          },
+        },
+      },
+    };
+  });
+}
+
+export function addOverallSmartScoreRankings(
+  scopedTasks: readonly ScoredTask[],
+  overallTasks: readonly ScoredTask[],
+): ScoredTask[] {
+  const overallByTaskId = new Map(
+    overallTasks.flatMap((task) => task.score.audit.ranking
+      ? [[task.taskId, task.score.audit.ranking.scope] as const]
+      : []),
+  );
+
+  return scopedTasks.map((task) => {
+    const ranking = task.score.audit.ranking;
+    const overall = overallByTaskId.get(task.taskId);
+    if (!ranking || !overall) return task;
+    return {
+      ...task,
+      score: {
+        ...task.score,
+        audit: {
+          ...task.score.audit,
+          ranking: {
+            ...ranking,
+            overall,
+          },
+        },
+      },
+    };
+  });
 }
 
 /**

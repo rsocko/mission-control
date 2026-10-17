@@ -17,14 +17,14 @@ export function ProjectActionsCard({
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Project actions</CardTitle>
-        <CardDescription>Manage project visibility and permanent deletion.</CardDescription>
+        <CardDescription>Manage whether this project participates in your workspace.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div>
             <p className="text-sm font-medium text-[var(--text-primary)]">Hide this project</p>
             <p className="text-xs text-[var(--text-tertiary)]">
-              Remove it from project navigation and portfolio views. You can unhide it from All Projects.
+              Exclude it from navigation, filters, grouping, and project membership. You can unhide it from All Projects.
             </p>
           </div>
           <Button

@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
-import { tasks } from '@/db/schema';
+import { sourceLists, tasks } from '@/db/schema';
 import {
   getMultiTagFilterCondition,
   getProjectFilterCondition,
@@ -58,6 +58,12 @@ export function getTaskSourceVisibilityConditions(): SQL[] {
   return [
     isNull(tasks.deletedAt),
     sql`${tasks.connectorInstanceId} NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
+    sql`NOT EXISTS (
+      SELECT 1 FROM ${sourceLists}
+      WHERE ${sourceLists.connectorInstanceId} = ${tasks.connectorInstanceId}
+        AND ${sourceLists.sourceId} = ${tasks.sourceListId}
+        AND ${sourceLists.hidden} = true
+    )`,
     notInArray(tasks.connectorType, [...NOTIFICATION_ONLY_CONNECTOR_TYPES]),
   ];
 }

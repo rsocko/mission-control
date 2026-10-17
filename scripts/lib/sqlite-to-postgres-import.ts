@@ -567,6 +567,7 @@ export function matchesSupportedSqliteColumnShape(
       'is_archived',
       'created_at',
       'updated_at',
+      'icon_color',
     ], {
       is_active: { dfltValue: '1' },
       is_archived: { dfltValue: '0' },

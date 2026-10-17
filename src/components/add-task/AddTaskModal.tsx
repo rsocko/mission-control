@@ -125,6 +125,14 @@ function formatDurationLabel(minutes: number): string {
   return m > 0 ? `${h}h ${m}min` : `${h}h`;
 }
 
+export function preferExplicitPickerValue<T>(
+  parsedValue: T | null | undefined,
+  pickerValue: T,
+  pickerChanged: boolean,
+): T {
+  return pickerChanged ? pickerValue : parsedValue ?? pickerValue;
+}
+
 function ConnectorIconImg({ type, size = 14 }: { type: string; size?: number }) {
   const src = CONNECTOR_ICON_PATHS[type];
   if (src) {
@@ -199,6 +207,17 @@ export function AddTaskModal({
   const tagInputRef = useRef<HTMLInputElement>(null);
   const listDropdownRef = useRef<HTMLDivElement>(null);
   const submitInFlightRef = useRef(false);
+  const explicitPickerFieldsRef = useRef({
+    dueDate: false,
+    priority: false,
+    planningHorizon: false,
+    tags: false,
+    project: false,
+    estimatedDuration: false,
+    effort: false,
+    recurrence: false,
+    addToMyDay: false,
+  });
   const captureSemantics = useMemo(() => {
     if (!enableQuickAddSemantics || !title.trim()) return null;
     return parseTaskInputForSubmission(title, {
@@ -361,7 +380,8 @@ export function AddTaskModal({
     setSubmitError(null);
 
     try {
-      const semanticTagSlugs = captureSemantics?.tags || [];
+      const explicitPickerFields = explicitPickerFieldsRef.current;
+      const semanticTagSlugs = explicitPickerFields.tags ? [] : captureSemantics?.tags || [];
       const semanticTags = availableTags.filter(tag =>
         semanticTagSlugs.some(slug =>
           tag.slug === slug || tag.name.toLowerCase() === slug.toLowerCase()
@@ -377,6 +397,46 @@ export function AddTaskModal({
         || projects.find(project =>
           semanticProjectName && project.name.toLowerCase() === semanticProjectName
         )?.id;
+      const resolvedDueDate = preferExplicitPickerValue(
+        captureSemantics?.dueDate,
+        dueDate || undefined,
+        explicitPickerFields.dueDate,
+      );
+      const resolvedPriority = preferExplicitPickerValue(
+        captureSemantics?.priority,
+        priority,
+        explicitPickerFields.priority,
+      );
+      const resolvedPlanningHorizon = preferExplicitPickerValue(
+        captureSemantics?.planningHorizon,
+        planningHorizon,
+        explicitPickerFields.planningHorizon,
+      );
+      const resolvedProjectId = preferExplicitPickerValue(
+        semanticProjectId,
+        selectedProjectId || undefined,
+        explicitPickerFields.project,
+      );
+      const resolvedEstimatedDuration = preferExplicitPickerValue(
+        captureSemantics?.estimatedDuration,
+        estimatedDuration || undefined,
+        explicitPickerFields.estimatedDuration,
+      );
+      const resolvedEffort = preferExplicitPickerValue(
+        captureSemantics?.effort,
+        effort || undefined,
+        explicitPickerFields.effort,
+      );
+      const resolvedRecurrence = preferExplicitPickerValue(
+        captureSemantics?.recurrence,
+        recurrence !== 'none' ? recurrence : undefined,
+        explicitPickerFields.recurrence,
+      );
+      const resolvedAddToMyDay = preferExplicitPickerValue(
+        captureSemantics?.addToMyDay ? true : undefined,
+        addToMyDay,
+        explicitPickerFields.addToMyDay,
+      );
 
       const res = await fetch('/api/tasks', {
         method: 'POST',
@@ -384,9 +444,9 @@ export function AddTaskModal({
         body: JSON.stringify({
           title: submittedTitle,
           description: description.trim() || undefined,
-          dueDate: captureSemantics?.dueDate || dueDate || undefined,
-          priority: captureSemantics?.priority || priority,
-          planningHorizon: captureSemantics?.planningHorizon || planningHorizon,
+          dueDate: resolvedDueDate,
+          priority: resolvedPriority,
+          planningHorizon: resolvedPlanningHorizon,
           connectorType: activeDestination.connectorType,
           connectorInstanceId: activeDestination.connectorType === 'local'
             ? undefined
@@ -395,16 +455,16 @@ export function AddTaskModal({
           sourceListName: (selectedListId ? availableLists.find(l => l.sourceId === selectedListId)?.name : activeDestination.listName) || undefined,
           tags: tagIds,
           tagSlugs,
-          projectIds: !deferProjectAssignment && (semanticProjectId || selectedProjectId)
-            ? [semanticProjectId || selectedProjectId]
+          projectIds: !deferProjectAssignment && resolvedProjectId
+            ? [resolvedProjectId]
             : [],
           subtasks: subtasks.length > 0 ? subtasks : undefined,
-          estimatedDuration: captureSemantics?.estimatedDuration || estimatedDuration || undefined,
-          effort: captureSemantics?.effort || effort || undefined,
-          recurrence: captureSemantics?.recurrence || (recurrence !== 'none' ? recurrence : undefined),
-          recurrenceMode: captureSemantics?.recurrence || recurrence !== 'none' ? recurrenceMode : undefined,
-          recurrenceSkipDates: recurrence !== 'none' ? recurrenceOptions.skipDates : undefined,
-          recurrenceCatchUp: recurrence !== 'none' ? recurrenceOptions.catchUp : undefined,
+          estimatedDuration: resolvedEstimatedDuration,
+          effort: resolvedEffort,
+          recurrence: resolvedRecurrence,
+          recurrenceMode: resolvedRecurrence ? recurrenceMode : undefined,
+          recurrenceSkipDates: resolvedRecurrence ? recurrenceOptions.skipDates : undefined,
+          recurrenceCatchUp: resolvedRecurrence ? recurrenceOptions.catchUp : undefined,
           triageItemId,
           sourceNotificationId: prefill?.sourceNotificationId,
         }),
@@ -418,7 +478,7 @@ export function AddTaskModal({
       const { id: newTaskId } = await res.json();
 
       // Optionally add to My Day
-      if (addToMyDay) {
+      if (resolvedAddToMyDay) {
         const { getLocalToday } = await import('@/lib/utils/client-date');
         await fetch('/api/my-day', {
           method: 'POST',
@@ -448,6 +508,12 @@ export function AddTaskModal({
         setRecurrence('none');
         setRecurrenceMode('schedule');
         setRecurrenceOptions({ skipDates: [], catchUp: 'latest' });
+        explicitPickerFieldsRef.current.dueDate = false;
+        explicitPickerFieldsRef.current.priority = false;
+        explicitPickerFieldsRef.current.planningHorizon = false;
+        explicitPickerFieldsRef.current.estimatedDuration = false;
+        explicitPickerFieldsRef.current.effort = false;
+        explicitPickerFieldsRef.current.recurrence = false;
         setAddToMyDay(initialAddToMyDay ?? false);
         setTagSearchQuery('');
         setShowTagDropdown(false);
@@ -602,6 +668,8 @@ export function AddTaskModal({
                 <code className="text-pink-300">+project</code>,{' '}
                 <code className="text-emerald-300">~soon</code>,{' '}
                 <code className="text-violet-300">^effort</code>, or a date.
+                {' '}Use <code className="text-[var(--text-secondary)]">30m</code> or{' '}
+                <code className="text-[var(--text-secondary)]">1.5h</code> for duration.
               </p>
               {captureSemanticLabels.length > 0 && (
                 <div
@@ -801,7 +869,10 @@ export function AddTaskModal({
               <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Due date</label>
               <DatePicker
                 value={dueDate || null}
-                onChange={setDueDate}
+                onChange={(value) => {
+                  explicitPickerFieldsRef.current.dueDate = true;
+                  setDueDate(value);
+                }}
                 placeholder="Choose or type a date"
                 aria-label="Choose task due date"
                 className="min-h-9 rounded-lg border-[var(--border)] text-xs"
@@ -812,8 +883,11 @@ export function AddTaskModal({
             <div className="space-y-3">
               <div>
               <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Priority</label>
-              <Select value={priority} onValueChange={(v) => setPriority(v)}>
-                <SelectTrigger className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]">
+              <Select value={priority} onValueChange={(value) => {
+                explicitPickerFieldsRef.current.priority = true;
+                setPriority(value);
+              }}>
+                <SelectTrigger aria-label="Priority" className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -829,9 +903,10 @@ export function AddTaskModal({
                 <PlanningHorizonFieldLabel className="mb-1 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]" />
                 <Select
                   value={planningHorizon ?? 'none'}
-                  onValueChange={(value) => setPlanningHorizon(
-                    value === 'none' ? null : value as PlanningHorizon,
-                  )}
+                  onValueChange={(value) => {
+                    explicitPickerFieldsRef.current.planningHorizon = true;
+                    setPlanningHorizon(value === 'none' ? null : value as PlanningHorizon);
+                  }}
                 >
                   <SelectTrigger
                     aria-label="Horizon"
@@ -859,8 +934,10 @@ export function AddTaskModal({
                 <EffortSelect
                   effort={effort}
                   onChange={(newEffort) => {
+                    explicitPickerFieldsRef.current.effort = true;
                     setEffort(newEffort);
                     if (newEffort && !estimatedDuration && EFFORT_TO_DURATION[newEffort]) {
+                      explicitPickerFieldsRef.current.estimatedDuration = true;
                       setEstimatedDuration(EFFORT_TO_DURATION[newEffort]);
                     }
                   }}
@@ -884,11 +961,15 @@ export function AddTaskModal({
                       key={d}
                       type="button"
                       onClick={() => {
+                        explicitPickerFieldsRef.current.estimatedDuration = true;
                         const newDuration = estimatedDuration === d ? null : d;
                         setEstimatedDuration(newDuration);
                         if (newDuration && !effort) {
                           const suggested = durationToEffort(newDuration);
-                          if (suggested) setEffort(suggested);
+                          if (suggested) {
+                            explicitPickerFieldsRef.current.effort = true;
+                            setEffort(suggested);
+                          }
                         }
                       }}
                       className={`px-2 py-1.5 text-xs rounded-md border transition-colors ${
@@ -906,13 +987,17 @@ export function AddTaskModal({
                     max="4800"
                     value={customDurationInput}
                     onChange={(e) => {
+                      explicitPickerFieldsRef.current.estimatedDuration = true;
                       setCustomDurationInput(e.target.value);
                       const val = parseInt(e.target.value, 10);
                       if (val > 0 && val <= 4800) {
                         setEstimatedDuration(val);
                         if (!effort) {
                           const suggested = durationToEffort(val);
-                          if (suggested) setEffort(suggested);
+                          if (suggested) {
+                            explicitPickerFieldsRef.current.effort = true;
+                            setEffort(suggested);
+                          }
                         }
                       }
                     }}
@@ -927,6 +1012,7 @@ export function AddTaskModal({
                     <button
                       type="button"
                       onClick={() => {
+                        explicitPickerFieldsRef.current.estimatedDuration = true;
                         setEstimatedDuration(null);
                         setCustomDurationInput('');
                       }}
@@ -948,6 +1034,7 @@ export function AddTaskModal({
               <RecurrencePicker
                 value={recurrence}
                 onChange={(next) => {
+                  explicitPickerFieldsRef.current.recurrence = true;
                   setRecurrence(next);
                   if (next === 'none') {
                     setRecurrenceMode('schedule');
@@ -973,8 +1060,11 @@ export function AddTaskModal({
             {/* Hub Project */}
             <div>
               <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Project</label>
-              <Select value={selectedProjectId} onValueChange={(v) => setSelectedProjectId(v)}>
-                <SelectTrigger className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]">
+              <Select value={selectedProjectId} onValueChange={(value) => {
+                explicitPickerFieldsRef.current.project = true;
+                setSelectedProjectId(value);
+              }}>
+                <SelectTrigger aria-label="Project" className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1013,6 +1103,7 @@ export function AddTaskModal({
                       t.name.toLowerCase().includes(tagSearchQuery.toLowerCase())
                     );
                     if (filtered.length > 0) {
+                      explicitPickerFieldsRef.current.tags = true;
                       setSelectedTags([...selectedTags, filtered[0]]);
                       setTagSearchQuery('');
                       setShowTagDropdown(false);
@@ -1021,6 +1112,7 @@ export function AddTaskModal({
                     }
                   }
                   if (e.key === 'Backspace' && !tagSearchQuery && selectedTags.length > 0) {
+                    explicitPickerFieldsRef.current.tags = true;
                     setSelectedTags(selectedTags.slice(0, -1));
                   }
                 }}
@@ -1042,6 +1134,7 @@ export function AddTaskModal({
                         type="button"
                         onMouseDown={(e) => {
                           e.preventDefault();
+                          explicitPickerFieldsRef.current.tags = true;
                           setSelectedTags([...selectedTags, t]);
                           setTagSearchQuery('');
                           setShowTagDropdown(false);
@@ -1072,7 +1165,12 @@ export function AddTaskModal({
                 >
                   {tag.name}
                   <button
-                    onClick={() => setSelectedTags(selectedTags.filter(t => t.id !== tag.id))}
+                    type="button"
+                    aria-label={`Remove ${tag.name} tag`}
+                    onClick={() => {
+                      explicitPickerFieldsRef.current.tags = true;
+                      setSelectedTags(selectedTags.filter(t => t.id !== tag.id));
+                    }}
                     className="opacity-60 hover:opacity-100"
                   ><X size={10} /></button>
                 </span>
@@ -1111,7 +1209,10 @@ export function AddTaskModal({
             <input
               type="checkbox"
               checked={addToMyDay}
-              onChange={(e) => setAddToMyDay(e.target.checked)}
+              onChange={(e) => {
+                explicitPickerFieldsRef.current.addToMyDay = true;
+                setAddToMyDay(e.target.checked);
+              }}
               className="w-4 h-4 accent-blue-600 rounded"
             />
             <span className="text-xs text-[var(--text-secondary)]">Add to My Day</span>

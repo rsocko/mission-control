@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AddTaskModal } from '@/components/add-task/AddTaskModal';
+import {
+  AddTaskModal,
+  preferExplicitPickerValue,
+} from '@/components/add-task/AddTaskModal';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 
 afterEach(() => {
@@ -10,6 +13,15 @@ afterEach(() => {
 });
 
 describe('AddTaskModal submission guard', () => {
+  it('uses explicit picker values, including clears, ahead of parsed tokens', () => {
+    expect(preferExplicitPickerValue('high', 'low', true)).toBe('low');
+    expect(preferExplicitPickerValue('project-inline', undefined, true)).toBeUndefined();
+    expect(preferExplicitPickerValue(30, 60, true)).toBe(60);
+    expect(preferExplicitPickerValue('weekly', undefined, true)).toBeUndefined();
+    expect(preferExplicitPickerValue('high', 'low', false)).toBe('high');
+    expect(preferExplicitPickerValue(undefined, 'low', false)).toBe('low');
+  });
+
   it('applies Quick Add semantic tokens during mobile capture', async () => {
     const taskBodies: Record<string, unknown>[] = [];
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -69,7 +81,7 @@ describe('AddTaskModal submission guard', () => {
 
     const titleInput = screen.getByPlaceholderText('Task, date, #tag, !priority…');
     fireEvent.change(titleInput, {
-      target: { value: 'Ship release !high #ops +Launch ^3 ~soon ~30m weekly' },
+      target: { value: 'Ship release !high #ops +Launch ^3 ~soon 30m weekly' },
     });
 
     await screen.findByText('#ops');
@@ -99,6 +111,97 @@ describe('AddTaskModal submission guard', () => {
       connectorType: 'local',
     }));
     expect(taskBodies[1]).not.toHaveProperty('connectorInstanceId');
+  });
+
+  it('lets explicit picker changes override conflicting inline tokens', async () => {
+    const taskBodies: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/tasks') {
+        taskBodies.push(JSON.parse(String(init?.body)));
+        return Promise.resolve(new Response(JSON.stringify({ id: 'task-1' })));
+      }
+      if (url === '/api/tags') {
+        return Promise.resolve(new Response(JSON.stringify({
+          tags: [{ id: 'tag-ops', name: 'ops', slug: 'ops', color: null }],
+        })));
+      }
+      if (url === '/api/hub-projects') {
+        return Promise.resolve(new Response(JSON.stringify({
+          projects: [
+            { id: 'project-launch', name: 'Launch', color: '#3b82f6' },
+            { id: 'project-operations', name: 'Operations', color: '#3b82f6' },
+          ],
+        })));
+      }
+      if (url === '/api/subtask-templates') {
+        return Promise.resolve(new Response(JSON.stringify({ templates: [] })));
+      }
+      if (url === '/api/recurrence/preview') {
+        return Promise.resolve(new Response(JSON.stringify({
+          status: 'supported',
+          occurrences: [],
+        })));
+      }
+      return Promise.resolve(new Response(JSON.stringify({})));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const destination: ComponentProps<typeof AddTaskModal>['initialDestination'] = {
+      id: 'local',
+      label: 'Local',
+      connectorType: 'local',
+      account: null,
+      color: '#64748b',
+    };
+
+    render(
+      <TooltipProvider>
+        <AddTaskModal
+          initialInput=""
+          initialParsed={null}
+          initialDestination={destination}
+          destinations={[destination]}
+          enableQuickAddSemantics
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('Task, date, #tag, !priority…'), {
+      target: {
+        value: 'Ship release !high #ops +Launch ^3 ~soon 30m weekly *',
+      },
+    });
+    await screen.findByText('+Launch');
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Priority' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Low/ }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Horizon' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Later/ }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Project' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Operations/ }));
+    fireEvent.click(screen.getByRole('button', { name: '1h' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Task recurrence' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Monthly' }));
+    const myDay = screen.getByRole('checkbox', { name: 'Add to My Day' });
+    fireEvent.click(myDay);
+    fireEvent.click(myDay);
+    fireEvent.click(screen.getByRole('button', { name: 'Add Task' }));
+
+    await waitFor(() => expect(taskBodies).toHaveLength(1));
+    expect(taskBodies[0]).toEqual(expect.objectContaining({
+      title: 'Ship release',
+      priority: 'low',
+      planningHorizon: 'later',
+      tags: ['tag-ops'],
+      projectIds: ['project-operations'],
+      estimatedDuration: 60,
+      effort: 2,
+      recurrence: 'monthly',
+    }));
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/my-day')).toBe(false);
   });
 
   it('sends one task request when submit is triggered twice before React rerenders', async () => {
@@ -367,7 +470,7 @@ describe('AddTaskModal submission guard', () => {
             tags: ['3dprint', 'new-tag'],
             dueDate: '2026-09-10',
             priority: 'high',
-            planningHorizon: 'now',
+            planningHorizon: 'soon',
           }}
           onClose={vi.fn()}
           onSubmit={vi.fn()}

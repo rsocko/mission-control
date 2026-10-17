@@ -374,6 +374,11 @@ describe('splitCompoundTask', () => {
     expect(result).toBeNull();
   });
 
+  it('does not split a one-word segment into its own task', () => {
+    expect(splitCompoundTask('Review and clean up document actions')).toBeNull();
+    expect(splitCompoundTask('Review document actions and file')).toBeNull();
+  });
+
   it('does not split when first word is not a verb', () => {
     const result = splitCompoundTask('Groceries and call dentist');
     expect(result).toBeNull();

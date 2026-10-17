@@ -98,6 +98,54 @@ interface QuickAddBarProps {
   onTaskAdded?: () => void;
 }
 
+function QuickAddSplitPreview({
+  tasks,
+  onKeepAsOneTask,
+  className,
+}: {
+  tasks: string[];
+  onKeepAsOneTask: () => void;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        'flex min-w-0 flex-col gap-2 rounded-lg border border-teal-800/40 bg-teal-950/20 px-3 py-2 text-xs',
+        className,
+      )}
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <GitBranch size={13} className="shrink-0 text-teal-400" />
+        <span className="font-medium text-teal-200" aria-live="polite">
+          Split into {tasks.length} tasks
+        </span>
+        <span className="hidden text-[var(--text-muted)] sm:inline">
+          Enter will add each item separately
+        </span>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onKeepAsOneTask}
+          className="ml-auto shrink-0 rounded-md px-2 py-1 font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-focus)]"
+        >
+          Keep as one task
+        </button>
+      </div>
+      <ol className="flex min-w-0 flex-wrap gap-1.5" aria-label="Tasks to be created">
+        {tasks.map((task, index) => (
+          <li
+            key={`${index}-${task}`}
+            className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-secondary)]"
+          >
+            <span className="tabular-nums text-teal-400">{index + 1}.</span>
+            <span className="truncate">{task}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 export function QuickAddProjectControl({
   project,
   active,
@@ -353,6 +401,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const [viewTaskId, setViewTaskId] = useState<string | null>(null);
   // Compound split hint: shown when NLP detects "verb and verb" pattern during typing
   const [compoundSplitHint, setCompoundSplitHint] = useState<string[] | null>(null);
+  const [dismissedCompoundSplitInput, setDismissedCompoundSplitInput] = useState<string | null>(null);
   // Tag / priority / effort typeahead state
   const [tagTypeaheadIndex, setTagTypeaheadIndex] = useState(0);
   const [priorityTypeaheadIndex, setPriorityTypeaheadIndex] = useState(0);
@@ -925,6 +974,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       parseOptions,
       projectsLoadState,
       currentInputParentTaskId,
+      splitCompoundTasks: normalizePendingTaskText(input) !== dismissedCompoundSplitInput,
     });
     if (plan.block) {
       if (plan.block.reason === 'empty') return;
@@ -972,6 +1022,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         setCurrentInputParentTaskId(undefined);
         setPendingTasks([]);
         setParsed(null);
+        setDismissedCompoundSplitInput(null);
         setCompoundSplitHint(null);
         const myDaySuffix = myDayActive || result.singleTaskMeta?.addToMyDay ? ' · My Day' : '';
         const toastDestSuffix = `${destination.account ? ` · ${destination.account}` : ''}${myDaySuffix}`;
@@ -1044,6 +1095,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     cachedTags,
     contextProjectActive,
     currentInputParentTaskId,
+    dismissedCompoundSplitInput,
     destination,
     input,
     isSubmitting,
@@ -1164,11 +1216,23 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
 
     // Detect compound task pattern for hint (but don't auto-split)
     if (!remaining.includes('\n') && !remaining.includes(';;')) {
-      const parts = splitCompoundTask(remaining);
-      setCompoundSplitHint(parts);
+      const normalizedRemaining = normalizePendingTaskText(remaining);
+      if (normalizedRemaining === dismissedCompoundSplitInput) {
+        setCompoundSplitHint(null);
+      } else {
+        setDismissedCompoundSplitInput(null);
+        setCompoundSplitHint(splitCompoundTask(remaining));
+      }
     } else {
+      setDismissedCompoundSplitInput(null);
       setCompoundSplitHint(null);
     }
+  }, [dismissedCompoundSplitInput, input]);
+
+  const keepCompoundInputAsOneTask = useCallback(() => {
+    setDismissedCompoundSplitInput(normalizePendingTaskText(input));
+    setCompoundSplitHint(null);
+    inputHandleRef.current?.focus();
   }, [input]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent): boolean => {
@@ -1340,6 +1404,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       setPendingTasks(prev => prev.slice(0, -1));
       setInput(lastTask.text);
       setCurrentInputParentTaskId(lastTask.parentTaskId);
+      setDismissedCompoundSplitInput(null);
       setCompoundSplitHint(null);
       return true;
     }
@@ -1355,6 +1420,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     } else if (e.key === 'Escape') {
       setInput('');
       setCurrentInputParentTaskId(undefined);
+      setDismissedCompoundSplitInput(null);
       setCompoundSplitHint(null);
       inputHandleRef.current?.blur();
       return true;
@@ -1870,17 +1936,13 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
           </div>
           </div>
 
-          {/* Compound task split hint — inside bar as a full-width second row */}
-          {compoundSplitHint && compoundSplitHint.length >= 2 && !listTypeahead && !templateTypeahead && !tagTypeahead && !priorityTypeahead && !effortTypeahead && (
-            <div className="flex w-full items-center gap-2 px-3 pb-1.5 pt-0.5 text-xs">
-              <GitBranch size={12} className="text-teal-400 shrink-0" />
-              <span className="text-[var(--text-muted)]">
-                Will split into {compoundSplitHint.length} tasks on ↵
-              </span>
-              <span className="text-[var(--text-muted)] opacity-60">
-                — use ;; to split now, or just keep typing
-              </span>
-            </div>
+          {/* Compound task split preview — inside bar as a full-width second row */}
+          {compoundSplitHint && compoundSplitHint.length >= 2 && !listTypeahead && !templateTypeahead && !tagTypeahead && !projectTypeahead && !priorityTypeahead && !effortTypeahead && (
+            <QuickAddSplitPreview
+              tasks={compoundSplitHint}
+              onKeepAsOneTask={keepCompoundInputAsOneTask}
+              className="mx-1 mb-1 basis-full"
+            />
           )}
         </div>
 
@@ -1966,17 +2028,13 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
           </div>
         )}
 
-        {/* Compound task split hint — shown when NLP detects "verb and verb" during typing */}
-        {isFocused && compoundSplitHint && compoundSplitHint.length >= 2 && !listTypeahead && !templateTypeahead && !tagTypeahead && !priorityTypeahead && !effortTypeahead && (
-          <div className="flex items-center gap-2 mt-1.5 px-3 text-xs">
-            <GitBranch size={12} className="text-teal-400 shrink-0" />
-            <span className="text-[var(--text-muted)]">
-              Will split into {compoundSplitHint.length} tasks on ↵
-            </span>
-            <span className="text-[var(--text-muted)] opacity-60">
-              — use ;; to split now, or just keep typing
-            </span>
-          </div>
+        {/* Compound task split preview — shown when NLP detects "verb and verb" during typing */}
+        {isFocused && compoundSplitHint && compoundSplitHint.length >= 2 && !listTypeahead && !templateTypeahead && !tagTypeahead && !projectTypeahead && !priorityTypeahead && !effortTypeahead && (
+          <QuickAddSplitPreview
+            tasks={compoundSplitHint}
+            onKeepAsOneTask={keepCompoundInputAsOneTask}
+            className="mt-1.5"
+          />
         )}
 
         {/* List typeahead dropdown */}

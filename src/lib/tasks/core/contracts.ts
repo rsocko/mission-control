@@ -405,6 +405,10 @@ export interface TaskQuickSortSuggestionInputs {
   readonly taskTags: Array<{
     readonly taskId: string;
     readonly tagId: string;
+    readonly title: string;
+    readonly connectorInstanceId: string;
+    readonly sourceListId: string | null;
+    readonly updatedAt: string;
   }>;
   readonly projectAffinities: Array<{
     readonly taskId: string;

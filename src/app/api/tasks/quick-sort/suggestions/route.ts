@@ -4,13 +4,14 @@ import type { TaskPriority } from '@/types';
 import { getResolvedPriorityEntities } from '@/lib/priority-entities';
 import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
+import { recommendTagsForTask } from '@/lib/tags/recommendations';
 
 /**
  * GET /api/tasks/quick-sort/suggestions?taskIds=id1,id2,...
  *
  * Returns suggestions for priority, effort, tags, and projects for the given task IDs.
- * Uses SmartScore for priority, title heuristics for effort, and tag frequency
- * analysis for tags. No LLM calls — fast and deterministic.
+ * Uses SmartScore for priority, title heuristics for effort, and contextual
+ * task history for tags. No LLM calls — fast and deterministic.
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -37,21 +38,12 @@ export async function GET(request: Request) {
   // Fetch priority entities and source rankings for SmartScore
   const entities = await getResolvedPriorityEntities() as PriorityEntity[];
 
-  // Tag frequency map
-  const tagFrequency = new Map<string, number>();
-  for (const tt of allTaskTags) {
-    tagFrequency.set(tt.tagId, (tagFrequency.get(tt.tagId) ?? 0) + 1);
-  }
-  const tagsByFrequency = allTags
-    .map((t) => ({ ...t, frequency: tagFrequency.get(t.id) ?? 0 }))
-    .sort((a, b) => b.frequency - a.frequency);
-
   const suggestions: Record<
     string,
     {
       priority: { value: string; confidence: number; reason: string } | null;
       effort: { value: number; confidence: number; reason: string } | null;
-      tags: Array<{ id: string; name: string; confidence: number }>;
+      tags: Array<{ id: string; name: string; confidence: number; reason: string }>;
       projects: Array<{
         id: string;
         name: string;
@@ -144,39 +136,6 @@ export async function GET(request: Request) {
       }
     }
 
-    // Tag suggestions: title keyword match → fallback to most frequent
-    const existingTaskTagIds = new Set(
-      allTaskTags.filter((tt) => tt.taskId === task.id).map((tt) => tt.tagId)
-    );
-    const suggestedTags: Array<{ id: string; name: string; confidence: number }> = [];
-
-    if (existingTaskTagIds.size === 0) {
-      const titleLower = task.title.toLowerCase();
-      const sourceListLower = (task.sourceListName ?? '').toLowerCase();
-      const seenTagNames = new Set<string>();
-
-      for (const tag of tagsByFrequency.slice(0, 30)) {
-        if (existingTaskTagIds.has(tag.id)) continue;
-        const tagLower = tag.name.toLowerCase();
-        // Skip duplicate tag names (DB can have same-name tags with different IDs)
-        if (seenTagNames.has(tagLower)) continue;
-        if (titleLower.includes(tagLower) || sourceListLower.includes(tagLower)) {
-          suggestedTags.push({ id: tag.id, name: tag.name, confidence: 0.7 });
-          seenTagNames.add(tagLower);
-        }
-      }
-
-      // Fallback: top 2 by frequency with low confidence
-      if (suggestedTags.length === 0 && tagsByFrequency.length > 0) {
-        for (const tag of tagsByFrequency.slice(0, 2)) {
-          const tagLower = tag.name.toLowerCase();
-          if (seenTagNames.has(tagLower)) continue;
-          suggestedTags.push({ id: tag.id, name: tag.name, confidence: 0.3 });
-          seenTagNames.add(tagLower);
-        }
-      }
-    }
-
     const sourcePeers = projectAffinities.filter((row) => (
       row.taskId !== task.id
       && row.connectorInstanceId === task.connectorInstanceId
@@ -229,11 +188,16 @@ export async function GET(request: Request) {
           reason: `${project.count} of ${cohortSize} items on ${cohortLabel}`,
         }))
       : [];
+    const suggestedTags = recommendTagsForTask(task, {
+        tags: allTags,
+        taskTags: allTaskTags,
+        projectAffinities,
+    });
 
     suggestions[task.id] = {
       priority: suggestedPriority,
       effort: suggestedEffort,
-      tags: suggestedTags.slice(0, 3),
+      tags: suggestedTags,
       projects: suggestedProjects,
     };
   }

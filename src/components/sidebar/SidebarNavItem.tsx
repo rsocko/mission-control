@@ -46,7 +46,7 @@ export function SidebarNavItem({
           </span>
           {suffix}
           {(showZeroCount || count > 0) && (
-            <span className={`text-xs tabular-nums transition-opacity ${
+            <span className={`ml-auto w-8 shrink-0 text-right text-xs tabular-nums transition-opacity ${
               active ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
             } ${
               overlayAction

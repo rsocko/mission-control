@@ -12,7 +12,7 @@ const ROUTINE_SORT_LOCK = 'routines:sort-order';
 
 const ROUTINE_COLUMNS = `
   id, name, description, cadence_type AS "cadenceType",
-  cadence_config AS "cadenceConfig", icon, sort_order AS "sortOrder",
+  cadence_config AS "cadenceConfig", icon, icon_color AS "iconColor", sort_order AS "sortOrder",
   is_active AS "isActive", is_archived AS "isArchived",
   created_at AS "createdAt", updated_at AS "updatedAt"
 `;
@@ -27,6 +27,7 @@ const UPDATE_COLUMNS: Record<keyof RoutineUpdate, string> = {
   cadenceConfig: 'cadence_config',
   description: 'description',
   icon: 'icon',
+  iconColor: 'icon_color',
   isActive: 'is_active',
   isArchived: 'is_archived',
   sortOrder: 'sort_order',
@@ -102,9 +103,9 @@ export function createPostgresRoutinesRepository(pool: Pool): RoutinesRepository
         const sortOrder = max ? (max.sortOrder ?? 0) + 1 : 0;
         await client.query(`
           INSERT INTO routines (
-            id, name, description, cadence_type, cadence_config, icon, sort_order,
+            id, name, description, cadence_type, cadence_config, icon, icon_color, sort_order,
             is_active, is_archived, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, TRUE, FALSE, $8, $9)
+          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, TRUE, FALSE, $9, $10)
         `, [
           command.id,
           command.name,
@@ -112,6 +113,7 @@ export function createPostgresRoutinesRepository(pool: Pool): RoutinesRepository
           command.cadenceType,
           JSON.stringify(command.cadenceConfig),
           command.icon,
+          command.iconColor,
           sortOrder,
           command.createdAt,
           command.updatedAt,

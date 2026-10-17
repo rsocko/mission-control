@@ -24,6 +24,7 @@ function routine(
     cadenceType,
     cadenceConfig: cadenceType === 'specific_days' ? { days: [1, 3, 5] } : {},
     icon: null,
+    iconColor: null,
     createdAt,
     updatedAt: createdAt,
   };
@@ -73,6 +74,8 @@ export function describeRoutinesRepositoryContract(
         updates: {
           name: 'Updated',
           cadenceConfig: { target: 3 },
+          icon: 'lucide:activity',
+          iconColor: '#3b82f6',
           sortOrder: 7,
         },
         updatedAt: '2026-09-02T00:00:00.000Z',
@@ -80,6 +83,8 @@ export function describeRoutinesRepositoryContract(
       await expect(harness.repository.getRoutine('routine-update')).resolves.toMatchObject({
         name: 'Updated',
         cadenceConfig: { target: 3 },
+        icon: 'lucide:activity',
+        iconColor: '#3b82f6',
         sortOrder: 7,
         updatedAt: '2026-09-02T00:00:00.000Z',
       });

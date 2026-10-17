@@ -24,6 +24,7 @@ const routine = {
   cadenceType: 'daily' as const,
   cadenceConfig: {},
   icon: null,
+  iconColor: null,
   sortOrder: 0,
   isActive: true,
   isArchived: false,

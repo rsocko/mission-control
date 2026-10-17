@@ -40,6 +40,7 @@ export interface Routine {
   cadenceType: CadenceType;
   cadenceConfig: CadenceConfig;
   icon: string | null;
+  iconColor: string | null;
   sortOrder: number;
   isActive: boolean;
   isArchived: boolean;

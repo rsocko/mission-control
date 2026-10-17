@@ -199,11 +199,9 @@ export function AttributionExceptionReview() {
     if (!focusAfterRefresh.current) return;
     const focusId = focusAfterRefresh.current;
     focusAfterRefresh.current = null;
-    window.requestAnimationFrame(() => {
-      const nextItem = itemRefs.current.get(focusId) ?? itemRefs.current.values().next().value;
-      if (nextItem) nextItem.focus();
-      else emptyStateRef.current?.focus();
-    });
+    const nextItem = itemRefs.current.get(focusId) ?? itemRefs.current.values().next().value;
+    if (nextItem) nextItem.focus();
+    else emptyStateRef.current?.focus();
   }, [exceptions]);
 
   const loadMore = async () => {

@@ -684,7 +684,13 @@ export async function fetchQuickAddSuggestion(
   const response = await (dependencies.fetcher ?? fetch)(
     `/api/tasks/quick-sort/suggestions?taskIds=${taskId}`,
   );
-  if (!response.ok) return null;
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    throw new QuickAddRequestError(
+      payload?.error ?? `Failed to check suggestions (${response.status})`,
+      response.status,
+    );
+  }
 
   const payload = await response.json() as {
     suggestions?: Record<string, QuickSortSuggestion | undefined>;

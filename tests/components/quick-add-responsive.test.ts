@@ -58,4 +58,11 @@ describe('Quick Entry responsive layout', () => {
       'top-full z-50 overflow-hidden rounded-b-[var(--radius-lg)] border border-t-0',
     );
   });
+
+  it('shows distinct loading, empty, and error states for suggestions', () => {
+    expect(quickAddSource).toContain('Checking for suggestions…');
+    expect(quickAddSource).toContain('No suggestions for this task');
+    expect(quickAddSource).toContain('Couldn&apos;t check suggestions');
+    expect(quickAddSource).toContain('loadQuickAddSuggestions(taskId');
+  });
 });

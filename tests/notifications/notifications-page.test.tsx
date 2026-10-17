@@ -561,4 +561,51 @@ describe('NotificationsPage data states', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('2 writebacks failed');
   });
+
+  it('shows writeback error details and retries retryable failures', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        failed: [{
+          id: 'job-1',
+          notificationId: 'notification-1',
+          connectorInstanceId: 'github-primary',
+          actionType: 'mark_read',
+          retryable: true,
+          attemptCount: 3,
+          maxAttempts: 5,
+          lastError: 'GitHub notification mark_read failed with HTTP 503',
+          updatedAt: '2026-08-10T12:00:00.000Z',
+        }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ failed: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    hookState = makeHook({
+      operationalStatus: {
+        isSyncing: false,
+        lastSyncAt: '2026-08-10T12:00:00.000Z',
+        lastSyncSucceeded: true,
+        backoffUntil: null,
+        pendingWritebacks: 0,
+        failedWritebacks: 1,
+        error: null,
+      },
+    });
+    render(<NotificationsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Review failures/i }));
+    expect(await screen.findByText('GitHub notification mark_read failed with HTTP 503'))
+      .toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/notifications/writebacks', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ ids: ['job-1'] }),
+      }));
+    });
+    expect(await screen.findByText('No current failures. Refresh notifications to clear the summary.'))
+      .toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
 });

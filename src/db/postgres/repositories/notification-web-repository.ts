@@ -338,7 +338,14 @@ function mutationUpdateSqlPg(
 const NOTIFICATION_SYNC_STATE_CASE_SQL = `CASE
         WHEN EXISTS (
           SELECT 1 FROM notification_writeback_jobs jobs
-          WHERE jobs.notification_id = notifications.id AND jobs.status = 'failed'
+          WHERE jobs.notification_id = notifications.id
+            AND jobs.status = 'failed'
+            AND NOT EXISTS (
+              SELECT 1 FROM notification_writeback_jobs newer
+              WHERE newer.notification_id = jobs.notification_id
+                AND (newer.created_at, newer.id) > (jobs.created_at, jobs.id)
+                AND newer.status <> 'superseded'
+            )
         ) THEN 'failed'
         WHEN EXISTS (
           SELECT 1 FROM notification_writeback_jobs jobs
@@ -1703,17 +1710,39 @@ export function createPostgresNotificationWebRepository(
     },
 
     async listWritebackStatus(notificationId) {
-      const counts = await pool.query(`SELECT status, COUNT(*)::int AS count FROM notification_writeback_jobs GROUP BY status`);
-      const where = notificationId ? `AND notification_id = $1` : '';
+      const counts = await pool.query(`
+        SELECT jobs.status, COUNT(*)::int AS count
+        FROM notification_writeback_jobs jobs
+        WHERE jobs.status <> 'failed'
+           OR NOT EXISTS (
+             SELECT 1 FROM notification_writeback_jobs newer
+             WHERE newer.notification_id = jobs.notification_id
+               AND (newer.created_at, newer.id) > (jobs.created_at, jobs.id)
+               AND newer.status <> 'superseded'
+           )
+        GROUP BY jobs.status
+      `);
+      const where = notificationId ? `AND jobs.notification_id = $1` : '';
       const params = notificationId ? [notificationId] : [];
       const jobs = await pool.query(`
         SELECT id, notification_id AS "notificationId", connector_instance_id AS "connectorInstanceId",
-               action_type AS action, status, retryable, attempt_count AS "attemptCount",
+               connector_type AS "connectorType", source_id AS "sourceId",
+               action_type AS "actionType", status, retryable, attempt_count AS "attemptCount",
                max_attempts AS "maxAttempts", next_attempt_at AS "nextAttemptAt",
-               last_error AS "lastError", updated_at AS "updatedAt"
-        FROM notification_writeback_jobs
-        WHERE status IN ('pending', 'sending', 'failed') ${where}
-        ORDER BY updated_at DESC LIMIT 50
+               lease_expires_at AS "leaseExpiresAt", last_error AS "lastError",
+               updated_at AS "updatedAt"
+        FROM notification_writeback_jobs jobs
+        WHERE jobs.status IN ('pending', 'sending', 'failed') ${where}
+          AND (
+            jobs.status <> 'failed'
+            OR NOT EXISTS (
+              SELECT 1 FROM notification_writeback_jobs newer
+              WHERE newer.notification_id = jobs.notification_id
+                AND (newer.created_at, newer.id) > (jobs.created_at, jobs.id)
+                AND newer.status <> 'superseded'
+            )
+          )
+        ORDER BY jobs.updated_at DESC LIMIT 50
       `, params);
       const syncState = jobs.rows.some((j: Record<string, unknown>) => j.status === 'failed')
         ? 'failed' as const

@@ -187,9 +187,12 @@ describe('TaskRowActions', () => {
       'grid',
       'gap-0.5',
       'grid-cols-[32px_32px_32px]',
-      '@min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px]',
-      '@min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_56px_32px_32px_96px]',
+      '@min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_var(--due-date-column-width)_32px_32px_32px]',
+      '@min-[1280px]:grid-cols-[var(--score-column-width)_44px_32px_30px_32px_var(--due-date-column-width)_32px_32px_96px]',
     );
+    expect(screen.getByTestId('task-row-properties')).toHaveStyle({
+      '--due-date-column-width': '104px',
+    });
     expect(screen.getByRole('button', { name: 'Add to My Day' }).parentElement).toHaveClass('hidden', '@min-[480px]:flex', 'opacity-0');
     expect(screen.getByRole('button', { name: 'Add due date' }).parentElement).toHaveClass('hidden', '@min-[640px]:flex', 'opacity-0');
     expect(screen.getByRole('button', { name: 'Add notes' }).parentElement).toHaveClass('hidden', '@min-[720px]:flex', 'opacity-0');
@@ -221,6 +224,18 @@ describe('TaskRowActions', () => {
     expect(screen.getByRole('button', { name: 'Open notes' }).parentElement).toHaveClass('@min-[720px]:flex');
   });
 
+  it('uses the same protected date track in dense Plan rows', () => {
+    renderActions({ dense: true, dueDate: '2026-08-28' });
+
+    expect(screen.getByTestId('task-row-properties')).toHaveClass(
+      '@min-[640px]:grid-cols-[32px_32px_var(--due-date-column-width)_32px_32px]',
+      '@min-[1280px]:grid-cols-[32px_30px_32px_var(--due-date-column-width)_32px_32px_96px]',
+    );
+    expect(screen.getByTestId('task-row-properties')).toHaveStyle({
+      '--due-date-column-width': '104px',
+    });
+  });
+
   it('keeps Smart Score visible and defers My Day when the score controls ordering', () => {
     renderActions({
       smartScore: 82,
@@ -231,8 +246,8 @@ describe('TaskRowActions', () => {
 
     expect(screen.getByTestId('task-row-properties')).toHaveClass(
       'grid-cols-[var(--score-column-width)_32px_32px_32px]',
-      '@min-[720px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px]',
-      '@min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_56px_32px_32px_32px]',
+      '@min-[720px]:grid-cols-[var(--score-column-width)_32px_32px_var(--due-date-column-width)_32px_32px]',
+      '@min-[960px]:grid-cols-[var(--score-column-width)_32px_32px_var(--due-date-column-width)_32px_32px_32px]',
     );
     expect(screen.getByRole('group', { name: 'Smart score: 82 out of 100' }).parentElement).toHaveClass('flex');
     expect(screen.getByRole('button', { name: 'Remove from My Day' }).parentElement).toHaveClass(

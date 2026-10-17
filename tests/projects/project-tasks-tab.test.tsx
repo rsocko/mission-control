@@ -180,6 +180,20 @@ describe('project tasks tab', () => {
     expect(screen.getByRole('button', { name: 'Sort direction: descending' })).toBeInTheDocument();
   });
 
+  it('keeps the due-date property visible when Project Tasks is sorted by due date', async () => {
+    await renderProjectTab('Project Tasks');
+    await screen.findByRole('heading', { name: 'Project tasks' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by: Priority' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Due Date' }));
+
+    expect(screen.getByRole('button', { name: 'Sort by: Due Date' })).toBeInTheDocument();
+    for (const button of screen.getAllByRole('button', { name: 'Add due date' })) {
+      expect(button.parentElement).toHaveClass('flex');
+      expect(button.parentElement).not.toHaveClass('opacity-0');
+    }
+  });
+
   it('keeps filter and sort state while the user visits another tab', async () => {
     await renderProjectTab('Project Tasks');
     await screen.findByRole('heading', { name: 'Project tasks' });

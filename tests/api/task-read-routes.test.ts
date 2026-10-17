@@ -107,7 +107,14 @@ describe('GET /api/tasks/quick-sort/suggestions', () => {
         { id: 'tag-billing', name: 'Billing' },
         { id: 'tag-other', name: 'Other' },
       ],
-      taskTags: [{ taskId: 'other-task', tagId: 'tag-billing' }],
+      taskTags: [{
+        taskId: 'other-task',
+        tagId: 'tag-billing',
+        title: 'Reconcile billing invoice',
+        connectorInstanceId: 'local',
+        sourceListId: 'billing',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+      }],
       projectAffinities: [],
     });
 
@@ -133,7 +140,8 @@ describe('GET /api/tasks/quick-sort/suggestions', () => {
           tags: [{
             id: 'tag-billing',
             name: 'Billing',
-            confidence: 0.7,
+            confidence: 0.92,
+            reason: 'Tag name appears in the task title',
           }],
           projects: [],
         },

@@ -184,6 +184,30 @@ vi.mock('@/lib/tasks/core/runtime', () => ({
         estimatedDurations: [],
       }),
     },
+    taskReads: {
+      getQuickSortSuggestionInputs: async () => ({
+        tasks: [{
+          id: 'task-energy',
+          title: 'Deep work',
+          description: null,
+          priority: 'high',
+          dueDate: '2026-09-01',
+          createdAt: '2026-09-01T12:00:00.000Z',
+          updatedAt: '2026-09-06T12:00:00.000Z',
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+          sourceListId: null,
+          sourceListName: 'Work',
+          assignee: null,
+          snoozedUntil: null,
+          effort: 3,
+        }],
+        sourceRankings: [],
+        tags: [{ id: 'tag-engineering', name: 'engineering' }],
+        taskTags: [],
+        projectAffinities: [],
+      }),
+    },
   }),
 }));
 

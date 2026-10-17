@@ -42,7 +42,7 @@ export interface QuickSortModeCounts {
 export interface QuickSortSuggestion {
   priority: { value: string; confidence: number; reason: string } | null;
   effort: { value: number; confidence: number; reason: string } | null;
-  tags: Array<{ id: string; name: string; confidence: number }>;
+  tags: Array<{ id: string; name: string; confidence: number; reason?: string }>;
   projects: Array<{
     id: string;
     name: string;

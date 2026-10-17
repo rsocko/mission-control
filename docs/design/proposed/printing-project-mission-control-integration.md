@@ -360,4 +360,3 @@ rollups. A Queue Entry should not automatically create a second task lifecycle.
 - Printing lifecycle remains correct while MC is offline.
 - MC task completion never silently changes printing lifecycle.
 - No migration deletes Print History or MC task history.
-

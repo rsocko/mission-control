@@ -10,6 +10,115 @@ import {
 import { EMPTY_TASK_RESPONSE } from '@/types/dashboard';
 
 describe('View in Graph collection surfaces', () => {
+  it('reveals only the hovered source-list pin action', () => {
+    const sourceLists = [
+      {
+        id: 'list-one',
+        sourceId: 'one',
+        connectorInstanceId: 'todo',
+        name: 'First list',
+        taskCount: 4,
+        groupId: 'home',
+      },
+      {
+        id: 'list-two',
+        sourceId: 'two',
+        connectorInstanceId: 'todo',
+        name: 'Second list',
+        taskCount: 7,
+        groupId: 'home',
+      },
+    ];
+
+    render(
+      <SidebarFilters
+        data={{
+          taskResponse: EMPTY_TASK_RESPONSE,
+          enabledSources: [{ type: 'microsoft-todo', name: 'To Do', icon: '' }],
+          sourceLists,
+          listGroups: [{
+            id: 'home',
+            name: 'Home',
+            icon: null,
+            iconColor: null,
+            sortOrder: 0,
+            createdAt: '2026-10-17T00:00:00.000Z',
+          }],
+          allTags: [],
+          projects: [],
+          savedViews: [],
+          allSourceCounts: { 'microsoft-todo': 11 },
+          loading: false,
+        }}
+        filters={{
+          sourceFilter: 'microsoft-todo',
+          listFilter: null,
+          listGroupFilter: null,
+          tagFilter: [],
+          quickFilter: null,
+          projectFilter: null,
+          priorityFilter: [],
+          statusFilter: [],
+          hiddenQuickFilters: [],
+          quickFilterVisibility: {},
+          activeSavedQuickFilterId: null,
+        }}
+        sidebar={{
+          sidebarExpanded: false,
+          sidebarMode: 'normal',
+          collapsedSections: new Set(),
+          expandedSourceLists: new Set(['microsoft-todo']),
+          collapsedListGroups: new Set(),
+          listSearch: '',
+          tagSearch: '',
+          tagsExpanded: false,
+        }}
+        actions={{
+          setSourceFilter: vi.fn(),
+          setListFilter: vi.fn(),
+          setListGroupFilter: vi.fn(),
+          setTagFilter: vi.fn(),
+          setQuickFilter: vi.fn(),
+          setProjectFilter: vi.fn(),
+          setPriorityFilter: vi.fn(),
+          setStatusFilter: vi.fn(),
+          setSidebarExpanded: vi.fn(),
+          setSidebarMode: vi.fn(),
+          toggleSection: vi.fn(),
+          setExpandedSourceLists: vi.fn(),
+          setCollapsedListGroups: vi.fn(),
+          setListSearch: vi.fn(),
+          setTagSearch: vi.fn(),
+          setTagsExpanded: vi.fn(),
+          applyView: vi.fn(),
+          editView: vi.fn(),
+          deleteView: vi.fn(),
+          startNewQuickFilter: vi.fn(),
+          applyQuickFilter: vi.fn(),
+          clearSavedQuickFilter: vi.fn(),
+          editQuickFilter: vi.fn(),
+          deleteQuickFilter: vi.fn(),
+          setQuickFilterVisibility: vi.fn(),
+        }}
+        computed={{
+          sourceHasLists: () => true,
+          getSourceListsForType: () => sourceLists,
+        }}
+      />,
+    );
+
+    const firstPin = screen.getByRole('button', { name: 'Pin First list' });
+    const secondPin = screen.getByRole('button', { name: 'Pin Second list' });
+
+    expect(firstPin).toHaveClass('opacity-0');
+    expect(secondPin).toHaveClass('opacity-0');
+
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /^First list/ }));
+
+    expect(firstPin).toHaveClass('opacity-100');
+    expect(secondPin).toHaveClass('opacity-0');
+  });
+
   it('links the desktop My Day switcher with explicit date semantics', () => {
     render(
       <TodayViewSwitcher

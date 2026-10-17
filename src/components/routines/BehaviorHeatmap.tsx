@@ -12,6 +12,7 @@ import {
 import { fadeSlideUp } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { formatDateLocal } from '@/lib/utils/date-format';
+import { RoutineIcon } from './RoutineIcon';
 import { type HeatmapCompletion, type Routine } from './types';
 
 interface BehaviorHeatmapProps {
@@ -116,8 +117,10 @@ export function BehaviorHeatmap({
             <SelectItem value="_all">All routines</SelectItem>
             {activeRoutines.map((routine) => (
               <SelectItem key={routine.id} value={routine.id}>
-                {routine.icon ? `${routine.icon} ` : ''}
-                {routine.name}
+                <span className="inline-flex items-center gap-1.5">
+                  <RoutineIcon routine={routine} size={14} />
+                  {routine.name}
+                </span>
               </SelectItem>
             ))}
           </SelectContent>

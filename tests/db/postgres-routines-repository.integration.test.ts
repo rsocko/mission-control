@@ -49,6 +49,7 @@ describe.skipIf(!connectionString)('PostgreSQL routines adapter', () => {
         cadenceType: 'daily',
         cadenceConfig: {},
         icon: null,
+        iconColor: null,
         createdAt: ROUTINES_NOW,
         updatedAt: ROUTINES_NOW,
       })
@@ -67,6 +68,7 @@ describe.skipIf(!connectionString)('PostgreSQL routines adapter', () => {
       cadenceType: 'daily',
       cadenceConfig: {},
       icon: null,
+      iconColor: null,
       createdAt: ROUTINES_NOW,
       updatedAt: ROUTINES_NOW,
     });

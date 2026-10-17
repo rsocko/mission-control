@@ -38,7 +38,7 @@ function validateCadenceConfig(cadenceType: RoutineCadenceType, config: unknown)
 
 /**
  * PATCH /api/routines/[id] — Update a routine
- * Body: Partial<{ name, cadenceType, cadenceConfig, description, icon, isActive, isArchived, sortOrder }>
+ * Body: Partial<{ name, cadenceType, cadenceConfig, description, icon, iconColor, isActive, isArchived, sortOrder }>
  */
 export async function PATCH(
   request: Request,
@@ -65,6 +65,9 @@ export async function PATCH(
     if ('icon' in body && body.icon !== null && typeof body.icon !== 'string') {
       return ApiErrors.badRequest('icon must be a string or null');
     }
+    if ('iconColor' in body && body.iconColor !== null && typeof body.iconColor !== 'string') {
+      return ApiErrors.badRequest('iconColor must be a string or null');
+    }
     if ('cadenceType' in body && !ROUTINE_CADENCE_TYPES.includes(body.cadenceType as RoutineCadenceType)) {
       return ApiErrors.badRequest(`Invalid cadenceType. Must be one of: ${ROUTINE_CADENCE_TYPES.join(', ')}`);
     }
@@ -76,10 +79,12 @@ export async function PATCH(
     }
 
     const updates: Record<string, unknown> = {};
-    const allowedFields = ['name', 'cadenceType', 'cadenceConfig', 'description', 'icon', 'isActive', 'isArchived', 'sortOrder'];
+    const allowedFields = ['name', 'cadenceType', 'cadenceConfig', 'description', 'icon', 'iconColor', 'isActive', 'isArchived', 'sortOrder'];
     for (const field of allowedFields) {
       if (body[field] !== undefined) {
-        updates[field] = field === 'name' ? body[field].trim() : body[field];
+        updates[field] = ['name', 'icon', 'iconColor'].includes(field) && typeof body[field] === 'string'
+          ? body[field].trim() || (field === 'name' ? body[field] : null)
+          : body[field];
       }
     }
 

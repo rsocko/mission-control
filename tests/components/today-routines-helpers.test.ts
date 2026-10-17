@@ -14,6 +14,7 @@ function routine(overrides: Partial<TodayRoutine> & Pick<TodayRoutine, 'id' | 'n
     id,
     name,
     icon: null,
+    iconColor: null,
     cadenceType: 'daily',
     cadenceConfig: {},
     sortOrder: 0,

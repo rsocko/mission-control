@@ -2,6 +2,7 @@
 
 import { Check, Flame, Pencil, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { RoutineIcon } from './RoutineIcon';
 import { type Routine } from './types';
 
 interface FlexibleRoutineCardProps {
@@ -72,8 +73,8 @@ export function FlexibleRoutineCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-medium text-[var(--text-primary)]">
-              {routine.icon && <span className="mr-1.5">{routine.icon}</span>}
+            <h3 className="inline-flex items-center text-sm font-medium text-[var(--text-primary)]">
+              <RoutineIcon routine={routine} size={17} className="mr-1.5" />
               {routine.name}
             </h3>
             <span className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-xs text-[var(--text-secondary)]">

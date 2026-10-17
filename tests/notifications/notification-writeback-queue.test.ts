@@ -16,6 +16,7 @@ describe('notification writeback outbox', () => {
   let wakeDispatcher: typeof import('@/lib/notifications/notification-writeback').wakeNotificationWritebackDispatcher;
   let dispatch: typeof import('@/lib/notifications/notification-writeback').dispatchNotificationWritebacks;
   let connectorRegistry: typeof import('@/lib/connectors').connectorRegistry;
+  let webRepo: import('@/db/persistence/notification-web').NotificationWebPersistence;
 
   beforeAll(async () => {
     vi.doUnmock('@/db');
@@ -32,7 +33,7 @@ describe('notification writeback outbox', () => {
     const { createSqliteNotificationWebRepository } = await import(
       '@/db/persistence/sqlite-notification-web-repository'
     );
-    const webRepo = createSqliteNotificationWebRepository(sqlite);
+    webRepo = createSqliteNotificationWebRepository(sqlite);
     vi.doMock('@/lib/persistence/worker-runtime', () => ({
       getWorkerPersistenceRepositories: () => Promise.resolve({
         notificationDelivery: { web: webRepo },
@@ -91,6 +92,45 @@ describe('notification writeback outbox', () => {
 
   it('does not queue unknown notification IDs', async () => {
     await expect(enqueue(['missing'])).resolves.toBe(0);
+  });
+
+  it('does not report an obsolete failure after a newer writeback supersedes it', async () => {
+    const now = new Date();
+    const older = new Date(now.getTime() - 1_000).toISOString();
+    const newer = now.toISOString();
+    await db.insert(schema.notifications).values({
+      id: 'notification-stale-failure',
+      sourceId: 'github:123',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-1',
+      title: 'Stale failure',
+      receivedAt: older,
+      sortAt: older,
+      syncState: 'failed',
+    });
+    sqlite.prepare(`
+      INSERT INTO notification_writeback_jobs (
+        id, notification_id, connector_instance_id, connector_type, source_id,
+        action_type, dedupe_key, status, retryable, attempt_count, max_attempts,
+        next_attempt_at, last_error, created_at, completed_at, updated_at
+      ) VALUES
+        ('stale-failed-job', 'notification-stale-failure', 'github-1', 'github-issues', '123',
+         'mark_read', 'stale-failed', 'failed', 1, 5, 5, ?, 'Temporary failure', ?, ?, ?),
+        ('newer-succeeded-job', 'notification-stale-failure', 'github-1', 'github-issues', '123',
+         'mark_done', 'newer-succeeded', 'succeeded', 1, 1, 5, ?, NULL, ?, ?, ?)
+    `).run(older, older, older, older, newer, newer, newer, newer);
+
+    await webRepo.refreshNotificationSyncState('notification-stale-failure');
+    const status = await webRepo.listWritebackStatus(null);
+
+    expect(status.failed).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'stale-failed-job' }),
+    ]));
+    expect(status.counts.failed ?? 0).toBe(0);
+    expect(sqlite.prepare(`
+      SELECT sync_state AS syncState
+      FROM notifications WHERE id = 'notification-stale-failure'
+    `).get()).toEqual({ syncState: 'synced' });
   });
 
   it('requeues a terminally failed dismissal', async () => {

@@ -203,7 +203,7 @@ describe('project phase navigation', () => {
     await screen.findByText('Test Project');
 
     expect(fetch).toHaveBeenCalledWith(
-      '/api/tasks?projectId=project-1&parentOnly=true&sortBy=updated&limit=200&offset=0',
+      '/api/tasks?projectId=project-1&parentOnly=true&sortBy=updated&includeScoreBreakdown=true&limit=200&offset=0',
       undefined,
     );
   });

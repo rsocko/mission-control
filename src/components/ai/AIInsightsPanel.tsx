@@ -15,10 +15,18 @@ import {
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { AssistantMarkdown } from '@/components/ai/AssistantMarkdown';
 import {
+  TagSuggestionReviewCard,
+  type EditableTagSuggestion,
+} from '@/components/ai/TagSuggestionReviewCard';
+import {
   canEditTaskField,
   selectedTaskFieldBlockedReason,
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
+import {
+  recordTagRecommendationFeedback,
+  recordTagRecommendationFeedbackBatch,
+} from '@/lib/tags/recommendation-feedback';
 import type { TaskEditPolicy } from '@/types';
 
 type InsightTab = 'digest' | 'priority' | 'tags' | 'notifications' | 'next' | 'projects';
@@ -36,8 +44,17 @@ interface SmartPriorityResponse {
 }
 
 interface InferTagsResponse {
-  suggestions: Array<{ taskId: string; title: string; suggestedTags: string[]; confidence: number; editPolicy: TaskEditPolicy }>;
+  suggestions: Array<{
+    taskId: string;
+    title: string;
+    tags: EditableTagSuggestion['tags'];
+    confidence: number;
+    editPolicy: TaskEditPolicy;
+  }>;
+  availableTags: Array<{ id: string; name: string }>;
 }
+
+type TagSuggestionState = EditableTagSuggestion & { editPolicy: TaskEditPolicy };
 
 interface NotificationTriageResponse {
   actions: Array<{ notificationId: string; title: string; recommendation: NotificationRecommendation; reason: string }>;
@@ -75,7 +92,8 @@ export function AIInsightsPanel() {
   const [priorityLoading, setPriorityLoading] = useState(false);
   const [priorityApplying, setPriorityApplying] = useState<string[]>([]);
 
-  const [tagSuggestions, setTagSuggestions] = useState<InferTagsResponse['suggestions']>([]);
+  const [tagSuggestions, setTagSuggestions] = useState<TagSuggestionState[]>([]);
+  const [availableTags, setAvailableTags] = useState<InferTagsResponse['availableTags']>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
   const [tagApplying, setTagApplying] = useState<string[]>([]);
 
@@ -155,7 +173,21 @@ export function AIInsightsPanel() {
     try {
       setTagsLoading(true);
       const result = await fetchJson<InferTagsResponse>('/api/ai/infer-tags');
-      setTagSuggestions(result.suggestions || []);
+      const suggestions = (result.suggestions || []).map((suggestion) => ({
+        ...suggestion,
+        suggestedTagIds: suggestion.tags.map((tag) => tag.id),
+        selectedTagIds: suggestion.tags.map((tag) => tag.id),
+      }));
+      setTagSuggestions(suggestions);
+      setAvailableTags(result.availableTags || []);
+      recordTagRecommendationFeedbackBatch(suggestions.map((suggestion) => ({
+          surface: 'ai-insights',
+          action: 'shown',
+          taskId: suggestion.taskId,
+          suggestedTagIds: suggestion.suggestedTagIds,
+          acceptedTagIds: [],
+          removedTagIds: [],
+      })));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to infer tags');
     } finally {
@@ -232,10 +264,18 @@ export function AIInsightsPanel() {
     }
   }
 
-  async function applyTagsToTask(taskId: string, suggestedTags: string[]) {
+  async function applyTagsToTask(taskId: string) {
     const suggestion = tagSuggestions.find((candidate) => candidate.taskId === taskId);
     if (!canEditTaskField(suggestion?.editPolicy, 'tags')) {
       toast.error(taskFieldBlockedReason(suggestion?.editPolicy, 'tags'));
+      return;
+    }
+    if (!suggestion) return;
+    const selectedTags = suggestion.tags.filter((tag) => (
+      suggestion.selectedTagIds.includes(tag.id)
+    ));
+    if (selectedTags.length === 0) {
+      toast.error('Select at least one tag to apply');
       return;
     }
     try {
@@ -243,7 +283,19 @@ export function AIInsightsPanel() {
       await fetchJson(`/api/tasks/${taskId}/tags`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: suggestedTags }),
+        body: JSON.stringify({ tags: selectedTags.map((tag) => tag.name) }),
+      });
+      recordTagRecommendationFeedback({
+        surface: 'ai-insights',
+        action: 'applied',
+        taskId,
+        suggestedTagIds: suggestion.suggestedTagIds,
+        acceptedTagIds: suggestion.suggestedTagIds.filter((tagId) => (
+          suggestion.selectedTagIds.includes(tagId)
+        )),
+        removedTagIds: suggestion.suggestedTagIds.filter((tagId) => (
+          !suggestion.selectedTagIds.includes(tagId)
+        )),
       });
       toast.success('Tags applied');
       setTagSuggestions(current => current.filter(suggestion => suggestion.taskId !== taskId));
@@ -262,12 +314,41 @@ export function AIInsightsPanel() {
       return;
     }
 
+    const applicable = suggestions.filter((suggestion) => suggestion.selectedTagIds.length > 0);
+    const dismissed = suggestions.filter((suggestion) => suggestion.selectedTagIds.length === 0);
+    if (applicable.length === 0) return;
     try {
-      setTagApplying(suggestions.map(suggestion => suggestion.taskId));
-      await Promise.all(suggestions.map(suggestion => fetchJson(`/api/tasks/${suggestion.taskId}/tags`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: suggestion.suggestedTags }),
+      setTagApplying(applicable.map(suggestion => suggestion.taskId));
+      await Promise.all(applicable.map(suggestion => fetchJson(`/api/tasks/${suggestion.taskId}/tags`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tags: suggestion.tags
+              .filter((tag) => suggestion.selectedTagIds.includes(tag.id))
+              .map((tag) => tag.name),
+          }),
+        })));
+      applicable.forEach((suggestion) => {
+        recordTagRecommendationFeedback({
+          surface: 'ai-insights',
+          action: 'applied',
+          taskId: suggestion.taskId,
+          suggestedTagIds: suggestion.suggestedTagIds,
+          acceptedTagIds: suggestion.suggestedTagIds.filter((tagId) => (
+            suggestion.selectedTagIds.includes(tagId)
+          )),
+          removedTagIds: suggestion.suggestedTagIds.filter((tagId) => (
+            !suggestion.selectedTagIds.includes(tagId)
+          )),
+        });
+      });
+      recordTagRecommendationFeedbackBatch(dismissed.map((suggestion) => ({
+        surface: 'ai-insights',
+        action: 'dismissed',
+        taskId: suggestion.taskId,
+        suggestedTagIds: suggestion.suggestedTagIds,
+        acceptedTagIds: [],
+        removedTagIds: suggestion.suggestedTagIds,
       })));
       toast.success('All tags applied');
       setTagSuggestions([]);
@@ -465,50 +546,53 @@ export function AIInsightsPanel() {
                 <div className={`${cardClassName} flex items-center justify-between gap-4`}>
                   <div>
                     <h2 className="text-sm font-semibold text-[var(--text-primary)]">Tag Suggestions</h2>
-                    <p className="text-sm text-[var(--text-secondary)]">Infer tags for untagged tasks and apply them in one click.</p>
+                    <p className="text-sm text-[var(--text-secondary)]">
+                      Review contextual recommendations from similar tasks, lists, and projects.
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button type="button" onClick={() => requestConfirm('Apply all tags', `Apply AI-suggested tags to ${tagSuggestions.length} task${tagSuggestions.length === 1 ? '' : 's'}? This will add new tags to each task.`, 'Apply All', 'warning', applyAllTags)} disabled={!tagSuggestions.length || tagApplying.length > 0 || Boolean(allTagsBlockedReason)} title={allTagsBlockedReason} className={actionButtonClassName}>
+                    <button type="button" onClick={() => requestConfirm('Apply selected tags', `Apply the currently selected tag recommendations to ${tagSuggestions.length} task${tagSuggestions.length === 1 ? '' : 's'}?`, 'Apply All', 'warning', applyAllTags)} disabled={!tagSuggestions.some((suggestion) => suggestion.selectedTagIds.length > 0) || tagApplying.length > 0 || Boolean(allTagsBlockedReason)} title={allTagsBlockedReason} className={actionButtonClassName}>
                       Apply All
                     </button>
                     <button type="button" onClick={inferTags} disabled={tagsLoading} className={actionButtonClassName}>
-                      {tagsLoading ? 'Inferring…' : 'Infer Tags'}
+                      {tagsLoading ? 'Finding…' : 'Find Suggestions'}
                     </button>
                   </div>
                 </div>
 
                 {tagSuggestions.map(suggestion => (
-                  <div key={suggestion.taskId} className={cardClassName}>
-                    <div className="mb-3 flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[var(--text-primary)]">{suggestion.title}</p>
-                        <p className="mt-1 text-xs text-[var(--text-muted)]">
-                          Confidence: <span className={getConfidenceClassName(suggestion.confidence)}>{getConfidenceLabel(suggestion.confidence)}</span>
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => requestConfirm('Apply tags', `Add tags [${suggestion.suggestedTags.join(', ')}] to "${suggestion.title}"?`, 'Apply', 'warning', () => applyTagsToTask(suggestion.taskId, suggestion.suggestedTags))}
-                        disabled={tagApplying.includes(suggestion.taskId) || !canEditTaskField(suggestion.editPolicy, 'tags')}
-                        title={!canEditTaskField(suggestion.editPolicy, 'tags') ? taskFieldBlockedReason(suggestion.editPolicy, 'tags') : undefined}
-                        className={actionButtonClassName}
-                      >
-                        {tagApplying.includes(suggestion.taskId) ? 'Applying…' : 'Apply'}
-                      </button>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      {suggestion.suggestedTags.map(tag => (
-                        <span key={`${suggestion.taskId}-${tag}`} className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-xs text-[var(--text-secondary)]">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
+                  <TagSuggestionReviewCard
+                    key={suggestion.taskId}
+                    suggestion={suggestion}
+                    availableTags={availableTags}
+                    applying={tagApplying.includes(suggestion.taskId)}
+                    blockedReason={!canEditTaskField(suggestion.editPolicy, 'tags')
+                      ? taskFieldBlockedReason(suggestion.editPolicy, 'tags')
+                      : undefined}
+                    onChange={(next) => setTagSuggestions((current) => current.map((candidate) => (
+                      candidate.taskId === next.taskId
+                        ? { ...candidate, ...next }
+                        : candidate
+                    )))}
+                    onApply={() => void applyTagsToTask(suggestion.taskId)}
+                    onDismiss={() => {
+                      recordTagRecommendationFeedback({
+                        surface: 'ai-insights',
+                        action: 'dismissed',
+                        taskId: suggestion.taskId,
+                        suggestedTagIds: suggestion.suggestedTagIds,
+                        acceptedTagIds: [],
+                        removedTagIds: suggestion.suggestedTagIds,
+                      });
+                      setTagSuggestions((current) => current.filter((candidate) => (
+                        candidate.taskId !== suggestion.taskId
+                      )));
+                    }}
+                  />
                 ))}
 
                 {!tagsLoading && !tagSuggestions.length && (
-                  <EmptyState message="Tags help you find things fast — run inference to auto-suggest them." />
+                  <EmptyState message="Find contextual tag suggestions for untagged tasks." />
                 )}
               </>
             )}
@@ -805,18 +889,6 @@ function getScoreGradient(score: number) {
   if (score >= 60) return 'from-orange-500 to-amber-400';
   if (score >= 40) return 'from-yellow-500 to-amber-300';
   return 'from-emerald-500 to-lime-400';
-}
-
-function getConfidenceLabel(confidence: number) {
-  if (confidence >= 0.75) return 'high';
-  if (confidence >= 0.5) return 'medium';
-  return 'low';
-}
-
-function getConfidenceClassName(confidence: number) {
-  if (confidence >= 0.75) return 'text-emerald-400';
-  if (confidence >= 0.5) return 'text-amber-400';
-  return 'text-rose-400';
 }
 
 function formatRecommendation(recommendation: NotificationRecommendation) {

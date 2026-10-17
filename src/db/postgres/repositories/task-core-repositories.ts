@@ -1257,7 +1257,17 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       this.db.select({
         taskId: taskTags.taskId,
         tagId: taskTags.tagId,
-      }).from(taskTags),
+        title: tasks.title,
+        connectorInstanceId: tasks.connectorInstanceId,
+        sourceListId: tasks.sourceListId,
+        updatedAt: tasks.updatedAt,
+      }).from(taskTags)
+        .innerJoin(tasks, eq(tasks.id, taskTags.taskId))
+        .where(and(
+          inArray(tasks.connectorInstanceId, connectorInstanceIds),
+          isNull(tasks.deletedAt),
+          notInArray(tasks.status, [...CLOSED_TASK_STATUSES]),
+        )),
       this.db.select({
         taskId: tasks.id,
         connectorInstanceId: tasks.connectorInstanceId,
@@ -1292,7 +1302,10 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       })),
       sourceRankings: rankingRows,
       tags: tagRows,
-      taskTags: assignmentRows,
+      taskTags: assignmentRows.map((row) => ({
+        ...row,
+        sourceListId: row.sourceListId ?? null,
+      })),
       projectAffinities: projectAffinityRows.map((row) => ({
         ...row,
         sourceListId: row.sourceListId ?? null,

@@ -11,6 +11,7 @@ const DURATION_PRESETS = [
   { minutes: 120, label: '2h' },
   { minutes: 240, label: '4h' },
   { minutes: 480, label: '1d' },
+  { minutes: 1440, label: '3d' },
   { minutes: 2400, label: '1w' },
 ] as const;
 

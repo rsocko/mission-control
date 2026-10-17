@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { EFFORT_BADGE_COLORS, getEffortLabel, getEffortOptions, DEFAULT_EFFORT_MEASURE } from '@/lib/constants/task-formatting';
+import { cn } from '@/lib/utils';
 import type { EffortMeasure } from '@/types';
 
 /**
@@ -55,10 +56,24 @@ interface EffortSelectProps {
   disabled?: boolean;
   /** When true, briefly pulse-highlight the trigger to signal a linked change. */
   highlight?: boolean;
+  includeNone?: boolean;
+  ariaLabel?: string;
+  title?: string;
+  triggerClassName?: string;
 }
 
-export function EffortSelect({ effort, onChange, measure = DEFAULT_EFFORT_MEASURE, disabled, highlight = false }: EffortSelectProps) {
-  const options = getEffortOptions(measure);
+export function EffortSelect({
+  effort,
+  onChange,
+  measure = DEFAULT_EFFORT_MEASURE,
+  disabled,
+  highlight = false,
+  includeNone = true,
+  ariaLabel = 'Task effort',
+  title = 'Change effort',
+  triggerClassName,
+}: EffortSelectProps) {
+  const options = getEffortOptions(measure).filter((option) => includeNone || option.value !== 0);
   const value = String(effort || 0);
   const [flash, setFlash] = useState(false);
   const prevEffort = useRef(effort);
@@ -80,9 +95,14 @@ export function EffortSelect({ effort, onChange, measure = DEFAULT_EFFORT_MEASUR
   return (
     <Select value={value} onValueChange={(v) => onChange(parseInt(v, 10) || null)} disabled={disabled}>
       <SelectTrigger
+        aria-label={ariaLabel}
         variant="inline"
-        className={`w-auto ${flash ? 'linked-field-feedback animate-[pulse-highlight_0.6s_ease-out] ring-2 ring-[var(--accent-600)]/50 scale-110' : ''}`}
-        title="Change effort"
+        className={cn(
+          'w-auto',
+          flash && 'linked-field-feedback animate-[pulse-highlight_0.6s_ease-out] scale-110 ring-2 ring-[var(--accent-600)]/50',
+          triggerClassName,
+        )}
+        title={title}
       >
         <SelectValue />
       </SelectTrigger>

@@ -35,10 +35,10 @@ const compositeControlSources = [
   ['src/components/quick-sort/ScopeFilter.tsx', 1],
   ['src/components/reset/ResetView.tsx', 2],
   ['src/components/search/SearchCommand.tsx', 1],
+  ['src/components/tags/TagPickerMenu.tsx', 1],
   ['src/components/task-detail/MoveToListDropdown.tsx', 1],
   ['src/components/task-detail/TagPickerPopover.tsx', 1],
   ['src/components/task-detail/TaskMoveDialog.tsx', 1],
-  ['src/components/task-detail/TaskTagsSection.tsx', 1],
   ['src/components/task-list/TaskContextMenu.tsx', 1],
   ['src/components/ui/SearchInput.tsx', 1],
 ] as const;

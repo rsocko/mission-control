@@ -372,7 +372,10 @@ export function QuickAddSuggestionReview({
               value={priority}
               label="Suggested priority"
               disabled={Boolean(blockedReasons.priority)}
-              onChange={setPriority}
+              onChange={(value) => {
+                setPriority(value);
+                setPrioritySelected(true);
+              }}
             >
               {PRIORITIES.map((option) => (
                 <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
@@ -397,7 +400,10 @@ export function QuickAddSuggestionReview({
               value={String(effort)}
               label="Suggested effort"
               disabled={Boolean(blockedReasons.effort)}
-              onChange={(value) => setEffort(Number(value))}
+              onChange={(value) => {
+                setEffort(Number(value));
+                setEffortSelected(true);
+              }}
             >
               {EFFORTS.map((option) => (
                 <SelectItem key={option.value} value={String(option.value)}>{option.label}</SelectItem>

@@ -70,6 +70,48 @@ describe('Quick Add suggestion review', () => {
     }));
   });
 
+  it('selects priority and effort for application when their values change', async () => {
+    const onApply = vi.fn<(selection: QuickAddSuggestionSelection) => Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    render(
+      <QuickAddSuggestionReview
+        suggestion={suggestion}
+        taskTitle="Finish launch readiness checklist"
+        projects={projects}
+        availableTags={[]}
+        applying={false}
+        onAvailableTagsChange={vi.fn()}
+        onApply={onApply}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Apply priority suggestion' }));
+    expect(screen.getByRole('checkbox', { name: 'Apply priority suggestion' }))
+      .toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(screen.getByLabelText('Suggested priority'));
+    fireEvent.click(screen.getByRole('option', { name: 'P3 · Low' }));
+    expect(screen.getByRole('checkbox', { name: 'Apply priority suggestion' }))
+      .toHaveAttribute('aria-checked', 'true');
+
+    expect(screen.getByRole('checkbox', { name: 'Apply effort suggestion' }))
+      .toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByLabelText('Suggested effort'));
+    fireEvent.click(screen.getByRole('option', { name: 'L' }));
+    expect(screen.getByRole('checkbox', { name: 'Apply effort suggestion' }))
+      .toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledWith({
+      priority: 'low',
+      effort: 4,
+      tagNames: ['Release'],
+    }));
+  });
+
   it('re-evaluates phase choices when the project changes and supports skipping by keyboard', () => {
     const onSkip = vi.fn();
     render(
@@ -95,7 +137,13 @@ describe('Quick Add suggestion review', () => {
     expect(screen.getByLabelText('Phase')).toHaveTextContent('Launch readiness');
     fireEvent.click(screen.getByLabelText('Project'));
     fireEvent.click(screen.getByRole('option', { name: 'Other' }));
+    expect(screen.getByRole('checkbox', { name: 'Apply project suggestion' }))
+      .toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('Phase')).toHaveTextContent('No phase');
+    fireEvent.click(screen.getByLabelText('Phase'));
+    fireEvent.click(screen.getByRole('option', { name: 'Build' }));
+    expect(screen.getByRole('checkbox', { name: 'Apply phase suggestion' }))
+      .toHaveAttribute('aria-checked', 'true');
 
     const review = screen.getByText('Review suggestions').parentElement?.parentElement;
     expect(review).not.toBeNull();

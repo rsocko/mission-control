@@ -9,7 +9,6 @@ interface SidebarNavItemProps {
   color?: string;
   action?: ReactNode;
   overlayAction?: ReactNode;
-  overlayActionVisible?: boolean;
   subtitle?: string;
   suffix?: ReactNode;
   showZeroCount?: boolean;
@@ -24,7 +23,6 @@ export function SidebarNavItem({
   color,
   action,
   overlayAction,
-  overlayActionVisible = false,
   subtitle,
   suffix,
   showZeroCount = false,
@@ -50,9 +48,7 @@ export function SidebarNavItem({
               active ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
             } ${
               overlayAction
-                ? overlayActionVisible
-                  ? 'opacity-0'
-                  : 'group-hover/nav:opacity-0 group-focus-within/nav:opacity-0'
+                ? 'group-hover/nav:opacity-0 group-focus-within/nav:opacity-0'
                 : ''
             }`}>
               {count}

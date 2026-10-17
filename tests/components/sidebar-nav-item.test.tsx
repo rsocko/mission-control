@@ -21,18 +21,4 @@ describe('SidebarNavItem', () => {
     expect(overlay).toHaveClass('absolute', 'right-1');
     expect(count).toHaveClass('group-hover/nav:opacity-0', 'group-focus-within/nav:opacity-0');
   });
-
-  it('keeps the count hidden when the overlaid action is persistent', () => {
-    render(
-      <SidebarNavItem
-        icon={<span aria-hidden="true">I</span>}
-        label="Pinned source"
-        count={42}
-        overlayAction={<button type="button" aria-label="Unpin source"><Pin size={12} /></button>}
-        overlayActionVisible
-      />,
-    );
-
-    expect(screen.getByText('42')).toHaveClass('opacity-0');
-  });
 });

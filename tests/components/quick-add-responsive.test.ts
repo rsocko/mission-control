@@ -50,6 +50,15 @@ describe('Quick Entry responsive layout', () => {
     expect(quickAddSource).toContain("isVoiceActive ? 'Stop dictation' : 'Dictate task'");
   });
 
+  it('previews detected task splits and lets the user keep the input intact', () => {
+    expect(quickAddSource).toContain('Split into {tasks.length} tasks');
+    expect(quickAddSource).toContain('aria-label="Tasks to be created"');
+    expect(quickAddSource).toContain('Keep as one task');
+    expect(quickAddSource).toContain(
+      'splitCompoundTasks: normalizePendingTaskText(input) !== dismissedCompoundSplitInput',
+    );
+  });
+
   it('connects the Quick Add row to the Added review surface', () => {
     expect(quickAddSource).toContain('style={inlineToast ? {');
     expect(quickAddSource).toContain('borderBottomLeftRadius: 0');

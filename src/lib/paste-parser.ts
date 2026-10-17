@@ -398,6 +398,9 @@ export function splitCompoundTask(text: string): string[] | null {
     const validSegments = parts.map(s => s.trim()).filter(Boolean);
     if (validSegments.length < 2) continue;
 
+    // A single-word segment is too ambiguous to promote into its own task.
+    if (validSegments.some(segment => segment.split(/\s+/).length < 2)) continue;
+
     // First segment must start with a verb
     const firstWord = validSegments[0].split(/\s+/)[0]?.toLowerCase();
     if (!firstWord || !ACTION_VERBS.has(firstWord)) continue;

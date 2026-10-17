@@ -1021,6 +1021,7 @@ export function TodayMainPanel({
                                   <motion.div key={item.id} layout initial={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0, overflow: 'hidden' }} transition={{ duration: 0.3, ease: 'easeInOut' }}>
                                     <SortableTaskRow
                                       item={item}
+                                      activeSortField={sortBy}
                                       taskSchedule={taskSchedule}
                                       onComplete={(taskId) => { void onCompleteTask(taskId); }}
                                       onFocus={onStartFocus}

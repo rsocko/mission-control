@@ -123,6 +123,23 @@ export function filterMyDayItems(items: MyDayItem[], query: string): MyDayItem[]
   return filterTasksByKeyword(items, query);
 }
 
+export function mergeMyDaySmartScores(
+  items: MyDayItem[],
+  scoredTasks: Array<Pick<MyDayItem, 'taskId' | 'smartScore' | 'scoreBreakdown'>>,
+): MyDayItem[] {
+  const scoreByTaskId = new Map(scoredTasks.map((task) => [task.taskId, task]));
+  return items.map((item) => {
+    const scored = scoreByTaskId.get(item.taskId);
+    return scored
+      ? {
+          ...item,
+          smartScore: scored.smartScore,
+          scoreBreakdown: scored.scoreBreakdown,
+        }
+      : item;
+  });
+}
+
 export function sortMyDayItems(
   items: MyDayItem[],
   sortBy: string,
@@ -161,6 +178,13 @@ export function sortMyDayItems(
       case 'smartScore':
         comparison = (b.smartScore ?? -1) - (a.smartScore ?? -1);
         break;
+      case 'smartScorePercentile': {
+        const aPercentile = a.scoreBreakdown?.audit.ranking?.scope.topPercent;
+        const bPercentile = b.scoreBreakdown?.audit.ranking?.scope.topPercent;
+        if (aPercentile == null) return bPercentile == null ? 0 : 1;
+        if (bPercentile == null) return -1;
+        return aPercentile - bPercentile;
+      }
     }
     return sortDirection === 'desc' ? -comparison : comparison;
   });

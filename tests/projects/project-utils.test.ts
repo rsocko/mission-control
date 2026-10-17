@@ -287,9 +287,42 @@ describe('getPriorityDotColor', () => {
 // ─── sortTasks ──────────────────────────────────────────────────────
 describe('sortTasks', () => {
   const tasks = [
-    { id: '1', title: 'Zebra', priority: 'low' as const, dueDate: '2024-03-10', updatedAt: '2024-01-01T00:00:00Z' },
-    { id: '2', title: 'Apple', priority: 'critical' as const, dueDate: null, updatedAt: '2024-06-01T00:00:00Z' },
-    { id: '3', title: 'Mango', priority: 'high' as const, dueDate: '2024-01-01', updatedAt: '2024-03-01T00:00:00Z' },
+    {
+      id: '1',
+      title: 'Zebra',
+      priority: 'low' as const,
+      planningHorizon: 'later' as const,
+      effort: 5,
+      smartScore: 40,
+      dueDate: '2024-03-10',
+      createdAt: '2024-01-01T00:00:00Z',
+      updatedAt: '2024-01-01T00:00:00Z',
+      sourceListName: 'Zulu',
+    },
+    {
+      id: '2',
+      title: 'Apple',
+      priority: 'critical' as const,
+      planningHorizon: 'next' as const,
+      effort: 2,
+      smartScore: 90,
+      dueDate: null,
+      createdAt: '2024-06-01T00:00:00Z',
+      updatedAt: '2024-06-01T00:00:00Z',
+      sourceListName: 'Alpha',
+    },
+    {
+      id: '3',
+      title: 'Mango',
+      priority: 'high' as const,
+      planningHorizon: null,
+      effort: null,
+      smartScore: null,
+      dueDate: '2024-01-01',
+      createdAt: '2024-03-01T00:00:00Z',
+      updatedAt: '2024-03-01T00:00:00Z',
+      sourceListName: null,
+    },
   ];
 
   it('sorts by priority ascending (critical first)', () => {
@@ -320,6 +353,19 @@ describe('sortTasks', () => {
   it('sorts by updated ascending (most recent first)', () => {
     const sorted = sortTasks(tasks, 'updated', 'asc');
     expect(sorted.map((t) => t.id)).toEqual(['2', '3', '1']);
+  });
+
+  it('sorts by the shared planning, effort, score, created, and source fields', () => {
+    expect(sortTasks(tasks, 'planningHorizon', 'asc').map((task) => task.id))
+      .toEqual(['2', '1', '3']);
+    expect(sortTasks(tasks, 'effort', 'asc').map((task) => task.id))
+      .toEqual(['2', '1', '3']);
+    expect(sortTasks(tasks, 'smartScore', 'asc').map((task) => task.id))
+      .toEqual(['2', '1', '3']);
+    expect(sortTasks(tasks, 'createdAt', 'asc').map((task) => task.id))
+      .toEqual(['2', '3', '1']);
+    expect(sortTasks(tasks, 'sourceList', 'asc').map((task) => task.id))
+      .toEqual(['2', '1', '3']);
   });
 });
 

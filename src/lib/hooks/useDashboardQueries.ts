@@ -3,7 +3,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useCallback, useEffect } from 'react';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
-import { uiLogger } from '@/lib/client-logger';
 import { MAX_TASK_PAGE_SIZE } from '@/app/api/tasks/pagination';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { TASK_CHANGED_EVENT } from '@/lib/task-change-events';
@@ -18,8 +17,12 @@ import type {
 import { EMPTY_TASK_RESPONSE, PAGE_SIZE } from '@/types/dashboard';
 import type {
   HubProjectListResponseDto,
+  TaskListItemDto,
   TaskListResponseDto,
 } from '@/types/api';
+import type { MyDayItem } from '@/components/today/types';
+import { mergeMyDaySmartScores } from '@/lib/utils/my-day-view';
+import { fetchAllTasks } from '@/lib/tasks/fetch-all';
 
 // ─── Fetcher helpers ────────────────────────────────────────────────────────
 
@@ -341,7 +344,27 @@ export function useMyDayQueries(todayISO: string) {
 
   const itemsQuery = useQuery({
     queryKey: myDayKeys.items(todayISO),
-    queryFn: () => fetchJson<{ items: unknown[]; suggestions: unknown }>(`/api/my-day?date=${todayISO}`),
+    queryFn: async () => {
+      const [myDay, scores] = await Promise.all([
+        fetchJson<{ items: MyDayItem[]; suggestions: unknown }>(`/api/my-day?date=${todayISO}`),
+        fetchAllTasks<TaskListItemDto>(
+          `/api/tasks?quickFilter=myDay&myDayDate=${todayISO}`
+          + `&sortBy=smartScorePercentile&includeScoreBreakdown=true`
+          + '&includeTags=false&openOnly=false',
+        ),
+      ]);
+      return {
+        ...myDay,
+        items: mergeMyDaySmartScores(
+          myDay.items,
+          scores.map((task) => ({
+            taskId: task.id,
+            smartScore: task.smartScore,
+            scoreBreakdown: task.scoreBreakdown,
+          })),
+        ),
+      };
+    },
     placeholderData: (prev) => prev,
   });
 

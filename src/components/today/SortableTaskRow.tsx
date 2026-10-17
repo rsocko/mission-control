@@ -268,6 +268,7 @@ export function SortableTaskRow({
       <TaskRowActions
         smartScore={item.smartScore}
         scoreBreakdown={item.scoreBreakdown ?? undefined}
+        scoreDisplayMode={activeSortField === 'smartScorePercentile' ? 'percentile' : 'score'}
         activeSortField={activeSortField}
         planningHorizon={item.planningHorizon}
         effort={item.effort}

@@ -194,6 +194,16 @@ describe('project tasks tab', () => {
     }
   });
 
+  it('offers the shared Smart Score percentile sort', async () => {
+    await renderProjectTab('Project Tasks');
+    await screen.findByRole('heading', { name: 'Project tasks' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by: Priority' }));
+
+    expect(screen.getByRole('menuitem', { name: 'Smart Score Percentile' }))
+      .toBeInTheDocument();
+  });
+
   it('keeps filter and sort state while the user visits another tab', async () => {
     await renderProjectTab('Project Tasks');
     await screen.findByRole('heading', { name: 'Project tasks' });

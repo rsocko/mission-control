@@ -5,6 +5,7 @@ import {
   filterMyDayItems,
   getMyDayCompletionPercentage,
   groupMyDayItems,
+  mergeMyDaySmartScores,
   partitionMyDayItems,
   reorderMyDayItems,
   resolveMyDayGroupSelection,
@@ -109,6 +110,115 @@ describe('My Day view helpers', () => {
       .toEqual(['next', 'later', 'unset']);
     expect(groupMyDayItems(items, 'planningHorizon', []).map((group) => group.label))
       .toEqual(['Next', 'Later', 'Not set']);
+  });
+
+  it('merges canonical Smart Scores into My Day items', () => {
+    const items = [
+      makeItem({ taskId: 'scored' }),
+      makeItem({ taskId: 'unscored', id: 'my-day-2' }),
+    ];
+
+    const merged = mergeMyDaySmartScores(items, [{
+      taskId: 'scored',
+      smartScore: 82,
+      scoreBreakdown: {
+        priority: 20,
+        organizationalContext: 15,
+        urgency: 15,
+        planningHorizon: 12,
+        momentum: 10,
+        sourceTrust: 10,
+        snoozePenalty: 0,
+        total: 82,
+        audit: {
+          confidence: { level: 'high', percentage: 90 },
+          evidence: [],
+          missingSignals: [],
+          sessionFit: {
+            estimatedDuration: null,
+            effort: null,
+            status: 'todo',
+            note: 'Test',
+          },
+          ranking: {
+            scope: {
+              label: 'My Day',
+              rank: 1,
+              total: 2,
+              topPercent: 50,
+            },
+          },
+        },
+      },
+    }]);
+
+    expect(merged[0]).toMatchObject({ taskId: 'scored', smartScore: 82 });
+    expect(merged[1]).toEqual(items[1]);
+    expect(items[0].smartScore).toBeUndefined();
+  });
+
+  it('sorts Smart Score percentile best-first regardless of prior direction', () => {
+    const items = [
+      makeItem({
+        taskId: 'top-half',
+        scoreBreakdown: {
+          priority: 0,
+          organizationalContext: 0,
+          urgency: 0,
+          planningHorizon: 0,
+          momentum: 0,
+          sourceTrust: 0,
+          snoozePenalty: 0,
+          total: 50,
+          audit: {
+            confidence: { level: 'medium', percentage: 70 },
+            evidence: [],
+            missingSignals: [],
+            sessionFit: {
+              estimatedDuration: null,
+              effort: null,
+              status: 'todo',
+              note: 'Test',
+            },
+            ranking: {
+              scope: { label: 'My Day', rank: 2, total: 4, topPercent: 50 },
+            },
+          },
+        },
+      }),
+      makeItem({
+        taskId: 'top-quarter',
+        id: 'my-day-2',
+        scoreBreakdown: {
+          priority: 0,
+          organizationalContext: 0,
+          urgency: 0,
+          planningHorizon: 0,
+          momentum: 0,
+          sourceTrust: 0,
+          snoozePenalty: 0,
+          total: 80,
+          audit: {
+            confidence: { level: 'medium', percentage: 70 },
+            evidence: [],
+            missingSignals: [],
+            sessionFit: {
+              estimatedDuration: null,
+              effort: null,
+              status: 'todo',
+              note: 'Test',
+            },
+            ranking: {
+              scope: { label: 'My Day', rank: 1, total: 4, topPercent: 25 },
+            },
+          },
+        },
+      }),
+      makeItem({ taskId: 'unranked', id: 'my-day-3' }),
+    ];
+
+    expect(sortMyDayItems(items, 'smartScorePercentile', 'desc').map((item) => item.taskId))
+      .toEqual(['top-quarter', 'top-half', 'unranked']);
   });
 
   it('sorts completed tasks by most recent completion without mutating the source array', () => {

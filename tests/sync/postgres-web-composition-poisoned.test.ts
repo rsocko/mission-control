@@ -74,7 +74,18 @@ const mocks = vi.hoisted(() => {
   };
   const financeAttribution = {
     assertConnector: vi.fn(async () => undefined),
-    listExceptions: vi.fn(async () => ({ exceptions: [], hasMore: false, subjects: [] })),
+    listExceptions: vi.fn(async () => ({
+      exceptions: [],
+      hasMore: false,
+      subjects: [],
+      categories: [],
+    })),
+    resolveExceptionTransactionId: vi.fn(async (
+      input: { connectorId: string; exceptionId: string },
+    ) => {
+      void input;
+      return 'transaction';
+    }),
     applyManualDecision: vi.fn(async () => ({
       status: 'resolved' as const,
       transactionId: 'transaction',
@@ -536,6 +547,7 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
         exceptions: [],
         nextCursor: null,
         subjects: [],
+        categories: [],
       });
       await expect(attribution.applyManualAttributionDecision({
         connectorId: 'finance',

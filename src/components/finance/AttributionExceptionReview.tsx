@@ -5,14 +5,18 @@ import Link from 'next/link';
 import {
   AlertTriangle,
   ArrowLeft,
+  CalendarDays,
   Check,
   CheckSquare,
   ChevronRight,
   CircleX,
+  CreditCard,
   ExternalLink,
   Loader2,
   RefreshCw,
   ShieldAlert,
+  Store,
+  Tags,
   UserRoundCheck,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -26,6 +30,7 @@ import {
 import { cn } from '@/lib/utils';
 import type {
   AttributionException,
+  AttributionCategory,
   AttributionSubject,
   FinanceOverviewData,
 } from './types';
@@ -40,6 +45,7 @@ interface ExceptionPage {
   exceptions: AttributionException[];
   nextCursor: string | null;
   subjects: AttributionSubject[];
+  categories: AttributionCategory[];
 }
 
 const NO_MANUAL_SUBJECT_VALUE = '__no_manual_subject__';
@@ -56,6 +62,7 @@ interface PendingConfirmation {
 }
 
 type ActionOutcome = 'succeeded' | 'conflicted' | 'failed';
+type QueueView = 'recent' | 'merchant' | 'account';
 
 interface ActionResult {
   exceptionId: string;
@@ -89,6 +96,14 @@ function formatDate(value: string) {
   });
 }
 
+function formatAmount(value: number) {
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(Math.abs(value));
+}
+
 function retainCurrentSubject(
   current: string,
   subjects: AttributionSubject[],
@@ -102,6 +117,7 @@ export function AttributionExceptionReview() {
   const [overview, setOverview] = useState<FinanceOverviewData | null>(null);
   const [exceptions, setExceptions] = useState<AttributionException[]>([]);
   const [subjects, setSubjects] = useState<AttributionSubject[]>([]);
+  const [categories, setCategories] = useState<AttributionCategory[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedExceptionIds, setSelectedExceptionIds] = useState<Set<string>>(new Set());
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -109,6 +125,8 @@ export function AttributionExceptionReview() {
   const [previousPageCursors, setPreviousPageCursors] = useState<Array<string | null>>([]);
   const [manualKidId, setManualKidId] = useState('');
   const [bulkKidId, setBulkKidId] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [queueView, setQueueView] = useState<QueueView>('recent');
   const [loading, setLoading] = useState(true);
   const [paginating, setPaginating] = useState(false);
   const [actionPending, setActionPending] = useState(false);
@@ -129,10 +147,44 @@ export function AttributionExceptionReview() {
     () => new Map(subjects.map((subject) => [subject.kidId, subject.name])),
     [subjects],
   );
+  const categoryNames = useMemo(
+    () => new Map(categories.map((category) => [category.id, category.name])),
+    [categories],
+  );
   const merchantGroups = useMemo(
     () => groupAttributionExceptions(exceptions),
     [exceptions],
   );
+  const queueGroups = useMemo(() => {
+    if (queueView === 'merchant') {
+      return merchantGroups.map((group) => ({
+        key: group.key,
+        label: group.merchantName,
+        meta: `${group.exceptions.length} ${group.exceptions.length === 1 ? 'exception' : 'exceptions'}`,
+        exceptions: group.exceptions,
+      }));
+    }
+    const groups = new Map<string, AttributionException[]>();
+    const sorted = [...exceptions].sort((left, right) => (
+      queueView === 'recent'
+        ? right.date.localeCompare(left.date) || Math.abs(right.amount) - Math.abs(left.amount)
+        : (left.accountName || 'Account unavailable').localeCompare(
+            right.accountName || 'Account unavailable',
+          ) || right.date.localeCompare(left.date)
+    ));
+    for (const item of sorted) {
+      const key = queueView === 'recent' ? item.date : item.accountName || 'Account unavailable';
+      groups.set(key, [...(groups.get(key) ?? []), item]);
+    }
+    return [...groups.entries()].map(([key, items]) => ({
+      key,
+      label: queueView === 'recent' ? formatDate(key) : key,
+      meta: queueView === 'recent'
+        ? `${items.length} ${items.length === 1 ? 'transaction' : 'transactions'}`
+        : `${items.length} ${items.length === 1 ? 'exception' : 'exceptions'}`,
+      exceptions: items,
+    }));
+  }, [exceptions, merchantGroups, queueView]);
 
   const fetchExceptions = useCallback(async (
     connectorId: string,
@@ -162,6 +214,7 @@ export function AttributionExceptionReview() {
       setOverview(nextOverview);
       setExceptions(page.exceptions);
       setSubjects(page.subjects);
+      setCategories(page.categories ?? []);
       setBulkKidId((current) => retainCurrentSubject(current, page.subjects));
       setManualKidId((current) => retainCurrentSubject(current, page.subjects));
       setNextCursor(page.nextCursor);
@@ -174,6 +227,7 @@ export function AttributionExceptionReview() {
           : page.exceptions[0]?.id ?? null
       ));
       setManualKidId('');
+      setCategoryId(page.exceptions[0]?.categoryId ?? '');
     } catch (error) {
       const status = error instanceof ResponseStatusError ? error.status : 0;
       setPageError({
@@ -213,6 +267,7 @@ export function AttributionExceptionReview() {
       const page = await fetchExceptions(overview.connector.id, requestedCursor);
       setExceptions(page.exceptions);
       setSubjects(page.subjects);
+      setCategories(page.categories ?? []);
       setBulkKidId((current) => retainCurrentSubject(current, page.subjects));
       setPreviousPageCursors((current) => [...current, pageCursor]);
       setPageCursor(requestedCursor);
@@ -220,6 +275,7 @@ export function AttributionExceptionReview() {
       setSelectedExceptionIds(new Set());
       setSelectedId(page.exceptions[0]?.id ?? null);
       setManualKidId('');
+      setCategoryId(page.exceptions[0]?.categoryId ?? '');
     } catch (error) {
       setActionStatus(error instanceof ResponseStatusError && error.status === 403
         ? 'You no longer have permission to load more exceptions.'
@@ -238,6 +294,7 @@ export function AttributionExceptionReview() {
       const page = await fetchExceptions(overview.connector.id, previousCursor);
       setExceptions(page.exceptions);
       setSubjects(page.subjects);
+      setCategories(page.categories ?? []);
       setBulkKidId((current) => retainCurrentSubject(current, page.subjects));
       setPreviousPageCursors((current) => current.slice(0, -1));
       setPageCursor(previousCursor);
@@ -245,6 +302,7 @@ export function AttributionExceptionReview() {
       setSelectedExceptionIds(new Set());
       setSelectedId(page.exceptions[0]?.id ?? null);
       setManualKidId('');
+      setCategoryId(page.exceptions[0]?.categoryId ?? '');
     } catch (error) {
       setActionStatus(error instanceof ResponseStatusError && error.status === 403
         ? 'You no longer have permission to load the previous page.'
@@ -260,6 +318,7 @@ export function AttributionExceptionReview() {
     const currentIds = new Set(page.exceptions.map((item) => item.id));
     setExceptions(page.exceptions);
     setSubjects(page.subjects);
+    setCategories(page.categories ?? []);
     setBulkKidId((current) => retainCurrentSubject(current, page.subjects));
     setManualKidId((current) => retainCurrentSubject(current, page.subjects));
     setNextCursor(page.nextCursor);
@@ -376,6 +435,41 @@ export function AttributionExceptionReview() {
       await loadInitial();
     } catch {
       setActionStatus('The action succeeded, but the review list could not be refreshed.');
+    } finally {
+      setActionPending(false);
+    }
+  };
+
+  const updateCategory = async () => {
+    if (!overview || !selected || !categoryId || actionPending) return;
+    setActionPending(true);
+    setActionStatus('Updating category in Monarch...');
+    try {
+      const response = await fetch(
+        `/api/connectors/${encodeURIComponent(overview.connector.id)}/finance/attribution-exceptions/${encodeURIComponent(selected.id)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': crypto.randomUUID(),
+          },
+          body: JSON.stringify({ action: 'update-category', categoryId }),
+        },
+      );
+      const body = await response.json().catch(() => ({})) as {
+        error?: string;
+        retryable?: boolean;
+      };
+      if (!response.ok) {
+        setActionStatus(body.retryable
+          ? 'The category update failed temporarily. Try again.'
+          : body.error || 'The category could not be updated.');
+        return;
+      }
+      setActionStatus('Category updated in Monarch.');
+      await refreshCurrentPage();
+    } catch {
+      setActionStatus('The category update failed temporarily. Try again.');
     } finally {
       setActionPending(false);
     }
@@ -545,8 +639,30 @@ export function AttributionExceptionReview() {
                 Current exceptions
               </h2>
               <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                {exceptions.length} loaded on this page, grouped by exact normalized merchant name
+                {exceptions.length} loaded on this page
               </p>
+              <div className="mt-3 grid grid-cols-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-1" aria-label="Group exceptions by">
+                {([
+                  ['recent', CalendarDays, 'Recent'],
+                  ['merchant', Store, 'Vendor'],
+                  ['account', CreditCard, 'Account'],
+                ] as const).map(([value, Icon, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={queueView === value}
+                    onClick={() => setQueueView(value)}
+                    className={cn(
+                      'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
+                      queueView === value
+                        ? 'bg-[var(--surface-3)] text-[var(--text-primary)]'
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]',
+                    )}
+                  >
+                    <Icon size={13} aria-hidden="true" /> {label}
+                  </button>
+                ))}
+              </div>
               <div className="mt-3 grid gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
                 <p className="text-xs font-medium text-[var(--text-secondary)]">
                   {selectedExceptionIds.size} selected
@@ -595,14 +711,14 @@ export function AttributionExceptionReview() {
               </div>
             </div>
             <div className="divide-y divide-[var(--border-subtle)]">
-              {merchantGroups.map((group) => {
+              {queueGroups.map((group) => {
                 const groupIds = group.exceptions.map((item) => item.id);
                 const selectedCount = groupIds.filter((id) => selectedExceptionIds.has(id)).length;
                 const allSelected = selectedCount === groupIds.length;
                 return (
                   <section
                     key={group.key}
-                    aria-label={`${group.merchantName} merchant group`}
+                    aria-label={`${group.label} exception group`}
                     className="py-2"
                   >
                     <div className="flex items-center gap-2 px-4 py-2">
@@ -610,7 +726,7 @@ export function AttributionExceptionReview() {
                         type="button"
                         role="checkbox"
                         aria-checked={allSelected ? true : selectedCount > 0 ? 'mixed' : false}
-                        aria-label={`${allSelected ? 'Deselect' : 'Select'} all ${group.exceptions.length} ${group.merchantName} exceptions`}
+                        aria-label={`${allSelected ? 'Deselect' : 'Select'} all ${group.exceptions.length} ${group.label} exceptions`}
                         disabled={actionPending}
                         onClick={() => toggleExceptionSelection(groupIds, !allSelected)}
                         className="flex size-8 shrink-0 items-center justify-center rounded border border-[var(--border)] text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50"
@@ -619,10 +735,10 @@ export function AttributionExceptionReview() {
                       </button>
                       <div className="min-w-0">
                         <p className="truncate text-xs font-semibold text-[var(--text-secondary)]">
-                          {group.merchantName}
+                          {group.label}
                         </p>
                         <p className="text-xs text-[var(--text-muted)]">
-                          {group.exceptions.length} {group.exceptions.length === 1 ? 'exception' : 'exceptions'}
+                          {group.meta}
                         </p>
                       </div>
                     </div>
@@ -653,6 +769,7 @@ export function AttributionExceptionReview() {
                               onClick={() => {
                                 setSelectedId(item.id);
                                 setManualKidId('');
+                                setCategoryId(item.categoryId ?? '');
                                 setActionStatus('');
                               }}
                               className={cn(
@@ -665,8 +782,15 @@ export function AttributionExceptionReview() {
                                 <span className="block truncate text-sm font-medium text-[var(--text-primary)]">
                                   {merchantName}
                                 </span>
-                                <span className="mt-0.5 block truncate text-xs text-[var(--text-muted)]">
-                                  {formatDate(item.date)} · {friendly(item.reasonCode)}
+                                <span className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-[var(--text-muted)]">
+                                  <span className="font-medium tabular-nums text-[var(--text-secondary)]">
+                                    {formatAmount(item.amount)}
+                                  </span>
+                                  <span aria-hidden="true">·</span>
+                                  <span className="truncate">
+                                    {item.categoryName || 'Uncategorized'}
+                                    {queueView !== 'recent' ? ` · ${formatDate(item.date)}` : ''}
+                                  </span>
                                 </span>
                               </span>
                               <ChevronRight size={15} className="shrink-0 text-[var(--text-muted)]" />
@@ -699,20 +823,72 @@ export function AttributionExceptionReview() {
           {selected && (
             <section aria-labelledby="exception-detail-heading" className="min-h-0 overflow-y-auto p-4 sm:p-6">
               <div className="mx-auto max-w-2xl space-y-5">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-amber-300">{friendly(selected.reasonCode)}</p>
-                  <h2 id="exception-detail-heading" className="mt-1 text-xl font-semibold text-[var(--text-primary)]">
-                    {selected.merchantName || 'Merchant unavailable'}
-                  </h2>
-                  <p className="mt-1 text-sm text-[var(--text-muted)]">{formatDate(selected.date)}</p>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h2 id="exception-detail-heading" className="text-xl font-semibold text-[var(--text-primary)]">
+                      {selected.merchantName || 'Merchant unavailable'}
+                    </h2>
+                    <p className="mt-1 text-sm text-[var(--text-muted)]">
+                      {formatDate(selected.date)} · {selected.accountName || 'Account unavailable'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-semibold tabular-nums text-[var(--text-primary)]">
+                      {formatAmount(selected.amount)}
+                    </p>
+                    <p className="mt-1 text-xs font-medium text-amber-300">{friendly(selected.reasonCode)}</p>
+                  </div>
                 </div>
 
                 <dl className="grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4 sm:grid-cols-2">
+                  <Detail label="Current category" value={selected.categoryName || 'Uncategorized'} />
+                  <Detail label="Account" value={[
+                    selected.accountName || 'Unavailable',
+                    selected.cardLast4 ? `•••• ${selected.cardLast4}` : null,
+                  ].filter(Boolean).join(' · ')} />
                   <Detail label="Tyrion suggestion" value={selected.assignedKidId ? subjectNames.get(selected.assignedKidId) || 'Current household member' : 'Parent expense'} />
                   <Detail label="Confidence" value={selected.confidence ? friendly(selected.confidence) : 'Unavailable'} />
                   <Detail label="Decision method" value={selected.method ? friendly(selected.method) : 'Unavailable'} />
                   <Detail label="Observed" value={new Date(selected.lastObservedAt).toLocaleString()} />
                 </dl>
+
+                <section aria-labelledby="category-heading" className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
+                  <div className="flex items-center gap-2">
+                    <Tags size={16} className="text-[var(--text-muted)]" aria-hidden="true" />
+                    <h3 id="category-heading" className="text-sm font-semibold text-[var(--text-primary)]">
+                      Transaction category
+                    </h3>
+                  </div>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    Correct the Monarch category without leaving this review.
+                  </p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <Select value={categoryId} onValueChange={setCategoryId} disabled={actionPending}>
+                      <SelectTrigger aria-label="Transaction category" className="min-h-10 w-full bg-[var(--surface-2)]">
+                        <span>
+                          {categoryNames.get(categoryId)
+                            || selected.categoryName
+                            || 'Choose a category'}
+                        </span>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categories.map((category) => (
+                          <SelectItem key={category.id} value={category.id}>
+                            {category.groupName ? `${category.groupName} · ` : ''}{category.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <button
+                      type="button"
+                      disabled={!categoryId || categoryId === selected.categoryId || actionPending}
+                      onClick={() => void updateCategory()}
+                      className="min-h-10 rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50"
+                    >
+                      Update category
+                    </button>
+                  </div>
+                </section>
 
                 <section aria-labelledby="explanation-heading" className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
                   <h3 id="explanation-heading" className="text-sm font-semibold text-[var(--text-primary)]">Tyrion explanation</h3>

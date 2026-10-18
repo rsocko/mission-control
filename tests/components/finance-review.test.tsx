@@ -55,7 +55,12 @@ const firstException = {
   lastObservedAt: '2026-08-08T12:00:00.000Z',
   updatedAt: '2026-08-08T12:00:00.000Z',
   date: '2026-08-08',
+  amount: -84.27,
   merchantName: 'Invented Market',
+  categoryId: 'category-one',
+  categoryName: 'Groceries',
+  accountName: 'Everyday Checking',
+  cardLast4: '4242',
   assignedKidId: 'kid-one',
   attributionStatus: 'attributed',
   confidence: 'likely',
@@ -78,6 +83,11 @@ const subjects = [
   { kidId: 'kid-two', name: 'Jordan' },
 ];
 
+const categories = [
+  { id: 'category-one', name: 'Groceries', groupName: 'Food' },
+  { id: 'category-two', name: 'Dining', groupName: 'Food' },
+];
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -89,6 +99,7 @@ describe('FinanceReview', () => {
       .mockResolvedValueOnce(jsonResponse({
         exceptions: [firstException],
         subjects,
+        categories,
         nextCursor: 'next-page',
       }))
       .mockResolvedValueOnce(jsonResponse({
@@ -111,13 +122,64 @@ describe('FinanceReview', () => {
     expect(screen.getByText('Likely')).toBeInTheDocument();
     expect(screen.getAllByText('Alex').length).toBeGreaterThan(0);
     expect(screen.queryByText('exception-one')).not.toBeInTheDocument();
-    expect(screen.queryByText(/account/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Everyday Checking/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Groceries').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$84.27').length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Load next page' }));
     expect(await screen.findByRole('button', { name: /Invented Cafe/ })).toBeInTheDocument();
     expect(fetchMock.mock.calls[2][0]).toContain('cursor=next-page');
     fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
     expect(await screen.findByRole('button', { name: /Invented Market/ })).toBeInTheDocument();
+  });
+
+  it('updates a transaction category from the exception detail', async () => {
+    const updated = {
+      ...firstException,
+      categoryId: 'category-two',
+      categoryName: 'Dining',
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(overview))
+      .mockResolvedValueOnce(jsonResponse({
+        exceptions: [firstException],
+        subjects,
+        categories,
+        nextCursor: null,
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        status: 'updated',
+        exceptionId: firstException.id,
+        categoryId: 'category-two',
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        exceptions: [updated],
+        subjects,
+        categories,
+        nextCursor: null,
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<FinanceReview />);
+    await screen.findByRole('heading', { name: 'Invented Market' });
+    fireEvent.click(screen.getByRole('combobox', { name: 'Transaction category' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Food · Dining' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Update category' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(fetchMock.mock.calls[2][0]).toContain('/exception-one');
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Idempotency-Key': expect.any(String),
+      }),
+      body: JSON.stringify({
+        action: 'update-category',
+        categoryId: 'category-two',
+      }),
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Category updated in Monarch.');
+    expect(screen.getAllByText('Dining').length).toBeGreaterThan(0);
   });
 
   it('submits a confirmed manual correction with an idempotency key and restores list focus', async () => {
@@ -192,6 +254,7 @@ describe('FinanceReview', () => {
     render(<FinanceReview />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Load next page' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Vendor' }));
     fireEvent.click(await screen.findByRole('checkbox', {
       name: 'Select all 1 Invented Cafe exceptions',
     }));
@@ -298,6 +361,7 @@ describe('FinanceReview', () => {
 
     render(<FinanceReview />);
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Vendor' }));
     fireEvent.click(await screen.findByRole('checkbox', {
       name: 'Select all 2 Invented Market exceptions',
     }));
@@ -352,6 +416,7 @@ describe('FinanceReview', () => {
 
     render(<FinanceReview />);
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Vendor' }));
     fireEvent.click(await screen.findByRole('checkbox', {
       name: 'Select all 101 Capped Merchant exceptions',
     }));
@@ -387,6 +452,7 @@ describe('FinanceReview', () => {
 
     render(<FinanceReview />);
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Vendor' }));
     fireEvent.click(await screen.findByRole('checkbox', {
       name: 'Select all 1 Invented Market exceptions',
     }));
@@ -468,6 +534,7 @@ describe('FinanceReview', () => {
 
     render(<FinanceReview />);
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Vendor' }));
     fireEvent.click(await screen.findByRole('checkbox', {
       name: 'Select all 6 Batch Merchant exceptions',
     }));
@@ -490,7 +557,7 @@ describe('FinanceReview', () => {
       name: /Batch Merchant/,
     })[0]).toHaveFocus());
     expect(screen.queryByText('batch-2')).not.toBeInTheDocument();
-    expect(screen.queryByText(/account/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('batch-3')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Assign selected' }));
     dialog = screen.getByRole('alertdialog');

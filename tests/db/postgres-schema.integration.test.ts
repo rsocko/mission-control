@@ -66,7 +66,7 @@ describePostgres('PostgreSQL schema integration', () => {
       'semantic_vector_ann',
     ]);
 
-    expect(declaredTables).toHaveLength(176);
+    expect(declaredTables).toHaveLength(177);
     expect(actualTables.filter((table) => declaredTables.includes(table)))
       .toEqual(declaredTables);
     expect(actualTables.filter((table) => (

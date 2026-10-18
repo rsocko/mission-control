@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-02T14:52:21.3854338-04:00",
+  "generatedAt": "2026-10-17T21:05:31.3864788-04:00",
   "title": "Design System: Mission Control",
   "extensions": {
     "colorMeta": {
@@ -57,6 +57,12 @@
         "displayName": "Primary Text",
         "canonical": "#f8fafc",
         "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#f8fafc"]
+      },
+      "text-heading": {
+        "role": "neutral",
+        "displayName": "Heading Text",
+        "canonical": "#c4cede",
+        "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#475569", "#64748b", "#94a3b8", "#c4cede", "#f8fafc"]
       },
       "text-secondary": {
         "role": "neutral",

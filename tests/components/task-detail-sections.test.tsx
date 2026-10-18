@@ -143,6 +143,44 @@ describe('TaskNotesSection', () => {
     }));
   });
 
+  it('sizes quick update relative to the notes card', () => {
+    renderWithTooltips(
+      <TaskNotesSection
+        mode="panel"
+        taskId="task-42"
+        description="Existing notes"
+        descValue="Existing notes"
+        editingDesc={false}
+        canEditDescription
+        supportsAttachments={false}
+        sourceUrl={null}
+        descRef={createRef<HTMLTextAreaElement>()}
+        expandButtonRef={createRef<HTMLButtonElement>()}
+        onDescValueChange={vi.fn()}
+        onEditStart={vi.fn()}
+        onEditCancel={vi.fn()}
+        onEditorBlur={vi.fn()}
+        onExpand={vi.fn()}
+        onPaste={vi.fn()}
+        canUpdateDueDate
+        canCreateSubtask
+        onQuickUpdate={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Quick update' });
+    fireEvent.click(trigger);
+
+    expect(trigger.closest('section')).toHaveClass('@container');
+    expect(trigger.parentElement).toHaveClass('static');
+    expect(screen.getByRole('dialog', { name: 'Quick task update' })).toHaveClass(
+      'inset-x-3',
+      '@[34rem]:left-auto',
+      '@[34rem]:right-3',
+      '@[34rem]:w-[30rem]',
+    );
+  });
+
   it('closes quick update with Escape and restores trigger focus', async () => {
     renderWithTooltips(
       <TaskNotesSection

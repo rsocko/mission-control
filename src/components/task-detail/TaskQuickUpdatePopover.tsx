@@ -74,7 +74,7 @@ export function TaskQuickUpdatePopover({
   };
 
   return (
-    <div className="relative ml-auto">
+    <div className="static ml-auto">
       <button
         ref={triggerRef}
         type="button"
@@ -99,7 +99,7 @@ export function TaskQuickUpdatePopover({
               close(true);
             }
           }}
-          className="absolute right-0 top-11 z-30 w-[min(30rem,calc(100vw-2rem))] rounded-xl border border-[var(--border-strong)] bg-[var(--surface-0)] p-3 shadow-xl"
+          className="absolute inset-x-3 top-14 z-30 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-0)] p-3 shadow-xl @[34rem]:left-auto @[34rem]:right-3 @[34rem]:w-[30rem]"
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <h4 className="text-xs font-semibold text-[var(--text-heading)]">Append a dated update</h4>

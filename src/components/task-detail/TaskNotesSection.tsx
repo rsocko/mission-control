@@ -70,7 +70,7 @@ export function TaskNotesSection({
 }: TaskNotesSectionProps) {
   return (
     <section className={cn(
-      'relative flex flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3',
+      '@container relative flex flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3',
       (mode === 'panel' || mode === 'mobile') && 'order-1',
       mode === 'dialog' && 'col-span-2 row-start-7 min-h-72 self-stretch',
       mode === 'workspace' && 'col-start-3 row-start-2 row-span-3 min-h-[520px] self-stretch',

@@ -478,6 +478,7 @@ export function TodayMainPanel({
 
   const getContextMenuActions = useTaskContextMenuActionFactory({
     complete: onCompleteTask,
+    addToMyDay: onAddToDay,
     setPriority: onSetTaskPriority,
     setStatus: onSetTaskStatus,
     removeFromMyDay: onRemoveFromDay,

@@ -993,7 +993,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
       relatedTarget: document.body,
     });
 
-    fireEvent.click(await screen.findByText('First draft'));
+    fireEvent.doubleClick(await screen.findByText('First draft'));
     fireEvent.change(screen.getByRole('textbox', { name: 'Edit notes' }), {
       target: { value: 'Newest draft' },
     });
@@ -1213,7 +1213,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
     renderPanel({ taskId: 'task-1', mode, onClose: vi.fn() });
 
-    fireEvent.click(await screen.findByText('Detailed notes'));
+    fireEvent.doubleClick(await screen.findByText('Detailed notes'));
     const editor = screen.getByRole('textbox', { name: 'Edit notes' });
 
     if (fillsAllocatedSpace) {
@@ -1619,7 +1619,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(moreButton).toHaveClass('min-h-11', 'min-w-11');
     expect(container.querySelector('.mx-auto')).toHaveClass('[&_button]:min-w-11');
 
-    fireEvent.click(screen.getByText('Detailed notes'));
+    fireEvent.doubleClick(screen.getByText('Detailed notes'));
     expect(screen.getByRole('button', { name: 'Bold' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Italic' })).toBeInTheDocument();
 

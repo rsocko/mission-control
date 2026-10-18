@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   EmbeddedMarkdownImage,
+  MarkdownCodeBlock,
   MarkdownSourceUrlContext,
   TaskDetailMarkdown,
   remarkOnlyEmbeddedImages,
@@ -11,6 +12,13 @@ import {
   getTaskImageSource,
   isGitHubUserAttachmentUrl,
 } from '@/lib/github-user-attachments';
+import { toast } from '@/lib/toast';
+
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    error: vi.fn(),
+  },
+}));
 
 const GITHUB_ATTACHMENT =
   'https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef';
@@ -224,5 +232,45 @@ describe('TaskDetailMarkdown', () => {
     fireEvent.click(checkboxes[1]);
 
     expect(onCheckboxToggle).toHaveBeenCalledWith(1, true);
+  });
+});
+
+describe('MarkdownCodeBlock', () => {
+  it('copies the rendered code text and confirms success', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(
+      <MarkdownCodeBlock>
+        <code>{'sudo apt update && \\\napt list --upgradable\n'}</code>
+      </MarkdownCodeBlock>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+
+    await vi.waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('sudo apt update && \\\napt list --upgradable');
+      expect(screen.getByRole('button', { name: 'Code copied' })).toBeInTheDocument();
+    });
+  });
+
+  it('reports clipboard failures', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+    });
+
+    render(<MarkdownCodeBlock><code>echo hello</code></MarkdownCodeBlock>);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Copy failed' })).toBeInTheDocument();
+      expect(toast.error).toHaveBeenCalledWith(
+        'Could not copy the code. Check browser clipboard permissions and try again.',
+      );
+    });
   });
 });

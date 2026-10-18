@@ -145,34 +145,52 @@ export function TaskNotesSection({
           aria-label="Edit notes"
           autoFocus
         />
-      ) : (
+      ) : description ? (
         <div
           className={cn(
-            `overflow-y-auto rounded-xl border border-[var(--border-subtle)] p-3 text-xs text-[var(--text-secondary)] ${canEditDescription ? 'cursor-text hover:bg-[var(--surface-0)]' : 'cursor-default'} transition-colors duration-100`,
+            `select-text overflow-y-auto rounded-xl border border-[var(--border-subtle)] p-3 text-xs text-[var(--text-secondary)] ${canEditDescription ? 'cursor-text' : 'cursor-default'}`,
             (mode === 'dialog' || mode === 'workspace')
               ? 'min-h-0 flex-1'
               : 'max-h-64 min-h-24',
           )}
-          onClick={(e) => {
-            if ((e.target as HTMLElement).closest('a, button, input')) return;
+          onDoubleClick={(event) => {
+            if ((event.target as HTMLElement).closest('a, button, input')) return;
             if (canEditDescription) onEditStart();
           }}
         >
-          {description ? (
-            <div className="prose prose-invert max-w-none text-xs [&_p]:my-1 [&_p]:text-xs [&_ul]:my-1 [&_ul]:text-xs [&_ol]:my-1 [&_ol]:text-xs [&_li]:my-0 [&_li]:text-xs [&_blockquote]:text-xs [&_table]:text-xs [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_code]:text-xs [&_pre]:text-xs [&_a]:text-blue-400 [&_a:hover]:underline [&_img]:my-2 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md">
-              <TaskDetailMarkdown
-                onCheckboxToggle={onCheckboxToggle}
-                sourceUrl={sourceUrl}
-                taskId={taskId}
-              >
-                {description}
-              </TaskDetailMarkdown>
-            </div>
-          ) : (
-            <span className="text-[var(--text-muted)] italic">
-              {canEditDescription ? 'Click to add notes...' : descriptionBlockedReason}
-            </span>
+          <div className="prose prose-invert max-w-none text-xs [&_p]:my-1 [&_p]:text-xs [&_ul]:my-1 [&_ul]:text-xs [&_ol]:my-1 [&_ol]:text-xs [&_li]:my-0 [&_li]:text-xs [&_blockquote]:text-xs [&_table]:text-xs [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_code]:text-xs [&_pre]:text-xs [&_a]:text-blue-400 [&_a:hover]:underline [&_img]:my-2 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md">
+            <TaskDetailMarkdown
+              onCheckboxToggle={onCheckboxToggle}
+              sourceUrl={sourceUrl}
+              taskId={taskId}
+            >
+              {description}
+            </TaskDetailMarkdown>
+          </div>
+        </div>
+      ) : canEditDescription ? (
+        <button
+          type="button"
+          onClick={onEditStart}
+          className={cn(
+            'w-full rounded-xl border border-[var(--border-subtle)] p-3 text-left text-xs italic text-[var(--text-muted)] transition-colors duration-100 hover:bg-[var(--surface-0)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
+            (mode === 'dialog' || mode === 'workspace')
+              ? 'min-h-0 flex-1'
+              : 'max-h-64 min-h-24',
           )}
+        >
+          Click to add notes...
+        </button>
+      ) : (
+        <div
+          className={cn(
+            'overflow-y-auto rounded-xl border border-[var(--border-subtle)] p-3 text-xs italic text-[var(--text-muted)]',
+            (mode === 'dialog' || mode === 'workspace')
+              ? 'min-h-0 flex-1'
+              : 'max-h-64 min-h-24',
+          )}
+        >
+          {descriptionBlockedReason}
         </div>
       )}
     </section>

@@ -145,7 +145,9 @@ export default function TodayPage() {
       setSuggestions((current) => Object.fromEntries(
         Object.entries(current).map(([group, tasks]) => [
           group,
-          tasks.map((task) => applySuggestionTaskFieldUpdate(task, selectedTaskId, fields)),
+          tasks.map((task: SuggestionTask) => (
+            applySuggestionTaskFieldUpdate(task, selectedTaskId, fields)
+          )),
         ]),
       ) as typeof current);
       setSelectedSuggestionContext((current) => current
@@ -263,6 +265,7 @@ export default function TodayPage() {
           items.find((item) => item.taskId === taskId),
         )}
         onAddToDay={actions.addToDay}
+        onNotToday={actions.skipSuggestionForToday}
         selectedTaskId={detailSurface === 'mobile' ? selectedTaskId : null}
         onSelectTask={(taskId) => {
           setSelectedSuggestionContext(suggestionTasks.find((task) => task.id === taskId) || null);
@@ -318,6 +321,7 @@ export default function TodayPage() {
           addToProject: addTaskToProject,
           saveTemplateTask: actions.setSaveTemplateTask,
           addToDay: actions.addToDay,
+          skipSuggestionForToday: actions.skipSuggestionForToday,
           moveToSource: (taskId) => {
             setPendingMoveDialogTaskId(taskId);
             setSelectedTaskId(taskId);
@@ -471,6 +475,7 @@ export default function TodayPage() {
           totalMinutes,
           whatsNextLoading: actions.whatsNextLoading,
           onAddToDay: actions.addToDay,
+          onNotToday: actions.skipSuggestionForToday,
           onCompleteTask: (task) => {
             void actions.completeTask(task.id, {
               title: task.title,

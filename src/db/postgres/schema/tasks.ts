@@ -450,6 +450,15 @@ export const myDayExclusions = pgTable('my_day_exclusions', {
   removedAt: text('removed_at').notNull(),
 });
 
+export const myDaySuggestionExclusions = pgTable('my_day_suggestion_exclusions', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull(),
+  date: text('date').notNull(), // YYYY-MM-DD
+  excludedAt: text('excluded_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_my_day_suggestion_exclusions_task_date').on(table.taskId, table.date),
+]);
+
 // ─── FOCUS ITEMS (Focus 3 Widget) ───────────────────────────────────────────
 
 export const focusItems = pgTable('focus_items', {

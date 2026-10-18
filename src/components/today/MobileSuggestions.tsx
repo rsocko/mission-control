@@ -19,6 +19,7 @@ import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 interface MobileSuggestionsProps {
   suggestions: SuggestionGroups;
   onAddToDay: (taskId: string) => void;
+  onNotToday?: (taskId: string) => void;
   onSelectTask: (taskId: string) => void;
   initialExpanded?: boolean;
 }
@@ -87,7 +88,13 @@ const PAGE_SIZE = 5;
  * Each group expands/collapses independently with pagination and optional sort.
  * Only one group is open at a time; expanding a group snaps it into view.
  */
-export function MobileSuggestions({ suggestions, onAddToDay, onSelectTask, initialExpanded = false }: MobileSuggestionsProps) {
+export function MobileSuggestions({
+  suggestions,
+  onAddToDay,
+  onNotToday,
+  onSelectTask,
+  initialExpanded = false,
+}: MobileSuggestionsProps) {
   const [sectionExpanded, setSectionExpanded] = useState(initialExpanded);
   const [expandedGroup, setExpandedGroup] = useState<keyof SuggestionGroups | null>(null);
   const prefersReducedMotion = useReducedMotion();
@@ -106,6 +113,7 @@ export function MobileSuggestions({ suggestions, onAddToDay, onSelectTask, initi
       <SuggestedForToday
         tasks={suggestions.aiRecommended}
         onAdd={onAddToDay}
+        onNotToday={onNotToday}
         onSelect={onSelectTask}
         className="mx-4 mb-4"
       />

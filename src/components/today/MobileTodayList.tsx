@@ -37,6 +37,7 @@ interface MobileTodayListProps {
   onSetTaskDueDate: (taskId: string, date: string) => Promise<void>;
   onSetTaskLocalDisposition: (taskId: string, disposition: LocalDisposition) => Promise<boolean>;
   onAddToDay: (taskId: string) => void;
+  onNotToday: (taskId: string) => void;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
   fetchData: () => Promise<void>;
@@ -62,6 +63,7 @@ export function MobileTodayList({
   onSetTaskDueDate,
   onSetTaskLocalDisposition,
   onAddToDay,
+  onNotToday,
   selectedTaskId,
   onSelectTask,
   fetchData,
@@ -244,6 +246,7 @@ export function MobileTodayList({
             <MobileSuggestions
               suggestions={suggestions}
               onAddToDay={onAddToDay}
+              onNotToday={onNotToday}
               onSelectTask={onSelectTask}
             />
           </div>

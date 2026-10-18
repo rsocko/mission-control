@@ -245,6 +245,44 @@ export function useTodayActions({
     }
   }
 
+  async function skipSuggestionForToday(taskId: string) {
+    const previousTask = suggestions.aiRecommended.find((task) => task.id === taskId);
+    if (!previousTask) return;
+    const previousIndex = suggestions.aiRecommended.findIndex((task) => task.id === taskId);
+
+    setSuggestions((current) => ({
+      ...current,
+      aiRecommended: current.aiRecommended.filter((task) => task.id !== taskId),
+    }));
+
+    try {
+      const response = await fetch('/api/my-day/suggestions/not-today', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId, date: todayISO }),
+      });
+      if (!response.ok) throw new Error('Failed to hide suggestion');
+
+      pushUndoWithToast('Hidden from today\'s suggestions', async () => {
+        const params = new URLSearchParams({ taskId, date: todayISO });
+        const undoResponse = await fetch(
+          `/api/my-day/suggestions/not-today?${params.toString()}`,
+          { method: 'DELETE' },
+        );
+        if (!undoResponse.ok) throw new Error('Failed to restore suggestion');
+        await fetchData({ skipSync: true });
+      });
+    } catch (error) {
+      setSuggestions((current) => {
+        if (current.aiRecommended.some((task) => task.id === taskId)) return current;
+        const restored = [...current.aiRecommended];
+        restored.splice(Math.min(previousIndex, restored.length), 0, previousTask);
+        return { ...current, aiRecommended: restored };
+      });
+      toast.error(error instanceof Error ? error.message : 'Failed to hide suggestion');
+    }
+  }
+
   async function removeFromDay(taskId: string) {
     const previousItems = items;
     setItems((prev) => prev.filter((item) => item.taskId !== taskId));
@@ -692,6 +730,7 @@ export function useTodayActions({
 
   return {
     addToDay,
+    skipSuggestionForToday,
     removeFromDay,
     setTaskLocalDisposition,
     completeTask,

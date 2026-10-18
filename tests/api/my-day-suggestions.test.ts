@@ -8,6 +8,8 @@ describe('GET /api/my-day suggestions', () => {
   let getMyDay: typeof import('@/app/api/my-day/route').GET;
   let postMyDay: typeof import('@/app/api/my-day/route').POST;
   let deleteMyDay: typeof import('@/app/api/my-day/route').DELETE;
+  let hideSuggestion: typeof import('@/app/api/my-day/suggestions/not-today/route').POST;
+  let restoreSuggestion: typeof import('@/app/api/my-day/suggestions/not-today/route').DELETE;
 
   beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
@@ -33,10 +35,11 @@ describe('GET /api/my-day suggestions', () => {
     });
     vi.resetModules();
 
-    const [dbModule, schemaModule, routeModule] = await Promise.all([
+    const [dbModule, schemaModule, routeModule, notTodayRouteModule] = await Promise.all([
       importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/app/api/my-day/route'),
+      import('@/app/api/my-day/suggestions/not-today/route'),
     ]);
     db = dbModule.default;
     sqlite = dbModule.sqlite;
@@ -44,6 +47,8 @@ describe('GET /api/my-day suggestions', () => {
     getMyDay = routeModule.GET;
     postMyDay = routeModule.POST;
     deleteMyDay = routeModule.DELETE;
+    hideSuggestion = notTodayRouteModule.POST;
+    restoreSuggestion = notTodayRouteModule.DELETE;
 
     const recent = '2026-08-04T12:00:00.000Z';
     const old = '2026-07-01T12:00:00.000Z';
@@ -329,5 +334,41 @@ describe('GET /api/my-day suggestions', () => {
       'http://localhost/api/my-day?date=2026-02-31',
     ));
     expect(invalidDateResponse.status).toBe(400);
+  });
+
+  it('hides a task only from AI recommendations for the selected date', async () => {
+    const hideResponse = await hideSuggestion(new Request(
+      'http://localhost/api/my-day/suggestions/not-today',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: 'top-overdue', date: '2026-08-05' }),
+      },
+    ));
+    expect(hideResponse.status).toBe(200);
+
+    const hiddenResponse = await getMyDay(new Request(
+      'http://localhost/api/my-day?date=2026-08-05',
+    ));
+    const hiddenBody = await hiddenResponse.json() as {
+      suggestions: Record<string, Array<{ id: string }>>;
+    };
+    expect(hiddenBody.suggestions.aiRecommended.map(({ id }) => id)).not.toContain('top-overdue');
+    expect(hiddenBody.suggestions.overdue.map(({ id }) => id)).toContain('top-overdue');
+
+    const restoreResponse = await restoreSuggestion(new Request(
+      'http://localhost/api/my-day/suggestions/not-today'
+      + '?taskId=top-overdue&date=2026-08-05',
+      { method: 'DELETE' },
+    ));
+    expect(restoreResponse.status).toBe(200);
+
+    const restoredResponse = await getMyDay(new Request(
+      'http://localhost/api/my-day?date=2026-08-05',
+    ));
+    const restoredBody = await restoredResponse.json() as {
+      suggestions: Record<string, Array<{ id: string }>>;
+    };
+    expect(restoredBody.suggestions.aiRecommended.map(({ id }) => id)).toContain('top-overdue');
   });
 });

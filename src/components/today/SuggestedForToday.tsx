@@ -1,9 +1,10 @@
 'use client';
 
 import { useId } from 'react';
-import { Plus, Sparkles } from 'lucide-react';
+import { CalendarX2, Plus, Sparkles } from 'lucide-react';
 import { ConnectorIcon } from './SortableTaskRow';
 import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { cn } from '@/lib/utils';
@@ -26,11 +27,13 @@ function suggestionReason(task: SuggestionTask): string {
 export function SuggestedForToday({
   tasks,
   onAdd,
+  onNotToday,
   onSelect,
   className,
 }: {
   tasks: SuggestionTask[];
   onAdd: (taskId: string) => void;
+  onNotToday?: (taskId: string) => void;
   onSelect: (taskId: string) => void;
   className?: string;
 }) {
@@ -78,14 +81,30 @@ export function SuggestedForToday({
                 </span>
               </span>
             </button>
-            <button
-              type="button"
-              onClick={() => onAdd(task.id)}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-purple-700/40 text-purple-300 transition-colors hover:border-purple-500/60 hover:bg-purple-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
-              aria-label={`Add "${task.title}" to My Day`}
-            >
-              <Plus size={13} aria-hidden="true" />
-            </button>
+            <div className="flex shrink-0 items-center gap-1">
+              {onNotToday && (
+                <Tooltip content="Not today">
+                  <button
+                    type="button"
+                    onClick={() => onNotToday(task.id)}
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-purple-200/70 transition-colors hover:bg-purple-400/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+                    aria-label={`Hide "${task.title}" from today's suggestions`}
+                  >
+                    <CalendarX2 size={13} aria-hidden="true" />
+                  </button>
+                </Tooltip>
+              )}
+              <Tooltip content="Add to My Day">
+                <button
+                  type="button"
+                  onClick={() => onAdd(task.id)}
+                  className="flex h-8 w-8 items-center justify-center rounded-md border border-purple-700/40 text-purple-300 transition-colors hover:border-purple-500/60 hover:bg-purple-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+                  aria-label={`Add "${task.title}" to My Day`}
+                >
+                  <Plus size={13} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            </div>
           </div>
         ))}
       </div>

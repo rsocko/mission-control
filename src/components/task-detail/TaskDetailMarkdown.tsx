@@ -1,12 +1,23 @@
 'use client';
 
-import { createContext, useContext, useState, type ImgHTMLAttributes } from 'react';
+import {
+  createContext,
+  isValidElement,
+  useContext,
+  useEffect,
+  useState,
+  type ComponentPropsWithoutRef,
+  type ImgHTMLAttributes,
+  type ReactNode,
+} from 'react';
 import dynamic from 'next/dynamic';
-import { ExternalLink, ImageOff } from 'lucide-react';
+import { Check, Copy, ExternalLink, ImageOff } from 'lucide-react';
 import {
   getTaskImageSource,
   isGitHubUserAttachmentUrl,
 } from '@/lib/github-user-attachments';
+import { toast } from '@/lib/toast';
+import { cn } from '@/lib/utils';
 
 interface MarkdownNode {
   type: string;
@@ -99,6 +110,76 @@ export function EmbeddedMarkdownImage({
   );
 }
 
+function markdownTextContent(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(markdownTextContent).join('');
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return markdownTextContent(node.props.children);
+  }
+  return '';
+}
+
+type CopyState = 'idle' | 'copied' | 'error';
+
+/** Fenced code block with a native clipboard action. */
+export function MarkdownCodeBlock({
+  node,
+  children,
+  className,
+  ...preProps
+}: ComponentPropsWithoutRef<'pre'> & { node?: unknown }) {
+  void node;
+  const [copyState, setCopyState] = useState<CopyState>('idle');
+
+  useEffect(() => {
+    if (copyState === 'idle') return;
+    const timeout = window.setTimeout(() => setCopyState('idle'), 2000);
+    return () => window.clearTimeout(timeout);
+  }, [copyState]);
+
+  const copyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(markdownTextContent(children).replace(/\n$/, ''));
+      setCopyState('copied');
+    } catch {
+      setCopyState('error');
+      toast.error('Could not copy the code. Check browser clipboard permissions and try again.');
+    }
+  };
+
+  const buttonLabel = copyState === 'copied'
+    ? 'Code copied'
+    : copyState === 'error'
+      ? 'Copy failed'
+      : 'Copy code';
+
+  return (
+    <div className="not-prose group relative my-4">
+      <pre
+        {...preProps}
+        className={cn(
+          'overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] px-4 pb-4 pt-11 text-sm',
+          className,
+        )}
+      >
+        {children}
+      </pre>
+      <button
+        type="button"
+        onClick={() => { void copyCode(); }}
+        className="absolute right-2 top-2 flex min-h-8 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-1)] px-2 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+        aria-label={buttonLabel}
+        title={buttonLabel}
+      >
+        {copyState === 'copied'
+          ? <Check size={13} aria-hidden="true" />
+          : <Copy size={13} aria-hidden="true" />}
+        <span>{copyState === 'copied' ? 'Copied' : 'Copy'}</span>
+      </button>
+    </div>
+  );
+}
+
 export interface TaskDetailMarkdownProps {
   children: string;
   /** Called when a rendered task-list checkbox is toggled. Omit to render read-only. */
@@ -152,6 +233,7 @@ export const TaskDetailMarkdown = dynamic(
                   );
                 },
                 img: EmbeddedMarkdownImage,
+                pre: MarkdownCodeBlock,
                 input: (inputProps) => {
                   if (inputProps.type === 'checkbox') {
                     checkboxIndex++;

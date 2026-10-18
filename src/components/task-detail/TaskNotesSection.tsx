@@ -5,6 +5,10 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { MarkdownEditor } from '@/components/ui/MarkdownEditor';
 import { cn } from '@/lib/utils';
 import { TaskDetailMarkdown } from './TaskDetailMarkdown';
+import {
+  TaskQuickUpdatePopover,
+  type QuickUpdateSubmitInput,
+} from './TaskQuickUpdatePopover';
 import type { TaskDetailMode } from './task-detail-types';
 
 export interface TaskNotesSectionProps {
@@ -32,6 +36,9 @@ export interface TaskNotesSectionProps {
   onEditorBlur: () => unknown;
   onExpand: () => void;
   onPaste: React.ClipboardEventHandler<HTMLTextAreaElement>;
+  canUpdateDueDate: boolean;
+  canCreateSubtask: boolean;
+  onQuickUpdate: (input: QuickUpdateSubmitInput) => Promise<boolean>;
   /** Omitted when notes are read-only, which also disables checkbox toggling. */
   onCheckboxToggle?: (index: number, checked: boolean) => void;
 }
@@ -56,11 +63,14 @@ export function TaskNotesSection({
   onEditorBlur,
   onExpand,
   onPaste,
+  canUpdateDueDate,
+  canCreateSubtask,
+  onQuickUpdate,
   onCheckboxToggle,
 }: TaskNotesSectionProps) {
   return (
     <section className={cn(
-      'flex flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3',
+      'relative flex flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3',
       (mode === 'panel' || mode === 'mobile') && 'order-1',
       mode === 'dialog' && 'col-span-2 row-start-7 min-h-72 self-stretch',
       mode === 'workspace' && 'col-start-3 row-start-2 row-span-3 min-h-[520px] self-stretch',
@@ -79,6 +89,13 @@ export function TaskNotesSection({
         <FileText size={14} className="text-[var(--text-tertiary)]" />
         <h3 className="text-sm font-semibold text-[var(--text-heading)]">Notes</h3>
         <div className="ml-auto flex items-center gap-1">
+          {canEditDescription && !editingDesc && (
+            <TaskQuickUpdatePopover
+              canUpdateDueDate={canUpdateDueDate}
+              canCreateSubtask={canCreateSubtask}
+              onSubmit={onQuickUpdate}
+            />
+          )}
           {!editingDesc && (
             <Tooltip content={canEditDescription ? 'Edit notes' : descriptionBlockedReason}>
               <button
@@ -142,7 +159,7 @@ export function TaskNotesSection({
           }}
         >
           {description ? (
-            <div className="prose prose-invert prose-xs max-w-none [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_code]:text-xs [&_pre]:text-xs [&_a]:text-blue-400 [&_a:hover]:underline [&_img]:rounded-md [&_img]:max-w-full [&_img]:h-auto [&_img]:my-2">
+            <div className="prose prose-invert max-w-none text-xs [&_p]:my-1 [&_p]:text-xs [&_ul]:my-1 [&_ul]:text-xs [&_ol]:my-1 [&_ol]:text-xs [&_li]:my-0 [&_li]:text-xs [&_blockquote]:text-xs [&_table]:text-xs [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_code]:text-xs [&_pre]:text-xs [&_a]:text-blue-400 [&_a:hover]:underline [&_img]:my-2 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-md">
               <TaskDetailMarkdown
                 onCheckboxToggle={onCheckboxToggle}
                 sourceUrl={sourceUrl}

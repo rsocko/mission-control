@@ -6,6 +6,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Check, ChevronDown, ChevronUp, Ellipsis, Flame, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from '@/lib/toast';
+import { useListAnimate } from '@/lib/hooks/useListAnimate';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
@@ -41,6 +42,7 @@ export function TodayRoutinesSection() {
   const [showSkipped, setShowSkipped] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [quickActionLimit, setQuickActionLimit] = useState(4);
+  const [promotedListRef] = useListAnimate({ duration: 250 });
   const sectionRef = useRef<HTMLElement>(null);
   const today = getClientToday();
 
@@ -339,6 +341,7 @@ export function TodayRoutinesSection() {
               <>
                 {visiblePromoted.length > 0 && (
                   <motion.div
+                    ref={promotedListRef}
                     className={cn(
                       'grid gap-px bg-[var(--border-subtle)]',
                       getRoutineGridColumns(visiblePromoted.length),

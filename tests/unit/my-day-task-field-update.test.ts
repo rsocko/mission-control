@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { applyMyDayTaskFieldUpdate } from '@/components/today/apply-task-field-update';
-import type { MyDayItem } from '@/components/today/types';
+import {
+  applyMyDayTaskFieldUpdate,
+  applySuggestionTaskFieldUpdate,
+  shouldRefreshMyDayAfterTaskDetailUpdate,
+} from '@/components/today/apply-task-field-update';
+import type { MyDayItem, SuggestionTask } from '@/components/today/types';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
 describe('applyMyDayTaskFieldUpdate', () => {
@@ -68,5 +72,29 @@ describe('applyMyDayTaskFieldUpdate', () => {
       microStatus: 'Drafting',
       localDisposition: 'handled',
     });
+  });
+
+  it('updates suggestion fields immediately when the detail panel clears a due date', () => {
+    const suggestion = {
+      id: 'task-1',
+      title: 'Recently overdue task',
+      status: 'todo',
+      priority: 'medium',
+      dueDate: '2026-10-17',
+      connectorType: 'local',
+      connectorInstanceId: 'local',
+      sourceListName: 'Inbox',
+      localDisposition: 'active',
+      taskSourceModel: 'mc-owned',
+      editPolicy: editableTaskPolicy,
+    } satisfies SuggestionTask;
+
+    expect(applySuggestionTaskFieldUpdate(suggestion, 'task-1', { dueDate: null }))
+      .toMatchObject({ dueDate: null });
+  });
+
+  it('reconciles only after persistence, not during optimistic field updates', () => {
+    expect(shouldRefreshMyDayAfterTaskDetailUpdate({ dueDate: null })).toBe(false);
+    expect(shouldRefreshMyDayAfterTaskDetailUpdate()).toBe(true);
   });
 });

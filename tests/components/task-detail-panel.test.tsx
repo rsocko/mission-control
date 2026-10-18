@@ -874,6 +874,36 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(onUpdate).toHaveBeenCalledWith({ description: valueWithSoftBreak });
   });
 
+  it('focuses Quick Update and appends the entry with Enter', async () => {
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === '/api/tasks/task-1' && init?.method === 'PATCH') return json({});
+      if (String(input) === '/api/tasks/task-1') return json({ task });
+      return json({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+    await screen.findByRole('heading', { name: task.title });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quick update' }));
+    const input = screen.getByRole('textbox', { name: 'Quick update' });
+    await waitFor(() => expect(input).toHaveFocus());
+    fireEvent.change(input, { target: { value: 'Called vendor and left a voicemail' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH');
+      expect(patchCall).toBeDefined();
+      const body = JSON.parse(String(patchCall?.[1]?.body)) as { description: string };
+      expect(body.description).toContain('Detailed notes');
+      expect(body.description).toMatch(
+        /## Updates\n\n- \*\*\d{4}-\d{2}-\d{2} \d{2}:\d{2}\*\* — Called vendor and left a voicemail/,
+      );
+    });
+    expect(screen.queryByRole('dialog', { name: 'Quick task update' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Quick update' })).toHaveFocus();
+  });
+
   it('switches inline Notes to read mode before persistence finishes', async () => {
     let resolvePatch!: (response: { ok: boolean; json: () => Promise<object> }) => void;
     const patchRequest = new Promise<{ ok: boolean; json: () => Promise<object> }>((resolve) => {

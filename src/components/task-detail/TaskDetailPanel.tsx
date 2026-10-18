@@ -50,6 +50,8 @@ import { OwlTaskActions } from './OwlTaskActions';
 import { TaskDetailFooter, TaskMobileActionBar } from './TaskDetailFooter';
 import { TaskDelegationSection } from './TaskDelegationSection';
 import { toggleMarkdownCheckbox } from './TaskDetailMarkdown';
+import { appendQuickUpdate } from './task-quick-update';
+import type { QuickUpdateSubmitInput } from './TaskQuickUpdatePopover';
 import { useTaskDetailData } from './useTaskDetailData';
 import { useTaskDetailMutations, type TaskConfirmRequest } from './useTaskDetailMutations';
 import { parseTaskMetadata } from './task-detail-types';
@@ -584,6 +586,82 @@ export function TaskDetailPanel({
     setEditingDesc(false);
   }, [task?.description]);
 
+  const handleQuickUpdate = useCallback(async ({
+    text,
+    dueDate,
+    subtaskTitle,
+  }: QuickUpdateSubmitInput) => {
+    if (!task) return false;
+    const taskIdAtSave = task.id;
+    const nextDescription = appendQuickUpdate(task.description, text);
+    const mutationId = ++descriptionMutationRef.current;
+    const saved = await saveDescription(nextDescription);
+    if (!saved) {
+      if (
+        descriptionMutationRef.current === mutationId
+        && activeTaskIdRef.current === taskIdAtSave
+      ) {
+        toast.error('Failed to append update');
+      }
+      return false;
+    }
+    if (
+      descriptionMutationRef.current === mutationId
+      && activeTaskIdRef.current === taskIdAtSave
+    ) {
+      setDescValue(nextDescription);
+      setTask((previous) => previous?.id === taskIdAtSave
+        ? { ...previous, description: nextDescription }
+        : previous);
+    }
+
+    let optionalActionFailed = false;
+    if (dueDate && !await mutations.handleDueDateChange(dueDate)) {
+      optionalActionFailed = true;
+    }
+
+    if (subtaskTitle) {
+      try {
+        const response = await fetch(`/api/tasks/${taskIdAtSave}/subtasks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: subtaskTitle }),
+        });
+        const data = await response.json().catch(() => ({})) as {
+          subtask?: { id: string; title: string; status: string };
+          error?: string;
+        };
+        if (!response.ok || !data.subtask) {
+          throw new Error(data.error || 'Failed to add follow-up subtask');
+        }
+        const nextSubtasks = [...(task.subtasks ?? []), data.subtask];
+        setTask((previous) => previous?.id === taskIdAtSave
+          ? { ...previous, subtasks: nextSubtasks }
+          : previous);
+        onSubtaskCountChange?.(
+          nextSubtasks.filter((subtask) => subtask.status === 'done').length,
+          nextSubtasks.length,
+        );
+        onUpdate?.();
+      } catch (error) {
+        optionalActionFailed = true;
+        toast.error(error instanceof Error
+          ? `Update appended, but ${error.message.toLowerCase()}`
+          : 'Update appended, but the follow-up subtask could not be added');
+      }
+    }
+
+    if (!optionalActionFailed) toast.success('Update appended');
+    return true;
+  }, [
+    mutations,
+    onSubtaskCountChange,
+    onUpdate,
+    saveDescription,
+    setTask,
+    task,
+  ]);
+
   const parsedMetadata = parseTaskMetadata(task?.metadata);
   const linkedResourceDeepLink = getLinkedResourceDeepLinkInfo(parsedMetadata.linkedResources);
   const currentRecurrence: string = task?.recurrence !== undefined
@@ -939,6 +1017,9 @@ export function TaskDetailPanel({
             setNotesExpanded(true);
           }}
           onPaste={handleImagePaste}
+          canUpdateDueDate={canEditDueDate}
+          canCreateSubtask={canManageSubtasks}
+          onQuickUpdate={handleQuickUpdate}
           onCheckboxToggle={canEditDescription ? handleCheckboxToggle : undefined}
         />
 

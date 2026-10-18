@@ -48,14 +48,95 @@ describe('TaskNotesSection', () => {
         onEditorBlur={vi.fn()}
         onExpand={vi.fn()}
         onPaste={vi.fn()}
+        canUpdateDueDate
+        canCreateSubtask
+        onQuickUpdate={vi.fn()}
       />,
     );
 
     expect(screen.getByText('OWL summary')).toBeInTheDocument();
     expect(screen.getByText('Payment for professional services rendered by your physician.'))
       .toBeInTheDocument();
-    expect(await screen.findByText('Call the billing office before paying.')).toBeInTheDocument();
+    const noteText = await screen.findByText('Call the billing office before paying.');
+    expect(noteText).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit notes' })).toBeEnabled();
+    expect(noteText.closest('.prose')).toHaveClass('[&_p]:text-xs');
+  });
+
+  it('focuses quick update entry and submits it with Enter', async () => {
+    const onQuickUpdate = vi.fn().mockResolvedValue(true);
+    renderWithTooltips(
+      <TaskNotesSection
+        mode="panel"
+        taskId="task-42"
+        description="Existing notes"
+        descValue="Existing notes"
+        editingDesc={false}
+        canEditDescription
+        supportsAttachments={false}
+        sourceUrl={null}
+        descRef={createRef<HTMLTextAreaElement>()}
+        expandButtonRef={createRef<HTMLButtonElement>()}
+        onDescValueChange={vi.fn()}
+        onEditStart={vi.fn()}
+        onEditCancel={vi.fn()}
+        onEditorBlur={vi.fn()}
+        onExpand={vi.fn()}
+        onPaste={vi.fn()}
+        canUpdateDueDate
+        canCreateSubtask
+        onQuickUpdate={onQuickUpdate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quick update' }));
+    const input = screen.getByRole('textbox', { name: 'Quick update' });
+    await vi.waitFor(() => expect(input).toHaveFocus());
+    fireEvent.change(input, { target: { value: 'Called vendor; check back Friday' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /Add subtask/ }));
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await vi.waitFor(() => expect(onQuickUpdate).toHaveBeenCalledWith({
+      text: 'Called vendor; check back Friday',
+      dueDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      subtaskTitle: 'Check back',
+    }));
+  });
+
+  it('closes quick update with Escape and restores trigger focus', async () => {
+    renderWithTooltips(
+      <TaskNotesSection
+        mode="panel"
+        taskId="task-42"
+        description={null}
+        descValue=""
+        editingDesc={false}
+        canEditDescription
+        supportsAttachments={false}
+        sourceUrl={null}
+        descRef={createRef<HTMLTextAreaElement>()}
+        expandButtonRef={createRef<HTMLButtonElement>()}
+        onDescValueChange={vi.fn()}
+        onEditStart={vi.fn()}
+        onEditCancel={vi.fn()}
+        onEditorBlur={vi.fn()}
+        onExpand={vi.fn()}
+        onPaste={vi.fn()}
+        canUpdateDueDate
+        canCreateSubtask
+        onQuickUpdate={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Quick update' });
+    fireEvent.click(trigger);
+    const input = screen.getByRole('textbox', { name: 'Quick update' });
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Quick task update' })).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
   });
 });
 

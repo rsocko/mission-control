@@ -54,6 +54,33 @@ describe('Quick Add submission planning', () => {
     ]);
   });
 
+  it('keeps a detected compound input as one task when splitting is dismissed', () => {
+    const expectedTasks = [
+      task('Already queued'),
+      {
+        id: 'current',
+        text: 'Email Sarah and call dentist',
+        parentIndex: null,
+        isComplete: false,
+      },
+    ];
+
+    expect(prepareQuickAddTasks(
+      'Email Sarah and call dentist',
+      [task('Already queued')],
+      undefined,
+      false,
+    )).toEqual(expectedTasks);
+
+    expect(planQuickAddSubmission({
+      input: 'Email Sarah and call dentist',
+      pendingTasks: [task('Already queued')],
+      destination: localDestination,
+      projectsLoadState: 'ready',
+      splitCompoundTasks: false,
+    }).tasks).toEqual(expectedTasks);
+  });
+
   it('resolves destination lists from the selected pill before context defaults', () => {
     expect(resolveQuickAddDestination(
       { ...localDestination, listId: 'selected', listName: 'Selected' },

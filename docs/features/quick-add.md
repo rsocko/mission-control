@@ -17,15 +17,19 @@ Both entry points use the same parser and create-preview behavior.
 | `!critical`, `!high`, `!medium`, `!low` | Sets priority | `Fix production alert !critical` |
 | `!0` through `!3` | Sets priority from critical through low | `Review backlog !2` |
 | `^1` through `^5` | Sets effort from XS through XL | `Refactor parser ^4` |
-| `~30m`, `~1.5h` | Sets estimated duration | `Review proposal ~30m` |
+| `30m`, `1.5h` | Sets estimated duration | `Review proposal 30m` |
 | `+Project` | Assigns an existing hub project | `Draft brief +Website` |
 | `/due:<date>` | Sets a due date explicitly | `Send report /due:next Friday` |
-| `@work`, `@personal`, `@github`, `@todo` | Selects a compatible destination | `File follow-up @work` |
+| `*` | Adds the task to My Day | `Review daily plan *` |
 | Recurrence phrase | Sets recurrence | `Review metrics every Monday` |
 
 Typeahead menus resolve tags, priorities, effort, lists, and projects. Project names selected from typeahead are stored by project ID; an unknown `+Project` blocks creation instead of silently discarding the assignment.
 
 Type `/` followed by part of a list name to choose a destination. Matches in the actual list name appear before matches found only in a group name, source, or other destination label. Matching is case-insensitive, with alphabetical ordering within each tier (lists before list-less sources). Typing `/` without search text keeps the default lists-first alphabetical order.
+
+Duration-like text at a token boundary is recognized automatically. The older `~30m` form remains supported. To keep a duration literal in the title, press `Escape` while it is highlighted, click its × affordance, or type a backslash directly: `\30m`.
+
+When the expanded task form is open, a value explicitly chosen in a picker takes precedence over a conflicting inline token. Tags selected in the picker replace parsed tag choices, while untouched fields continue to use detected inline metadata.
 
 ## Safe date detection
 

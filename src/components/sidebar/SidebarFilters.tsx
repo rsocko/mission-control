@@ -2,10 +2,14 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Bot, Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Filter, Pencil, Plus, Repeat, Trash2 } from 'lucide-react';
+import { Bot, Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Filter, Pencil, Pin, PinOff, Plus, Repeat, Trash2 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@rsocko/icon-picker/renderer';
-import { ConnectorIcon, SourceListIcon } from '@/components/sources/SourceIcons';
+import {
+  ConnectorIcon,
+  resolveSourceListIconValue,
+  SourceListIcon,
+} from '@/components/sources/SourceIcons';
 import {
   Select,
   SelectContent,
@@ -36,6 +40,14 @@ import {
   type QuickFilterVisibility,
 } from '@/lib/tasks/quick-filters';
 import { SidebarNavItem } from './SidebarNavItem';
+import { useTaskShortcuts } from '@/lib/hooks/useTaskShortcuts';
+import {
+  recordRecentTaskShortcut,
+  taskShortcutFromList,
+  taskShortcutFromSavedView,
+  taskShortcutFromSource,
+  type TaskShortcut,
+} from '@/lib/navigation/task-shortcuts';
 
 const TAG_DEFAULT_COUNT = 10;
 
@@ -157,6 +169,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
   } = computed;
 
   const [showFilterSettings, setShowFilterSettings] = React.useState(false);
+  const { pinnedIds, togglePinned } = useTaskShortcuts();
   const visibleQuickFilters = QUICK_FILTERS.filter((filter) => isQuickFilterVisible(
     filter,
     taskResponse.stats,
@@ -327,8 +340,9 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
             const showLists = isListsExpanded;
             const currentSourceLists = showLists ? getSourceListsForType(source.type) : [];
             const hasActiveChildList = sourceFilter === source.type && !!listFilter && !isListsExpanded;
+            const sourceShortcut = taskShortcutFromSource(source);
             return (
-            <div key={source.type}>
+            <div key={source.type} className="group">
               <SidebarNavItem
                 icon={<ConnectorIcon connectorType={source.type} size={14} />}
                 label={source.name}
@@ -336,6 +350,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                 active={sourceFilter === source.type}
                 suffix={hasActiveChildList ? <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] flex-shrink-0" /> : undefined}
                 onClick={() => {
+                  recordRecentTaskShortcut(sourceShortcut);
                   setSourceFilter(source.type);
                   setListFilter(null);
                   setListSearch('');
@@ -352,23 +367,33 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                     });
                   }
                 }}
+                overlayAction={(
+                  <TaskShortcutPinButton
+                    shortcut={sourceShortcut}
+                    pinned={pinnedIds.has(sourceShortcut.id)}
+                    onToggle={togglePinned}
+                    revealClassName="group-hover/nav:opacity-100 group-focus-within/nav:opacity-100"
+                  />
+                )}
                 action={hasLists ? (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setExpandedSourceLists((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(source.type)) next.delete(source.type);
-                        else next.add(source.type);
-                        return next;
-                      });
-                    }}
-                    className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors duration-100 shrink-0"
-                    aria-label={isListsExpanded ? 'Collapse lists' : 'Expand lists'}
-                    title={isListsExpanded ? 'Collapse lists' : 'Expand lists'}
-                  >
-                    {isListsExpanded ? <ChevronsDownUp size={12} /> : <ChevronsUpDown size={12} />}
-                  </button>
+                  <div className="flex shrink-0 items-center pr-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedSourceLists((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(source.type)) next.delete(source.type);
+                          else next.add(source.type);
+                          return next;
+                        });
+                      }}
+                      className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors duration-100 shrink-0"
+                      aria-label={isListsExpanded ? 'Collapse lists' : 'Expand lists'}
+                      title={isListsExpanded ? 'Collapse lists' : 'Expand lists'}
+                    >
+                      {isListsExpanded ? <ChevronsDownUp size={12} /> : <ChevronsUpDown size={12} />}
+                    </button>
+                  </div>
                 ) : undefined}
               />
               {showLists && currentSourceLists.length > 0 && (
@@ -380,12 +405,13 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                   listFilter={listFilter}
                   listGroupFilter={listGroupFilter}
                   collapsedListGroups={collapsedListGroups}
-                  sidebarExpanded={sidebarExpanded}
                   setListSearch={setListSearch}
                   setSourceFilter={setSourceFilter}
                   setListFilter={setListFilter}
                   setListGroupFilter={setListGroupFilter}
                   setCollapsedListGroups={setCollapsedListGroups}
+                  pinnedIds={pinnedIds}
+                  togglePinned={togglePinned}
                 />
               )}
             </div>
@@ -563,7 +589,18 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                     )}
                     label={view.name}
                     count={0}
-                    onClick={() => applyView(view)}
+                    onClick={() => {
+                      recordRecentTaskShortcut(taskShortcutFromSavedView(view));
+                      applyView(view);
+                    }}
+                    overlayAction={(
+                      <TaskShortcutPinButton
+                        shortcut={taskShortcutFromSavedView(view)}
+                        pinned={pinnedIds.has(`saved-view:${view.id}`)}
+                        onToggle={togglePinned}
+                        revealClassName="group-hover/nav:opacity-100 group-focus-within/nav:opacity-100"
+                      />
+                    )}
                     action={graphOrigin ? (
                       <ViewInGraphLink
                         context={view.filterContext ?? taskFilterContextFromSavedView(view.filters)}
@@ -847,6 +884,110 @@ function QuickFilterIcon({
   return icons[icon];
 }
 
+function TaskShortcutPinButton({
+  shortcut,
+  pinned,
+  onToggle,
+  visible = false,
+  revealClassName = 'group-hover:opacity-100 group-focus-within:opacity-100',
+}: {
+  shortcut: TaskShortcut;
+  pinned: boolean;
+  onToggle: (shortcut: TaskShortcut) => boolean;
+  visible?: boolean;
+  revealClassName?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle(shortcut);
+      }}
+      className={`shrink-0 rounded p-1 transition-[color,opacity] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:opacity-100 ${
+        pinned ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'
+      } ${visible ? 'opacity-100' : `opacity-0 ${revealClassName}`}`}
+      aria-label={`${pinned ? 'Unpin' : 'Pin'} ${shortcut.label}`}
+      title={`${pinned ? 'Unpin' : 'Pin'} ${shortcut.label} in task navigation`}
+    >
+      {pinned ? <PinOff size={12} /> : <Pin size={12} />}
+    </button>
+  );
+}
+
+function SourceListNavRow({
+  source,
+  sourceList,
+  active,
+  pinned,
+  onSelect,
+  onTogglePinned,
+}: {
+  source: EnabledSource;
+  sourceList: SourceList;
+  active: boolean;
+  pinned: boolean;
+  onSelect: () => void;
+  onTogglePinned: (shortcut: TaskShortcut) => boolean;
+}) {
+  const shortcut = taskShortcutFromList(source, sourceList);
+  const showDedicatedIcon = Boolean(resolveSourceListIconValue(sourceList))
+    || (source.type === 'github-issues' && sourceList.type === 'repo');
+  const [actionsVisible, setActionsVisible] = React.useState(false);
+  return (
+    <div
+      className="relative flex items-center"
+      onMouseEnter={() => setActionsVisible(true)}
+      onMouseLeave={() => setActionsVisible(false)}
+      onFocusCapture={() => setActionsVisible(true)}
+      onBlurCapture={(event) => {
+        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+          setActionsVisible(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded px-2 py-1 text-xs transition-colors ${
+          active
+            ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-medium'
+            : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]'
+        }`}
+      >
+        <span className="inline-flex min-w-0 items-center gap-1">
+          {showDedicatedIcon && (
+            <SourceListIcon connectorType={source.type} list={sourceList} />
+          )}
+          <span className="truncate">{sourceList.name}</span>
+          {sourceList.selectedForSync === false && (
+            <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-400">
+              Not syncing
+            </span>
+          )}
+        </span>
+        {sourceList.taskCount > 0 && (
+          <AnimatedCounter
+            value={sourceList.taskCount}
+            className={`ml-auto w-8 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)] transition-opacity ${
+              actionsVisible ? 'opacity-0' : 'opacity-100'
+            }`}
+          />
+        )}
+      </button>
+      <div className="absolute inset-y-0 right-1 flex items-center">
+        <TaskShortcutPinButton
+          shortcut={shortcut}
+          pinned={pinned}
+          onToggle={onTogglePinned}
+          visible={actionsVisible}
+          revealClassName=""
+        />
+      </div>
+    </div>
+  );
+}
+
 // Sub-component for source list rendering within expanded sources
 function SourceListSection({
   source,
@@ -856,12 +997,13 @@ function SourceListSection({
   listFilter,
   listGroupFilter,
   collapsedListGroups,
-  sidebarExpanded,
   setListSearch,
   setSourceFilter,
   setListFilter,
   setListGroupFilter,
   setCollapsedListGroups,
+  pinnedIds,
+  togglePinned,
 }: {
   source: EnabledSource;
   currentSourceLists: SourceList[];
@@ -870,12 +1012,13 @@ function SourceListSection({
   listFilter: string | null;
   listGroupFilter: string | null;
   collapsedListGroups: Set<string>;
-  sidebarExpanded: boolean;
   setListSearch: (v: string) => void;
   setSourceFilter: (v: string | null) => void;
   setListFilter: (v: string | null) => void;
   setListGroupFilter: (v: string | null) => void;
   setCollapsedListGroups: React.Dispatch<React.SetStateAction<Set<string>>>;
+  pinnedIds: Set<string>;
+  togglePinned: (shortcut: TaskShortcut) => boolean;
 }) {
   const knownGroupIds = new Set(listGroups.map((g) => g.id));
   const sourceListsByGroup = new Map<string, SourceList[]>();
@@ -897,7 +1040,7 @@ function SourceListSection({
     }));
 
   return (
-    <div className="ml-2 mt-1 space-y-1">
+    <div className="ml-1 mt-1 space-y-0.5">
       <div className="relative mb-2">
         <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
         <input
@@ -917,22 +1060,30 @@ function SourceListSection({
         const isGroupActive = listGroupFilter === group.id;
         const groupTaskCount = groupedLists.reduce((sum, sl) => sum + sl.taskCount, 0);
         return (
-          <div key={group.id} className="space-y-0.5">
-            <div className={`flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-bold uppercase tracking-[0.06em] transition-colors border-b border-[var(--border-subtle)] ${
+          <div key={group.id} className="space-y-px">
+            <div className={`flex w-full items-center gap-1 px-1 py-1 text-xs font-medium transition-colors border-b border-[var(--border-subtle)] ${
               isGroupActive ? 'bg-[var(--accent)]/10 text-[var(--accent)]' : 'text-[var(--text-primary)] hover:text-[var(--accent)]'
             }`}>
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   const next = new Set(collapsedListGroups);
-                  isCollapsed ? next.delete(group.id) : next.add(group.id);
+                  if (isCollapsed) {
+                    next.delete(group.id);
+                  } else {
+                    next.add(group.id);
+                  }
                   setCollapsedListGroups(next);
                 }}
-                className="shrink-0 p-0.5 -ml-0.5 rounded hover:bg-[var(--surface-2)]"
+                className="shrink-0 rounded p-0.5 hover:bg-[var(--surface-2)]"
+                aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${group.name}`}
+                aria-expanded={!isCollapsed}
               >
                 <ChevronRight size={10} className={`transition-transform duration-150 ${isCollapsed ? '' : 'rotate-90'}`} />
               </button>
               <button
+                type="button"
                 onClick={() => {
                   if (isGroupActive) {
                     setListGroupFilter(null);
@@ -943,12 +1094,12 @@ function SourceListSection({
                     setListFilter(null);
                   }
                 }}
-                className="flex items-center gap-1.5 flex-1 min-w-0"
+                className="flex min-w-0 flex-1 items-center"
+                aria-pressed={isGroupActive}
               >
-                <span className="text-xs leading-none">{group.icon ? <IconRenderer value={group.icon} size={12} color={group.iconColor || undefined} /> : <FolderOpen size={11} className="inline" />}</span>
-                <span className={sidebarExpanded ? '' : 'truncate'}>{group.name}</span>
+                <span className="truncate">{group.name}</span>
                 {groupTaskCount > 0 && (
-                  <AnimatedCounter value={groupTaskCount} className="text-xs text-[var(--text-muted)] tabular-nums shrink-0 ml-auto" />
+                  <AnimatedCounter value={groupTaskCount} className="ml-auto w-8 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)]" />
                 )}
               </button>
               {isGroupActive && (
@@ -963,30 +1114,22 @@ function SourceListSection({
               )}
             </div>
             {!isCollapsed && (
-              <div className="pl-7 space-y-0.5">
+              <div className="space-y-px pl-5">
                 {filteredLists.map((sl) => (
-                  <button
+                  <SourceListNavRow
                     key={sl.id}
-                    onClick={() => { setSourceFilter(source.type); setListGroupFilter(null); setListFilter(matchesSourceListFilter(sl, listFilter) ? null : sl.sourceId); }}
-                    className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-xs transition-colors ${
-                      matchesSourceListFilter(sl, listFilter)
-                        ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-medium'
-                        : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    <span className="inline-flex items-center gap-1.5 truncate">
-                      <SourceListIcon connectorType={source.type} list={sl} />
-                      <span className="truncate">{sl.name}</span>
-                      {sl.selectedForSync === false && (
-                        <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-400">
-                          Not syncing
-                        </span>
-                      )}
-                    </span>
-                    {sl.taskCount > 0 && (
-                      <AnimatedCounter value={sl.taskCount} className="text-xs text-[var(--text-muted)] tabular-nums shrink-0" />
-                    )}
-                  </button>
+                    source={source}
+                    sourceList={sl}
+                    active={matchesSourceListFilter(sl, listFilter)}
+                    pinned={pinnedIds.has(`list:${sl.connectorInstanceId}:${sl.sourceId}`)}
+                    onSelect={() => {
+                      recordRecentTaskShortcut(taskShortcutFromList(source, sl));
+                      setSourceFilter(source.type);
+                      setListGroupFilter(null);
+                      setListFilter(matchesSourceListFilter(sl, listFilter) ? null : sl.sourceId);
+                    }}
+                    onTogglePinned={togglePinned}
+                  />
                 ))}
               </div>
             )}
@@ -1000,46 +1143,43 @@ function SourceListSection({
         if (filteredUngrouped.length === 0) return null;
         const isCollapsed = listSearch ? false : (groups.length > 0 && collapsedListGroups.has('__ungrouped__'));
         return (
-          <div className="space-y-0.5">
+          <div className="space-y-px">
             {groups.length > 0 && (
               <button
+                type="button"
                 onClick={() => {
                   const next = new Set(collapsedListGroups);
-                  isCollapsed ? next.delete('__ungrouped__') : next.add('__ungrouped__');
+                  if (isCollapsed) {
+                    next.delete('__ungrouped__');
+                  } else {
+                    next.add('__ungrouped__');
+                  }
                   setCollapsedListGroups(next);
                 }}
-                className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors border-b border-[var(--border-subtle)]"
+                className="flex w-full items-center gap-1 border-b border-[var(--border-subtle)] px-1 py-1 text-xs font-medium text-[var(--text-primary)] transition-colors hover:text-[var(--accent)]"
+                aria-expanded={!isCollapsed}
               >
                 <ChevronRight size={10} className={`shrink-0 transition-transform duration-150 ${isCollapsed ? '' : 'rotate-90'}`} />
-                <span className="text-xs leading-none"><List size={11} className="inline" /></span>
                 <span>Other</span>
               </button>
             )}
             {!isCollapsed && (
-              <div className={`${groups.length > 0 ? 'pl-7' : ''} space-y-0.5`}>
+              <div className={`${groups.length > 0 ? 'pl-5' : ''} space-y-px`}>
                 {filteredUngrouped.map((sl) => (
-                  <button
+                  <SourceListNavRow
                     key={sl.id}
-                    onClick={() => { setSourceFilter(source.type); setListGroupFilter(null); setListFilter(matchesSourceListFilter(sl, listFilter) ? null : sl.sourceId); }}
-                    className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-xs transition-colors ${
-                      matchesSourceListFilter(sl, listFilter)
-                        ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-medium'
-                        : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    <span className="inline-flex items-center gap-1.5 truncate">
-                      <SourceListIcon connectorType={source.type} list={sl} />
-                      <span className="truncate">{sl.name}</span>
-                      {sl.selectedForSync === false && (
-                        <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-400">
-                          Not syncing
-                        </span>
-                      )}
-                    </span>
-                    {sl.taskCount > 0 && (
-                      <AnimatedCounter value={sl.taskCount} className="text-xs text-[var(--text-muted)] tabular-nums shrink-0" />
-                    )}
-                  </button>
+                    source={source}
+                    sourceList={sl}
+                    active={matchesSourceListFilter(sl, listFilter)}
+                    pinned={pinnedIds.has(`list:${sl.connectorInstanceId}:${sl.sourceId}`)}
+                    onSelect={() => {
+                      recordRecentTaskShortcut(taskShortcutFromList(source, sl));
+                      setSourceFilter(source.type);
+                      setListGroupFilter(null);
+                      setListFilter(matchesSourceListFilter(sl, listFilter) ? null : sl.sourceId);
+                    }}
+                    onTogglePinned={togglePinned}
+                  />
                 ))}
               </div>
             )}

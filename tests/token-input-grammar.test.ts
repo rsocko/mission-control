@@ -54,6 +54,27 @@ describe('Quick Add token highlighting', () => {
     expect(standalone).toContainEqual(expect.objectContaining({ type: 'project' }));
   });
 
+  it.each([
+    'Investigate issue#123',
+    'Document C# API behavior',
+    'Review https://example.com/page#section',
+  ])('does not highlight embedded hash text as a tag: %s', (input) => {
+    expect(findTokens(input, { naturalLanguageDates: true })
+      .some(({ type }) => type === 'tag')).toBe(false);
+  });
+
+  it.each(['30m', '1.5h', '~45m'])('highlights duration token %s', (duration) => {
+    expect(findTokens(`Review proposal ${duration}`, { naturalLanguageDates: true }))
+      .toContainEqual(expect.objectContaining({ type: 'duration' }));
+  });
+
+  it('does not highlight escaped or embedded raw durations', () => {
+    const tokens = findTokens('Keep \\30m and version30m literal', {
+      naturalLanguageDates: true,
+    });
+    expect(tokens.some(({ type }) => type === 'duration')).toBe(false);
+  });
+
   it('does not highlight metadata disabled for subtask entry', () => {
     const tokens = findTokens('Child #ops daily ^3', {
       naturalLanguageDates: true,

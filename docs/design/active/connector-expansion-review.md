@@ -161,7 +161,13 @@ and category or merchant variance insights. They are not yet shipped.
 
 ### 5. 🔴 Model Catalog — NOT STARTED
 
-No connector exists in Mission Control. See [§ Model Catalog Gap Analysis](#model-catalog--custom-rest-connector-gap-analysis) below.
+No connector exists in Mission Control.
+
+The original gap analysis below predates the discovery that Catalog Project and
+current Bambuddy Project now overlap substantially. Its Queue-to-task and
+Custom-REST-first recommendations are retained as historical analysis, but they
+must not be implemented before the Project ownership decision in
+[Printing Project and Mission Control Integration](../proposed/printing-project-mission-control-integration.md).
 
 ### 6. ⚠️ PROJECT Import/Sync — PARTIALLY DESIGNED
 
@@ -193,6 +199,13 @@ No connector exists in Mission Control. See [§ Model Catalog Gap Analysis](#mod
 ---
 
 ## Model Catalog ↔ Custom REST Connector: Gap Analysis
+
+> **Superseded as an implementation recommendation.** This section establishes
+> technical compatibility only. Unified Queue entries are printing-domain batch
+> records, not generic human tasks, and direct two-way task mapping would create
+> conflicting lifecycle authority. See
+> [Printing Project and Mission Control Integration](../proposed/printing-project-mission-control-integration.md)
+> for the current architecture gate and delivery sequence.
 
 ### Source System
 
@@ -372,7 +385,13 @@ With gap #1 (`updated_since`) addressed, this Custom REST config works immediate
 | **Dedicated `model-catalog` connector** | Rich entity mapping; print-specific UI (plates, files, estimates); project sync; alerts | More code; needs entity mapping design decisions |
 | **Hybrid: Custom REST now → dedicated later** | Ship fast; learn from real usage; graduate when patterns stabilize | Two integration paths to maintain temporarily |
 
-**Recommendation:** Start with Custom REST + `updated_since` filter to validate the integration. Graduate to a dedicated connector when richer features (plate-level tracking, print-specific kanban columns, project sync) are needed.
+**Historical recommendation:** Start with Custom REST + `updated_since` filter to
+validate transport compatibility.
+
+**Current recommendation:** Do not ship Queue-to-task synchronization until the
+Catalog Project vs Bambuddy Project ADR is accepted. A temporary read-only Custom
+REST experiment may validate transport and authentication, but it is not the
+architecture for task ownership or Project synchronization.
 
 ---
 
@@ -395,9 +414,9 @@ _See also: `docs/design/FUTURE-INTEGRATIONS.md`_
 | # | Decision | Options | Recommendation |
 |---|----------|---------|----------------|
 | 1 | Capabilities enforcement layer | API routes / sync engine / UI / all three | All three (defense in depth) |
-| 2 | Model Catalog entity mapping | Queue → tasks, projects → projects, intake → triage | Start with queue → tasks only |
-| 3 | Model Catalog write-back | Read-only vs two-way sync | Two-way via Custom REST (CRUD endpoints exist) |
+| 2 | Printing Project ownership | Preserve linked Catalog/Bambuddy Projects / Bambuddy canonical / Catalog canonical / converge | Decide through the required cross-repository ADR before connector work |
+| 3 | Model Catalog write-back | Read-only context vs task/lifecycle write-back | Read-only context until ownership and lifecycle authority are accepted |
 | 4 | Project sync direction | MC→GitHub / GitHub→MC / bidirectional | GitHub→MC first (import), bidirectional later |
-| 5 | Model Catalog: connector approach | Dedicated / Custom REST / Hybrid | Hybrid: Custom REST now, dedicated later |
+| 5 | Model Catalog: connector approach | Dedicated / Custom REST / Hybrid | Defer; Custom REST may validate transport only |
 | 6 | Cross-connector project linking | `hubProjectIds` exists — needs UI workflow | Design a project linking dialog |
-| 7 | Model Catalog API additions | `/api/mc/*` projection endpoints | Add `updated_since` + API key first (Priority 1-2) |
+| 7 | Model Catalog API additions | Stable identity, events/cursors, scoped auth, projections | Define after the Project ADR; identity and reconciliation precede projection endpoints |

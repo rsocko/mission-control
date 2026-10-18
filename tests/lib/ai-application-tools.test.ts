@@ -36,6 +36,11 @@ const aiWorkflowMocks = vi.hoisted(() => ({
     source: 'local',
     sourceList: 'Work',
     description: null,
+    paymentCheck: {
+      state: 'posted_match',
+      source: 'Tyrion Bill Matching',
+      candidates: [],
+    },
   }]),
   listAllTags: vi.fn(async () => [{ id: 'tag-1', name: 'Engineering', type: 'hub', color: '#10b981' }]),
   listTaskTags: vi.fn(async () => [{ id: 'tag-1', name: 'Engineering', type: 'hub', color: '#10b981' }]),
@@ -156,6 +161,12 @@ describe('Houston task-tools (clean AI workflow + task-core seams)', () => {
       limit: 5,
     });
     expect(results).toEqual([expect.objectContaining({ id: 'task-1' })]);
+    expect(results[0]).toMatchObject({
+      paymentCheck: {
+        state: 'posted_match',
+        source: 'Tyrion Bill Matching',
+      },
+    });
   });
 
   it('completes a task through the clean task-core write context and mutation', async () => {

@@ -33,6 +33,7 @@ export interface DocAction {
   /** Transitional alias accepted from prerelease OWL builds. */
   review_url?: string | null;
   source_actions?: DocSourceAction[] | null;
+  payment_check?: DocPaymentCheck | null;
   status: 'pending' | 'acknowledged' | 'completed' | 'done' | 'dismissed' | 'snoozed' | 'not_an_action';
   created_at: string;
   document_created_at?: string | null;
@@ -50,6 +51,70 @@ export interface DocSourceAction {
   label: string;
   method: 'POST';
   url: string;
+  revision?: string | number;
+  idempotency_key?: string;
+}
+
+export type DocPaymentCheckState =
+  | 'unchecked'
+  | 'checking'
+  | 'posted_match'
+  | 'pending_match'
+  | 'multiple_matches'
+  | 'no_match'
+  | 'partial_payment'
+  | 'source_unavailable'
+  | 'stale'
+  | 'conflict'
+  | 'possible_double_payment'
+  | 'confirmed';
+
+export interface DocPaymentCandidate {
+  id: string;
+  payee: string;
+  amount: number;
+  currency: string;
+  transaction_date: string;
+  status: 'posted' | 'pending';
+  account_display_name: string;
+  account_last_four: string;
+  confidence: number;
+  score: number;
+  match_reasons: string[];
+  rank?: number | null;
+  score_gap_basis_points?: number | null;
+  receipt_association?: {
+    status?: string | null;
+    label?: string | null;
+    receipt_date?: string | null;
+    amount?: number | null;
+    currency?: string | null;
+  } | null;
+}
+
+export interface DocPaymentCheck {
+  state: DocPaymentCheckState;
+  checked_at?: string | null;
+  fresh_until?: string | null;
+  stale_after?: string | null;
+  source?: string | null;
+  revision?: string | number | null;
+  message?: string | null;
+  candidates?: DocPaymentCandidate[] | null;
+  matches?: DocPaymentCandidate[] | null;
+  match?: DocPaymentCandidate | null;
+  confirmed_at?: string | null;
+  search_context?: {
+    anchor_date?: string | null;
+    window_start?: string | null;
+    window_end?: string | null;
+    amount_tolerance?: number | null;
+    date_tolerance_days?: number | null;
+    source_as_of?: string | null;
+    searched_at?: string | null;
+    eligible_account_count?: number | null;
+    candidate_pool_size?: number | null;
+  } | null;
 }
 
 export interface MissingStatement {
@@ -174,6 +239,7 @@ export function mapActionToTask(
       primaryActionUrl: primaryAction?.url,
       recommendedCta: action.recommended_cta,
       sourceActions: resolveSourceActions(action),
+      paymentCheck: normalizePaymentCheck(action.payment_check),
       owlStatus: action.status,
       owlCreatedAt: action.created_at,
       owlDisposition: action.status === 'dismissed' || action.status === 'not_an_action'
@@ -342,7 +408,144 @@ export function resolveSourceActions(action: DocAction): DocSourceAction[] {
     && sourceAction.method === 'POST'
     && typeof sourceAction.url === 'string'
     && isSafeSourceActionReference(sourceAction.url)
-  ));
+  )).map((sourceAction) => ({
+    id: sourceAction.id.trim(),
+    label: sourceAction.label.trim(),
+    method: 'POST',
+    url: sourceAction.url,
+    ...(typeof sourceAction.revision === 'string' || typeof sourceAction.revision === 'number'
+      ? { revision: sourceAction.revision }
+      : {}),
+    ...(typeof sourceAction.idempotency_key === 'string' && sourceAction.idempotency_key.trim()
+      ? { idempotency_key: sourceAction.idempotency_key.trim() }
+      : {}),
+  }));
+}
+
+function normalizePaymentCheck(value: DocPaymentCheck | null | undefined) {
+  if (!value || !PAYMENT_CHECK_STATES.has(value.state)) return undefined;
+  const candidates = [
+    ...(Array.isArray(value.candidates) ? value.candidates : []),
+    ...(Array.isArray(value.matches) ? value.matches : []),
+    ...(value.match ? [value.match] : []),
+  ]
+    .map(normalizePaymentCandidate)
+    .filter((candidate): candidate is NonNullable<ReturnType<typeof normalizePaymentCandidate>> => !!candidate)
+    .filter((candidate, index, all) => all.findIndex((other) => other.id === candidate.id) === index);
+
+  return {
+    state: value.state,
+    checkedAt: validTimestamp(value.checked_at),
+    freshUntil: validTimestamp(value.fresh_until || value.stale_after),
+    source: typeof value.source === 'string' ? value.source : undefined,
+    revision: typeof value.revision === 'string' || typeof value.revision === 'number'
+      ? value.revision
+      : undefined,
+    message: typeof value.message === 'string' ? value.message : undefined,
+    candidates,
+    confirmedAt: validTimestamp(value.confirmed_at),
+    searchContext: normalizeSearchContext(value.search_context),
+  };
+}
+
+const PAYMENT_CHECK_STATES = new Set<DocPaymentCheckState>([
+  'unchecked',
+  'checking',
+  'posted_match',
+  'pending_match',
+  'multiple_matches',
+  'no_match',
+  'partial_payment',
+  'source_unavailable',
+  'stale',
+  'conflict',
+  'possible_double_payment',
+  'confirmed',
+]);
+
+function normalizePaymentCandidate(value: DocPaymentCandidate) {
+  if (
+    !value
+    || typeof value.id !== 'string'
+    || typeof value.payee !== 'string'
+    || typeof value.amount !== 'number'
+    || !Number.isFinite(value.amount)
+    || typeof value.currency !== 'string'
+    || typeof value.transaction_date !== 'string'
+    || (value.status !== 'posted' && value.status !== 'pending')
+    || typeof value.account_display_name !== 'string'
+    || typeof value.account_last_four !== 'string'
+    || typeof value.confidence !== 'number'
+    || !Number.isFinite(value.confidence)
+    || typeof value.score !== 'number'
+    || !Number.isFinite(value.score)
+    || !Array.isArray(value.match_reasons)
+  ) {
+    return null;
+  }
+  return {
+    id: value.id,
+    payee: value.payee,
+    amount: value.amount,
+    currency: value.currency.toUpperCase(),
+    transactionDate: value.transaction_date,
+    status: value.status,
+    accountDisplayName: value.account_display_name,
+    accountLastFour: value.account_last_four.replace(/\D/g, '').slice(-4),
+    confidence: normalizeScore(value.confidence),
+    score: normalizeScore(value.score),
+    matchReasons: value.match_reasons.filter((reason): reason is string => typeof reason === 'string'),
+    rank: positiveInteger(value.rank),
+    scoreGapBasisPoints: nonNegativeNumber(value.score_gap_basis_points),
+    receiptAssociation: normalizeReceiptAssociation(value.receipt_association),
+  };
+}
+
+function normalizeReceiptAssociation(value: DocPaymentCandidate['receipt_association']) {
+  if (!value || typeof value !== 'object') return undefined;
+  const amount = nonNegativeNumber(value.amount);
+  return {
+    status: typeof value.status === 'string' ? value.status : undefined,
+    label: typeof value.label === 'string' ? value.label : undefined,
+    receiptDate: validDate(value.receipt_date),
+    amount,
+    currency: typeof value.currency === 'string' ? value.currency.toUpperCase() : undefined,
+  };
+}
+
+function normalizeSearchContext(value: DocPaymentCheck['search_context']) {
+  if (!value || typeof value !== 'object') return undefined;
+  return {
+    anchorDate: validDate(value.anchor_date),
+    windowStart: validDate(value.window_start),
+    windowEnd: validDate(value.window_end),
+    amountTolerance: nonNegativeNumber(value.amount_tolerance),
+    dateToleranceDays: nonNegativeNumber(value.date_tolerance_days),
+    sourceAsOf: validTimestamp(value.source_as_of),
+    searchedAt: validTimestamp(value.searched_at),
+    eligibleAccountCount: nonNegativeNumber(value.eligible_account_count),
+    candidatePoolSize: nonNegativeNumber(value.candidate_pool_size),
+  };
+}
+
+function normalizeScore(value: number): number {
+  return Math.max(0, Math.min(1, value > 1 ? value / 100 : value));
+}
+
+function validTimestamp(value: string | null | undefined): string | undefined {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : undefined;
+}
+
+function validDate(value: string | null | undefined): string | undefined {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value) ? value : undefined;
+}
+
+function nonNegativeNumber(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function positiveInteger(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function isSafeSourceActionReference(value: string): boolean {

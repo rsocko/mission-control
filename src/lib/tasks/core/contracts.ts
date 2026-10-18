@@ -405,6 +405,10 @@ export interface TaskQuickSortSuggestionInputs {
   readonly taskTags: Array<{
     readonly taskId: string;
     readonly tagId: string;
+    readonly title: string;
+    readonly connectorInstanceId: string;
+    readonly sourceListId: string | null;
+    readonly updatedAt: string;
   }>;
   readonly projectAffinities: Array<{
     readonly taskId: string;
@@ -641,6 +645,7 @@ export interface TaskDetailSubtask {
 export interface TaskDetailResult {
   readonly task: TaskCoreTaskRow;
   readonly tagIds: string[];
+  readonly tags: Array<Pick<TaskCollectionTag, 'id' | 'name' | 'slug' | 'color'>>;
   readonly projectIds: string[];
   readonly subtasks: TaskDetailSubtask[];
   readonly subtaskOrderRevision: number;

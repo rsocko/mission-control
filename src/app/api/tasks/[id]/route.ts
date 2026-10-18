@@ -1453,6 +1453,7 @@ export async function GET(
             }
           : getRecurrenceControlState(parsedRecurrence.rule, getTimezone()),
         tagIds: detail.tagIds,
+        tags: detail.tags,
         projectIds: detail.projectIds,
         subtasks: detail.subtasks,
         subtaskOrderRevision: detail.subtaskOrderRevision,

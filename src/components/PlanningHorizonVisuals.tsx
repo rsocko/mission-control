@@ -3,8 +3,15 @@
 import { Telescope } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from '@/components/ui/select';
+import {
   PLANNING_HORIZON_CODES,
   PLANNING_HORIZON_LABELS,
+  PLANNING_HORIZONS,
   PLANNING_HORIZON_VISUALS,
 } from '@/lib/tasks/planning-horizon';
 import { cn } from '@/lib/utils';
@@ -54,5 +61,50 @@ export function PlanningHorizonOption({
         {value ? PLANNING_HORIZON_LABELS[value] : 'Not set'}
       </span>
     </span>
+  );
+}
+
+export function PlanningHorizonSelect({
+  value,
+  onChange,
+  disabled = false,
+  ariaLabel = 'Horizon',
+  title,
+  triggerClassName,
+  variant = 'default',
+}: {
+  value: PlanningHorizon | null;
+  onChange: (value: PlanningHorizon | null) => void;
+  disabled?: boolean;
+  ariaLabel?: string;
+  title?: string;
+  triggerClassName?: string;
+  variant?: 'default' | 'inline';
+}) {
+  return (
+    <Select
+      value={value ?? 'none'}
+      onValueChange={(nextValue) => onChange(
+        nextValue === 'none' ? null : nextValue as PlanningHorizon,
+      )}
+      disabled={disabled}
+    >
+      <SelectTrigger
+        aria-label={ariaLabel}
+        title={title}
+        variant={variant}
+        className={triggerClassName}
+      >
+        <PlanningHorizonOption value={value} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none"><PlanningHorizonOption value={null} /></SelectItem>
+        {PLANNING_HORIZONS.map((option) => (
+          <SelectItem key={option} value={option}>
+            <PlanningHorizonOption value={option} />
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

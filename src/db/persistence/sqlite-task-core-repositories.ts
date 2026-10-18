@@ -1275,7 +1275,17 @@ class SqliteTaskReadRepository implements TaskReadRepository {
       this.database.select({
         taskId: taskTags.taskId,
         tagId: taskTags.tagId,
-      }).from(taskTags),
+        title: tasks.title,
+        connectorInstanceId: tasks.connectorInstanceId,
+        sourceListId: tasks.sourceListId,
+        updatedAt: tasks.updatedAt,
+      }).from(taskTags)
+        .innerJoin(tasks, eq(tasks.id, taskTags.taskId))
+        .where(and(
+          inArray(tasks.connectorInstanceId, connectorInstanceIds),
+          isNull(tasks.deletedAt),
+          notInArray(tasks.status, [...CLOSED_TASK_STATUSES]),
+        )),
       this.database.select({
         taskId: tasks.id,
         connectorInstanceId: tasks.connectorInstanceId,
@@ -1310,7 +1320,10 @@ class SqliteTaskReadRepository implements TaskReadRepository {
       })),
       sourceRankings: rankingRows,
       tags: tagRows,
-      taskTags: assignmentRows,
+      taskTags: assignmentRows.map((row) => ({
+        ...row,
+        sourceListId: row.sourceListId ?? null,
+      })),
       projectAffinities: projectAffinityRows.map((row) => ({
         ...row,
         sourceListId: row.sourceListId ?? null,
@@ -2606,7 +2619,13 @@ class SqliteTaskDetailReadRepository implements TaskDetailReadRepository {
       .from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     if (!task) return null;
     const [tagRows, projectRows, subtasks, scheduleRows, myDayRows] = await Promise.all([
-      this.database.select({ tagId: taskTags.tagId }).from(taskTags)
+      this.database.select({
+        id: tags.id,
+        name: tags.name,
+        slug: tags.slug,
+        color: tags.color,
+      }).from(taskTags)
+        .innerJoin(tags, eq(taskTags.tagId, tags.id))
         .where(eq(taskTags.taskId, taskId)).orderBy(asc(taskTags.tagId)),
       this.database.select({ projectId: taskProjects.projectId }).from(taskProjects)
         .where(eq(taskProjects.taskId, taskId)).orderBy(asc(taskProjects.projectId)),
@@ -2636,7 +2655,8 @@ class SqliteTaskDetailReadRepository implements TaskDetailReadRepository {
     ]);
     return {
       task: toMoveTaskRow(task),
-      tagIds: tagRows.map((row) => row.tagId),
+      tagIds: tagRows.map((row) => row.id),
+      tags: tagRows.map((row) => ({ ...row, color: row.color ?? null })),
       projectIds: projectRows.map((row) => row.projectId),
       subtasks,
       subtaskOrderRevision: task.subtaskOrderRevision ?? 0,

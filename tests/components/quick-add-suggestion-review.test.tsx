@@ -92,14 +92,18 @@ describe('Quick Add suggestion review', () => {
       .toHaveAttribute('aria-checked', 'false');
 
     fireEvent.click(screen.getByLabelText('Suggested priority'));
-    fireEvent.click(screen.getByRole('option', { name: 'P3 · Low' }));
+    const lowPriorityOption = screen.getByRole('option', { name: 'P3 · Low' });
+    expect(lowPriorityOption).toHaveClass('text-sky-400');
+    fireEvent.click(lowPriorityOption);
     expect(screen.getByRole('checkbox', { name: 'Apply priority suggestion' }))
       .toHaveAttribute('aria-checked', 'true');
 
     expect(screen.getByRole('checkbox', { name: 'Apply effort suggestion' }))
       .toHaveAttribute('aria-checked', 'false');
     fireEvent.click(screen.getByLabelText('Suggested effort'));
-    fireEvent.click(screen.getByRole('option', { name: 'L' }));
+    const largeEffortOption = screen.getByRole('option', { name: 'L' });
+    expect(largeEffortOption.querySelector('.bg-orange-400')).toBeInTheDocument();
+    fireEvent.click(largeEffortOption);
     expect(screen.getByRole('checkbox', { name: 'Apply effort suggestion' }))
       .toHaveAttribute('aria-checked', 'true');
 
@@ -135,7 +139,11 @@ describe('Quick Add suggestion review', () => {
     );
 
     expect(screen.getByLabelText('Phase')).toHaveTextContent('Launch readiness');
-    fireEvent.click(screen.getByLabelText('Project'));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Project' }));
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search projects' }), {
+      target: { value: 'oth' },
+    });
+    expect(screen.queryByRole('option', { name: 'Launch' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('option', { name: 'Other' }));
     expect(screen.getByRole('checkbox', { name: 'Apply project suggestion' }))
       .toHaveAttribute('aria-checked', 'true');

@@ -40,6 +40,7 @@ async function fetchPlanningTasks(projectId: string | null | undefined, requeste
 }
 
 export async function POST(request: Request) {
+  let route: Awaited<ReturnType<typeof getAsyncAIModel>> | undefined;
   try {
     const body = await request.json().catch(() => ({}));
     const parsedBody = requestSchema.safeParse(body);
@@ -74,7 +75,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'AI provider is not configured' }, { status: 503 });
     }
 
-    const route = await getAsyncAIModel('project-phase-suggestion', {
+    route = await getAsyncAIModel('project-phase-suggestion', {
       sources: projectTasks.map((task) => task.connectorType),
     });
     const today = getLocalToday();
@@ -156,6 +157,19 @@ Return JSON only.`,
       routing: getAsyncAIRouteOutcome(route, result.response),
     });
   } catch (error) {
-    return ApiErrors.internal('Failed to generate phase suggestion', error);
+    return ApiErrors.internal(
+      'Failed to generate phase suggestion',
+      error,
+      route?.context.correlationId,
+      route
+        ? {
+            featureId: route.context.featureId,
+            correlationId: route.context.correlationId,
+            allowedRoutes: route.context.allowedRoutes,
+            provider: route.configured.provider,
+            model: route.configured.model,
+          }
+        : undefined,
+    );
   }
 }

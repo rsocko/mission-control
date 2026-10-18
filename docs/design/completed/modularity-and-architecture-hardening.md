@@ -1,8 +1,9 @@
 ---
 title: "Modularity and Architecture Hardening"
-status: active
+status: completed
 created: 2026-08-06
-last_reviewed: 2026-08-19
+last_reviewed: 2026-10-17
+completed: 2026-10-17
 category: architecture
 issues:
   - "rsocko/mission-control#1217 - program epic"
@@ -33,9 +34,11 @@ and organized in the Mission Control project **Modularity & Architecture
 Hardening** under the **Mission Control** category.
 
 The issue numbers in this document are the canonical numbers after the
-repository realignment. As of 2026-08-19, every implementation item is closed
-except #1224. That item targets the removed `runtime/copilot-adapter` package
-and requires an explicit descope decision before the epic can close.
+repository realignment. The program closed on 2026-10-17. Every implementation
+item was completed except #1224, which was explicitly descoped because its
+target, the removed `runtime/copilot-adapter` package, no longer exists.
+Security-sensitive restoration of that boundary is tracked separately by
+[#1344](https://github.com/rsocko/mission-control/issues/1344).
 
 ## Context
 
@@ -166,7 +169,8 @@ that the completed extraction issues failed:
 - `ProjectPhasesTab.tsx` has grown as Plan features were added and should be
   watched for another workflow extraction; and
 - automated import-boundary and module-growth checks would reduce regression
-  risk.
+  risk. Import-boundary enforcement is tracked by
+  [#1621](https://github.com/rsocko/mission-control/issues/1621).
 
 ## Delivery plan
 
@@ -303,7 +307,7 @@ Before extracting a high-risk workflow, capture its observable behavior:
 
 ## Completion measures
 
-The program is complete when:
+The program closed after the closure review confirmed:
 
 - Project, task move, and hierarchy mutations each have one canonical workflow;
 - target pages and routes are composition roots rather than workflow owners;
@@ -311,7 +315,8 @@ The program is complete when:
 - implementation barrels contain only exports;
 - duplicated Settings and extension workflows have one implementation;
 - graph layout algorithms are DOM-independent;
-- same-named incompatible domain types no longer coexist; and
+- canonical type ownership is established for the targeted workflows, with
+  remaining same-named `SourceList` view models recorded as follow-up debt; and
 - all tracked GitHub issues are complete or explicitly descoped in the epic.
 
 Line-count reduction is an expected consequence, not the acceptance metric.

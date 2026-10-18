@@ -394,6 +394,39 @@ instance, validates the allowlisted payload, writes OWL first, and updates local
 status, snooze, priority, and metadata only after OWL succeeds. Upstream errors
 are returned to the UI and are not recorded as local success.
 
+For `pay` actions, OWL may add a `payment_check` projection and two task-scoped
+source actions. Mission Control recognizes only `check_payment` at
+`POST /api/action-queue/actions/{actionId}/check-payment` and
+`confirm_payment_and_complete` at
+`POST /api/action-queue/actions/{actionId}/confirm-payment-and-complete`.
+Mission Control echoes OWL's opaque revision and idempotency values, rejects a
+route/action mismatch, and treats a revision conflict as a refresh requirement.
+It never queries or mutates Tyrion or Monarch directly.
+
+`payment_check` carries the decision state, source revision, check/freshness
+timestamps, and synthetic-safe candidate projections: payee, actual amount and
+ISO currency, transaction date, posted/pending state, account display name and
+masked last four, confidence, score, and match reasons. Supported states are
+`unchecked`, `checking`, `posted_match`, `pending_match`, `multiple_matches`,
+`no_match`, `partial_payment`, `source_unavailable`, `stale`, `conflict`,
+`possible_double_payment`, and `confirmed`. A posted match still requires an
+explicit user confirmation. Pending and ambiguous evidence cannot expose the
+confirm operation. Confirmation and source completion are one atomic OWL
+operation; normal manual task completion remains available through the existing
+lifecycle behavior.
+
+OWL may also project Tyrion-owned ranking and search context (`rank`, score gap,
+anchor/window, tolerances, source-as-of and searched-at freshness, eligible
+account count, and candidate-pool size). Receipt association is displayed only
+as supporting evidence and never substitutes for Tyrion Bill Matching or enables
+confirmation by itself.
+
+Houston task search receives a bounded read-only projection of `payment_check`
+so payment questions can use the same OWL/Tyrion evidence shown in the task
+surface. The projection excludes source actions, revisions, idempotency keys,
+candidate IDs, and receipt internals; it includes at most three candidates and
+five match reasons per candidate.
+
 Scout does not accept direct task writes; Mission
 Control persists Scout lifecycle locally and Scout observes it through the
 status-change feed.

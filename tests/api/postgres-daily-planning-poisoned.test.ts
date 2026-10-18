@@ -152,6 +152,7 @@ const dailyPlanning = {
           metadata: {},
           localDisposition: 'active',
         }],
+        recentlyDue: [],
         overdue: [],
         dueToday: [],
         dueThisWeek: [],

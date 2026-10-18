@@ -35,6 +35,7 @@ export function useMyDayData(todayISO: string) {
         planningSignals: (sugg?.planningSignals as MyDayItem[]) || [],
         planningNext: (sugg?.planningNext as MyDayItem[]) || [],
         yesterday: (sugg?.yesterday as MyDayItem[]) || [],
+        recentlyDue: (sugg?.recentlyDue as MyDayItem[]) || [],
         overdue: (sugg?.overdue as MyDayItem[]) || [],
         dueToday: (sugg?.dueToday as MyDayItem[]) || [],
         dueThisWeek: (sugg?.dueThisWeek as MyDayItem[]) || [],

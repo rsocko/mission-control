@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
-  AlertCircle, ArrowUpDown, Brain, Calendar, CalendarClock,
+  AlertCircle, ArrowUpDown, Calendar, CalendarClock,
   ChevronDown, ChevronRight, ChevronUp,
   Flame, History, Plus, RotateCcw, Sparkles,
   TimerReset,
 } from 'lucide-react';
 import { ConnectorIcon } from './SortableTaskRow';
+import { SuggestedForToday } from './SuggestedForToday';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
-import { REPLANNING_SUGGESTION, type SuggestionGroups, type SuggestionTask } from './types';
+import { RECENTLY_DUE_SUGGESTION, REPLANNING_SUGGESTION, type SuggestionGroups, type SuggestionTask } from './types';
 import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 
@@ -28,6 +29,7 @@ interface GroupConfig {
   icon: React.ReactNode;
   color: string;
   sortable?: boolean;
+  defaultSortDirection?: 'asc' | 'desc';
   description?: string;
   learnMoreHref?: string;
 }
@@ -43,11 +45,25 @@ const GROUPS: GroupConfig[] = [
   },
   { key: 'planningNext', title: 'Planned for Next', icon: <TimerReset size={16} />, color: 'emerald' },
   { key: 'yesterday', title: "Yesterday's Incomplete", icon: <History size={16} />, color: 'amber' },
-  { key: 'overdue', title: 'Overdue', icon: <AlertCircle size={16} />, color: 'red', sortable: true },
+  {
+    key: 'recentlyDue',
+    title: RECENTLY_DUE_SUGGESTION.title,
+    icon: <CalendarClock size={16} />,
+    color: 'amber',
+    sortable: true,
+    description: RECENTLY_DUE_SUGGESTION.description,
+  },
+  {
+    key: 'overdue',
+    title: 'Overdue',
+    icon: <AlertCircle size={16} />,
+    color: 'red',
+    sortable: true,
+    defaultSortDirection: 'desc',
+  },
   { key: 'dueToday', title: 'Due Today', icon: <CalendarClock size={16} />, color: 'blue' },
   { key: 'dueThisWeek', title: NEXT_7_DAYS_LABEL, icon: <Calendar size={16} />, color: 'cyan', sortable: true },
   { key: 'highPriority', title: 'High Priority', icon: <Flame size={16} />, color: 'orange' },
-  { key: 'aiRecommended', title: 'AI Recommended', icon: <Brain size={16} />, color: 'purple' },
   { key: 'recentlyAdded', title: 'Recently Added', icon: <Plus size={16} />, color: 'emerald' },
   { key: 'carriedForward', title: 'Carried Forward', icon: <RotateCcw size={16} />, color: 'rose' },
   { key: 'repeatedlyRescheduled', title: 'Repeatedly Rescheduled', icon: <CalendarClock size={16} />, color: 'amber' },
@@ -76,67 +92,89 @@ export function MobileSuggestions({ suggestions, onAddToDay, onSelectTask, initi
   const [expandedGroup, setExpandedGroup] = useState<keyof SuggestionGroups | null>(null);
   const prefersReducedMotion = useReducedMotion();
 
-  const totalSuggestions = Object.values(suggestions).reduce((sum, group) => sum + group.length, 0);
+  const totalSuggestions = GROUPS.reduce((sum, group) => sum + suggestions[group.key].length, 0);
+  const hasSuggestedTasks = suggestions.aiRecommended.length > 0;
 
   const handleGroupToggle = useCallback((key: keyof SuggestionGroups) => {
     setExpandedGroup((prev) => (prev === key ? null : key));
   }, []);
 
-  if (totalSuggestions === 0) return null;
+  if (totalSuggestions === 0 && !hasSuggestedTasks) return null;
 
   return (
-    <div className="md:hidden border-t border-[var(--border)] mt-4">
-      <button
-        onClick={() => setSectionExpanded(!sectionExpanded)}
-        className="w-full flex items-center justify-between px-4 py-3 active:bg-[var(--surface-0)] transition-colors"
-        aria-expanded={sectionExpanded}
-        aria-label={`Suggestions (${totalSuggestions} available)`}
-      >
-        <span className="flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
-          <Sparkles size={14} className="text-purple-400" />
-          Suggestions
-          <span className="text-xs text-[var(--text-muted)] bg-[var(--surface-2)] px-1.5 py-0.5 rounded-full">
-            {totalSuggestions}
-          </span>
-        </span>
-        {sectionExpanded ? <ChevronUp size={16} className="text-[var(--text-muted)]" /> : <ChevronDown size={16} className="text-[var(--text-muted)]" />}
-      </button>
+    <div className="md:hidden mt-4">
+      <SuggestedForToday
+        tasks={suggestions.aiRecommended}
+        onAdd={onAddToDay}
+        onSelect={onSelectTask}
+        className="mx-4 mb-4"
+      />
 
-      <AnimatePresence>
-        {sectionExpanded && (
-          <motion.div
-            initial={prefersReducedMotion ? undefined : { height: 0, opacity: 0 }}
-            animate={prefersReducedMotion ? undefined : { height: 'auto', opacity: 1 }}
-            exit={prefersReducedMotion ? undefined : { height: 0, opacity: 0 }}
-            transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.2 }}
-            className="overflow-hidden"
+      {totalSuggestions > 0 && (
+        <div className="border-t border-[var(--border)]">
+          <button
+            onClick={() => setSectionExpanded(!sectionExpanded)}
+            className="w-full flex items-center justify-between px-4 py-3 active:bg-[var(--surface-0)] transition-colors"
+            aria-expanded={sectionExpanded}
+            aria-label={`Suggestions (${totalSuggestions} available)`}
           >
-            <div className="px-4 pb-4 space-y-2">
-              {GROUPS.map(({ key, title, icon, color, sortable, description, learnMoreHref }) => {
-                const tasks = suggestions[key] ?? [];
-                if (tasks.length === 0) return null;
-                return (
-                  <MobileSuggestionAccordion
-                    key={key}
-                    groupKey={key}
-                    title={title}
-                    icon={icon}
-                    color={color}
-                    tasks={tasks}
-                    sortable={sortable}
-                    description={description}
-                    learnMoreHref={learnMoreHref}
-                    expanded={expandedGroup === key}
-                    onToggle={handleGroupToggle}
-                    onAdd={onAddToDay}
-                    onSelect={onSelectTask}
-                  />
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <span className="flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
+              <Sparkles size={14} className="text-purple-400" />
+              Suggestions
+              <span className="text-xs text-[var(--text-muted)] bg-[var(--surface-2)] px-1.5 py-0.5 rounded-full">
+                {totalSuggestions}
+              </span>
+            </span>
+            {sectionExpanded ? <ChevronUp size={16} className="text-[var(--text-muted)]" /> : <ChevronDown size={16} className="text-[var(--text-muted)]" />}
+          </button>
+
+          <AnimatePresence>
+            {sectionExpanded && (
+              <motion.div
+                initial={prefersReducedMotion ? undefined : { height: 0, opacity: 0 }}
+                animate={prefersReducedMotion ? undefined : { height: 'auto', opacity: 1 }}
+                exit={prefersReducedMotion ? undefined : { height: 0, opacity: 0 }}
+                transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="px-4 pb-4 space-y-2">
+                  {GROUPS.map(({
+                    key,
+                    title,
+                    icon,
+                    color,
+                    sortable,
+                    defaultSortDirection,
+                    description,
+                    learnMoreHref,
+                  }) => {
+                    const tasks = suggestions[key] ?? [];
+                    if (tasks.length === 0) return null;
+                    return (
+                      <MobileSuggestionAccordion
+                        key={key}
+                        groupKey={key}
+                        title={title}
+                        icon={icon}
+                        color={color}
+                        tasks={tasks}
+                        sortable={sortable}
+                        defaultSortDirection={defaultSortDirection}
+                        description={description}
+                        learnMoreHref={learnMoreHref}
+                        expanded={expandedGroup === key}
+                        onToggle={handleGroupToggle}
+                        onAdd={onAddToDay}
+                        onSelect={onSelectTask}
+                      />
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
     </div>
   );
 }
@@ -148,6 +186,7 @@ function MobileSuggestionAccordion({
   color,
   tasks,
   sortable,
+  defaultSortDirection = 'asc',
   description,
   learnMoreHref,
   expanded,
@@ -161,6 +200,7 @@ function MobileSuggestionAccordion({
   color: string;
   tasks: SuggestionTask[];
   sortable?: boolean;
+  defaultSortDirection?: 'asc' | 'desc';
   description?: string;
   learnMoreHref?: string;
   expanded: boolean;
@@ -170,7 +210,7 @@ function MobileSuggestionAccordion({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [pageIndex, setPageIndex] = useState(0);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(defaultSortDirection);
   const styles = COLOR_STYLES[color] || COLOR_STYLES.blue;
 
   const sortedTasks = useMemo(() => {

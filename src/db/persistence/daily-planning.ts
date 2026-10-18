@@ -323,6 +323,7 @@ export interface MyDaySuggestionGroups {
   planningSignals: MyDaySignalledSuggestionRecord[];
   planningNext: MyDaySuggestionRecord[];
   yesterday: MyDaySuggestionRecord[];
+  recentlyDue: MyDaySuggestionRecord[];
   overdue: MyDaySuggestionRecord[];
   dueToday: MyDaySuggestionRecord[];
   dueThisWeek: MyDaySuggestionRecord[];
@@ -336,6 +337,8 @@ export interface MyDaySuggestionGroups {
 export interface MyDayDayViewQuery {
   date: string;
   yesterday: string;
+  /** Inclusive lower bound of the recently-due recovery window. */
+  recentlyDueSince: string;
   /** Inclusive upper bound of the "due this week" group. */
   dueThrough: string;
   /** Lower bound for the recently-updated and recently-created groups. */

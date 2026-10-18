@@ -166,7 +166,10 @@ describe('View in Graph collection surfaces', () => {
         loading={false}
         completingIds={new Set()}
         suggestions={{
+          planningSignals: [],
+          planningNext: [],
           yesterday: [],
+          recentlyDue: [],
           overdue: [],
           dueToday: [],
           dueThisWeek: [],
@@ -174,6 +177,7 @@ describe('View in Graph collection surfaces', () => {
           aiRecommended: [],
           recentlyAdded: [],
           carriedForward: [],
+          repeatedlyRescheduled: [],
         }}
         onCompleteTask={vi.fn()}
         onRemoveFromDay={vi.fn()}

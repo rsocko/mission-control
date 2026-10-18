@@ -817,6 +817,7 @@ export function createPostgresDailyPlanningPersistence(
           signalledTasks,
           carriedForward,
           yesterday,
+          recentlyDue,
           overdue,
           dueToday,
           dueThisWeek,
@@ -836,6 +837,12 @@ export function createPostgresDailyPlanningPersistence(
             ORDER BY m."order", m.id
             LIMIT $2
           `, [input.yesterday, limit], excluded),
+          listSuggestions(`
+            SELECT ${SUGGESTION_COLUMNS} FROM tasks t
+            WHERE t.due_date >= $1 AND t.due_date < $2 AND ${openTopVisible}
+            ORDER BY t.due_date DESC, t.id
+            LIMIT $3
+          `, [input.recentlyDueSince, input.date, limit], excluded),
           listSuggestions(`
             SELECT ${SUGGESTION_COLUMNS} FROM tasks t
             WHERE t.due_date < $1 AND t.status = 'todo' AND ${topLevelTask('t')}
@@ -870,10 +877,31 @@ export function createPostgresDailyPlanningPersistence(
           `, [limit], excluded),
           listSuggestions(`
             SELECT ${SUGGESTION_COLUMNS} FROM tasks t
-            WHERE t.updated_at >= $1 AND ${openTopVisible}
-            ORDER BY t.id
-            LIMIT $2
-          `, [input.activitySince, limit], excluded),
+            WHERE ${openTopVisible}
+              AND (
+                t.due_date <= $1
+                OR t.priority IN ('critical', 'high')
+                OR t.planning_horizon IN ('now', 'next')
+                OR t.push_count >= 2
+              )
+            ORDER BY
+              CASE
+                WHEN t.due_date < $2 THEN 0
+                WHEN t.due_date = $2 THEN 1
+                WHEN t.priority = 'critical' THEN 2
+                WHEN t.priority = 'high' THEN 3
+                WHEN t.planning_horizon = 'now' THEN 4
+                WHEN t.planning_horizon = 'next' THEN 5
+                WHEN t.push_count >= 2 THEN 6
+                ELSE 7
+              END,
+              CASE WHEN t.due_date < $2 THEN t.due_date END DESC,
+              t.due_date,
+              t.push_count DESC,
+              t.updated_at DESC,
+              t.id
+            LIMIT $3
+          `, [input.dueThrough, input.date, limit], excluded),
           listSuggestions(`
             SELECT ${SUGGESTION_COLUMNS} FROM tasks t
             WHERE t.created_at >= $1 AND ${openTopVisible}
@@ -897,6 +925,7 @@ export function createPostgresDailyPlanningPersistence(
             planningSignals,
             carriedForward,
             yesterday,
+            recentlyDue,
             overdue,
             dueToday,
             dueThisWeek,

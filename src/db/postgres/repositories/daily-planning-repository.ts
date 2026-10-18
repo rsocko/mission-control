@@ -687,6 +687,15 @@ export function createPostgresDailyPlanningPersistence(
 
         const taskIds = itemRows.map((row) => row.taskId);
         const excluded = new Set(taskIds);
+        const recommendationExcluded = new Set([
+          ...taskIds,
+          ...(await query<{ taskId: string }>(pool, `
+            SELECT task_id AS "taskId"
+            FROM my_day_suggestion_exclusions
+            WHERE date = $1
+            ORDER BY task_id
+          `, [input.date])).map((row) => row.taskId),
+        ]);
 
         const tagsByTask = new Map<string, MyDayTagRecord[]>();
         const subtasks = new Map<string, { total: number; done: number }>();
@@ -901,7 +910,7 @@ export function createPostgresDailyPlanningPersistence(
               t.updated_at DESC,
               t.id
             LIMIT $3
-          `, [input.dueThrough, input.date, limit], excluded),
+          `, [input.dueThrough, input.date, limit], recommendationExcluded),
           listSuggestions(`
             SELECT ${SUGGESTION_COLUMNS} FROM tasks t
             WHERE t.created_at >= $1 AND ${openTopVisible}
@@ -936,6 +945,32 @@ export function createPostgresDailyPlanningPersistence(
             repeatedlyRescheduled,
           },
         };
+      },
+
+      async listSuggestionExclusions(date) {
+        const rows = await query<{ taskId: string }>(pool, `
+          SELECT task_id AS "taskId"
+          FROM my_day_suggestion_exclusions
+          WHERE date = $1
+          ORDER BY task_id
+        `, [date]);
+        return rows.map((row) => row.taskId);
+      },
+
+      async excludeSuggestion(command) {
+        await query(pool, `
+          INSERT INTO my_day_suggestion_exclusions (id, task_id, date, excluded_at)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (task_id, date)
+          DO UPDATE SET excluded_at = EXCLUDED.excluded_at
+        `, [command.id, command.taskId, command.date, command.excludedAt]);
+      },
+
+      async restoreSuggestion(command) {
+        await query(pool, `
+          DELETE FROM my_day_suggestion_exclusions
+          WHERE task_id = $1 AND date = $2
+        `, [command.taskId, command.date]);
       },
 
       async includeCompletedTasks({ date, dayStart, nextDayStart }): Promise<

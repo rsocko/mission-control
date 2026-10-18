@@ -15,7 +15,11 @@ import { TodayMainPanel } from '@/components/today/TodayMainPanel';
 import { TodayScheduleModal } from '@/components/today/TodayScheduleModal';
 import { TodayUtilityPanels } from '@/components/today/TodayUtilityPanels';
 import { MobileTodayList } from '@/components/today/MobileTodayList';
-import { applyMyDayTaskFieldUpdate } from '@/components/today/apply-task-field-update';
+import {
+  applyMyDayTaskFieldUpdate,
+  applySuggestionTaskFieldUpdate,
+  shouldRefreshMyDayAfterTaskDetailUpdate,
+} from '@/components/today/apply-task-field-update';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MobileSheet } from '@/components/ui/MobileSheet';
 import { useMyDayData } from '@/lib/hooks/useMyDayData';
@@ -138,13 +142,25 @@ export default function TodayPage() {
       setItems((current) => current.map((item) => (
         applyMyDayTaskFieldUpdate(item, selectedTaskId, fields)
       )));
+      setSuggestions((current) => Object.fromEntries(
+        Object.entries(current).map(([group, tasks]) => [
+          group,
+          tasks.map((task: SuggestionTask) => (
+            applySuggestionTaskFieldUpdate(task, selectedTaskId, fields)
+          )),
+        ]),
+      ) as typeof current);
+      setSelectedSuggestionContext((current) => current
+        ? applySuggestionTaskFieldUpdate(current, selectedTaskId, fields)
+        : null);
     }
 
-    // An immediate source sync can race the Microsoft To Do title write-through.
-    if (typeof fields?.title !== 'string') {
+    // Field-bearing callbacks are optimistic and fire before persistence.
+    // The fieldless callback after a successful save performs reconciliation.
+    if (shouldRefreshMyDayAfterTaskDetailUpdate(fields)) {
       void fetchData({ skipSync: true });
     }
-  }, [fetchData, selectedTaskId, setItems]);
+  }, [fetchData, selectedTaskId, setItems, setSuggestions]);
 
   const getSuggestionContextMenuActions = useCallback((task: SuggestionTask): TaskContextMenuActions => {
     const recurrence = extractRecurrenceFromMetadata(task.metadata);
@@ -249,6 +265,7 @@ export default function TodayPage() {
           items.find((item) => item.taskId === taskId),
         )}
         onAddToDay={actions.addToDay}
+        onNotToday={actions.skipSuggestionForToday}
         selectedTaskId={detailSurface === 'mobile' ? selectedTaskId : null}
         onSelectTask={(taskId) => {
           setSelectedSuggestionContext(suggestionTasks.find((task) => task.id === taskId) || null);
@@ -304,6 +321,7 @@ export default function TodayPage() {
           addToProject: addTaskToProject,
           saveTemplateTask: actions.setSaveTemplateTask,
           addToDay: actions.addToDay,
+          skipSuggestionForToday: actions.skipSuggestionForToday,
           moveToSource: (taskId) => {
             setPendingMoveDialogTaskId(taskId);
             setSelectedTaskId(taskId);
@@ -457,6 +475,7 @@ export default function TodayPage() {
           totalMinutes,
           whatsNextLoading: actions.whatsNextLoading,
           onAddToDay: actions.addToDay,
+          onNotToday: actions.skipSuggestionForToday,
           onCompleteTask: (task) => {
             void actions.completeTask(task.id, {
               title: task.title,

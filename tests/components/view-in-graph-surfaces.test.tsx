@@ -184,6 +184,7 @@ describe('View in Graph collection surfaces', () => {
         onSetTaskDueDate={vi.fn()}
         onSetTaskLocalDisposition={vi.fn()}
         onAddToDay={vi.fn()}
+        onNotToday={vi.fn()}
         selectedTaskId={null}
         onSelectTask={vi.fn()}
         fetchData={vi.fn()}

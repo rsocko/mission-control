@@ -473,6 +473,9 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
   getWorkerPersistenceRepositories: async () => ({
     aiWorkflows,
     dailyPlanning: {
+      myDay: {
+        listSuggestionExclusions: async () => [],
+      },
       energy: { getForDate: async () => null },
       energySuggestions: {
         listTasksByIds: async () => {

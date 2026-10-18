@@ -4,6 +4,11 @@ import React from 'react';
 import { TodayRoutinesSection } from '@/components/routines/TodayRoutinesSection';
 import type { TodayRoutine } from '@/components/routines/today-routines';
 
+const { listAnimateRef, useListAnimate } = vi.hoisted(() => ({
+  listAnimateRef: vi.fn(),
+  useListAnimate: vi.fn(() => [vi.fn()]),
+}));
+
 vi.mock('motion/react', async () => {
   const React = await import('react');
   const MockDiv = React.forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<'div'> & {
@@ -44,6 +49,7 @@ vi.mock('@/components/ui/Tooltip', () => ({
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
 vi.mock('@/lib/toast', () => ({ toast: { error: toastError } }));
+vi.mock('@/lib/hooks/useListAnimate', () => ({ useListAnimate }));
 vi.mock('@/lib/motion', () => ({ fadeSlideUp: {}, staggerContainer: {} }));
 vi.mock('@/lib/utils/client-date', () => ({ getLocalToday: () => '2026-07-29' }));
 
@@ -101,6 +107,7 @@ class TestResizeObserver {
 describe('TodayRoutinesSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useListAnimate.mockReturnValue([listAnimateRef]);
     vi.stubGlobal('ResizeObserver', TestResizeObserver);
   });
 
@@ -157,6 +164,20 @@ describe('TodayRoutinesSection', () => {
 
     expect(grid).toHaveClass('sm:grid-cols-2');
     expect(grid).not.toHaveClass('xl:grid-cols-3');
+  });
+
+  it('animates promoted routine reordering after completion', async () => {
+    mockFetch(Array.from({ length: 3 }, (_, index) => routine(index + 1)));
+    render(<TodayRoutinesSection />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark Routine 1 complete' }));
+
+    await waitFor(() => {
+      const names = screen.getAllByText(/^Routine \d$/).map((element) => element.textContent);
+      expect(names).toEqual(['Routine 2', 'Routine 3', 'Routine 1']);
+    });
+    expect(useListAnimate).toHaveBeenCalledWith({ duration: 250 });
+    expect(listAnimateRef.mock.calls.some(([element]) => element instanceof HTMLDivElement)).toBe(true);
   });
 
   it('keeps on-track flexible routines under Other routines', async () => {

@@ -1,4 +1,8 @@
 import type { NotificationRow } from './notification-web';
+import type {
+  BridgeStatementDescriptor,
+  NormalizedLocationEvidence,
+} from '@/lib/finance/transaction-evidence';
 
 export interface FinanceWebKid {
   id: string;
@@ -22,6 +26,11 @@ export interface FinanceWebTransaction {
   amount: number;
   merchantName: string | null;
   businessContext: string | null;
+  statementDescriptors: BridgeStatementDescriptor[];
+  locationEvidence: NormalizedLocationEvidence | null;
+  locationEvidenceInputFingerprint: string | null;
+  locationInferenceEvidence: string | null;
+  locationInferenceErrorCode: string | null;
   merchantLogoUrl: string | null;
   categoryId: string | null;
   originalCategory: string | null;

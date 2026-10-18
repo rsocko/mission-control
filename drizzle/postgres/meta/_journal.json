@@ -253,6 +253,13 @@
       "when": 1792344886200,
       "tag": "0035_clumsy_galactus",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792363586930,
+      "tag": "0036_finance_transaction_location_evidence",
+      "breakpoints": true
     }
   ]
 }

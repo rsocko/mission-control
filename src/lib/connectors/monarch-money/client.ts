@@ -6,8 +6,10 @@ import {
   getTyrionBridgeUrl,
   TyrionBridgeUrlValidationError,
 } from './bridge-url';
+import { statementDescriptorsSchema } from '@/lib/finance/transaction-evidence';
 
-const CONTRACT_VERSION = '1.0';
+const SUPPORTED_CONTRACT_VERSIONS = ['1.0', '1.1'] as const;
+type SupportedContractVersion = (typeof SUPPORTED_CONTRACT_VERSIONS)[number];
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_RETRIES = 2;
 const MAX_RETRY_DELAY_MS = 30_000;
@@ -74,6 +76,7 @@ const transactionSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => value ?? null),
+  statementDescriptors: statementDescriptorsSchema.optional().default([]),
   category: z.object({
     id: z.string().min(1),
     name: z.string(),
@@ -96,7 +99,7 @@ const transactionSchema = z.object({
 }).strict();
 
 const transactionsResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   provenance: provenanceSchema,
   transactions: z.array(transactionSchema),
   total: z.number().int().nonnegative(),
@@ -107,7 +110,7 @@ const transactionsResponseSchema = z.object({
 }).strict();
 
 const healthResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   status: z.enum(['ok', 'degraded']),
   mode: z.enum(['demo', 'live']),
   reachable: z.boolean(),
@@ -162,32 +165,32 @@ const budgetSchema = z.object({
 }).strict();
 
 const accountsResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   provenance: provenanceSchema,
   accounts: z.array(accountSchema).max(MONARCH_DATASET_LIMITS.accounts),
 }).strict();
 const categoryGroupsResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   provenance: provenanceSchema,
   categoryGroups: z.array(activeReferenceSchema).max(MONARCH_DATASET_LIMITS['category-groups']),
 }).strict();
 const categoriesResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   provenance: provenanceSchema,
   categories: z.array(categorySchema).max(MONARCH_DATASET_LIMITS.categories),
 }).strict();
 const tagsResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   provenance: provenanceSchema,
   tags: z.array(activeReferenceSchema).max(MONARCH_DATASET_LIMITS.tags),
 }).strict();
 const recurringResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   provenance: provenanceSchema,
   recurring: z.array(recurringSchema).max(MONARCH_DATASET_LIMITS.recurring),
 }).strict();
 const budgetsResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   provenance: provenanceSchema,
   periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -195,28 +198,28 @@ const budgetsResponseSchema = z.object({
 }).strict();
 
 const categoryUpdateResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   status: z.literal('updated'),
   transactionId: z.string(),
   categoryId: z.string(),
 }).strict();
 
 const merchantUpdateResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   status: z.literal('updated'),
   transactionId: z.string(),
   merchantName: z.string(),
 }).strict();
 
 const reviewUpdateResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS),
   status: z.literal('reviewed'),
   transactionId: z.string(),
   reviewStatus: z.literal('reviewed'),
 }).strict();
 
 const errorResponseSchema = z.object({
-  contractVersion: z.literal(CONTRACT_VERSION).optional(),
+  contractVersion: z.enum(SUPPORTED_CONTRACT_VERSIONS).optional(),
   error: z.object({
     code: z.enum(BRIDGE_ERROR_CODES),
     message: z.string(),
@@ -233,7 +236,7 @@ export type MonarchTag = z.infer<typeof activeReferenceSchema>;
 export type MonarchRecurringObligation = z.infer<typeof recurringSchema>;
 export type MonarchBudget = z.infer<typeof budgetSchema>;
 export type MonarchDatasetResponse<T extends string, Item> = {
-  contractVersion: typeof CONTRACT_VERSION;
+  contractVersion: SupportedContractVersion;
   provenance: z.infer<typeof provenanceSchema>;
 } & Record<T, Item[]>;
 export type MonarchBudgetsResponse = z.infer<typeof budgetsResponseSchema>;
@@ -512,13 +515,16 @@ export class MonarchBridgeClient {
       }
 
       const headerVersion = response.headers.get('x-monarch-contract-version');
-      if (headerVersion !== CONTRACT_VERSION) {
+      if (!SUPPORTED_CONTRACT_VERSIONS.includes(headerVersion as SupportedContractVersion)) {
         throw new MonarchBridgeError('unsupported_contract', 'Unsupported Monarch Bridge contract version', false, response.status);
       }
       if (
         typeof body !== 'object'
         || body === null
-        || (body as { contractVersion?: unknown }).contractVersion !== CONTRACT_VERSION
+        || !SUPPORTED_CONTRACT_VERSIONS.includes(
+          (body as { contractVersion?: unknown }).contractVersion as SupportedContractVersion,
+        )
+        || (body as { contractVersion?: unknown }).contractVersion !== headerVersion
       ) {
         throw new MonarchBridgeError('invalid_contract', 'Invalid Monarch Bridge response contract', false, response.status);
       }

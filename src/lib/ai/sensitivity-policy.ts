@@ -41,6 +41,7 @@ export const AI_FEATURE_DEFAULTS: Record<AIFeatureId, SensitivityClass> = {
   'semantic-embedding': 'restricted',
   'provider-health-check': 'standard',
   'finance-vendor-research': 'standard',
+  'finance-location-inference': 'restricted',
 };
 
 export const DEFAULT_AI_ROUTING_POLICY: AIRoutingPolicyConfig = {

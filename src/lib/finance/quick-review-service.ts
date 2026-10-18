@@ -34,6 +34,7 @@ import {
   type TyrionQuickReviewRuleRequest,
   TYRION_MERCHANT_RULE_CONTRACT_VERSION,
 } from '@/lib/finance/quick-review-contract';
+import { attributionStatementDescriptors } from '@/lib/finance/transaction-evidence';
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const MAX_SESSION_ITEMS = 5_000;
@@ -377,6 +378,16 @@ export async function startQuickReviewSession(
     const kid = local?.assignedKidId ? kidById.get(local.assignedKidId) : null;
     const reviewRef = opaque('review');
     const stateToken = opaque('state');
+    const locationEvidence = local?.locationEvidence ?? null;
+    const trustedLocation = locationEvidence
+      && locationEvidence.confidence >= 0.55
+      && Date.parse(locationEvidence.staleAfter) > Date.now()
+      ? {
+          locality: locationEvidence.locality,
+          region: locationEvidence.region,
+          countryCode: locationEvidence.countryCode,
+        }
+      : null;
     return {
       sourceRef: rankedItem.sourceRef,
       reviewRef,
@@ -393,6 +404,14 @@ export async function startQuickReviewSession(
         accountName: transaction.account.displayName,
         payee: merchantNameForRank(transaction.merchant.name),
         businessContext: transaction.businessContext ?? null,
+        statementDescriptors: local?.statementDescriptors ?? transaction.statementDescriptors,
+        location: {
+          evidence: locationEvidence,
+          inferenceEvidence: local?.locationInferenceEvidence ?? null,
+          errorCode: (
+            local?.locationInferenceErrorCode as FinanceReviewItem['location']['errorCode']
+          ) ?? null,
+        },
         category: transaction.category
           ? { id: transaction.category.id, label: transaction.category.name }
           : null,
@@ -427,7 +446,7 @@ export async function startQuickReviewSession(
           )),
           reason: rankedItem.reasons.includes('unknown-merchant') ? 'Merchant is unfamiliar' : null,
           normalizedVendorName: merchantNameForRank(transaction.merchant.name).replace(/\s+/g, ' ').trim(),
-          coarseLocation: null,
+          coarseLocation: trustedLocation,
         },
       },
     };
@@ -629,6 +648,10 @@ export async function previewQuickReviewMerchantRule(
       businessEntityName: target.transaction.businessEntityName,
       accountRef: target.transaction.account.id,
       kidId: request.kidId,
+      suggestionMode: request.suggestionMode,
+      statementDescriptors: attributionStatementDescriptors(target.item.statementDescriptors),
+      locationEvidence: target.item.location.evidence,
+      locationMinimumConfidence: request.locationMinimumConfidence,
     }),
     signal,
   );
@@ -641,6 +664,10 @@ export function buildQuickReviewRuleSuggestionRequest(input: {
   businessEntityName: string | null;
   accountRef: string;
   kidId: string;
+  suggestionMode: FinanceQuickReviewRuleSuggestionRequest['suggestionMode'];
+  statementDescriptors: TyrionQuickReviewRuleRequest['statementDescriptors'];
+  locationEvidence: TyrionQuickReviewRuleRequest['locationEvidence'];
+  locationMinimumConfidence: number | null;
 }): TyrionQuickReviewRuleRequest {
   return {
     contractVersion: FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
@@ -650,6 +677,10 @@ export function buildQuickReviewRuleSuggestionRequest(input: {
     scope: 'accounts',
     kidId: input.kidId,
     suggestReusableRule: true,
+    suggestionMode: input.suggestionMode,
+    statementDescriptors: input.statementDescriptors,
+    locationEvidence: input.locationEvidence,
+    locationMinimumConfidence: input.locationMinimumConfidence,
   };
 }
 
@@ -670,6 +701,17 @@ export async function createQuickReviewMerchantRule(
     throw new QuickReviewSessionError(
       'merchant_rule_preview_changed',
       'The merchant rule no longer matches the preview',
+      409,
+    );
+  }
+  if (
+    request.rule.statementDescriptorPattern !== preview.suggestion.statementDescriptorPattern
+    || JSON.stringify(request.rule.locationPredicate)
+      !== JSON.stringify(preview.suggestion.locationPredicate)
+  ) {
+    throw new QuickReviewSessionError(
+      'merchant_rule_preview_changed',
+      'The descriptor or location rule no longer matches the preview',
       409,
     );
   }
@@ -695,6 +737,17 @@ export async function createQuickReviewMerchantRule(
       422,
     );
   }
+  if (request.locationOnlyConfirmation) {
+    const locationConfirmedAt = Date.parse(request.locationOnlyConfirmation.confirmedAt);
+    const age = Date.now() - locationConfirmedAt;
+    if (!Number.isFinite(locationConfirmedAt) || age > 5 * 60_000 || age < -60_000) {
+      throw new QuickReviewSessionError(
+        'location_only_confirmation_expired',
+        'Location-only confirmation expired; review and confirm the rule again',
+        422,
+      );
+    }
+  }
   const config = await getPersistedFinanceConnectorConfigById(session.connectorId);
   const result = await new TyrionFinanceReviewClient(
     resolveTyrionQuickReviewToken(config),
@@ -712,6 +765,8 @@ export async function createQuickReviewMerchantRule(
       kidId: result.rule.kidId,
       pattern: result.rule.pattern,
       businessEntityPattern: result.rule.businessEntityPattern,
+      statementDescriptorPattern: result.rule.statementDescriptorPattern,
+      locationPredicate: result.rule.locationPredicate,
       scope: result.rule.scope,
       confidence: result.rule.confidence,
       enabled: result.rule.enabled,
@@ -732,6 +787,7 @@ export function buildQuickReviewMerchantRuleRequest(
       confirmed: true,
       confirmedAt: request.confirmation.confirmedAt,
     },
+    locationOnlyConfirmation: request.locationOnlyConfirmation,
     rule: {
       ...request.rule,
       accountRefs: request.rule.scope === 'global' ? [] : [currentAccountRef],

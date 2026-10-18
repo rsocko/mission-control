@@ -33,6 +33,15 @@ export const financeTransactions = pgTable('finance_transactions', {
   amount: real('amount').notNull(),
   merchantName: text('merchant_name'),
   businessContext: text('business_context'),
+  statementDescriptors: jsonb('statement_descriptors')
+    .$type<import('@/lib/finance/transaction-evidence').BridgeStatementDescriptor[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  locationEvidence: jsonb('location_evidence')
+    .$type<import('@/lib/finance/transaction-evidence').NormalizedLocationEvidence | null>(),
+  locationEvidenceInputFingerprint: text('location_evidence_input_fingerprint'),
+  locationInferenceEvidence: text('location_inference_evidence'),
+  locationInferenceErrorCode: text('location_inference_error_code'),
   merchantLogoUrl: text('merchant_logo_url'),
   categoryId: text('category_id'),
   originalCategory: text('original_category'),

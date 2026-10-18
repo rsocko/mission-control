@@ -122,7 +122,10 @@ function stableValue(value: unknown): string {
 }
 
 function transactionFingerprint(value: FinanceSnapshotTransaction): string {
-  const identityFacts = { ...value };
+  const identityFacts = {
+    ...value,
+    statementDescriptors: value.statementDescriptors ?? [],
+  };
   delete identityFacts.businessContext;
   return stableValue(identityFacts);
 }
@@ -151,6 +154,39 @@ function acceptedNamespace(credentials: unknown): string {
 
 function createSnapshotPersistence(pool: Pool): FinanceSnapshotPersistence {
   return {
+    async readLocationEvidence(connectorId, upstreamTransactionIds) {
+      if (upstreamTransactionIds.length === 0) return new Map();
+      assertBatch(
+        upstreamTransactionIds.length,
+        FINANCE_TRANSACTION_PAGE_MAX,
+        'Finance location evidence lookup',
+      );
+      const rows = await query<{
+        upstreamTransactionId: string;
+        inputFingerprint: string | null;
+        evidence: import('@/lib/finance/transaction-evidence').NormalizedLocationEvidence | null;
+        inferenceEvidence: string | null;
+        errorCode: string | null;
+      }>(
+        pool,
+        `SELECT upstream_transaction_id AS "upstreamTransactionId",
+                location_evidence_input_fingerprint AS "inputFingerprint",
+                location_evidence AS evidence,
+                location_inference_evidence AS "inferenceEvidence",
+                location_inference_error_code AS "errorCode"
+         FROM finance_transactions
+         WHERE connector_instance_id = $1
+           AND upstream_transaction_id = ANY($2::text[])`,
+        [connectorId, upstreamTransactionIds],
+      );
+      return new Map(rows.map((row) => [row.upstreamTransactionId, {
+        inputFingerprint: row.inputFingerprint,
+        evidence: row.evidence,
+        inferenceEvidence: row.inferenceEvidence,
+        errorCode: row.errorCode,
+      }]));
+    },
+
     async readBasis(connectorId, stableTagRecoveryStart) {
       const [state, recovery] = await Promise.all([
         query<{ lastSuccessfulWindowEnd: string | null }>(
@@ -255,6 +291,11 @@ function createSnapshotPersistence(pool: Pool): FinanceSnapshotPersistence {
             item.merchant.name,
             item.merchant.logoUrl,
             item.businessContext ?? null,
+            JSON.stringify(item.statementDescriptors ?? []),
+            item.locationEvidence ? JSON.stringify(item.locationEvidence) : null,
+            item.locationEvidenceInputFingerprint ?? null,
+            item.locationInferenceEvidence ?? null,
+            item.locationInferenceErrorCode ?? null,
             item.category?.id ?? null,
             item.category?.name ?? null,
             item.account.id,
@@ -270,7 +311,10 @@ function createSnapshotPersistence(pool: Pool): FinanceSnapshotPersistence {
             await client.query(
               `INSERT INTO finance_transactions (
                  id, connector_instance_id, upstream_transaction_id, date, amount,
-                 merchant_name, merchant_logo_url, business_context, category_id, original_category,
+                 merchant_name, merchant_logo_url, business_context, statement_descriptors,
+                 location_evidence, location_evidence_input_fingerprint,
+                 location_inference_evidence, location_inference_error_code,
+                 category_id, original_category,
                  confirmed_category, account_id, account_name, card_last4,
                  assigned_kid_id, kid_assignment_method, triage_status, flag_reason,
                  is_pending, is_recurring, notes, tags, tag_references,
@@ -278,9 +322,10 @@ function createSnapshotPersistence(pool: Pool): FinanceSnapshotPersistence {
                  provenance_fetched_at, source_fingerprint, source_url,
                  last_seen_generation_id, first_seen_at, last_seen_at, synced_at
                ) VALUES (
-                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12, $13,
-                 NULL, NULL, 'pending', NULL, $14, $15, $16, $17::jsonb, $18::jsonb,
-                 'active', NULL, $19, $20, $21, NULL, $22, $23, $23, $23
+                 $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13,
+                 $14, $15, NULL, $16, $17, $18, NULL, NULL, 'pending', NULL,
+                 $19, $20, $21, $22::jsonb, $23::jsonb,
+                 'active', NULL, $24, $25, $26, NULL, $27, $28, $28, $28
                )`,
               [
                 localTransactionId(command.connectorId, item.id),
@@ -300,15 +345,20 @@ function createSnapshotPersistence(pool: Pool): FinanceSnapshotPersistence {
             await client.query(
               `UPDATE finance_transactions
                SET date = $1, amount = $2, merchant_name = $3, merchant_logo_url = $4,
-                   business_context = $5, category_id = $6, original_category = $7,
-                   account_id = $8, account_name = $9, card_last4 = $10,
-                   is_pending = $11, is_recurring = $12, notes = $13,
-                   tags = $14::jsonb, tag_references = $15::jsonb,
+                   business_context = $5, statement_descriptors = $6::jsonb,
+                   location_evidence = $7::jsonb,
+                   location_evidence_input_fingerprint = $8,
+                   location_inference_evidence = $9,
+                   location_inference_error_code = $10,
+                   category_id = $11, original_category = $12,
+                   account_id = $13, account_name = $14, card_last4 = $15,
+                   is_pending = $16, is_recurring = $17, notes = $18,
+                   tags = $19::jsonb, tag_references = $20::jsonb,
                    lifecycle_status = 'active', deleted_at = NULL,
-                   provenance_provider = $16, provenance_fetched_at = $17,
-                   source_fingerprint = $18, last_seen_generation_id = $19,
-                   last_seen_at = $20, synced_at = $20
-               WHERE connector_instance_id = $21 AND upstream_transaction_id = $22`,
+                   provenance_provider = $21, provenance_fetched_at = $22,
+                   source_fingerprint = $23, last_seen_generation_id = $24,
+                   last_seen_at = $25, synced_at = $25
+               WHERE connector_instance_id = $26 AND upstream_transaction_id = $27`,
               [
                 ...values,
                 command.provenance.provider,

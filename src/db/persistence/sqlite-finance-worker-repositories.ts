@@ -84,7 +84,10 @@ function stableValue(value: unknown): string {
 }
 
 function transactionFingerprint(transaction: FinanceSnapshotTransaction): string {
-  const identityFacts = { ...transaction };
+  const identityFacts = {
+    ...transaction,
+    statementDescriptors: transaction.statementDescriptors ?? [],
+  };
   delete identityFacts.businessContext;
   return stableValue(identityFacts);
 }
@@ -574,6 +577,38 @@ function createSnapshotPersistence(
   projectionProofs: SqliteFinanceProjectionProofs | undefined,
 ): FinanceSnapshotPersistence {
   return {
+    async readLocationEvidence(connectorId, upstreamTransactionIds) {
+      if (upstreamTransactionIds.length === 0) return new Map();
+      assertBatch(
+        upstreamTransactionIds.length,
+        FINANCE_TRANSACTION_PAGE_MAX,
+        'Finance location evidence lookup',
+      );
+      const placeholders = upstreamTransactionIds.map(() => '?').join(', ');
+      const rows = sqlite.prepare(`
+        SELECT upstream_transaction_id AS upstreamTransactionId,
+               location_evidence_input_fingerprint AS inputFingerprint,
+               location_evidence AS evidence,
+               location_inference_evidence AS inferenceEvidence,
+               location_inference_error_code AS errorCode
+        FROM finance_transactions
+        WHERE connector_instance_id = ?
+          AND upstream_transaction_id IN (${placeholders})
+      `).all(connectorId, ...upstreamTransactionIds) as Array<{
+        upstreamTransactionId: string;
+        inputFingerprint: string | null;
+        evidence: string | null;
+        inferenceEvidence: string | null;
+        errorCode: string | null;
+      }>;
+      return new Map(rows.map((row) => [row.upstreamTransactionId, {
+        inputFingerprint: row.inputFingerprint,
+        evidence: row.evidence ? JSON.parse(row.evidence) : null,
+        inferenceEvidence: row.inferenceEvidence,
+        errorCode: row.errorCode,
+      }]));
+    },
+
     async readBasis(connectorId, stableTagRecoveryStart) {
       const state = sqlite.prepare(`
         SELECT last_successful_window_end AS lastSuccessfulWindowEnd
@@ -644,14 +679,17 @@ function createSnapshotPersistence(
         const insert = sqlite.prepare(`
           INSERT INTO finance_transactions (
             id, connector_instance_id, upstream_transaction_id, date, amount,
-            merchant_name, merchant_logo_url, business_context, category_id, original_category,
+            merchant_name, merchant_logo_url, business_context, statement_descriptors,
+            location_evidence, location_evidence_input_fingerprint,
+            location_inference_evidence, location_inference_error_code,
+            category_id, original_category,
             confirmed_category, account_id, account_name, card_last4,
             assigned_kid_id, kid_assignment_method, triage_status, flag_reason,
             is_pending, is_recurring, notes, tags, tag_references, lifecycle_status, deleted_at,
             provenance_provider, provenance_fetched_at, source_fingerprint, source_url,
             last_seen_generation_id, first_seen_at, last_seen_at, synced_at
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?,
             NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, 'active', NULL,
             ?, ?, ?, NULL, ?, ?, ?, ?
           )
@@ -659,7 +697,9 @@ function createSnapshotPersistence(
         const update = sqlite.prepare(`
           UPDATE finance_transactions
           SET date = ?, amount = ?, merchant_name = ?, merchant_logo_url = ?,
-              business_context = ?, category_id = ?, original_category = ?,
+              business_context = ?, statement_descriptors = ?, location_evidence = ?,
+              location_evidence_input_fingerprint = ?, location_inference_evidence = ?,
+              location_inference_error_code = ?, category_id = ?, original_category = ?,
               account_id = ?, account_name = ?, card_last4 = ?, is_pending = ?,
               is_recurring = ?, notes = ?, tags = ?, tag_references = ?,
               lifecycle_status = 'active', deleted_at = NULL, provenance_provider = ?,
@@ -680,6 +720,11 @@ function createSnapshotPersistence(
             transaction.merchant.name,
             transaction.merchant.logoUrl,
             transaction.businessContext ?? null,
+            JSON.stringify(transaction.statementDescriptors ?? []),
+            transaction.locationEvidence ? JSON.stringify(transaction.locationEvidence) : null,
+            transaction.locationEvidenceInputFingerprint ?? null,
+            transaction.locationInferenceEvidence ?? null,
+            transaction.locationInferenceErrorCode ?? null,
             transaction.category?.id ?? null,
             transaction.category?.name ?? null,
             transaction.account.id,

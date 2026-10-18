@@ -214,6 +214,9 @@ export async function previewFinanceAttributionPolicy(connectorId: string) {
       projection.items.map((item) => ({
         ...item,
         merchantName: normalizeAttributionMerchant(item.merchantName),
+        businessEntityName: null,
+        statementDescriptors: [],
+        locationEvidence: null,
       })),
       policyVersion,
     );

@@ -24,6 +24,13 @@ const item: AttributionBatchItem = {
   sourceRef: 'source-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
   occurredOn: '2026-08-08',
   merchantName: 'Invented merchant',
+  businessEntityName: null,
+  statementDescriptors: [{
+    kind: 'statement',
+    text: ' Invented merchant #1842 ',
+    source: 'monarch',
+  }],
+  locationEvidence: null,
   accountRef: 'bridge-account-1',
   observedAt: '2026-08-08T12:00:00.000Z',
   existingManualDecision: null,
@@ -31,8 +38,8 @@ const item: AttributionBatchItem = {
 
 function request(overrides: Partial<AttributionBatchRequest> = {}): AttributionBatchRequest {
   return {
-    contractVersion: '2.0',
-    provenance: 'mission-control-normalized-v2',
+    contractVersion: '2.1',
+    provenance: 'mission-control-normalized-v3',
     expectedPolicyVersion: 2,
     items: [item],
     ...overrides,
@@ -41,11 +48,11 @@ function request(overrides: Partial<AttributionBatchRequest> = {}): AttributionB
 
 function success(sourceRef = item.sourceRef, policyVersion = 2) {
   return {
-    contractVersion: '2.0',
+    contractVersion: '2.1',
     policyVersion,
-    engineVersion: '2.0.0',
+    engineVersion: '2.1.0',
     results: [{
-      contractVersion: '2.0',
+      contractVersion: '2.1',
       sourceRef,
       status: 'attributed',
       kidId: 'kid-one',
@@ -56,13 +63,13 @@ function success(sourceRef = item.sourceRef, policyVersion = 2) {
       reasons: [],
       decisionSource: 'automated',
       policyVersion,
-      engineVersion: '2.0.0',
+      engineVersion: '2.1.0',
       evaluatedAt: '2026-08-08T12:00:01.000Z',
     }],
   };
 }
 
-describe('Tyrion attribution v2 client', () => {
+describe('Tyrion attribution v2.1 client', () => {
   it('uses only the shared finance-manager bearer credential', () => {
     const headers = createAttributionHeaders(config);
 
@@ -120,11 +127,14 @@ describe('Tyrion attribution v2 client', () => {
       const body = JSON.parse(String(init?.body));
       expect(Object.keys(body.items[0]).sort()).toEqual([
         'accountRef',
+        'businessEntityName',
         'existingManualDecision',
+        'locationEvidence',
         'merchantName',
         'observedAt',
         'occurredOn',
         'sourceRef',
+        'statementDescriptors',
       ]);
       expect(JSON.stringify(body)).not.toMatch(/amount|accountId|mask|notes|tags|category/i);
       return new Response(JSON.stringify(success()), {
@@ -138,7 +148,7 @@ describe('Tyrion attribution v2 client', () => {
 
     await expect(client.attribute(request())).resolves.toMatchObject({
       policyVersion: 2,
-      engineVersion: '2.0.0',
+      engineVersion: '2.1.0',
     });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'error' });
@@ -174,7 +184,7 @@ describe('Tyrion attribution v2 client', () => {
     );
 
     await expect(client.attribute(request({ expectedPolicyVersion: 7 }))).resolves.toMatchObject({
-      contractVersion: '2.0',
+      contractVersion: '2.1',
       policyVersion: 7,
     });
   });
@@ -369,9 +379,9 @@ describe('Tyrion attribution v2 client', () => {
       sourceRef: `source-v1:${index.toString().padStart(43, 'A')}`,
     }));
     const responseBody = {
-      contractVersion: '2.0',
+      contractVersion: '2.1',
       policyVersion: 2,
-      engineVersion: '2.0.0',
+      engineVersion: '2.1.0',
       results: items.map((entry) => ({
         ...success(entry.sourceRef).results[0],
         sourceRef: entry.sourceRef,

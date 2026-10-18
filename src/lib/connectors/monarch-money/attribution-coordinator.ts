@@ -25,6 +25,7 @@ import {
   type AttributionBatchResult,
   type ManualDecision,
 } from './attribution-contract';
+import { attributionStatementDescriptors } from '@/lib/finance/transaction-evidence';
 import type { MonarchTransaction } from './client';
 import { createFinanceIdentityNamespace } from './identity';
 
@@ -127,7 +128,9 @@ function attributionStateSnapshot(
 function prepareItems(
   config: TyrionAttributionConfig,
   connectorId: string,
-  transactions: MonarchTransaction[],
+  transactions: Array<MonarchTransaction & {
+    locationEvidence?: import('@/lib/finance/transaction-evidence').NormalizedLocationEvidence | null;
+  }>,
   observedAt: string,
   rows: Map<string, FinanceAttributionRow>,
 ): PreparedAttributionItem[] {
@@ -150,6 +153,9 @@ function prepareItems(
         sourceRef: createAttributionSourceRef(config, connectorId, transaction.id),
         occurredOn: transaction.date,
         merchantName: normalizeAttributionMerchant(transaction.merchant.name),
+        businessEntityName: transaction.businessEntityName ?? null,
+        statementDescriptors: attributionStatementDescriptors(transaction.statementDescriptors),
+        locationEvidence: transaction.locationEvidence ?? null,
         accountRef: transaction.account.id,
         observedAt,
         existingManualDecision: manualDecision,
@@ -216,7 +222,9 @@ export class FinanceAttributionCoordinator {
   }
 
   async attributePage(
-    transactions: MonarchTransaction[],
+    transactions: Array<MonarchTransaction & {
+      locationEvidence?: import('@/lib/finance/transaction-evidence').NormalizedLocationEvidence | null;
+    }>,
     observedAt: string,
     signal?: AbortSignal,
   ): Promise<void> {

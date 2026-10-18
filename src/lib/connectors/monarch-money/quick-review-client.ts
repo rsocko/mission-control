@@ -9,8 +9,12 @@ import {
   tyrionQuickReviewRuleResponseSchema,
   tyrionMerchantRuleCreateRequestSchema,
   tyrionMerchantRuleCreateResponseSchema,
+  tyrionDescriptorInferenceRequestSchema,
+  tyrionDescriptorInferenceEnvelopeSchema,
   type TyrionMerchantRuleCreateRequest,
   type TyrionMerchantRuleCreateResponse,
+  type TyrionDescriptorInferenceRequest,
+  type TyrionDescriptorInferenceEnvelope,
   type TyrionQuickReviewRankRequest,
   type TyrionQuickReviewRankResponse,
   type TyrionQuickReviewResearchRequest,
@@ -169,6 +173,19 @@ export class TyrionFinanceReviewClient {
     );
   }
 
+  prepareDescriptorInference(
+    request: TyrionDescriptorInferenceRequest,
+    signal?: AbortSignal,
+  ): Promise<TyrionDescriptorInferenceEnvelope> {
+    return this.post(
+      'descriptor-inference',
+      request,
+      tyrionDescriptorInferenceRequestSchema,
+      tyrionDescriptorInferenceEnvelopeSchema,
+      signal,
+    );
+  }
+
   async createMerchantRule(
     request: TyrionMerchantRuleCreateRequest,
     signal?: AbortSignal,
@@ -230,6 +247,9 @@ export class TyrionFinanceReviewClient {
       || actualRule.kidId !== expectedRule.kidId
       || actualRule.pattern !== expectedRule.pattern
       || actualRule.businessEntityPattern !== expectedRule.businessEntityPattern
+      || actualRule.statementDescriptorPattern !== expectedRule.statementDescriptorPattern
+      || JSON.stringify(actualRule.locationPredicate)
+        !== JSON.stringify(expectedRule.locationPredicate)
       || actualRule.scope !== expectedRule.scope
       || actualRule.confidence !== expectedRule.confidence
       || JSON.stringify(actualRule.accountRefs) !== JSON.stringify(expectedRule.accountRefs)
@@ -249,7 +269,7 @@ export class TyrionFinanceReviewClient {
   }
 
   private async post<TRequest, TResponse>(
-    operation: 'rank' | 'research' | 'rule-suggestion',
+    operation: 'rank' | 'research' | 'rule-suggestion' | 'descriptor-inference',
     request: TRequest,
     requestSchema: { safeParse(value: unknown): { success: true; data: TRequest } | { success: false } },
     responseSchema: { safeParse(value: unknown): { success: true; data: TResponse } | { success: false } },
@@ -319,4 +339,6 @@ export type {
   TyrionQuickReviewResearchResponse,
   TyrionQuickReviewRuleRequest,
   TyrionQuickReviewRuleResponse,
+  TyrionDescriptorInferenceRequest,
+  TyrionDescriptorInferenceEnvelope,
 };

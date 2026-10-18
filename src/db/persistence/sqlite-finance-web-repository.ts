@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type {
-  FinanceCategoryClaimCommand,
   FinanceWebOperationsData,
   FinanceWebPersistence,
   FinanceWebTransaction,
@@ -23,6 +22,11 @@ const transactionColumns = `
   id, connector_instance_id AS connectorInstanceId,
   upstream_transaction_id AS upstreamTransactionId, date, amount,
   merchant_name AS merchantName, business_context AS businessContext,
+  statement_descriptors AS statementDescriptors,
+  location_evidence AS locationEvidence,
+  location_evidence_input_fingerprint AS locationEvidenceInputFingerprint,
+  location_inference_evidence AS locationInferenceEvidence,
+  location_inference_error_code AS locationInferenceErrorCode,
   merchant_logo_url AS merchantLogoUrl,
   category_id AS categoryId, original_category AS originalCategory,
   confirmed_category AS confirmedCategory, account_id AS accountId,
@@ -86,6 +90,8 @@ function normalizeTransaction(row: FinanceWebTransaction): FinanceWebTransaction
   return {
     ...row,
     attributionReasons: parseJson(row.attributionReasons) as string[],
+    statementDescriptors: parseJson(row.statementDescriptors) as FinanceWebTransaction['statementDescriptors'],
+    locationEvidence: parseJson(row.locationEvidence) as FinanceWebTransaction['locationEvidence'],
     attributionRetryable: Boolean(row.attributionRetryable),
     isPending: Boolean(row.isPending),
     isRecurring: Boolean(row.isRecurring),

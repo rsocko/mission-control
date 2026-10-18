@@ -101,6 +101,11 @@ export interface FinanceAssistantTransaction {
   amount: number;
   merchant: string | null;
   businessContext: string | null;
+  statementDescriptorCount: number;
+  locationCountryCode: string | null;
+  locationRegion: string | null;
+  locationLocality: string | null;
+  locationConfidence: number | null;
   category: string | null;
   confirmedCategory: string | null;
   pending: boolean;

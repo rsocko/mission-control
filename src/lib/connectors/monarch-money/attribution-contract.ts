@@ -2,16 +2,19 @@ import 'server-only';
 
 import { z } from 'zod';
 import { currencySchema } from '@/lib/finance/currency';
+import { normalizedLocationEvidenceSchema } from '@/lib/finance/transaction-evidence';
 
-export const TYRION_ATTRIBUTION_CONTRACT_VERSION = '2.0';
-export const TYRION_ATTRIBUTION_ENGINE_VERSION = '2.0.0';
-export const TYRION_ATTRIBUTION_PROVENANCE = 'mission-control-normalized-v2';
+export const TYRION_ATTRIBUTION_CONTRACT_VERSION = '2.1';
+export const TYRION_ATTRIBUTION_ENGINE_VERSION = '2.1.0';
+export const TYRION_ATTRIBUTION_PROVENANCE = 'mission-control-normalized-v3';
 export const TYRION_ATTRIBUTION_PATH = '/api/internal/v2/attribution/batch';
 export const TYRION_ATTRIBUTION_POLICY_PATH = '/api/internal/v2/attribution/policy';
 export const TYRION_ATTRIBUTION_MAX_ITEMS = 100;
 export const TYRION_ATTRIBUTION_MAX_SUBJECTS = 100;
 export const TYRION_ATTRIBUTION_MAX_BODY_BYTES = 65_536;
 export const TYRION_ATTRIBUTION_MAX_RESPONSE_BYTES = 262_144;
+const supportedAttributionContractVersionSchema = z.enum(['2.0', '2.1']);
+const supportedAttributionEngineVersionSchema = z.enum(['2.0.0', '2.1.0']);
 
 const identifierSchema = z.string()
   .min(1)
@@ -54,14 +57,25 @@ export const attributionBatchItemSchema = z.object({
   sourceRef: identifierSchema,
   occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   merchantName: z.string().min(1).max(160),
+  businessEntityName: z.string().min(1).max(160).nullable().default(null),
+  statementDescriptors: z.array(z.object({
+    kind: z.enum(['statement', 'provider-description']),
+    text: z.string().min(1).refine(
+      (value) => !/[\u0000-\u001f\u007f]/.test(value)
+        && Buffer.byteLength(value, 'utf8') <= 2_048,
+      'Invalid statement descriptor',
+    ),
+    source: z.literal('monarch'),
+  }).strict()).max(2).default([]),
+  locationEvidence: normalizedLocationEvidenceSchema.nullable().default(null),
   accountRef: tyrionBridgeAccountRefSchema,
   observedAt: timestampSchema,
   existingManualDecision: manualDecisionSchema,
 }).strict();
 
 export const attributionBatchRequestSchema = z.object({
-  contractVersion: z.literal(TYRION_ATTRIBUTION_CONTRACT_VERSION),
-  provenance: z.literal(TYRION_ATTRIBUTION_PROVENANCE),
+  contractVersion: supportedAttributionContractVersionSchema,
+  provenance: z.enum(['mission-control-normalized-v2', TYRION_ATTRIBUTION_PROVENANCE]),
   expectedPolicyVersion: z.number().int().positive(),
   items: z.array(attributionBatchItemSchema)
     .min(1)
@@ -81,7 +95,7 @@ export const attributionBatchRequestSchema = z.object({
 });
 
 export const attributionBatchResultSchema = z.object({
-  contractVersion: z.literal(TYRION_ATTRIBUTION_CONTRACT_VERSION),
+  contractVersion: supportedAttributionContractVersionSchema,
   sourceRef: identifierSchema,
   status: z.enum(['attributed', 'unassigned', 'pending']),
   kidId: identifierSchema.nullable(),
@@ -99,7 +113,7 @@ export const attributionBatchResultSchema = z.object({
   reasons: z.array(reasonSchema).max(8),
   decisionSource: z.enum(['manual', 'automated', 'fallback']),
   policyVersion: z.number().int().positive(),
-  engineVersion: z.literal(TYRION_ATTRIBUTION_ENGINE_VERSION),
+  engineVersion: supportedAttributionEngineVersionSchema,
   evaluatedAt: timestampSchema,
 }).strict().superRefine((value, context) => {
   if (value.status === 'attributed' && value.kidId === null) {
@@ -129,17 +143,17 @@ export const attributionBatchResultSchema = z.object({
 });
 
 export const attributionBatchResponseSchema = z.object({
-  contractVersion: z.literal(TYRION_ATTRIBUTION_CONTRACT_VERSION),
+  contractVersion: supportedAttributionContractVersionSchema,
   policyVersion: z.number().int().positive(),
-  engineVersion: z.literal(TYRION_ATTRIBUTION_ENGINE_VERSION),
+  engineVersion: supportedAttributionEngineVersionSchema,
   results: z.array(attributionBatchResultSchema)
     .min(1)
     .max(TYRION_ATTRIBUTION_MAX_ITEMS),
 }).strict();
 
 export const attributionPolicyResponseSchema = z.object({
-  contractVersion: z.literal(TYRION_ATTRIBUTION_CONTRACT_VERSION),
-  engineVersion: z.literal(TYRION_ATTRIBUTION_ENGINE_VERSION),
+  contractVersion: supportedAttributionContractVersionSchema,
+  engineVersion: supportedAttributionEngineVersionSchema,
   policyVersion: z.number().int().positive(),
   policyUpdatedAt: timestampSchema,
   householdCurrency: currencySchema,

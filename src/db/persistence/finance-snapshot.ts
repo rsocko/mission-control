@@ -13,6 +13,11 @@ export interface FinanceSnapshotTransaction {
   date: string;
   amount: number;
   businessContext?: string | null;
+  statementDescriptors: readonly import('@/lib/finance/transaction-evidence').BridgeStatementDescriptor[];
+  locationEvidence?: import('@/lib/finance/transaction-evidence').NormalizedLocationEvidence | null;
+  locationEvidenceInputFingerprint?: string | null;
+  locationInferenceEvidence?: string | null;
+  locationInferenceErrorCode?: string | null;
   merchant: {
     name: string;
     logoUrl: string | null;
@@ -99,7 +104,18 @@ export class FinanceSnapshotFenceError extends Error {
   }
 }
 
+export interface FinanceLocationEvidenceCacheEntry {
+  inputFingerprint: string | null;
+  evidence: import('@/lib/finance/transaction-evidence').NormalizedLocationEvidence | null;
+  inferenceEvidence: string | null;
+  errorCode: string | null;
+}
+
 export interface FinanceSnapshotPersistence {
+  readLocationEvidence(
+    connectorId: string,
+    upstreamTransactionIds: readonly string[],
+  ): Promise<Map<string, FinanceLocationEvidenceCacheEntry>>;
   readBasis(
     connectorId: string,
     stableTagRecoveryStart: string,

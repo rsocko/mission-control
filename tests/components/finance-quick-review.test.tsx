@@ -18,6 +18,26 @@ const item = {
   accountName: 'Household card',
   payee: 'Invented Market',
   businessContext: 'Invented Neighborhood Foods',
+  statementDescriptors: [{
+    kind: 'statement',
+    text: ' INVENTED  MARKET #1842 ',
+    source: { system: 'monarch', field: 'plaidName' },
+  }],
+  location: {
+    evidence: {
+      countryCode: 'US',
+      region: 'WA',
+      locality: 'Seattle',
+      confidence: 0.88,
+      sourceKind: 'private-ai-inference',
+      model: 'private-model',
+      modelVersion: 'provider:azure',
+      evaluatedAt: '2026-10-08T20:00:00.000Z',
+      staleAfter: '2027-01-06T20:00:00.000Z',
+    },
+    inferenceEvidence: 'Descriptor contains Seattle WA.',
+    errorCode: null,
+  },
   category: { id: 'category-groceries', label: 'Groceries' },
   kid: null,
   monarchReview: { status: 'needs-review', assignedTo: 'Parent' },
@@ -96,6 +116,11 @@ describe('FinanceQuickReview', () => {
     expect(screen.getByText('$184.62')).toBeInTheDocument();
     expect(screen.getByText('Needs review · Assigned to Parent')).toBeInTheDocument();
     expect(screen.getByText('High amount with low Kids attribution confidence.')).toBeInTheDocument();
+    expect(screen.getByText(' INVENTED  MARKET #1842 ', {
+      normalizer: (text) => text,
+    })).toHaveClass('whitespace-pre-wrap');
+    expect(screen.getByText('Seattle, WA, US')).toBeInTheDocument();
+    expect(screen.getByText(/88% confidence · Private AI/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Confirm/ }));
 
@@ -205,7 +230,7 @@ describe('FinanceQuickReview', () => {
         },
       }))
       .mockResolvedValueOnce(response({
-        contractVersion: '2.0',
+        contractVersion: '2.1',
         outcome: 'created',
         policyVersion: 8,
         rule: {
@@ -231,7 +256,7 @@ describe('FinanceQuickReview', () => {
     expect(await screen.findByText('Rule created')).toBeInTheDocument();
     const request = JSON.parse(fetchMock.mock.calls[2][1].body as string);
     expect(request).toMatchObject({
-      contractVersion: '2.0',
+      contractVersion: '2.1',
       sessionRef: session.sessionRef,
       resumeToken: session.resumeToken,
       reviewRef: item.reviewRef,
@@ -251,6 +276,81 @@ describe('FinanceQuickReview', () => {
     expect(request).not.toHaveProperty('expectedPolicyVersion');
     expect(screen.getByRole('button', { name: 'Save correction' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('requires a distinct confirmation before creating a location-only rule', async () => {
+    const locationPredicate = {
+      countryCode: 'US',
+      region: 'WA',
+      locality: 'Seattle',
+      minimumConfidence: 0.7,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(session))
+      .mockResolvedValueOnce(response({
+        contractVersion: '1.0',
+        suggestion: {
+          kind: 'location-only',
+          merchantPattern: null,
+          businessEntityPattern: null,
+          statementDescriptorPattern: null,
+          locationPredicate,
+          kidId: 'kid-alex',
+          confidence: 'likely',
+          requiresConfirmation: true,
+          requiresLocationOnlyConfirmation: true,
+        },
+      }))
+      .mockResolvedValueOnce(response({
+        contractVersion: '2.1',
+        outcome: 'created',
+        policyVersion: 8,
+        rule: {
+          id: 'rule-location-seattle',
+          outcome: 'kid',
+          kidId: 'kid-alex',
+          pattern: null,
+          businessEntityPattern: null,
+          statementDescriptorPattern: null,
+          locationPredicate,
+          scope: 'accounts',
+          confidence: 'likely',
+          enabled: true,
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<FinanceQuickReview />);
+    fireEvent.click(await screen.findByRole('button', { name: /Correct/ }));
+    fireEvent.click(screen.getByLabelText('Kids attribution'));
+    fireEvent.click(screen.getByRole('option', { name: 'Alex' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Rule match' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Location only' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Preview reusable rule' }));
+
+    const createButton = await screen.findByRole('button', { name: 'Create confirmed rule' });
+    expect(createButton).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', {
+      name: /assign transactions based on location without a merchant match/i,
+    }));
+    expect(createButton).toBeEnabled();
+    fireEvent.click(createButton);
+
+    expect(await screen.findByText('Rule created')).toBeInTheDocument();
+    const previewRequest = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(previewRequest).toMatchObject({
+      suggestionMode: 'location-only',
+      locationMinimumConfidence: 0.7,
+    });
+    const createRequest = JSON.parse(fetchMock.mock.calls[2][1].body as string);
+    expect(createRequest).toMatchObject({
+      contractVersion: '2.1',
+      locationOnlyConfirmation: { confirmed: true },
+      rule: {
+        pattern: null,
+        locationPredicate,
+      },
+    });
   });
 
   it('requires a conspicuous additional confirmation for global rules', async () => {

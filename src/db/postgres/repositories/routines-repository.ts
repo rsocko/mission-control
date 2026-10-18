@@ -1,10 +1,12 @@
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import type {
   CreateRoutineCompletionResult,
+  CreateRoutineSkipResult,
   RoutineCompletionQuery,
   RoutineCompletionRecord,
   RoutineRecord,
   RoutinesRepository,
+  RoutineSkipRecord,
   RoutineUpdate,
 } from '@/db/persistence/routines';
 
@@ -19,6 +21,10 @@ const ROUTINE_COLUMNS = `
 
 const COMPLETION_COLUMNS = `
   id, routine_id AS "routineId", date, notes, completed_at AS "completedAt"
+`;
+
+const SKIP_COLUMNS = `
+  id, routine_id AS "routineId", date, skipped_at AS "skippedAt"
 `;
 
 const UPDATE_COLUMNS: Record<keyof RoutineUpdate, string> = {
@@ -170,7 +176,7 @@ export function createPostgresRoutinesRepository(pool: Pool): RoutinesRepository
     },
 
     async createCompletion(command): Promise<CreateRoutineCompletionResult> {
-      const lockKey = `routine-completion:${command.routineId}:${command.date}`;
+      const lockKey = `routine-occurrence:${command.routineId}:${command.date}`;
       return withMutationTransaction(pool, [lockKey], async (client) => {
         const [routine] = await query<{ cadenceType: string }>(client, `
           SELECT cadence_type AS "cadenceType" FROM routines WHERE id = $1
@@ -196,6 +202,10 @@ export function createPostgresRoutinesRepository(pool: Pool): RoutinesRepository
           command.notes,
           command.completedAt,
         ]);
+        await client.query(
+          'DELETE FROM routine_skips WHERE routine_id = $1 AND date = $2',
+          [command.routineId, command.date],
+        );
         return { outcome: 'created' };
       });
     },
@@ -207,6 +217,62 @@ export function createPostgresRoutinesRepository(pool: Pool): RoutinesRepository
     async deleteCompletionsForDate(routineId, date) {
       await pool.query(
         'DELETE FROM routine_completions WHERE routine_id = $1 AND date = $2',
+        [routineId, date],
+      );
+    },
+
+    async listSkips(skipQuery) {
+      const conditions = ['date >= $1'];
+      const values: string[] = [skipQuery.fromInclusive];
+      if (skipQuery.toInclusive !== undefined) {
+        values.push(skipQuery.toInclusive);
+        conditions.push(`date <= $${values.length}`);
+      }
+      if (skipQuery.routineId !== undefined) {
+        values.push(skipQuery.routineId);
+        conditions.push(`routine_id = $${values.length}`);
+      }
+      return query<RoutineSkipRecord>(pool, `
+        SELECT ${SKIP_COLUMNS}
+        FROM routine_skips
+        WHERE ${conditions.join(' AND ')}
+        ${completionOrder(skipQuery.order)}
+      `, values);
+    },
+
+    async createSkip(command): Promise<CreateRoutineSkipResult> {
+      const lockKey = `routine-occurrence:${command.routineId}:${command.date}`;
+      return withMutationTransaction(pool, [lockKey], async (client) => {
+        const routine = await query(client, `
+          SELECT 1 FROM routines WHERE id = $1
+        `, [command.routineId]);
+        if (routine.length === 0) return { outcome: 'routine-not-found' };
+
+        const completion = await query(client, `
+          SELECT 1 FROM routine_completions
+          WHERE routine_id = $1 AND date = $2
+          LIMIT 1
+        `, [command.routineId, command.date]);
+        if (completion.length > 0) return { outcome: 'already-completed' };
+
+        const existing = await query(client, `
+          SELECT 1 FROM routine_skips
+          WHERE routine_id = $1 AND date = $2
+          LIMIT 1
+        `, [command.routineId, command.date]);
+        if (existing.length > 0) return { outcome: 'duplicate' };
+
+        await client.query(`
+          INSERT INTO routine_skips (id, routine_id, date, skipped_at)
+          VALUES ($1, $2, $3, $4)
+        `, [command.id, command.routineId, command.date, command.skippedAt]);
+        return { outcome: 'created' };
+      });
+    },
+
+    async deleteSkipForDate(routineId, date) {
+      await pool.query(
+        'DELETE FROM routine_skips WHERE routine_id = $1 AND date = $2',
         [routineId, date],
       );
     },

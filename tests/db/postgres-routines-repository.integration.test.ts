@@ -26,7 +26,7 @@ describe.skipIf(!connectionString)('PostgreSQL routines adapter', () => {
     harness = {
       repository,
       async reset() {
-        await pool.query('DELETE FROM routine_completions; DELETE FROM routines;');
+        await pool.query('DELETE FROM routine_skips; DELETE FROM routine_completions; DELETE FROM routines;');
       },
     };
   });
@@ -90,5 +90,50 @@ describe.skipIf(!connectionString)('PostgreSQL routines adapter', () => {
       routineId: 'routine-concurrent',
       order: 'unspecified',
     })).resolves.toHaveLength(1);
+  });
+
+  it('serializes a same-day skip against completion so completion wins', async () => {
+    await harness.reset();
+    await repository.createRoutine({
+      id: 'routine-skip-race',
+      name: 'Skip race',
+      description: null,
+      cadenceType: 'daily',
+      cadenceConfig: {},
+      icon: null,
+      iconColor: null,
+      createdAt: ROUTINES_NOW,
+      updatedAt: ROUTINES_NOW,
+    });
+
+    const [, skipResult] = await Promise.all([
+      repository.createCompletion({
+        id: 'completion-skip-race',
+        routineId: 'routine-skip-race',
+        date: '2026-09-06',
+        notes: null,
+        completedAt: ROUTINES_NOW,
+      }),
+      repository.createSkip({
+        id: 'skip-race',
+        routineId: 'routine-skip-race',
+        date: '2026-09-06',
+        skippedAt: ROUTINES_NOW,
+      }),
+    ]);
+
+    expect(['created', 'already-completed']).toContain(skipResult.outcome);
+    await expect(repository.listCompletions({
+      fromInclusive: '2026-09-06',
+      toInclusive: '2026-09-06',
+      routineId: 'routine-skip-race',
+      order: 'unspecified',
+    })).resolves.toHaveLength(1);
+    await expect(repository.listSkips({
+      fromInclusive: '2026-09-06',
+      toInclusive: '2026-09-06',
+      routineId: 'routine-skip-race',
+      order: 'unspecified',
+    })).resolves.toEqual([]);
   });
 });

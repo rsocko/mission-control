@@ -2,10 +2,12 @@ import type Database from 'better-sqlite3';
 import type { PersistenceJson } from './contracts';
 import type {
   CreateRoutineCompletionResult,
+  CreateRoutineSkipResult,
   RoutineCompletionQuery,
   RoutineCompletionRecord,
   RoutineRecord,
   RoutinesRepository,
+  RoutineSkipRecord,
   RoutineUpdate,
 } from './routines';
 
@@ -27,6 +29,10 @@ const ROUTINE_COLUMNS = `
 
 const COMPLETION_COLUMNS = `
   id, routine_id AS routineId, date, notes, completed_at AS completedAt
+`;
+
+const SKIP_COLUMNS = `
+  id, routine_id AS routineId, date, skipped_at AS skippedAt
 `;
 
 const UPDATE_COLUMNS: Record<keyof RoutineUpdate, string> = {
@@ -181,6 +187,9 @@ export function createSqliteRoutinesRepository(
           command.notes,
           command.completedAt,
         );
+        sqlite.prepare(`
+          DELETE FROM routine_skips WHERE routine_id = ? AND date = ?
+        `).run(command.routineId, command.date);
         return { outcome: 'created' };
       }).immediate();
     },
@@ -192,6 +201,60 @@ export function createSqliteRoutinesRepository(
     async deleteCompletionsForDate(routineId, date) {
       sqlite.prepare(`
         DELETE FROM routine_completions WHERE routine_id = ? AND date = ?
+      `).run(routineId, date);
+    },
+
+    async listSkips(query) {
+      const conditions = ['date >= ?'];
+      const values: string[] = [query.fromInclusive];
+      if (query.toInclusive !== undefined) {
+        conditions.push('date <= ?');
+        values.push(query.toInclusive);
+      }
+      if (query.routineId !== undefined) {
+        conditions.push('routine_id = ?');
+        values.push(query.routineId);
+      }
+      return sqlite.prepare(`
+        SELECT ${SKIP_COLUMNS}
+        FROM routine_skips
+        WHERE ${conditions.join(' AND ')}
+        ${completionOrder(query.order)}
+      `).all(...values) as RoutineSkipRecord[];
+    },
+
+    async createSkip(command): Promise<CreateRoutineSkipResult> {
+      return sqlite.transaction((): CreateRoutineSkipResult => {
+        const routine = sqlite.prepare(
+          'SELECT 1 FROM routines WHERE id = ?',
+        ).get(command.routineId);
+        if (!routine) return { outcome: 'routine-not-found' };
+
+        const completion = sqlite.prepare(`
+          SELECT 1 FROM routine_completions
+          WHERE routine_id = ? AND date = ?
+          LIMIT 1
+        `).get(command.routineId, command.date);
+        if (completion) return { outcome: 'already-completed' };
+
+        const existing = sqlite.prepare(`
+          SELECT 1 FROM routine_skips
+          WHERE routine_id = ? AND date = ?
+          LIMIT 1
+        `).get(command.routineId, command.date);
+        if (existing) return { outcome: 'duplicate' };
+
+        sqlite.prepare(`
+          INSERT INTO routine_skips (id, routine_id, date, skipped_at)
+          VALUES (?, ?, ?, ?)
+        `).run(command.id, command.routineId, command.date, command.skippedAt);
+        return { outcome: 'created' };
+      }).immediate();
+    },
+
+    async deleteSkipForDate(routineId, date) {
+      sqlite.prepare(`
+        DELETE FROM routine_skips WHERE routine_id = ? AND date = ?
       `).run(routineId, date);
     },
   };

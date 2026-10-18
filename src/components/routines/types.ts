@@ -20,6 +20,11 @@ export interface WeekCompletion {
   id: string;
 }
 
+export interface WeekSkip {
+  date: string;
+  id: string;
+}
+
 export interface IntervalStatus {
   status: 'on_track' | 'due_soon' | 'overdue_soft';
   daysSinceLast: number;
@@ -46,6 +51,7 @@ export interface Routine {
   isArchived: boolean;
   streak: number;
   weekCompletions: WeekCompletion[];
+  weekSkips: WeekSkip[];
   intervalStatus: IntervalStatus | null;
   weeklyProgress: WeeklyProgress | null;
   createdAt: string;

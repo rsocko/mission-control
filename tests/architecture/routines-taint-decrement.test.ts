@@ -7,6 +7,7 @@ const ROUTES = [
   'src/app/api/routines/[id]/route.ts',
   'src/app/api/routines/completions/route.ts',
   'src/app/api/routines/route.ts',
+  'src/app/api/routines/skips/route.ts',
 ] as const;
 const SERVICE = 'src/lib/routines/service.ts';
 const CONTRACT = 'src/db/persistence/routines.ts';
@@ -73,7 +74,7 @@ describe('personal-planning routines taint decrement', () => {
     expect(postgres).toContain('BEGIN ISOLATION LEVEL READ COMMITTED');
     expect(postgres).not.toContain('SERIALIZABLE');
     expect(postgres).toContain('pg_advisory_xact_lock(hashtext($1))');
-    expect(postgres).toContain('routine-completion:${command.routineId}:${command.date}');
+    expect(postgres).toContain('routine-occurrence:${command.routineId}:${command.date}');
     expect(postgres).toContain('ORDER BY sort_order ASC, created_at COLLATE "C" ASC');
   });
 

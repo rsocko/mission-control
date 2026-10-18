@@ -15,6 +15,8 @@ const calls = vi.hoisted(() => ({
   createCompletion: vi.fn(async () => ({ outcome: 'created' as const })),
   deleteCompletionById: vi.fn(async () => undefined),
   deleteCompletionsForDate: vi.fn(async () => undefined),
+  createSkip: vi.fn(async () => ({ outcome: 'created' as const })),
+  deleteSkipForDate: vi.fn(async () => undefined),
 }));
 
 const routine = {
@@ -48,6 +50,9 @@ const repository: RoutinesRepository = {
   createCompletion: calls.createCompletion,
   deleteCompletionById: calls.deleteCompletionById,
   deleteCompletionsForDate: calls.deleteCompletionsForDate,
+  listSkips: async () => [],
+  createSkip: calls.createSkip,
+  deleteSkipForDate: calls.deleteSkipForDate,
 };
 
 vi.mock('@/lib/persistence/worker-runtime', () => ({

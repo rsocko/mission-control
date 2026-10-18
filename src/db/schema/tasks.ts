@@ -587,6 +587,16 @@ export const routineCompletions = sqliteTable('routine_completions', {
   completedAt: text('completed_at').notNull(),
 });
 
+export const routineSkips = sqliteTable('routine_skips', {
+  id: text('id').primaryKey(),
+  routineId: text('routine_id').notNull(),
+  date: text('date').notNull(),
+  skippedAt: text('skipped_at').notNull(),
+}, table => [
+  uniqueIndex('idx_routine_skips_routine_date').on(table.routineId, table.date),
+  index('idx_routine_skips_date').on(table.date),
+]);
+
 // ─── ENERGY CHECK-INS ───────────────────────────────────────────────────────
 
 export const energyCheckins = sqliteTable('energy_checkins', {

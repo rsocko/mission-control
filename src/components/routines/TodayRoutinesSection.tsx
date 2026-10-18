@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Check, ChevronDown, ChevronUp, Flame, RotateCcw } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { Check, ChevronDown, ChevronUp, Ellipsis, Flame, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from '@/lib/toast';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
@@ -15,6 +16,7 @@ import {
   getRoutineDetail,
   groupTodayRoutines,
   isRoutineComplete,
+  isRoutineSkipped,
   type TodayRoutine,
 } from './today-routines';
 import { RoutineIcon as RenderedRoutineIcon } from './RoutineIcon';
@@ -37,6 +39,7 @@ export function TodayRoutinesSection() {
   const [expanded, setExpanded] = useState(true);
   const [showAll, setShowAll] = useState(false);
   const [showOther, setShowOther] = useState(false);
+  const [showSkipped, setShowSkipped] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [quickActionLimit, setQuickActionLimit] = useState(4);
   const [promotedListRef] = useListAnimate({ duration: 250 });
@@ -72,25 +75,28 @@ export function TodayRoutinesSection() {
     return () => observer.disconnect();
   }, [loading]);
 
-  const { promoted, other } = useMemo(
+  const { promoted, other, skipped } = useMemo(
     () => groupTodayRoutines(routines, today),
     [routines, today],
   );
   const doneCount = promoted.filter((routine) => isRoutineComplete(routine, today)).length;
   const remainingCount = promoted.length - doneCount;
-  const allComplete = promoted.length > 0 && remainingCount === 0;
+  const plannedCount = promoted.length + skipped.length;
+  const allResolved = plannedCount > 0 && remainingCount === 0;
+  const allComplete = allResolved && skipped.length === 0;
 
   useEffect(() => {
-    if (!allComplete) return;
+    if (!allResolved) return;
     const timeout = window.setTimeout(() => setExpanded(false), 0);
     return () => window.clearTimeout(timeout);
-  }, [allComplete]);
+  }, [allResolved]);
 
   const setSectionExpanded = (nextExpanded: boolean) => {
     setExpanded(nextExpanded);
     if (!nextExpanded) {
       setShowAll(false);
       setShowOther(false);
+      setShowSkipped(false);
     }
   };
 
@@ -129,10 +135,85 @@ export function TodayRoutinesSection() {
     }
   };
 
+  const restoreRoutine = async (routineId: string) => {
+    const routine = routines.find(item => item.id === routineId);
+    if (!routine || pendingIds.has(routineId)) return;
+    setPendingIds((current) => new Set(current).add(routineId));
+
+    try {
+      const response = await fetch(
+        `/api/routines/skips?routineId=${encodeURIComponent(routineId)}&date=${today}`,
+        { method: 'DELETE' },
+      );
+      if (!response.ok) throw new Error('Failed to restore routine');
+
+      setRoutines((current) => current.map((item) => (
+        item.id === routineId
+          ? { ...item, weekSkips: item.weekSkips.filter((skip) => skip.date !== today) }
+          : item
+      )));
+    } catch (restoreError) {
+      toast.error(restoreError instanceof Error ? restoreError.message : 'Failed to restore routine');
+    } finally {
+      setPendingIds((current) => {
+        const next = new Set(current);
+        next.delete(routineId);
+        return next;
+      });
+    }
+  };
+
+  const skipRoutine = async (routineId: string) => {
+    const routine = routines.find(item => item.id === routineId);
+    if (
+      !routine
+      || pendingIds.has(routineId)
+      || isRoutineComplete(routine, today)
+      || isRoutineSkipped(routine, today)
+    ) return;
+    setPendingIds((current) => new Set(current).add(routineId));
+
+    try {
+      const response = await fetch('/api/routines/skips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ routineId, date: today }),
+      });
+      if (!response.ok) throw new Error('Failed to skip routine');
+
+      setRoutines((current) => current.map((item) => (
+        item.id === routineId
+          ? {
+            ...item,
+            weekSkips: [
+              ...item.weekSkips.filter((skip) => skip.date !== today),
+              { date: today, id: `pending-skip-${routineId}-${today}` },
+            ],
+          }
+          : item
+      )));
+      toast.success(`${routine.name} skipped for today`, {
+        action: {
+          label: 'Undo',
+          onClick: () => void restoreRoutine(routineId),
+        },
+        duration: 5000,
+      });
+    } catch (skipError) {
+      toast.error(skipError instanceof Error ? skipError.message : 'Failed to skip routine');
+    } finally {
+      setPendingIds((current) => {
+        const next = new Set(current);
+        next.delete(routineId);
+        return next;
+      });
+    }
+  };
+
   if (loading) return null;
   if (!error && routines.length === 0) return null;
 
-  const progress = promoted.length === 0 ? 0 : Math.round((doneCount / promoted.length) * 100);
+  const progress = plannedCount === 0 ? 0 : Math.round((doneCount / plannedCount) * 100);
   const greenWeight = Math.max(0, Math.min(100, Math.round(((progress - 35) / 65) * 100)));
   const progressColor = `color-mix(in srgb, var(--accent-400) ${100 - greenWeight}%, var(--success) ${greenWeight}%)`;
   const visiblePromoted = showAll ? promoted : promoted.slice(0, INITIAL_VISIBLE_ROUTINES);
@@ -159,7 +240,7 @@ export function TodayRoutinesSection() {
               aria-hidden="true"
             >
               <span className="grid size-6 place-items-center rounded-full bg-[var(--surface-1)] text-[9px] font-semibold tabular-nums text-[var(--text-primary)]">
-                {doneCount}/{promoted.length}
+                {doneCount}/{plannedCount}
               </span>
             </span>
             <span className="min-w-0">
@@ -168,7 +249,9 @@ export function TodayRoutinesSection() {
                   ? 'Routines unavailable'
                   : allComplete
                   ? 'All routines complete'
-                  : promoted.length === 0
+                  : allResolved
+                    ? 'Routines wrapped for today'
+                  : plannedCount === 0
                     ? 'No routines due today'
                     : `${remainingCount} routine${remainingCount === 1 ? '' : 's'} left today`}
               </span>
@@ -177,9 +260,11 @@ export function TodayRoutinesSection() {
                   ? "Retry to restore today's routine list"
                   : allComplete
                   ? 'Nice work · details collapsed automatically'
+                  : skipped.length > 0
+                    ? `${doneCount} complete · ${skipped.length} skipped`
                   : other.length > 0
-                    ? `${promoted.length} planned · ${other.length} other available`
-                    : `${promoted.length} planned for today`}
+                    ? `${plannedCount} planned · ${other.length} other available`
+                    : `${plannedCount} planned for today`}
               </span>
             </span>
           </button>
@@ -272,6 +357,7 @@ export function TodayRoutinesSection() {
                         completed={isRoutineComplete(routine, today)}
                         pending={pendingIds.has(routine.id)}
                         onToggle={toggleCompletion}
+                        onSkip={skipRoutine}
                       />
                     ))}
                   </motion.div>
@@ -294,6 +380,44 @@ export function TodayRoutinesSection() {
                       {showAll ? 'Show fewer' : 'Show all'}
                     </span>
                   </button>
+                )}
+
+                {skipped.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowSkipped(!showSkipped)}
+                      aria-expanded={showSkipped}
+                      className="flex min-h-[35px] w-full items-center justify-between gap-3 border-t border-[var(--border-subtle)] bg-[var(--surface-0)] px-[11px] py-1.5 text-left text-[10px] text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-500)]"
+                    >
+                      <span>
+                        <strong className="font-medium text-[var(--text-secondary)]">
+                          Skipped today ({skipped.length})
+                        </strong>
+                        {' · '}kept out of your active list
+                      </span>
+                      <span className="font-medium text-[var(--accent-400)]">
+                        {showSkipped ? 'Hide' : 'Show'}
+                      </span>
+                    </button>
+                    {showSkipped && (
+                      <div
+                        className={cn(
+                          'grid gap-px border-t border-[var(--border-subtle)] bg-[var(--border-subtle)]',
+                          getRoutineGridColumns(skipped.length),
+                        )}
+                      >
+                        {skipped.map((routine) => (
+                          <SkippedRoutineCard
+                            key={routine.id}
+                            routine={routine}
+                            pending={pendingIds.has(routine.id)}
+                            onRestore={restoreRoutine}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {other.length > 0 && (
@@ -405,11 +529,13 @@ function RoutineCard({
   completed,
   pending,
   onToggle,
+  onSkip,
 }: {
   routine: TodayRoutine;
   completed: boolean;
   pending: boolean;
   onToggle: (routineId: string) => void;
+  onSkip?: (routineId: string) => void;
 }) {
   return (
     <motion.div
@@ -437,6 +563,34 @@ function RoutineCard({
           {getRoutineDetail(routine, completed)}
         </span>
       </div>
+      {!completed && onSkip && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              disabled={pending}
+              aria-label={`More actions for ${routine.name}`}
+              className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-sm)] text-[var(--text-muted)] opacity-70 transition-[background-color,color,opacity] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)] disabled:cursor-wait disabled:opacity-40"
+            >
+              <Ellipsis size={15} aria-hidden="true" />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="end"
+              sideOffset={4}
+              className="z-50 min-w-36 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-1)] p-1 shadow-lg"
+            >
+              <DropdownMenu.Item
+                onSelect={() => onSkip(routine.id)}
+                className="flex min-h-8 cursor-default items-center rounded-[var(--radius-sm)] px-2.5 text-xs text-[var(--text-primary)] outline-none data-[highlighted]:bg-[var(--surface-2)]"
+              >
+                Skip today
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      )}
       {routine.streak > 0 && (
         <span
           className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums text-[var(--text-muted)]"
@@ -447,5 +601,41 @@ function RoutineCard({
         </span>
       )}
     </motion.div>
+  );
+}
+
+function SkippedRoutineCard({
+  routine,
+  pending,
+  onRestore,
+}: {
+  routine: TodayRoutine;
+  pending: boolean;
+  onRestore: (routineId: string) => void;
+}) {
+  return (
+    <div className="flex min-h-[43px] min-w-0 items-center gap-[9px] bg-[var(--surface-1)] px-[11px] py-2">
+      <div className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-2)] opacity-60">
+        <RoutineIcon routine={routine} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-medium leading-4 text-[var(--text-muted)]">
+          {routine.name}
+        </span>
+        <span className="mt-px block truncate text-[9px] leading-3 text-[var(--text-muted)]">
+          Skipped today
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={() => onRestore(routine.id)}
+        disabled={pending}
+        aria-label={`Restore ${routine.name}`}
+        className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-[var(--radius-sm)] px-2 text-[10px] font-medium text-[var(--accent-400)] transition-colors hover:bg-[var(--accent-500)]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)] disabled:cursor-wait disabled:opacity-50"
+      >
+        <RotateCcw size={11} aria-hidden="true" />
+        Restore
+      </button>
+    </div>
   );
 }

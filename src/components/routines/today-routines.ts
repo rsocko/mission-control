@@ -11,12 +11,17 @@ export type TodayRoutine = Pick<
   | 'sortOrder'
   | 'streak'
   | 'weekCompletions'
+  | 'weekSkips'
   | 'intervalStatus'
   | 'weeklyProgress'
 >;
 
 export function isRoutineComplete(routine: TodayRoutine, today: string): boolean {
   return routine.weekCompletions.some((completion) => completion.date === today);
+}
+
+export function isRoutineSkipped(routine: TodayRoutine, today: string): boolean {
+  return routine.weekSkips.some((skip) => skip.date === today);
 }
 
 function getDaysRemainingInWeek(today: string): number {
@@ -56,14 +61,17 @@ function compareRoutineIdentity(a: TodayRoutine, b: TodayRoutine): number {
 export function groupTodayRoutines(
   routines: TodayRoutine[],
   today: string,
-): { promoted: TodayRoutine[]; other: TodayRoutine[] } {
+): { promoted: TodayRoutine[]; other: TodayRoutine[]; skipped: TodayRoutine[] } {
   const promoted: Array<{ routine: TodayRoutine; rank: number }> = [];
   const other: TodayRoutine[] = [];
+  const skipped: TodayRoutine[] = [];
 
   for (const routine of routines) {
     const rank = getPromotionRank(routine, today);
     if (rank === null) {
       other.push(routine);
+    } else if (isRoutineSkipped(routine, today)) {
+      skipped.push(routine);
     } else {
       promoted.push({ routine, rank });
     }
@@ -80,10 +88,12 @@ export function groupTodayRoutines(
       - Number(isRoutineComplete(b, today));
     return completionOrder || compareRoutineIdentity(a, b);
   });
+  skipped.sort(compareRoutineIdentity);
 
   return {
     promoted: promoted.map(({ routine }) => routine),
     other,
+    skipped,
   };
 }
 

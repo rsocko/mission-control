@@ -8,6 +8,7 @@ import {
   type RoutineCadenceType,
   createRoutine,
   listRoutineCompletions,
+  listRoutineSkips,
   listRoutines,
 } from '@/lib/routines/service';
 
@@ -60,6 +61,11 @@ export async function GET(request: Request) {
       toInclusive: weekSunday,
       order: 'ascending',
     });
+    const weekSkips = await listRoutineSkips({
+      fromInclusive: weekMonday,
+      toInclusive: weekSunday,
+      order: 'ascending',
+    });
 
     // Fetch last 365 days of completions for streak calculation
     const streakStartDate = new Date(today + 'T12:00:00');
@@ -75,6 +81,7 @@ export async function GET(request: Request) {
     const result = allRoutines.map(routine => {
       const config = (routine.cadenceConfig || {}) as CadenceConfig;
       const routineWeekCompletions = weekCompletions.filter(c => c.routineId === routine.id);
+      const routineWeekSkips = weekSkips.filter(skip => skip.routineId === routine.id);
       const routineAllCompletions = allCompletions.filter(c => c.routineId === routine.id);
 
       const streak = calculateStreak(routine.cadenceType, config, routineAllCompletions, today);
@@ -96,6 +103,7 @@ export async function GET(request: Request) {
         ...routine,
         streak,
         weekCompletions: routineWeekCompletions.map(c => ({ date: c.date, id: c.id })),
+        weekSkips: routineWeekSkips.map(skip => ({ date: skip.date, id: skip.id })),
         intervalStatus,
         weeklyProgress,
       };

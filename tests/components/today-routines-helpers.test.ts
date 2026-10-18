@@ -20,6 +20,7 @@ function routine(overrides: Partial<TodayRoutine> & Pick<TodayRoutine, 'id' | 'n
     sortOrder: 0,
     streak: 0,
     weekCompletions: [],
+    weekSkips: [],
     intervalStatus: null,
     weeklyProgress: null,
     ...rest,
@@ -57,6 +58,7 @@ describe('today routine grouping', () => {
 
     expect(result.promoted.map(({ id }) => id)).toEqual(['due', 'scheduled']);
     expect(result.other.map(({ id }) => id)).toEqual(['on-track', 'not-scheduled']);
+    expect(result.skipped).toEqual([]);
   });
 
   it('promotes weekly targets only when every remaining day is needed', () => {
@@ -97,6 +99,23 @@ describe('today routine grouping', () => {
     ], TODAY);
 
     expect(result.promoted.map(({ id }) => id)).toEqual(['incomplete', 'complete']);
+  });
+
+  it('separates skipped due routines from the active promoted list', () => {
+    const result = groupTodayRoutines([
+      routine({
+        id: 'active',
+        name: 'Active',
+      }),
+      routine({
+        id: 'skipped',
+        name: 'Skipped',
+        weekSkips: [{ date: TODAY, id: 'skip-1' }],
+      }),
+    ], TODAY);
+
+    expect(result.promoted.map(({ id }) => id)).toEqual(['active']);
+    expect(result.skipped.map(({ id }) => id)).toEqual(['skipped']);
   });
 
   it('selects compact quick-action counts by available width', () => {

@@ -901,6 +901,14 @@ export function describeFinanceWorkerPersistenceContract(
         expect(page.subjects).toEqual([
           expect.objectContaining({ kidId: 'kid-one' }),
         ]);
+        await expect(harness.repositories.attribution.resolveExceptionTransactionId({
+          connectorId: CONNECTOR_ID,
+          exceptionId,
+        })).resolves.toBeTruthy();
+        await expect(harness.repositories.attribution.resolveExceptionTransactionId({
+          connectorId: CONNECTOR_ID,
+          exceptionId: 'missing-exception',
+        })).resolves.toBeNull();
 
         // A cursor past the only row returns an empty page, not an error.
         const empty = await harness.repositories.attribution.listExceptions({

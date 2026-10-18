@@ -6,6 +6,7 @@ import {
   FinanceAttributionFenceError,
   FinanceAttributionMutationError,
   type FinanceAttributionApplyItem,
+  type FinanceAttributionCategoryView,
   type FinanceAttributionExceptionActionCommand,
   type FinanceAttributionExceptionView,
   type FinanceAttributionManualDecisionCommand,
@@ -1957,7 +1958,10 @@ function createAttributionPersistence(
                  e.occurrence_count AS "occurrenceCount",
                  e.first_observed_at AS "firstObservedAt",
                  e.last_observed_at AS "lastObservedAt", e.updated_at AS "updatedAt",
-                 t.date, t.merchant_name AS "merchantName",
+                 t.date, t.amount, t.merchant_name AS "merchantName",
+                 COALESCE(t.confirmed_category, t.category_id) AS "categoryId",
+                 COALESCE(categories.name, t.confirmed_category, t.original_category) AS "categoryName",
+                 t.account_name AS "accountName", t.card_last4 AS "cardLast4",
                  t.assigned_kid_id AS "assignedKidId",
                  t.attribution_status AS "attributionStatus",
                  t.attribution_confidence AS "confidence",
@@ -1971,6 +1975,9 @@ function createAttributionPersistence(
           INNER JOIN finance_transactions t
             ON t.id = e.transaction_id
             AND t.connector_instance_id = e.connector_id
+          LEFT JOIN finance_categories categories
+            ON categories.connector_id = t.connector_instance_id
+            AND categories.upstream_category_id = COALESCE(t.confirmed_category, t.category_id)
           WHERE ${conditions.join(' AND ')}
           ORDER BY e.updated_at DESC, e.id DESC
           LIMIT $${parameters.length}
@@ -1988,6 +1995,12 @@ function createAttributionPersistence(
           WHERE subjects.connector_id = $1
           ORDER BY name, subjects.kid_id
         `, [request.connectorId]);
+        const categories = await query<FinanceAttributionCategoryView>(client, `
+          SELECT upstream_category_id AS id, name, group_name AS "groupName"
+          FROM finance_categories
+          WHERE connector_id = $1 AND is_active = true AND source_is_active = true
+          ORDER BY COALESCE(group_name, ''), name, upstream_category_id
+        `, [request.connectorId]);
         return {
           exceptions: page.map((row) => ({
             ...row,
@@ -1996,7 +2009,23 @@ function createAttributionPersistence(
           })),
           hasMore,
           subjects,
+          categories,
         };
+      });
+    },
+
+    async resolveExceptionTransactionId(input) {
+      return transaction(pool, async (client) => {
+        await requireFinanceConnector(client, input.connectorId);
+        const [row] = await query<{ id: string }>(client, `
+          SELECT t.id
+          FROM finance_attribution_exceptions e
+          INNER JOIN finance_transactions t
+            ON t.id = e.transaction_id
+            AND t.connector_instance_id = e.connector_id
+          WHERE e.connector_id = $1 AND e.id = $2
+        `, [input.connectorId, input.exceptionId]);
+        return row?.id ?? null;
       });
     },
 

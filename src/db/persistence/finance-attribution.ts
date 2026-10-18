@@ -158,7 +158,12 @@ export interface FinanceAttributionExceptionView {
   lastObservedAt: string;
   updatedAt: string;
   date: string;
+  amount: number;
   merchantName: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  accountName: string | null;
+  cardLast4: string | null;
   assignedKidId: string | null;
   attributionStatus: string | null;
   confidence: string | null;
@@ -175,6 +180,12 @@ export interface FinanceAttributionSubjectView {
   name: string;
 }
 
+export interface FinanceAttributionCategoryView {
+  id: string;
+  name: string;
+  groupName: string | null;
+}
+
 export interface FinanceAttributionExceptionQuery {
   connectorId: string;
   status: FinanceAttributionExceptionStatusFilter;
@@ -187,6 +198,7 @@ export interface FinanceAttributionExceptionPage {
   /** True when at least one more row exists after `exceptions`. */
   hasMore: boolean;
   subjects: readonly FinanceAttributionSubjectView[];
+  categories: readonly FinanceAttributionCategoryView[];
 }
 
 export interface FinanceAttributionExpectedTransactionVersion {
@@ -286,6 +298,10 @@ export interface FinanceAttributionPersistence {
   listExceptions(
     query: FinanceAttributionExceptionQuery,
   ): Promise<FinanceAttributionExceptionPage>;
+  resolveExceptionTransactionId(input: {
+    connectorId: string;
+    exceptionId: string;
+  }): Promise<string | null>;
   /**
    * Atomic manual transaction decision. Connector ownership, transaction
    * existence, projected-subject membership, expected-version CAS, exception

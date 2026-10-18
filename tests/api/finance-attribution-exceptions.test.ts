@@ -53,19 +53,30 @@ beforeAll(async () => {
   sqlite.prepare(`
     INSERT INTO finance_transactions (
       id, connector_instance_id, upstream_transaction_id, date, amount,
-      merchant_name, account_id, card_last4, assigned_kid_id,
+      merchant_name, category_id, original_category, account_id, account_name,
+      card_last4, assigned_kid_id,
       kid_assignment_method, triage_status, is_pending, is_recurring, tags,
       lifecycle_status, source_fingerprint, first_seen_at, last_seen_at, synced_at,
       attribution_status, attribution_reasons, attribution_review_state,
       attribution_retryable
     ) VALUES (
       ?, ?, 'transaction-one', '2026-08-08', -10,
-      'Invented merchant', 'account-one', '1234', 'kid-one',
+      'Invented merchant', 'category-one', 'Groceries', 'account-one', 'Everyday Checking',
+      '1234', 'kid-one',
       'account-default', 'pending', 0, 0, '[]',
       'active', 'source-hash', ?, ?, ?,
       'attributed', '[]', 'pending', 0
     )
   `).run(transactionId, connectorId, now, now, now);
+  sqlite.prepare(`
+    INSERT INTO finance_categories (
+      id, connector_id, upstream_category_id, name, upstream_group_id, group_name,
+      is_active, source_is_active, last_seen_generation_id, first_seen_at, last_seen_at
+    ) VALUES (
+      'finance:category:one', ?, 'category-one', 'Groceries', 'group-one', 'Food',
+      1, 1, 'generation-one', ?, ?
+    )
+  `).run(connectorId, now, now);
   sqlite.prepare(`
     INSERT INTO finance_attribution_subjects (
       id, connector_id, kid_id, policy_version, engine_version,
@@ -117,9 +128,15 @@ describe.sequential('finance attribution exception APIs', () => {
         id: exceptionId,
         reasonCode: 'low-confidence',
         retryable: true,
+        amount: -10,
+        categoryId: 'category-one',
+        categoryName: 'Groceries',
+        accountName: 'Everyday Checking',
+        cardLast4: '1234',
       }],
       nextCursor: null,
       subjects: [{ kidId: 'kid-one', name: 'Household member' }],
+      categories: [{ id: 'category-one', name: 'Groceries', groupName: 'Food' }],
     });
     expect(responseBody.exceptions[0]).not.toHaveProperty('transactionId');
 

@@ -201,6 +201,7 @@ describe('FinanceReview', () => {
 
     render(<FinanceReview />);
     await screen.findByRole('heading', { name: 'Invented Market' });
+    const focusSpy = vi.spyOn(HTMLElement.prototype, 'focus');
     fireEvent.click(screen.getByLabelText('Manual correction'));
     fireEvent.click(screen.getByRole('option', { name: 'Jordan' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save correction' }));
@@ -222,7 +223,9 @@ describe('FinanceReview', () => {
       }),
     });
     await waitFor(() => expect(screen.getByRole('button', { name: /Invented Cafe/ })).toHaveFocus());
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
     expect(screen.getByRole('status')).toHaveTextContent('Attribution decision saved.');
+    focusSpy.mockRestore();
   });
 
   it('keeps previous-page recovery available when a later page becomes empty', async () => {

@@ -629,6 +629,8 @@ interface FailureRule {
   method?: string;
   status: number;
   error: string;
+  code?: string;
+  retryAfter?: number;
   once: boolean;
   used?: boolean;
 }
@@ -647,8 +649,20 @@ export interface ProjectPageHarness {
   hierarchyCommands(): ProjectHierarchyCommand[];
   /** Authoritative hierarchy the fake transport currently serves. */
   hierarchy(): ProjectHierarchySnapshot;
-  failOnce(pattern: RegExp | string, options?: { status?: number; error?: string; method?: string }): void;
-  fail(pattern: RegExp | string, options?: { status?: number; error?: string; method?: string }): void;
+  failOnce(pattern: RegExp | string, options?: {
+    status?: number;
+    error?: string;
+    code?: string;
+    retryAfter?: number;
+    method?: string;
+  }): void;
+  fail(pattern: RegExp | string, options?: {
+    status?: number;
+    error?: string;
+    code?: string;
+    retryAfter?: number;
+    method?: string;
+  }): void;
   /** Holds every matching request until the returned release function runs. */
   hold(pattern: RegExp | string): () => void;
   /** Holds only the next matching request until the returned release function runs. */
@@ -877,7 +891,17 @@ export function installProjectPageHarness(
     const failure = matchedFailure(url, method);
     if (failure) {
       failure.used = true;
-      return jsonResponse({ error: failure.error }, failure.status);
+      return new Response(JSON.stringify({
+        error: failure.error,
+        ...(failure.code ? { code: failure.code } : {}),
+        ...(failure.retryAfter ? { retryAfterSeconds: failure.retryAfter } : {}),
+      }), {
+        status: failure.status,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(failure.retryAfter ? { 'Retry-After': String(failure.retryAfter) } : {}),
+        },
+      });
     }
 
     if (url === `/api/hub-projects/${PROJECT_ID}`) {
@@ -1065,6 +1089,8 @@ export function installProjectPageHarness(
         method: options.method,
         status: options.status ?? 500,
         error: options.error ?? 'Request failed',
+        code: options.code,
+        retryAfter: options.retryAfter,
         once: true,
       });
     },
@@ -1074,6 +1100,8 @@ export function installProjectPageHarness(
         method: options.method,
         status: options.status ?? 500,
         error: options.error ?? 'Request failed',
+        code: options.code,
+        retryAfter: options.retryAfter,
         once: false,
       });
     },

@@ -312,6 +312,34 @@ describe('project phases (Plan) tab', () => {
     });
   });
 
+  it('shows an actionable retry message when the AI provider rate limits planning', async () => {
+    harness = installProjectPageHarness({
+      project: { name: 'Plan Project' },
+      phases: [],
+      tasks: [makeTask('task-alpha', { title: 'Alpha migration' })],
+    });
+    harness.failOnce(`${PHASE_ENDPOINT}/ai-suggest`, {
+      method: 'POST',
+      status: 429,
+      error: 'The AI provider is temporarily rate limited. Try again shortly.',
+      code: 'AI_RATE_LIMITED',
+      retryAfter: 45,
+    });
+    await renderProjectTab('Plan');
+
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'AI Plan' }));
+    fireEvent.click(await screen.findByText('Generate plan'));
+    const guidanceDialog = await screen.findByRole('dialog', { name: 'Generate plan from tasks' });
+    fireEvent.click(within(guidanceDialog).getByRole('button', { name: 'Generate proposal' }));
+
+    await waitFor(() => {
+      expect(toasts).toContainEqual({
+        level: 'error',
+        message: 'The AI provider is temporarily rate limited. Try again in 45 seconds.',
+      });
+    });
+  });
+
   it('renames a phase inline and abandons the edit on Escape', async () => {
     await renderProjectTab('Plan');
     await screen.findByRole('region', { name: 'Discovery phase' });

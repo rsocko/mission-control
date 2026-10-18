@@ -223,7 +223,7 @@ describe('useTodayActions completion', () => {
     expect(fetchData).not.toHaveBeenCalled();
   });
 
-  it('deduplicates completion requests while a task is in flight', async () => {
+  it('deduplicates completion requests and refreshes without pulling stale connector state', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
     const fetchData = vi.fn(async () => {});
     const { result } = renderHook(() => useTodayActions({
@@ -272,6 +272,7 @@ describe('useTodayActions completion', () => {
     expect(mocks.pushUndoWithToast).toHaveBeenCalledTimes(1);
     expect(mocks.toastError).not.toHaveBeenCalled();
     expect(fetchData).toHaveBeenCalledTimes(1);
+    expect(fetchData).toHaveBeenCalledWith({ skipSync: true });
   });
 
   it('completes suggestions outside My Day and restores their prior status on undo', async () => {
@@ -313,6 +314,8 @@ describe('useTodayActions completion', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/tasks/suggestion-1', expect.objectContaining({
       body: JSON.stringify({ status: 'in_progress' }),
     }));
+    expect(fetchData).toHaveBeenNthCalledWith(1, { skipSync: true });
+    expect(fetchData).toHaveBeenNthCalledWith(2, { skipSync: true });
   });
 
   it('hides a disabled-connector mirror after its local disposition is persisted', async () => {

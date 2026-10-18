@@ -202,9 +202,11 @@ describe('IconRenderer', () => {
       target: { value: 'rocketship' },
     });
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'One provider is temporarily unavailable.',
-    );
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'One provider is temporarily unavailable.',
+      );
+    });
     expect(screen.getByRole('button', { name: 'Retry providers' })).toBeInTheDocument();
   });
 });

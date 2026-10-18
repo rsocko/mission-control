@@ -115,6 +115,12 @@ export interface AttributionSubject {
   name: string;
 }
 
+export interface AttributionCategory {
+  id: string;
+  name: string;
+  groupName: string | null;
+}
+
 export interface AttributionException {
   id: string;
   status: string;
@@ -127,7 +133,12 @@ export interface AttributionException {
   lastObservedAt: string;
   updatedAt: string;
   date: string;
+  amount: number;
   merchantName: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  accountName: string | null;
+  cardLast4: string | null;
   assignedKidId: string | null;
   attributionStatus: string;
   confidence: string | null;

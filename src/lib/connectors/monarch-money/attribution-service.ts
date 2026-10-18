@@ -5,6 +5,7 @@ import {
   FINANCE_ATTRIBUTION_EXCEPTION_STATUS_FILTERS,
   FinanceAttributionMutationError,
   type FinanceAttributionExceptionAction,
+  type FinanceAttributionCategoryView,
   type FinanceAttributionExceptionCursor,
   type FinanceAttributionExceptionStatusFilter,
   type FinanceAttributionExceptionView,
@@ -133,6 +134,7 @@ export async function listAttributionExceptions(
   exceptions: readonly FinanceAttributionExceptionView[];
   nextCursor: string | null;
   subjects: readonly FinanceAttributionSubjectView[];
+  categories: readonly FinanceAttributionCategoryView[];
 }> {
   const persistence = await attributionPersistence();
   await persistence.assertConnector(connectorId);
@@ -168,7 +170,27 @@ export async function listAttributionExceptions(
     exceptions: page.exceptions,
     nextCursor: page.hasMore && last ? encodeCursor(last.updatedAt, last.id) : null,
     subjects: page.subjects,
+    categories: page.categories,
   };
+}
+
+export async function resolveAttributionExceptionTransactionId(
+  connectorId: string,
+  exceptionId: string,
+): Promise<string> {
+  const persistence = await attributionPersistence();
+  const transactionId = await persistence.resolveExceptionTransactionId({
+    connectorId,
+    exceptionId,
+  });
+  if (!transactionId) {
+    throw new FinanceAttributionMutationError(
+      'exception_not_found',
+      'Attribution exception was not found',
+      404,
+    );
+  }
+  return transactionId;
 }
 
 export async function actOnAttributionException(input: {

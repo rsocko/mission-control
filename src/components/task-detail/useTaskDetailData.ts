@@ -106,6 +106,7 @@ export function useTaskDetailData({
       .then((loaded) => {
         if (loaded && requestVersion === taskRequestVersionRef.current) {
           setTask(loaded);
+          setExtraTags(loaded.tags ?? []);
           onTaskLoadedRef.current?.(loaded);
         }
       })
@@ -125,6 +126,7 @@ export function useTaskDetailData({
         .then((loaded) => {
           if (!loaded || requestVersion !== taskRequestVersionRef.current) return;
           setTask(loaded);
+          setExtraTags(loaded.tags ?? []);
           onTaskLoadedRef.current?.(loaded);
         })
         .catch((err) => {

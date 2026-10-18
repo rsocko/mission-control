@@ -1436,6 +1436,11 @@ export function describeTaskCoreContract(
         const detail = await harness.persistence.details.getTaskDetail('task-literal', TODAY);
         expect(detail).toMatchObject({
           tagIds: ['tag-api'],
+          tags: [{
+            id: 'tag-api',
+            name: 'API',
+            slug: 'api',
+          }],
           projectIds: ['project-1'],
           isInMyDay: true,
           schedule: { estimatedDuration: 45 },

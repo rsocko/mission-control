@@ -57,6 +57,7 @@ export interface TaskDetail {
   createdAt: string;
   updatedAt: string;
   tagIds: string[];
+  tags: TaskTag[];
   projectIds: string[];
   subtasks: Subtask[];
   subtaskOrderRevision?: number;

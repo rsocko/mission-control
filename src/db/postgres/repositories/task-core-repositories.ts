@@ -2747,7 +2747,13 @@ class PostgresTaskDetailReadRepository implements TaskDetailReadRepository {
       .from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     if (!task) return null;
     const [tagRows, projectRows, subtasks, scheduleRows, myDayRows] = await Promise.all([
-      this.db.select({ tagId: taskTags.tagId }).from(taskTags)
+      this.db.select({
+        id: tags.id,
+        name: tags.name,
+        slug: tags.slug,
+        color: tags.color,
+      }).from(taskTags)
+        .innerJoin(tags, eq(taskTags.tagId, tags.id))
         .where(eq(taskTags.taskId, taskId)).orderBy(asc(taskTags.tagId)),
       this.db.select({ projectId: taskProjects.projectId }).from(taskProjects)
         .where(eq(taskProjects.taskId, taskId)).orderBy(asc(taskProjects.projectId)),
@@ -2777,7 +2783,8 @@ class PostgresTaskDetailReadRepository implements TaskDetailReadRepository {
     ]);
     return {
       task: toMoveTaskRow(task),
-      tagIds: tagRows.map((row) => row.tagId),
+      tagIds: tagRows.map((row) => row.id),
+      tags: tagRows.map((row) => ({ ...row, color: row.color ?? null })),
       projectIds: projectRows.map((row) => row.projectId),
       subtasks,
       subtaskOrderRevision: task.subtaskOrderRevision ?? 0,

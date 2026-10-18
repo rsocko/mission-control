@@ -382,9 +382,10 @@ export function useTodayActions({
           body: JSON.stringify({ status: previousStatus }),
         });
         notifyTaskChanged(taskId);
-        fetchData();
+        await fetchData({ skipSync: true });
       });
-      fetchData();
+      // The connector can briefly return its pre-completion state after write-through.
+      void fetchData({ skipSync: true });
       return true;
     }
 

@@ -1,11 +1,12 @@
 ﻿'use client';
 
-import { AlertCircle, Brain, Calendar, CalendarClock, Clock, Flame, History, PanelRightClose, Plus, RotateCcw, Sparkles, Target, TimerReset } from 'lucide-react';
+import { AlertCircle, Calendar, CalendarClock, Clock, Flame, History, PanelRightClose, Plus, RotateCcw, Sparkles, Target, TimerReset } from 'lucide-react';
 import { SuggestionGroup } from './SuggestionGroup';
+import { SuggestedForToday } from './SuggestedForToday';
 import { Button } from '@/components/ui/button';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
-import { REPLANNING_SUGGESTION, type SourceList, type SuggestionGroups, type SuggestionTask } from './types';
+import { RECENTLY_DUE_SUGGESTION, REPLANNING_SUGGESTION, type SourceList, type SuggestionGroups, type SuggestionTask } from './types';
 import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 import { cn } from '@/lib/utils';
 
@@ -93,6 +94,12 @@ export function TodaySidebar({
           </div>
         </div>
 
+        <SuggestedForToday
+          tasks={suggestions.aiRecommended}
+          onAdd={onAddToDay}
+          onSelect={onSelectTask}
+        />
+
         <div className="space-y-1">
           <h4 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2 flex items-center gap-1"><Sparkles size={11} /> Suggestions</h4>
           <SuggestionGroup
@@ -106,11 +113,19 @@ export function TodaySidebar({
           />
           <SuggestionGroup title="Planned for Next" icon={<TimerReset size={12} />} tasks={suggestions.planningNext} color="emerald" {...interactionProps} />
           <SuggestionGroup title="Yesterday's Incomplete" icon={<History size={12} />} tasks={suggestions.yesterday} color="amber" {...interactionProps} />
-          <SuggestionGroup title="Overdue" icon={<AlertCircle size={12} />} tasks={suggestions.overdue} color="red" sortable {...interactionProps} />
+          <SuggestionGroup
+            title={RECENTLY_DUE_SUGGESTION.title}
+            icon={<CalendarClock size={12} />}
+            tasks={suggestions.recentlyDue}
+            color="amber"
+            description={RECENTLY_DUE_SUGGESTION.description}
+            sortable
+            {...interactionProps}
+          />
+          <SuggestionGroup title="Overdue" icon={<AlertCircle size={12} />} tasks={suggestions.overdue} color="red" sortable defaultSortDirection="desc" {...interactionProps} />
           <SuggestionGroup title="Due Today" icon={<CalendarClock size={12} />} tasks={suggestions.dueToday} color="blue" {...interactionProps} />
           <SuggestionGroup title={NEXT_7_DAYS_LABEL} icon={<Calendar size={12} />} tasks={suggestions.dueThisWeek} color="cyan" sortable {...interactionProps} />
           <SuggestionGroup title="High Priority" icon={<Flame size={12} />} tasks={suggestions.highPriority} color="orange" {...interactionProps} />
-          <SuggestionGroup title="AI Recommended" icon={<Brain size={12} />} tasks={suggestions.aiRecommended} color="purple" {...interactionProps} />
           <SuggestionGroup title="Recently Added" icon={<Plus size={12} />} tasks={suggestions.recentlyAdded} color="emerald" {...interactionProps} />
           <SuggestionGroup title="Carried Forward" icon={<RotateCcw size={12} />} tasks={suggestions.carriedForward} color="rose" {...interactionProps} />
           <SuggestionGroup title="Repeatedly Rescheduled" icon={<CalendarClock size={12} />} tasks={suggestions.repeatedlyRescheduled} color="amber" {...interactionProps} />

@@ -16,6 +16,7 @@ import {
 
 const SUGGESTION_LIMIT = 200;
 const CARRIED_FORWARD_MINIMUM = 3;
+const RECENTLY_DUE_DAYS = 3;
 const FRICTION_WINDOW_DAYS = 90;
 const PROVENANCE = 'my-day-api';
 
@@ -56,8 +57,8 @@ function addDays(date: string, days: number): string {
 
 /**
  * GET /api/my-day — Get today's items with full task details + tags
- * Also returns grouped suggestions (yesterday, overdue, dueToday, dueThisWeek,
- * highPriority, aiRecommended, recentlyAdded, carriedForward)
+ * Also returns grouped suggestions (yesterday, recentlyDue, overdue, dueToday,
+ * dueThisWeek, highPriority, aiRecommended, recentlyAdded, carriedForward)
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -92,6 +93,7 @@ export async function GET(request: Request) {
     const { items, suggestions } = await repository.dayView({
       date,
       yesterday: getYesterday(date),
+      recentlyDueSince: addDays(date, -RECENTLY_DUE_DAYS),
       dueThrough: addDays(date, NEXT_7_DAYS),
       activitySince: addDays(date, -2),
       frictionSince: getLocalDateBoundsISO(addDays(date, -FRICTION_WINDOW_DAYS)).dayStart,
@@ -105,16 +107,12 @@ export async function GET(request: Request) {
       planningSignals: suggestions.planningSignals,
       planningNext: suggestions.planningNext,
       yesterday: suggestions.yesterday,
+      recentlyDue: suggestions.recentlyDue,
       overdue: suggestions.overdue,
       dueToday: suggestions.dueToday,
       dueThisWeek: suggestions.dueThisWeek,
       highPriority: suggestions.highPriority,
-      aiRecommended: [...suggestions.aiRecommended].sort((a, b) => {
-        const pOrder: Record<string, number> = {
-          critical: 0, high: 1, medium: 2, low: 3, none: 4,
-        };
-        return (pOrder[a.priority] ?? 4) - (pOrder[b.priority] ?? 4);
-      }),
+      aiRecommended: suggestions.aiRecommended,
       recentlyAdded: suggestions.recentlyAdded,
       carriedForward: suggestions.carriedForward,
       repeatedlyRescheduled: suggestions.repeatedlyRescheduled,
@@ -172,6 +170,7 @@ export async function GET(request: Request) {
         delete (fields as Partial<typeof fields>).localDisposition;
         return fields;
       }),
+      recentlyDue: suggestionGroups.recentlyDue.map(pickSuggestionFields),
       overdue: suggestionGroups.overdue.map(pickSuggestionFields),
       dueToday: suggestionGroups.dueToday.map(pickSuggestionFields),
       dueThisWeek: suggestionGroups.dueThisWeek.map(pickSuggestionFields),

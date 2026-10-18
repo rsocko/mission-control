@@ -51,6 +51,12 @@ describe('repointTaskReferences', () => {
     await db.insert(schema.myDayExclusions).values({
       id: 'inventory-my-day-exclusion', taskId: sourceTaskId, date: '2026-08-14', removedAt: now,
     });
+    await db.insert(schema.myDaySuggestionExclusions).values({
+      id: 'inventory-my-day-suggestion-exclusion',
+      taskId: sourceTaskId,
+      date: '2026-08-14',
+      excludedAt: now,
+    });
     await db.insert(schema.focusItems).values({
       id: 'inventory-focus', taskId: sourceTaskId, scope: 'today', date: '2026-08-14', slot: 1, addedAt: now,
     });
@@ -277,6 +283,7 @@ describe('repointTaskReferences', () => {
     for (const [table, column] of [
       ['my_day_items', 'task_id'],
       ['my_day_exclusions', 'task_id'],
+      ['my_day_suggestion_exclusions', 'task_id'],
       ['focus_items', 'task_id'],
       ['weekly_one_thing', 'task_id'],
       ['priority_sync_log', 'task_id'],

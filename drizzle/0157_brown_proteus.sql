@@ -5,13 +5,4 @@ CREATE TABLE `my_day_suggestion_exclusions` (
 	`excluded_at` text NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `idx_my_day_suggestion_exclusions_task_date` ON `my_day_suggestion_exclusions` (`task_id`,`date`);--> statement-breakpoint
-CREATE TABLE `routine_skips` (
-	`id` text PRIMARY KEY NOT NULL,
-	`routine_id` text NOT NULL,
-	`date` text NOT NULL,
-	`skipped_at` text NOT NULL
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX `idx_routine_skips_routine_date` ON `routine_skips` (`routine_id`,`date`);--> statement-breakpoint
-CREATE INDEX `idx_routine_skips_date` ON `routine_skips` (`date`);
+CREATE UNIQUE INDEX `idx_my_day_suggestion_exclusions_task_date` ON `my_day_suggestion_exclusions` (`task_id`,`date`);

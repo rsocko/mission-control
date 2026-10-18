@@ -36,6 +36,13 @@ export interface RoutineCompletionRecord {
   completedAt: string;
 }
 
+export interface RoutineSkipRecord {
+  id: string;
+  routineId: string;
+  date: string;
+  skippedAt: string;
+}
+
 export interface CreateRoutineCommand {
   id: string;
   name: string;
@@ -80,9 +87,22 @@ export interface CreateRoutineCompletionCommand {
   completedAt: string;
 }
 
+export interface CreateRoutineSkipCommand {
+  id: string;
+  routineId: string;
+  date: string;
+  skippedAt: string;
+}
+
 export type CreateRoutineCompletionResult =
   | { outcome: 'created' }
   | { outcome: 'duplicate' }
+  | { outcome: 'routine-not-found' };
+
+export type CreateRoutineSkipResult =
+  | { outcome: 'created' }
+  | { outcome: 'duplicate' }
+  | { outcome: 'already-completed' }
   | { outcome: 'routine-not-found' };
 
 /**
@@ -104,4 +124,7 @@ export interface RoutinesRepository {
   ): Promise<CreateRoutineCompletionResult>;
   deleteCompletionById(id: string): Promise<void>;
   deleteCompletionsForDate(routineId: string, date: string): Promise<void>;
+  listSkips(query: RoutineCompletionQuery): Promise<RoutineSkipRecord[]>;
+  createSkip(command: CreateRoutineSkipCommand): Promise<CreateRoutineSkipResult>;
+  deleteSkipForDate(routineId: string, date: string): Promise<void>;
 }

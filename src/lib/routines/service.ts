@@ -1,6 +1,7 @@
 import type {
   CreateRoutineCommand,
   CreateRoutineCompletionCommand,
+  CreateRoutineSkipCommand,
   RoutineCompletionQuery,
   UpdateRoutineCommand,
 } from '@/db/persistence/routines';
@@ -47,4 +48,16 @@ export async function deleteRoutineCompletionById(id: string) {
 
 export async function deleteRoutineCompletionsForDate(routineId: string, date: string) {
   return (await repository()).deleteCompletionsForDate(routineId, date);
+}
+
+export async function listRoutineSkips(query: RoutineCompletionQuery) {
+  return (await repository()).listSkips(query);
+}
+
+export async function createRoutineSkip(command: CreateRoutineSkipCommand) {
+  return (await repository()).createSkip(command);
+}
+
+export async function deleteRoutineSkipForDate(routineId: string, date: string) {
+  return (await repository()).deleteSkipForDate(routineId, date);
 }

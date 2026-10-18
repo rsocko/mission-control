@@ -25,9 +25,24 @@ vi.mock('lucide-react', () => ({
   Check: () => <span data-testid="check-icon">check</span>,
   ChevronDown: () => <span>down</span>,
   ChevronUp: () => <span>up</span>,
+  Ellipsis: () => <span>more</span>,
   Flame: () => <span>flame</span>,
   Repeat: () => <span data-testid="routine-fallback-icon">repeat</span>,
   RotateCcw: () => <span>retry</span>,
+}));
+
+vi.mock('@radix-ui/react-dropdown-menu', () => ({
+  Root: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Trigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Portal: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Content: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Item: ({
+    children,
+    onSelect,
+  }: {
+    children: React.ReactNode;
+    onSelect?: () => void;
+  }) => <button type="button" onClick={onSelect}>{children}</button>,
 }));
 
 vi.mock('@/components/ui/Tooltip', () => ({
@@ -42,8 +57,11 @@ vi.mock('@/components/ui/Tooltip', () => ({
   }) => <span data-tooltip={String(content)} data-delay={delay}>{children}</span>,
 }));
 
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
-vi.mock('@/lib/toast', () => ({ toast: { error: toastError } }));
+const { toastError, toastSuccess } = vi.hoisted(() => ({
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+}));
+vi.mock('@/lib/toast', () => ({ toast: { error: toastError, success: toastSuccess } }));
 vi.mock('@/lib/motion', () => ({ fadeSlideUp: {}, staggerContainer: {} }));
 vi.mock('@/lib/utils/client-date', () => ({ getLocalToday: () => '2026-07-29' }));
 
@@ -60,6 +78,7 @@ function routine(index: number, overrides: Partial<TodayRoutine> = {}): TodayRou
     sortOrder: index,
     streak: 0,
     weekCompletions: [],
+    weekSkips: [],
     intervalStatus: null,
     weeklyProgress: null,
     ...overrides,
@@ -82,6 +101,8 @@ function mockFetch(routines: TodayRoutine[], loadStatus = 200) {
     }
     if (url === '/api/routines/completions' && method === 'POST') return response({});
     if (url.startsWith('/api/routines/completions?') && method === 'DELETE') return response({});
+    if (url === '/api/routines/skips' && method === 'POST') return response({}, 201);
+    if (url.startsWith('/api/routines/skips?') && method === 'DELETE') return response({});
     throw new Error(`Unexpected fetch: ${method} ${url}`);
   }) as typeof fetch;
 }
@@ -206,6 +227,75 @@ describe('TodayRoutinesSection', () => {
     expect(global.fetch).toHaveBeenCalledWith('/api/routines/completions', expect.objectContaining({
       method: 'POST',
     }));
+  });
+
+  it('skips a routine, preserves honest progress, and allows restoring it', async () => {
+    mockFetch([routine(1), routine(2)]);
+    render(<TodayRoutinesSection />);
+
+    await screen.findByText('Routine 1');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Skip today' })[0]);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Routine 1')).not.toBeInTheDocument();
+      expect(screen.getByText('1 routine left today')).toBeInTheDocument();
+      expect(screen.getByText('0 complete · 1 skipped')).toBeInTheDocument();
+    });
+    expect(toastSuccess).toHaveBeenCalledWith(
+      'Routine 1 skipped for today',
+      expect.objectContaining({
+        action: expect.objectContaining({ label: 'Undo' }),
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Skipped today \(1\)/ }));
+    expect(screen.getByText('Skipped today')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Routine 1' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Routine 1')).toBeInTheDocument();
+      expect(screen.getByText('2 routines left today')).toBeInTheDocument();
+    });
+  });
+
+  it('automatically collapses when all routines are completed or skipped', async () => {
+    mockFetch([
+      routine(1, { weekCompletions: [{ date: '2026-07-29', id: 'completion-1' }] }),
+      routine(2),
+    ]);
+    render(<TodayRoutinesSection />);
+
+    await screen.findByText('Routine 2');
+    fireEvent.click(screen.getByRole('button', { name: 'Skip today' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Routines wrapped for today')).toBeInTheDocument();
+      expect(screen.getByText('1 complete · 1 skipped')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Expand routines' })).toHaveAttribute('aria-expanded', 'false');
+    });
+  });
+
+  it('restores a skipped routine from the undo toast action', async () => {
+    mockFetch([routine(1), routine(2)]);
+    render(<TodayRoutinesSection />);
+
+    await screen.findByText('Routine 1');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Skip today' })[0]);
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+
+    const options = toastSuccess.mock.calls[0][1] as {
+      action: { onClick: () => void };
+    };
+    options.action.onClick();
+
+    await waitFor(() => {
+      expect(screen.getByText('Routine 1')).toBeInTheDocument();
+      expect(screen.getByText('2 routines left today')).toBeInTheDocument();
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/routines/skips?routineId=routine-1&date=2026-07-29',
+      { method: 'DELETE' },
+    );
   });
 
   it('shows an actionable error state when routines fail to load', async () => {

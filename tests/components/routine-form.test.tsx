@@ -49,6 +49,7 @@ const routine: Routine = {
   isArchived: false,
   streak: 2,
   weekCompletions: [],
+  weekSkips: [],
   intervalStatus: null,
   weeklyProgress: null,
   createdAt: '2026-10-01T00:00:00.000Z',

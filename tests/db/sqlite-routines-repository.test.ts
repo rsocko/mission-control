@@ -32,7 +32,7 @@ describe('SQLite routines adapter', () => {
     harness = {
       repository,
       async reset() {
-        sqlite.exec('DELETE FROM routine_completions; DELETE FROM routines;');
+        sqlite.exec('DELETE FROM routine_skips; DELETE FROM routine_completions; DELETE FROM routines;');
       },
     };
   });

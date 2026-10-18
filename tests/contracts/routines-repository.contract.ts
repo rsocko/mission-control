@@ -195,5 +195,63 @@ export function describeRoutinesRepositoryContract(
         expect.objectContaining({ id: 'completion-b' }),
       ]);
     });
+
+    it('persists one skip per routine and date without counting it as a completion', async () => {
+      await harness.repository.createRoutine(routine('routine-skip'));
+
+      await expect(harness.repository.createSkip({
+        id: 'skip-a',
+        routineId: 'routine-skip',
+        date: '2026-09-04',
+        skippedAt: ROUTINES_NOW,
+      })).resolves.toEqual({ outcome: 'created' });
+      await expect(harness.repository.createSkip({
+        id: 'skip-b',
+        routineId: 'routine-skip',
+        date: '2026-09-04',
+        skippedAt: ROUTINES_NOW,
+      })).resolves.toEqual({ outcome: 'duplicate' });
+      await expect(harness.repository.createSkip({
+        id: 'skip-missing',
+        routineId: 'routine-missing',
+        date: '2026-09-04',
+        skippedAt: ROUTINES_NOW,
+      })).resolves.toEqual({ outcome: 'routine-not-found' });
+
+      await expect(harness.repository.listSkips({
+        fromInclusive: '2026-09-04',
+        toInclusive: '2026-09-04',
+        routineId: 'routine-skip',
+        order: 'ascending',
+      })).resolves.toEqual([
+        expect.objectContaining({ id: 'skip-a', routineId: 'routine-skip' }),
+      ]);
+      await expect(harness.repository.listCompletions({
+        fromInclusive: '2026-09-04',
+        toInclusive: '2026-09-04',
+        routineId: 'routine-skip',
+        order: 'ascending',
+      })).resolves.toEqual([]);
+
+      await expect(harness.repository.createCompletion({
+        id: 'completion-after-skip',
+        routineId: 'routine-skip',
+        date: '2026-09-04',
+        notes: null,
+        completedAt: ROUTINES_NOW,
+      })).resolves.toEqual({ outcome: 'created' });
+      await expect(harness.repository.listSkips({
+        fromInclusive: '2026-09-04',
+        toInclusive: '2026-09-04',
+        routineId: 'routine-skip',
+        order: 'ascending',
+      })).resolves.toEqual([]);
+      await expect(harness.repository.createSkip({
+        id: 'skip-after-completion',
+        routineId: 'routine-skip',
+        date: '2026-09-04',
+        skippedAt: ROUTINES_NOW,
+      })).resolves.toEqual({ outcome: 'already-completed' });
+    });
   });
 }

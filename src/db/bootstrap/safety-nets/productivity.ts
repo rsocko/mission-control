@@ -100,6 +100,16 @@ export function applyProductivityTableSafetyNets(_sqlite: Database.Database): vo
   `);
   _sqlite.exec('CREATE INDEX IF NOT EXISTS idx_routine_completions_routine_date ON routine_completions(routine_id, date)');
   _sqlite.exec('CREATE INDEX IF NOT EXISTS idx_routine_completions_date ON routine_completions(date)');
+  _sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS routine_skips (
+      id TEXT PRIMARY KEY NOT NULL,
+      routine_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      skipped_at TEXT NOT NULL
+    )
+  `);
+  _sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_routine_skips_routine_date ON routine_skips(routine_id, date)');
+  _sqlite.exec('CREATE INDEX IF NOT EXISTS idx_routine_skips_date ON routine_skips(date)');
 
   // Energy Check-Ins
   _sqlite.exec(`

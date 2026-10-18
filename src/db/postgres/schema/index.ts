@@ -69,6 +69,7 @@ export {
   smartScoreSettings,
   routines,
   routineCompletions,
+  routineSkips,
   energyCheckins,
   resets,
   quickSortLog,

@@ -719,6 +719,12 @@ export function createSqliteDailyPlanningPersistence(
               ORDER BY m."order", m.id
               LIMIT ?
             `, [query.yesterday, limit], excluded),
+            recentlyDue: listSuggestions(`
+              SELECT ${SUGGESTION_COLUMNS} FROM tasks t
+              WHERE t.due_date >= ? AND t.due_date < ? AND ${openTopVisible}
+              ORDER BY t.due_date DESC, t.id
+              LIMIT ?
+            `, [query.recentlyDueSince, query.date, limit], excluded),
             overdue: listSuggestions(`
               SELECT ${SUGGESTION_COLUMNS} FROM tasks t
               WHERE t.due_date < ? AND t.status = 'todo' AND ${topLevelTask('t')}
@@ -753,10 +759,31 @@ export function createSqliteDailyPlanningPersistence(
             `, [limit], excluded),
             aiRecommended: listSuggestions(`
               SELECT ${SUGGESTION_COLUMNS} FROM tasks t
-              WHERE t.updated_at >= ? AND ${openTopVisible}
-              ORDER BY t.id
+              WHERE ${openTopVisible}
+                AND (
+                  t.due_date <= ?
+                  OR t.priority IN ('critical', 'high')
+                  OR t.planning_horizon IN ('now', 'next')
+                  OR t.push_count >= 2
+                )
+              ORDER BY
+                CASE
+                  WHEN t.due_date < ? THEN 0
+                  WHEN t.due_date = ? THEN 1
+                  WHEN t.priority = 'critical' THEN 2
+                  WHEN t.priority = 'high' THEN 3
+                  WHEN t.planning_horizon = 'now' THEN 4
+                  WHEN t.planning_horizon = 'next' THEN 5
+                  WHEN t.push_count >= 2 THEN 6
+                  ELSE 7
+                END,
+                CASE WHEN t.due_date < ? THEN t.due_date END DESC,
+                t.due_date,
+                t.push_count DESC,
+                t.updated_at DESC,
+                t.id
               LIMIT ?
-            `, [query.activitySince, limit], excluded),
+            `, [query.dueThrough, query.date, query.date, query.date, limit], excluded),
             recentlyAdded: listSuggestions(`
               SELECT ${SUGGESTION_COLUMNS} FROM tasks t
               WHERE t.created_at >= ? AND ${openTopVisible}

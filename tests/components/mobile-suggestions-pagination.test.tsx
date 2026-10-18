@@ -44,7 +44,9 @@ function suggestion(index: number): SuggestionTask {
 function suggestionGroups(overdue: SuggestionTask[]): SuggestionGroups {
   return {
     planningSignals: [],
+    planningNext: [],
     yesterday: [],
+    recentlyDue: [],
     overdue,
     dueToday: [],
     dueThisWeek: [],
@@ -80,6 +82,72 @@ describe('MobileSuggestions pagination', () => {
     expect(screen.getByRole('button', { name: 'Next 7 Days (1)' })).toBeTruthy();
   });
 
+  it('keeps top suggestions visible without opening the accordion', () => {
+    render(
+      <MobileSuggestions
+        suggestions={{
+          ...suggestionGroups([]),
+          aiRecommended: [suggestion(1)],
+        }}
+        onAddToDay={vi.fn()}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Suggested for Today' })).toBeTruthy();
+    expect(screen.getByText('Overdue task 1')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Suggestions \(/ })).toBeNull();
+  });
+
+  it('refills the three-item shortlist after a suggestion is added', () => {
+    const candidates = [suggestion(1), suggestion(2), suggestion(3), suggestion(4)];
+    const view = render(
+      <MobileSuggestions
+        suggestions={{
+          ...suggestionGroups([]),
+          aiRecommended: candidates,
+        }}
+        onAddToDay={vi.fn()}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Overdue task 1')).toBeTruthy();
+    expect(screen.getByText('Overdue task 3')).toBeTruthy();
+    expect(screen.queryByText('Overdue task 4')).toBeNull();
+
+    view.rerender(
+      <MobileSuggestions
+        suggestions={{
+          ...suggestionGroups([]),
+          aiRecommended: candidates.slice(1),
+        }}
+        onAddToDay={vi.fn()}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Overdue task 1')).toBeNull();
+    expect(screen.getByText('Overdue task 4')).toBeTruthy();
+  });
+
+  it('shows recently due tasks as a focused recovery group', () => {
+    render(
+      <MobileSuggestions
+        suggestions={{
+          ...suggestionGroups([]),
+          recentlyDue: [suggestion(2)],
+        }}
+        onAddToDay={vi.fn()}
+        onSelectTask={vi.fn()}
+        initialExpanded
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Recently Due \(1\)/ }));
+    expect(screen.getByText(/due in the last 3 days/i)).toBeTruthy();
+  });
+
   it('keeps the current page when adding a suggestion changes the task list', () => {
     const onAddToDay = vi.fn();
     const overdue = Array.from({ length: 11 }, (_, index) => suggestion(index + 1));
@@ -109,8 +177,28 @@ describe('MobileSuggestions pagination', () => {
     );
 
     expect(screen.getByText('2 / 2')).toBeTruthy();
-    expect(screen.getByText('Overdue task 7')).toBeTruthy();
-    expect(screen.queryByText('Overdue task 1')).toBeNull();
+    expect(screen.getByText('Overdue task 5')).toBeTruthy();
+    expect(screen.queryByText('Overdue task 11')).toBeNull();
+  });
+
+  it('shows the most recently overdue tasks first and keeps the sort toggle', () => {
+    render(
+      <MobileSuggestions
+        suggestions={suggestionGroups([suggestion(1), suggestion(3), suggestion(2)])}
+        onAddToDay={vi.fn()}
+        onSelectTask={vi.fn()}
+        initialExpanded
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Overdue (3)' }));
+    expect(screen.getByText('Due date: newest first')).toBeTruthy();
+
+    const taskTitles = screen.getAllByText(/Overdue task \d/).map((node) => node.textContent);
+    expect(taskTitles).toEqual(['Overdue task 3', 'Overdue task 2', 'Overdue task 1']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Due date: newest first' }));
+    expect(screen.getByText('Due date: oldest first')).toBeTruthy();
   });
 
   it('explains replanning suggestions and links to Insights', () => {

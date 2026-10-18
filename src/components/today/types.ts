@@ -90,6 +90,7 @@ export interface SuggestionTask {
   status: string;
   microStatus?: string | null;
   priority: string;
+  planningHorizon?: TaskItem['planningHorizon'] | null;
   dueDate: string | null;
   pushCount?: number;
   planningSignalCount?: number;
@@ -107,6 +108,7 @@ export interface SuggestionGroups {
   planningSignals: SuggestionTask[];
   planningNext: SuggestionTask[];
   yesterday: SuggestionTask[];
+  recentlyDue: SuggestionTask[];
   overdue: SuggestionTask[];
   dueToday: SuggestionTask[];
   dueThisWeek: SuggestionTask[];
@@ -121,6 +123,11 @@ export const REPLANNING_SUGGESTION = {
   title: 'May Need Replanning',
   description: 'Tasks with recent missed commitments, elapsed time blocks, overdue transitions, snooze extensions, or due dates moved later.',
   insightsHref: '/insights#planning-friction',
+} as const;
+
+export const RECENTLY_DUE_SUGGESTION = {
+  title: 'Recently Due',
+  description: 'Open tasks that were due in the last 3 days, kept close at hand before they disappear into the full overdue backlog.',
 } as const;
 
 export interface CalendarEvent {
@@ -176,6 +183,7 @@ export const EMPTY_SUGGESTION_GROUPS: SuggestionGroups = {
   planningSignals: [],
   planningNext: [],
   yesterday: [],
+  recentlyDue: [],
   overdue: [],
   dueToday: [],
   dueThisWeek: [],

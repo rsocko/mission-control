@@ -46,6 +46,7 @@ interface SuggestionGroupProps {
   listGroups: ListGroup[];
   projects: HubProject[];
   sortable?: boolean;
+  defaultSortDirection?: SortDirection;
   description?: string;
   learnMoreHref?: string;
 }
@@ -64,12 +65,13 @@ export function SuggestionGroup({
   listGroups,
   projects,
   sortable = false,
+  defaultSortDirection = 'asc',
   description,
   learnMoreHref,
 }: SuggestionGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
-  const [sortDir, setSortDir] = useState<SortDirection>('asc');
+  const [sortDir, setSortDir] = useState<SortDirection>(defaultSortDirection);
   const parentRef = useRef<HTMLDivElement>(null);
   const [suggestionsRef] = useListAnimate({ duration: 150 });
   const styles = COLOR_STYLES[color] || COLOR_STYLES.blue;

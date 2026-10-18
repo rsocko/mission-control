@@ -97,6 +97,8 @@ describe('GET /api/my-day suggestions', () => {
         depth: 0,
       }),
       task('top-overdue', { dueDate: '2026-08-04', timestamp: old }),
+      task('top-recently-due', { dueDate: '2026-08-03', timestamp: old }),
+      task('top-too-old-for-recent', { dueDate: '2026-08-01', timestamp: old }),
       task('child-overdue', {
         dueDate: '2026-08-04',
         parentId: 'top-overdue',
@@ -249,6 +251,8 @@ describe('GET /api/my-day suggestions', () => {
 
     expect(response.status).toBe(200);
     expect(body.suggestions.yesterday.map(({ id }) => id)).toContain('top-today');
+    expect(body.suggestions.recentlyDue.map(({ id }) => id)).toContain('top-recently-due');
+    expect(body.suggestions.recentlyDue.map(({ id }) => id)).not.toContain('top-too-old-for-recent');
     expect(body.suggestions.overdue.map(({ id }) => id)).toContain('top-overdue');
     expect(body.suggestions.dueToday.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.dueThisWeek.map(({ id }) => id)).toContain('top-week');
@@ -257,6 +261,7 @@ describe('GET /api/my-day suggestions', () => {
     expect(body.suggestions.dueThisWeek.map(({ id }) => id)).not.toContain('top-today');
     expect(body.suggestions.highPriority.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.aiRecommended.map(({ id }) => id)).toContain('top-today');
+    expect(body.suggestions.aiRecommended[0]?.id).toBe('top-overdue');
     expect(body.suggestions.recentlyAdded.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.carriedForward.map(({ id }) => id)).toContain('top-carried');
     expect(body.suggestions.repeatedlyRescheduled).toContainEqual(expect.objectContaining({

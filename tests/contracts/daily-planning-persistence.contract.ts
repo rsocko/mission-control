@@ -408,6 +408,7 @@ export function describeDailyPlanningPersistenceContract(
     it('projects bounded My Day suggestion groups without already-planned tasks', async () => {
       await harness.seedTasks([
         { id: 'planned', status: 'todo' },
+        { id: 'recently-due', status: 'todo', dueDate: '2026-09-03' },
         { id: 'overdue', status: 'todo', dueDate: '2026-09-01' },
         { id: 'due-today', status: 'todo', dueDate: PLANNING_DATE },
         { id: 'due-week', status: 'todo', dueDate: '2026-09-09' },
@@ -453,7 +454,8 @@ export function describeDailyPlanningPersistenceContract(
         view.suggestions[group].map((task) => task.id).sort();
 
       expect(view.items.map((item) => item.taskId)).not.toContain('soft-deleted');
-      expect(ids('overdue')).toEqual(['overdue']);
+      expect(ids('recentlyDue')).toEqual(['recently-due']);
+      expect(ids('overdue')).toEqual(['overdue', 'recently-due']);
       expect(ids('dueToday')).toEqual(['due-today']);
       expect(ids('dueThisWeek')).toEqual(['due-week']);
       expect(ids('planningNext')).toEqual(['next']);
@@ -740,6 +742,7 @@ export function dayViewQuery() {
   return {
     date: PLANNING_DATE,
     yesterday: '2026-09-04',
+    recentlyDueSince: '2026-09-02',
     dueThrough: '2026-09-12',
     activitySince: '2026-09-03',
     frictionSince: '2026-06-07T00:00:00.000Z',

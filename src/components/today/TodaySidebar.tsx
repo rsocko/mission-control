@@ -101,6 +101,10 @@ export function TodaySidebar({
           onAdd={onAddToDay}
           onNotToday={onNotToday}
           onSelect={onSelectTask}
+          getContextMenuActions={getContextMenuActions}
+          sourceLists={sourceLists}
+          listGroups={listGroups}
+          projects={projects}
         />
 
         <div className="space-y-1">

@@ -645,6 +645,7 @@ export interface TaskDetailSubtask {
 export interface TaskDetailResult {
   readonly task: TaskCoreTaskRow;
   readonly tagIds: string[];
+  readonly tags: Array<Pick<TaskCollectionTag, 'id' | 'name' | 'slug' | 'color'>>;
   readonly projectIds: string[];
   readonly subtasks: TaskDetailSubtask[];
   readonly subtaskOrderRevision: number;

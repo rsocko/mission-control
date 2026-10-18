@@ -50,6 +50,7 @@ const baseTask: TaskDetail = {
   microStatus: null,
   statusReason: null,
   priority: 'high',
+  planningHorizon: null,
   dueDate: '2026-08-01',
   connectorType: 'local',
   connectorInstanceId: 'local',
@@ -61,6 +62,7 @@ const baseTask: TaskDetail = {
   createdAt: '2026-07-01T12:00:00.000Z',
   updatedAt: '2026-07-31T12:00:00.000Z',
   tagIds: ['tag-1'],
+  tags: [{ id: 'tag-1', name: 'Docs', slug: 'docs', color: null }],
   projectIds: [],
   subtasks: [],
   metadata: null,
@@ -173,6 +175,7 @@ describe('useTaskDetailData', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.task?.id).toBe('task-1');
+    expect(result.current.extraTags).toEqual(baseTask.tags);
     expect(onTaskLoaded).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-1' }));
     await waitFor(() => expect(result.current.supportsAttachments).toBe(true));
     expect(result.current.connectorCaps).toEqual({

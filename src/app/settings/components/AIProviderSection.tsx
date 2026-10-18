@@ -398,10 +398,11 @@ function AIProviderSection() {
           <>
             <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
             <div>
-              <p className="text-sm font-medium text-emerald-300">AI Connected</p>
+              <p className="text-sm font-medium text-emerald-300">AI Configured</p>
               <p className="text-xs text-[var(--text-muted)]">
-                Active: <span className="font-mono text-[var(--text-secondary)]">{activeProvider}/{activeModel}</span>
+                Selected: <span className="font-mono text-[var(--text-secondary)]">{activeProvider}/{activeModel}</span>
                 {activeBaseUrl && <span> via <span className="font-mono">{activeBaseUrl}</span></span>}
+                <span> · Run a connection test to verify availability.</span>
               </p>
             </div>
           </>

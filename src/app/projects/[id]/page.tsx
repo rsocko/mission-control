@@ -71,6 +71,36 @@ const EMPTY_CONFIRMATION: ConfirmationRequest = {
   onConfirm: () => {},
 };
 
+function phaseProposalErrorMessage(
+  response: Response,
+  payload: { error?: string; code?: string; retryAfterSeconds?: number } | null,
+) {
+  const headerRetryAfter = Number.parseInt(response.headers.get('Retry-After') ?? '', 10);
+  const payloadRetryAfter = payload?.retryAfterSeconds;
+  const retryAfterSeconds = typeof payloadRetryAfter === 'number'
+    && Number.isSafeInteger(payloadRetryAfter)
+    && payloadRetryAfter > 0
+    ? payloadRetryAfter
+    : Number.isSafeInteger(headerRetryAfter) && headerRetryAfter > 0
+      ? headerRetryAfter
+      : undefined;
+
+  if (payload?.code === 'AI_RATE_LIMITED') {
+    return retryAfterSeconds
+      ? `The AI provider is temporarily rate limited. Try again in ${retryAfterSeconds} second${retryAfterSeconds === 1 ? '' : 's'}.`
+      : 'The AI provider is temporarily rate limited. Try again shortly.';
+  }
+  if (payload?.code === 'AI_QUOTA_EXHAUSTED') {
+    return 'The AI provider quota is currently exhausted. Try again later or check the provider quota.';
+  }
+  if (payload?.code === 'AI_PROVIDER_UNAVAILABLE' || payload?.code === 'AI_CAPACITY_EXHAUSTED') {
+    return retryAfterSeconds
+      ? `The AI provider is temporarily unavailable. Try again in ${retryAfterSeconds} second${retryAfterSeconds === 1 ? '' : 's'}.`
+      : 'The AI provider is temporarily unavailable. Try again shortly.';
+  }
+  return payload?.error || 'Failed to generate phase proposal';
+}
+
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
   const projectId = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -268,9 +298,14 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         }),
       });
 
-      const payload = (await response.json().catch(() => null)) as { proposal?: PhaseProposal; error?: string } | null;
+      const payload = (await response.json().catch(() => null)) as {
+        proposal?: PhaseProposal;
+        error?: string;
+        code?: string;
+        retryAfterSeconds?: number;
+      } | null;
       if (!response.ok || !payload?.proposal) {
-        throw new Error(payload?.error || 'Failed to generate phase proposal');
+        throw new Error(phaseProposalErrorMessage(response, payload));
       }
 
       setProposal(payload.proposal);

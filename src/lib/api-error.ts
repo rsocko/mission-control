@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
-import logger, { requestContext } from '@/lib/logger';
+import logger, { aiLogger, requestContext } from '@/lib/logger';
 import { normalizeTraceId } from '@/lib/trace-id';
 import { getAIOverloadDetails } from '@/lib/ai/admission-controller';
+import {
+  getAIProviderErrorDetails,
+  sanitizeAITelemetryLabel,
+} from '@/lib/ai/provider-errors';
 
 /**
  * Standardized API error response.
@@ -11,6 +15,15 @@ export interface ApiErrorBody {
   error: string;
   code: string;
   traceId?: string;
+  retryAfterSeconds?: number;
+}
+
+interface AIErrorContext {
+  featureId?: string;
+  correlationId?: string;
+  allowedRoutes?: string[];
+  provider?: string;
+  model?: string;
 }
 
 /**
@@ -43,16 +56,59 @@ export const ApiErrors = {
   validation: (message: string) =>
     apiError(message, 'VALIDATION_ERROR', 422),
 
-  internal: (message: string, cause?: unknown, traceId?: string) => {
+  internal: (
+    message: string,
+    cause?: unknown,
+    traceId?: string,
+    aiContext?: AIErrorContext,
+  ) => {
     const resolvedTraceId = normalizeTraceId(traceId ?? requestContext.getStore()?.traceId);
     const overload = getAIOverloadDetails(cause);
     if (overload) {
       logger.warn({ code: overload.code, traceId: resolvedTraceId }, 'Retryable AI capacity error');
       return NextResponse.json(
-        { error: overload.message, code: overload.code, traceId: resolvedTraceId },
+        {
+          error: overload.message,
+          code: overload.code,
+          traceId: resolvedTraceId,
+          retryAfterSeconds: overload.retryAfter,
+        },
         {
           status: overload.status,
           headers: { 'Retry-After': String(overload.retryAfter) },
+        },
+      );
+    }
+    const providerError = aiContext ? getAIProviderErrorDetails(cause) : null;
+    if (providerError) {
+      const correlationId = normalizeTraceId(aiContext?.correlationId) ?? resolvedTraceId;
+      aiLogger.warn({
+        event: 'ai_provider_request_failed',
+        featureId: sanitizeAITelemetryLabel(aiContext?.featureId, 80),
+        correlationId,
+        allowedRoutes: aiContext?.allowedRoutes
+          ?.map((route) => sanitizeAITelemetryLabel(route, 80))
+          .filter((route): route is string => Boolean(route)),
+        provider: sanitizeAITelemetryLabel(aiContext?.provider, 80),
+        model: sanitizeAITelemetryLabel(aiContext?.model),
+        errorCategory: providerError.category,
+        upstreamStatus: providerError.upstreamStatus,
+        responseStatus: providerError.status,
+        retryAfterSeconds: providerError.retryAfter,
+      }, 'Retryable AI provider error');
+      return NextResponse.json(
+        {
+          error: providerError.message,
+          code: providerError.code,
+          traceId: correlationId,
+          retryAfterSeconds: providerError.retryAfter,
+        },
+        {
+          status: providerError.status,
+          headers: {
+            'Retry-After': String(providerError.retryAfter),
+            'Cache-Control': 'no-store',
+          },
         },
       );
     }

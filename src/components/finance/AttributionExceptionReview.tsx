@@ -254,7 +254,7 @@ export function AttributionExceptionReview() {
     const focusId = focusAfterRefresh.current;
     focusAfterRefresh.current = null;
     const nextItem = itemRefs.current.get(focusId) ?? itemRefs.current.values().next().value;
-    if (nextItem) nextItem.focus();
+    if (nextItem) nextItem.focus({ preventScroll: true });
     else emptyStateRef.current?.focus();
   }, [exceptions]);
 

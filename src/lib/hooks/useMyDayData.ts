@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useMyDayQueries, myDayKeys } from '@/lib/hooks/useDashboardQueries';
+import { useMyDayQueries } from '@/lib/hooks/useDashboardQueries';
 import { uiLogger } from '@/lib/client-logger';
 import {
   EMPTY_SUGGESTION_GROUPS,
@@ -77,6 +77,11 @@ export function useMyDayData(todayISO: string) {
   // fetchData triggers a sync + invalidates the React Query cache
   const fetchData = useCallback(async (options?: { skipSync?: boolean }) => {
     try {
+      // Prevent a pre-mutation response from restoring stale My Day state.
+      await queryClient.cancelQueries(
+        { queryKey: ['myDay'], type: 'active' },
+        { silent: true },
+      );
       if (!options?.skipSync) {
         await fetch('/api/my-day/sync', {
           method: 'POST',

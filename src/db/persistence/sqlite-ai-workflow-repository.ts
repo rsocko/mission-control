@@ -7,6 +7,7 @@ import type {
   AIWorkflowPersistence,
   TaskBreakdownContext,
 } from './ai-workflows';
+import { projectPaymentCheckContext } from '@/lib/ai/payment-check-context';
 import type {
   DailyPlanningPersistence,
   DayPlanSchedule,
@@ -423,13 +424,14 @@ function createSqliteTaskToolsPersistence(
         conditions.push(`(
           instr(lower(title), lower(?)) > 0
           OR instr(lower(COALESCE(description, '')), lower(?)) > 0
+          OR instr(lower(COALESCE(metadata, '')), lower(?)) > 0
         )`);
-        params.push(filters.query, filters.query);
+        params.push(filters.query, filters.query, filters.query);
       }
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const rows = sqlite.prepare(`
         SELECT id, title, status, micro_status AS microStatus, priority, due_date AS dueDate,
-               connector_type AS connectorType, source_list_name AS sourceListName, description
+               connector_type AS connectorType, source_list_name AS sourceListName, description, metadata
         FROM tasks
         ${where}
         ORDER BY updated_at DESC, id ASC
@@ -437,7 +439,7 @@ function createSqliteTaskToolsPersistence(
       `).all(...params, filters.limit) as Array<{
         id: string; title: string; status: string; microStatus: string | null;
         priority: string; dueDate: string | null; connectorType: string;
-        sourceListName: string | null; description: string | null;
+        sourceListName: string | null; description: string | null; metadata: string | null;
       }>;
       return rows.map((row) => ({
         id: row.id,
@@ -449,6 +451,7 @@ function createSqliteTaskToolsPersistence(
         source: row.connectorType,
         sourceList: row.sourceListName,
         description: row.description ? row.description.slice(0, 100) : null,
+        paymentCheck: projectPaymentCheckContext(row.metadata),
       }));
     },
     async listAllTags() {

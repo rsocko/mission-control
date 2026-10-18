@@ -185,7 +185,63 @@ export interface TaskDetailMetadata {
     label: string;
     method: 'POST';
     url: string;
+    revision?: string | number;
+    idempotency_key?: string;
   }>;
+  paymentCheck?: {
+    state:
+      | 'unchecked'
+      | 'checking'
+      | 'posted_match'
+      | 'pending_match'
+      | 'multiple_matches'
+      | 'no_match'
+      | 'partial_payment'
+      | 'source_unavailable'
+      | 'stale'
+      | 'conflict'
+      | 'possible_double_payment'
+      | 'confirmed';
+    checkedAt?: string;
+    freshUntil?: string;
+    source?: string;
+    revision?: string | number;
+    message?: string;
+    confirmedAt?: string;
+    searchContext?: {
+      anchorDate?: string;
+      windowStart?: string;
+      windowEnd?: string;
+      amountTolerance?: number;
+      dateToleranceDays?: number;
+      sourceAsOf?: string;
+      searchedAt?: string;
+      eligibleAccountCount?: number;
+      candidatePoolSize?: number;
+    };
+    candidates: Array<{
+      id: string;
+      payee: string;
+      amount: number;
+      currency: string;
+      transactionDate: string;
+      status: 'posted' | 'pending';
+      accountDisplayName: string;
+      accountLastFour: string;
+      confidence: number;
+      score: number;
+      matchReasons: string[];
+      rank?: number;
+      scoreGapBasisPoints?: number;
+      receiptAssociation?: {
+        status?: string;
+        label?: string;
+        receiptDate?: string;
+        amount?: number;
+        currency?: string;
+      };
+    }>;
+  };
   owlStatus?: string;
   owlCreatedAt?: string;
   owlDisposition?: string;

@@ -86,7 +86,7 @@ export const taskTools = {
   }),
 
   searchTasks: tool({
-    description: 'Search tasks by title, status, priority, or source. Returns matching tasks.',
+    description: 'Search tasks by title, description, source context, status, priority, or source. OWL pay tasks include bounded payment-check evidence.',
     inputSchema: zodSchema(z.object({
       query: z.string().optional().describe('Text to search in task titles/descriptions'),
       status: z.enum(['todo', 'in_progress', 'done', 'cancelled']).optional(),

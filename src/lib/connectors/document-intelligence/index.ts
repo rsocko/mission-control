@@ -29,6 +29,7 @@ import {
 } from './document-parser';
 import type {
   DocAction,
+  DocPaymentCheck,
   DocSourceAction,
   MissingStatement,
   UnmatchedEob,
@@ -366,7 +367,11 @@ export class DocumentIntelligenceConnector implements IConnector {
     sourceAction: DocSourceAction,
   ): Promise<TaskItem | null> {
     const path = resolveSourceActionPath(this.settings.baseUrl, sourceId, sourceAction);
-    const payload = await this.client!.executeSourceAction(path);
+    const payload = await this.client!.executeSourceAction(path, {
+      ...(sourceAction.revision !== undefined ? { revision: sourceAction.revision } : {}),
+      idempotency_key: sourceAction.idempotency_key
+        || `mc:${this.id}:${sourceId}:${sourceAction.id}:${sourceAction.revision ?? 'current'}`,
+    });
     const action = unwrapActionPayload(payload);
     return action
       ? mapActionToTask(action, this.type, this.id, this.settings.baseUrl)
@@ -541,7 +546,15 @@ function unwrapActionPayload(value: unknown): DocAction | null {
   if (isDocAction(value)) return value;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  return isDocAction(record.action) ? record.action : null;
+  if (!isDocAction(record.action)) return null;
+  return record.payment_check
+    && typeof record.payment_check === 'object'
+    && !Array.isArray(record.payment_check)
+    ? {
+        ...record.action,
+        payment_check: record.payment_check as DocPaymentCheck,
+      }
+    : record.action;
 }
 
 function isDocAction(value: unknown): value is DocAction {
@@ -569,6 +582,17 @@ function resolveSourceActionPath(
   const expectedPrefix = `/api/action-queue/actions/${encodeURIComponent(sourceId)}/`;
   if (actionUrl.origin !== base.origin || !actionUrl.pathname.startsWith(expectedPrefix)) {
     throw new Error(`OWL source action "${sourceAction.id}" has an invalid action URL`);
+  }
+  const paymentActionSuffixes: Record<string, string> = {
+    check_payment: 'check-payment',
+    confirm_payment_and_complete: 'confirm-payment-and-complete',
+  };
+  const expectedPaymentSuffix = paymentActionSuffixes[sourceAction.id];
+  if (
+    expectedPaymentSuffix
+    && actionUrl.pathname !== `${expectedPrefix}${expectedPaymentSuffix}`
+  ) {
+    throw new Error(`OWL payment source action "${sourceAction.id}" has an invalid action URL`);
   }
   return `${actionUrl.pathname}${actionUrl.search}`;
 }

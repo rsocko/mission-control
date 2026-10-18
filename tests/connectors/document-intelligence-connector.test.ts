@@ -429,17 +429,73 @@ describe('DocumentIntelligenceConnector', () => {
         label: 'File in Paperless',
         method: 'POST',
         url: '/api/action-queue/actions/act-1/file',
+        revision: 'rev-2',
+        idempotency_key: 'file-act-1-rev-2',
       });
 
       expect(task?.status).toBe('done');
       expect(String(fetchMock.mock.calls[0][0])).toContain('/api/action-queue/actions/act-1/file');
       expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
+      expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+        revision: 'rev-2',
+        idempotency_key: 'file-act-1-rev-2',
+      });
       await expect(connector.executeSourceAction('act-1', {
         id: 'bad',
         label: 'Bad',
         method: 'POST',
         url: 'https://attacker.example/api/action-queue/actions/act-1/file',
       })).rejects.toThrow('invalid action URL');
+      await expect(connector.executeSourceAction('act-1', {
+        id: 'check_payment',
+        label: 'Check for payment',
+        method: 'POST',
+        url: '/api/action-queue/actions/act-1/confirm-payment-and-complete',
+      })).rejects.toThrow('invalid action URL');
+    });
+
+    it('merges the atomic confirmation envelope payment check into the refreshed task', async () => {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+        action: {
+          id: 'act-1',
+          document_id: 42,
+          document_title: 'Synthetic bill',
+          action_type: 'pay',
+          urgency: 'high',
+          summary: 'Payment confirmed',
+          status: 'completed',
+          action_ready: true,
+          review_state: 'ready',
+          created_at: '2026-10-15T12:00:00Z',
+          updated_at: '2026-10-17T18:30:00Z',
+          source_actions: [],
+        },
+        payment_check: {
+          state: 'confirmed',
+          confirmed_at: '2026-10-17T18:30:00Z',
+          candidates: [],
+        },
+      }), { status: 200 }));
+      const connector = await createConnector();
+
+      const task = await connector.executeSourceAction('act-1', {
+        id: 'confirm_payment_and_complete',
+        label: 'Confirm payment',
+        method: 'POST',
+        url: '/api/action-queue/actions/act-1/confirm-payment-and-complete',
+        revision: 'rev-7',
+        idempotency_key: 'confirm-act-1-rev-7',
+      });
+
+      expect(task).toMatchObject({
+        status: 'done',
+        metadata: {
+          paymentCheck: {
+            state: 'confirmed',
+            confirmedAt: '2026-10-17T18:30:00Z',
+          },
+        },
+      });
     });
   });
 

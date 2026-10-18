@@ -61,6 +61,7 @@ import {
   parseOwlTaskActionInput,
   performOwlTaskAction,
 } from '@/lib/connectors/document-intelligence/task-actions';
+import { DocClientRequestError } from '@/lib/connectors/document-intelligence/document-client';
 
 /**
  * The persistence port speaks physical column names; this projects one write
@@ -202,6 +203,101 @@ describe('OWL task action service', () => {
         message: 'Paperless mutation failed',
       });
     expect(applyTaskWrite).not.toHaveBeenCalled();
+  });
+
+  it('surfaces stale OWL source-action revisions as a refresh conflict', async () => {
+    currentTask.metadata = {
+      actionType: 'pay',
+      sourceActions: [{
+        id: 'check_payment',
+        label: 'Check for payment',
+        method: 'POST',
+        url: '/api/action-queue/actions/owl-action-1/check-payment',
+        revision: 'rev-7',
+      }],
+    };
+    executeSourceAction.mockRejectedValueOnce(
+      new DocClientRequestError('OWL request failed: 409 Conflict', 409),
+    );
+
+    await expect(performOwlTaskAction('task-1', {
+      action: 'source_action',
+      sourceActionId: 'check_payment',
+    })).rejects.toMatchObject({
+      code: 'TASK_CHANGED',
+      status: 409,
+      message: expect.stringContaining('stale payment action revision'),
+    });
+    expect(applyTaskWrite).not.toHaveBeenCalled();
+  });
+
+  it('rejects confirm-and-complete unless current evidence is a posted match', async () => {
+    currentTask.metadata = {
+      actionType: 'pay',
+      paymentCheck: { state: 'pending_match', candidates: [] },
+      sourceActions: [{
+        id: 'confirm_payment_and_complete',
+        label: 'Confirm payment',
+        method: 'POST',
+        url: '/api/action-queue/actions/owl-action-1/confirm-payment-and-complete',
+        revision: 'rev-7',
+      }],
+    };
+
+    await expect(performOwlTaskAction('task-1', {
+      action: 'source_action',
+      sourceActionId: 'confirm_payment_and_complete',
+    })).rejects.toMatchObject({
+      code: 'SOURCE_ACTION_UNAVAILABLE',
+      status: 409,
+      message: expect.stringContaining('only from current posted-match evidence'),
+    });
+    expect(executeSourceAction).not.toHaveBeenCalled();
+    expect(applyTaskWrite).not.toHaveBeenCalled();
+  });
+
+  it('applies atomic payment confirmation from posted evidence without a separate completion call', async () => {
+    currentTask.metadata = {
+      actionType: 'pay',
+      paymentCheck: { state: 'posted_match', candidates: [] },
+      sourceActions: [{
+        id: 'confirm_payment_and_complete',
+        label: 'Confirm payment',
+        method: 'POST',
+        url: '/api/action-queue/actions/owl-action-1/confirm-payment-and-complete',
+        revision: 'rev-7',
+      }],
+    };
+    executeSourceAction.mockResolvedValueOnce({
+      title: 'Pay: Acme',
+      description: 'Payment confirmed',
+      status: 'done',
+      priority: 'high',
+      dueDate: '2026-08-30',
+      snoozedUntil: null,
+      completedAt: '2026-10-17T18:30:00.000Z',
+      metadata: {
+        actionType: 'pay',
+        actionReady: true,
+        paymentCheck: { state: 'confirmed', candidates: [] },
+        sourceActions: [],
+      },
+    });
+
+    const result = await performOwlTaskAction('task-1', {
+      action: 'source_action',
+      sourceActionId: 'confirm_payment_and_complete',
+    });
+
+    expect(executeSourceAction).toHaveBeenCalledOnce();
+    expect(completeTask).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: 'done',
+      statusReason: 'completed',
+      metadata: {
+        paymentCheck: { state: 'confirmed' },
+      },
+    });
   });
 
   it('maps no-action and extraction corrections to OWL feedback', async () => {

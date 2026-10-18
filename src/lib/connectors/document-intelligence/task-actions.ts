@@ -4,7 +4,7 @@ import { connectorRegistry } from '@/lib/connectors';
 import { syncScheduler } from '@/lib/sync';
 import { parseTaskMetadataCompat } from '@/lib/tasks/metadata-compat';
 import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
-import type { DocActionFeedback } from './document-client';
+import { DocClientRequestError, type DocActionFeedback } from './document-client';
 import type { DocSourceAction } from './document-parser';
 
 const ACTION_TYPES = ['pay', 'respond', 'file', 'archive', 'review', 'sign', 'schedule'] as const;
@@ -131,6 +131,40 @@ function feedbackFor(input: Extract<OwlTaskActionInput, { action: 'correct' }>):
   }
 }
 
+function assertPaymentSourceActionAvailable(
+  metadata: Record<string, unknown>,
+  sourceActionId: string,
+): void {
+  if (
+    sourceActionId !== 'check_payment'
+    && sourceActionId !== 'confirm_payment_and_complete'
+  ) {
+    return;
+  }
+  if (metadata.actionType !== 'pay') {
+    throw new OwlTaskActionError(
+      'OWL payment actions are available only for pay tasks',
+      'SOURCE_ACTION_UNAVAILABLE',
+      409,
+    );
+  }
+  if (sourceActionId !== 'confirm_payment_and_complete') return;
+
+  const paymentCheck = metadata.paymentCheck;
+  const state = paymentCheck
+    && typeof paymentCheck === 'object'
+    && !Array.isArray(paymentCheck)
+    ? (paymentCheck as Record<string, unknown>).state
+    : undefined;
+  if (state !== 'posted_match') {
+    throw new OwlTaskActionError(
+      'Payment can be confirmed only from current posted-match evidence',
+      'SOURCE_ACTION_UNAVAILABLE',
+      409,
+    );
+  }
+}
+
 function localMetadataAfter(
   current: Record<string, unknown>,
   input: OwlTaskActionInput,
@@ -244,6 +278,10 @@ async function performOwlTaskActionNow(
           409,
         );
       }
+      assertPaymentSourceActionAvailable(
+        parseTaskMetadataCompat(task.metadata).metadata,
+        sourceAction.id,
+      );
       refreshedTask = await connector.executeSourceAction(task.sourceId, sourceAction);
       refreshedTask ??= await connector.fetchActionTask(task.sourceId);
       if (!refreshedTask) {
@@ -262,6 +300,14 @@ async function performOwlTaskActionNow(
     }
   } catch (error) {
     if (error instanceof OwlTaskActionError) throw error;
+    if (error instanceof DocClientRequestError && error.status === 409) {
+      throw new OwlTaskActionError(
+        'OWL rejected a stale payment action revision; refresh the task and try again',
+        'TASK_CHANGED',
+        409,
+        { cause: error },
+      );
+    }
     throw new OwlTaskActionError(
       error instanceof Error ? error.message : 'OWL write-back failed',
       'REMOTE_WRITE_FAILED',
@@ -385,6 +431,12 @@ async function performOwlTaskActionNow(
           label: record.label,
           method: 'POST',
           url: record.url,
+          ...(typeof record.revision === 'string' || typeof record.revision === 'number'
+            ? { revision: record.revision }
+            : {}),
+          ...(typeof record.idempotency_key === 'string' && record.idempotency_key.trim()
+            ? { idempotency_key: record.idempotency_key.trim() }
+            : {}),
         }
       : null;
   }

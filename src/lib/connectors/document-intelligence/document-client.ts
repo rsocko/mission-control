@@ -7,6 +7,16 @@ export interface DocClientOptions {
   apiKey: string;
 }
 
+export class DocClientRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'DocClientRequestError';
+  }
+}
+
 export interface DocHealthResponse {
   status: 'healthy' | 'degraded' | 'unhealthy';
   modules?: Record<string, { status: string; message?: string }>;
@@ -51,7 +61,10 @@ export interface DocClient {
   ): Promise<void>;
   snoozeAction(sourceId: string, until: string): Promise<void>;
   submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<unknown | null>;
-  executeSourceAction(path: string): Promise<unknown | null>;
+  executeSourceAction(
+    path: string,
+    input: { revision?: string | number; idempotency_key: string },
+  ): Promise<unknown | null>;
   fetchHealth(): Promise<DocHealthResponse>;
   fetchStats(): Promise<DocStatsResponse>;
 }
@@ -97,8 +110,9 @@ export function createDocumentClient(options: DocClientOptions): DocClient {
     });
     if (!response.ok) {
       const detail = (await response.text()).trim();
-      throw new Error(
+      throw new DocClientRequestError(
         `OWL request failed: ${response.status} ${response.statusText}${detail ? ` - ${detail}` : ''}`,
+        response.status,
       );
     }
     return response;
@@ -214,8 +228,11 @@ export function createDocumentClient(options: DocClientOptions): DocClient {
       );
     },
 
-    async executeSourceAction(path: string): Promise<unknown | null> {
-      return postJson(path, {});
+    async executeSourceAction(
+      path: string,
+      input: { revision?: string | number; idempotency_key: string },
+    ): Promise<unknown | null> {
+      return postJson(path, input);
     },
 
     async fetchHealth(): Promise<DocHealthResponse> {

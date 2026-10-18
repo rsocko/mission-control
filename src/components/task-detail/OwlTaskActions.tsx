@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/select';
 import { postOwlTaskAction, type OwlTaskActionUpdate } from './task-detail-api';
 import type { TaskDetailMetadata } from './task-detail-types';
+import { OwlPaymentCheck } from './OwlPaymentCheck';
 
 const ACTION_TYPES = [
   ['pay', 'Pay'],
@@ -68,6 +69,10 @@ export function OwlTaskActions({
     || amount !== initialAmount;
   const primaryActionUrl = normalizeActionUrl(metadata.primaryActionUrl);
   const reviewUrl = normalizeActionUrl(metadata.reviewUrl || metadata.docHubUrl);
+  const generalSourceActions = metadata.sourceActions?.filter((sourceAction) => (
+    sourceAction.id !== 'check_payment'
+    && sourceAction.id !== 'confirm_payment_and_complete'
+  ));
 
   const snoozeLabel = useMemo(() => {
     if (!snoozedUntil) return null;
@@ -168,6 +173,21 @@ export function OwlTaskActions({
         </p>
       </div>
 
+      {metadata.actionType === 'pay' && (
+        <OwlPaymentCheck
+          paymentCheck={metadata.paymentCheck}
+          sourceActions={metadata.sourceActions}
+          busyAction={busyAction}
+          onExecute={(sourceAction, successMessage) => {
+            void submit(
+              `source:${sourceAction.id}`,
+              { action: 'source_action', sourceActionId: sourceAction.id },
+              successMessage,
+            );
+          }}
+        />
+      )}
+
       {(primaryActionUrl || reviewUrl) && (
         <div className="flex flex-wrap gap-2">
           {primaryActionUrl && (
@@ -195,9 +215,9 @@ export function OwlTaskActions({
         </div>
       )}
 
-      {metadata.sourceActions && metadata.sourceActions.length > 0 && (
+      {generalSourceActions && generalSourceActions.length > 0 && (
         <div className="flex flex-wrap gap-2" aria-label="OWL source actions">
-          {metadata.sourceActions.map((sourceAction) => (
+          {generalSourceActions.map((sourceAction) => (
             <button
               key={sourceAction.id}
               type="button"

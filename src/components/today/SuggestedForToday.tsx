@@ -1,13 +1,21 @@
 'use client';
 
 import { useId } from 'react';
-import { Plus, Sparkles } from 'lucide-react';
+import { CalendarX2, Plus, Sparkles } from 'lucide-react';
+import {
+  TaskContextMenu,
+  type HubProject,
+  type TaskContextMenuActions,
+} from '@/components/task-list/TaskContextMenu';
 import { ConnectorIcon } from './SortableTaskRow';
 import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { cn } from '@/lib/utils';
-import type { SuggestionTask } from './types';
+import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
+import type { ListGroup } from '@/types/dashboard';
+import type { SourceList, SuggestionTask } from './types';
 
 const DISPLAY_LIMIT = 3;
 
@@ -26,12 +34,22 @@ function suggestionReason(task: SuggestionTask): string {
 export function SuggestedForToday({
   tasks,
   onAdd,
+  onNotToday,
   onSelect,
+  getContextMenuActions,
+  sourceLists = [],
+  listGroups = [],
+  projects = [],
   className,
 }: {
   tasks: SuggestionTask[];
   onAdd: (taskId: string) => void;
+  onNotToday?: (taskId: string) => void;
   onSelect: (taskId: string) => void;
+  getContextMenuActions?: (task: SuggestionTask) => TaskContextMenuActions;
+  sourceLists?: SourceList[];
+  listGroups?: ListGroup[];
+  projects?: HubProject[];
   className?: string;
 }) {
   const headingId = useId();
@@ -60,35 +78,112 @@ export function SuggestedForToday({
       </div>
       <div className="divide-y divide-purple-800/20">
         {visibleTasks.map((task) => (
-          <div key={task.id} className="flex min-h-12 items-center gap-2 px-2">
-            <button
-              type="button"
-              onClick={() => onSelect(task.id)}
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-2 text-left transition-colors hover:bg-purple-400/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
-            >
-              <TaskStatusIndicator status={task.status} microStatus={task.microStatus} size="sm" />
-              <ConnectorIcon type={task.connectorType} size={12} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium text-[var(--text-primary)]">
-                  {task.title}
-                </span>
-                <span className="mt-0.5 flex items-center gap-2 text-xs text-purple-200/70">
-                  {suggestionReason(task)}
-                  <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
-                </span>
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onAdd(task.id)}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-purple-700/40 text-purple-300 transition-colors hover:border-purple-500/60 hover:bg-purple-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
-              aria-label={`Add "${task.title}" to My Day`}
-            >
-              <Plus size={13} aria-hidden="true" />
-            </button>
-          </div>
+          <SuggestedTaskRow
+            key={task.id}
+            task={task}
+            onAdd={onAdd}
+            onNotToday={onNotToday}
+            onSelect={onSelect}
+            contextMenuActions={getContextMenuActions?.(task)}
+            sourceLists={sourceLists}
+            listGroups={listGroups}
+            projects={projects}
+          />
         ))}
       </div>
     </section>
+  );
+}
+
+function SuggestedTaskRow({
+  task,
+  onAdd,
+  onNotToday,
+  onSelect,
+  contextMenuActions,
+  sourceLists,
+  listGroups,
+  projects,
+}: {
+  task: SuggestionTask;
+  onAdd: (taskId: string) => void;
+  onNotToday?: (taskId: string) => void;
+  onSelect: (taskId: string) => void;
+  contextMenuActions?: TaskContextMenuActions;
+  sourceLists: SourceList[];
+  listGroups: ListGroup[];
+  projects: HubProject[];
+}) {
+  const row = (
+    <div className="flex min-h-12 items-center gap-2 px-2">
+      <button
+        type="button"
+        onClick={() => onSelect(task.id)}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-2 text-left transition-colors hover:bg-purple-400/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+      >
+        <TaskStatusIndicator status={task.status} microStatus={task.microStatus} size="sm" />
+        <ConnectorIcon type={task.connectorType} size={12} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium text-[var(--text-primary)]">
+            {task.title}
+          </span>
+          <span className="mt-0.5 flex items-center gap-2 text-xs text-purple-200/70">
+            {suggestionReason(task)}
+            <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
+          </span>
+        </span>
+      </button>
+      <div className="flex shrink-0 items-center gap-1">
+        {onNotToday && (
+          <Tooltip content="Not today">
+            <button
+              type="button"
+              onClick={() => onNotToday(task.id)}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-purple-200/70 transition-colors hover:bg-purple-400/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+              aria-label={`Hide "${task.title}" from today's suggestions`}
+            >
+              <CalendarX2 size={13} aria-hidden="true" />
+            </button>
+          </Tooltip>
+        )}
+        <Tooltip content="Add to My Day">
+          <button
+            type="button"
+            onClick={() => onAdd(task.id)}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-purple-700/40 text-purple-300 transition-colors hover:border-purple-500/60 hover:bg-purple-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+            aria-label={`Add "${task.title}" to My Day`}
+          >
+            <Plus size={13} aria-hidden="true" />
+          </button>
+        </Tooltip>
+      </div>
+    </div>
+  );
+
+  if (!contextMenuActions) return row;
+
+  return (
+    <TaskContextMenu
+      task={{
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        priority: task.priority,
+        connectorType: task.connectorType,
+        connectorInstanceId: task.connectorInstanceId,
+        sourceId: task.sourceId,
+        dueDate: task.dueDate,
+        recurrence: extractRecurrenceFromMetadata(task.metadata),
+        localDisposition: task.localDisposition,
+        taskSourceModel: task.taskSourceModel,
+        editPolicy: task.editPolicy,
+      }}
+      actions={contextMenuActions}
+      sourceLists={sourceLists}
+      listGroups={listGroups}
+      projects={projects}
+    >
+      {row}
+    </TaskContextMenu>
   );
 }

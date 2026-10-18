@@ -42,6 +42,27 @@ function suggestionsWithYesterdayTask(taskId: string): SuggestionGroups {
   };
 }
 
+function suggestionsWithRecommendedTasks(): SuggestionGroups {
+  const tasks = [1, 2, 3, 4].map((index) => ({
+    id: `suggestion-${index}`,
+    title: `Suggested task ${index}`,
+    status: 'todo',
+    priority: 'high',
+    dueDate: null,
+    connectorType: 'local',
+    connectorInstanceId: 'local',
+    sourceListName: 'Inbox',
+    localDisposition: 'active' as const,
+    taskSourceModel: 'mc-owned' as const,
+    editPolicy: editableTaskPolicy,
+  }));
+  return {
+    ...EMPTY_SUGGESTION_GROUPS,
+    overdue: [tasks[0]],
+    aiRecommended: tasks,
+  };
+}
+
 const disabledMirrorPolicy = makeTaskEditPolicy({
   sourceModel: 'remote-mirror',
   connectorEnabled: false,
@@ -221,6 +242,79 @@ describe('useTodayActions completion', () => {
     expect(result.current.suggestions.yesterday).toHaveLength(1);
     expect(mocks.toastError).toHaveBeenCalledWith('Add was rejected');
     expect(fetchData).not.toHaveBeenCalled();
+  });
+
+  it('hides only the recommendation for today and exposes the next candidate', async () => {
+    vi.useRealTimers();
+    const fetchData = vi.fn(async () => {});
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+    const { result } = renderHook(() => {
+      const [suggestions, setSuggestions] = useState(suggestionsWithRecommendedTasks());
+      const actions = useTodayActions({
+        items: [],
+        setItems: vi.fn(),
+        suggestions,
+        setSuggestions,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { suggestions, actions };
+    });
+
+    await act(async () => {
+      await result.current.actions.skipSuggestionForToday('suggestion-1');
+    });
+
+    expect(result.current.suggestions.aiRecommended.map((task) => task.id)).toEqual([
+      'suggestion-2',
+      'suggestion-3',
+      'suggestion-4',
+    ]);
+    expect(result.current.suggestions.overdue.map((task) => task.id)).toEqual(['suggestion-1']);
+    expect(mocks.pushUndoWithToast).toHaveBeenCalledWith(
+      'Hidden from today\'s suggestions',
+      expect.any(Function),
+    );
+  });
+
+  it('restores a hidden recommendation in its ranked position when persistence fails', async () => {
+    vi.useRealTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })));
+    const { result } = renderHook(() => {
+      const [suggestions, setSuggestions] = useState(suggestionsWithRecommendedTasks());
+      const actions = useTodayActions({
+        items: [],
+        setItems: vi.fn(),
+        suggestions,
+        setSuggestions,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData: vi.fn(async () => {}),
+      });
+      return { suggestions, actions };
+    });
+
+    await act(async () => {
+      await result.current.actions.skipSuggestionForToday('suggestion-2');
+    });
+
+    expect(result.current.suggestions.aiRecommended.map((task) => task.id)).toEqual([
+      'suggestion-1',
+      'suggestion-2',
+      'suggestion-3',
+      'suggestion-4',
+    ]);
+    expect(mocks.toastError).toHaveBeenCalledWith('Failed to hide suggestion');
+    expect(mocks.pushUndoWithToast).not.toHaveBeenCalled();
   });
 
   it('deduplicates completion requests and refreshes without pulling stale connector state', async () => {

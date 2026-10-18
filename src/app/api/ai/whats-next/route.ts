@@ -1,6 +1,14 @@
 import { whatsNext } from '@/lib/ai/features/whats-next';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { getLocalToday } from '@/lib/utils/date';
+
+async function excludedTaskIds(): Promise<string[]> {
+  const { dailyPlanning } = await getWorkerPersistenceRepositories();
+  if (!dailyPlanning) return [];
+  return dailyPlanning.myDay.listSuggestionExclusions(getLocalToday());
+}
 
 function parseContext(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -18,7 +26,7 @@ function parseContext(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const result = await whatsNext(body);
+    const result = await whatsNext({ ...body, excludedTaskIds: await excludedTaskIds() });
     return Response.json({ ...result, generatedAt: new Date().toISOString() });
   } catch (error) {
     aiLogger.error({ err: error }, 'Whats-next request failed');
@@ -29,7 +37,7 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const context = parseContext(request);
-    const result = await whatsNext(context);
+    const result = await whatsNext({ ...context, excludedTaskIds: await excludedTaskIds() });
     return Response.json({ ...result, generatedAt: new Date().toISOString() });
   } catch (error) {
     aiLogger.error({ err: error }, 'Whats-next request failed');

@@ -15,6 +15,7 @@ interface TodaySidebarProps {
   totalMinutes: number;
   whatsNextLoading: boolean;
   onAddToDay: (taskId: string) => void;
+  onNotToday: (taskId: string) => void;
   onCompleteTask: (task: SuggestionTask) => void;
   onSelectTask: (taskId: string) => void;
   completingIds: ReadonlySet<string>;
@@ -32,6 +33,7 @@ export function TodaySidebar({
   totalMinutes,
   whatsNextLoading,
   onAddToDay,
+  onNotToday,
   onCompleteTask,
   onSelectTask,
   completingIds,
@@ -97,7 +99,12 @@ export function TodaySidebar({
         <SuggestedForToday
           tasks={suggestions.aiRecommended}
           onAdd={onAddToDay}
+          onNotToday={onNotToday}
           onSelect={onSelectTask}
+          getContextMenuActions={getContextMenuActions}
+          sourceLists={sourceLists}
+          listGroups={listGroups}
+          projects={projects}
         />
 
         <div className="space-y-1">

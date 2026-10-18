@@ -71,10 +71,19 @@ export function describeWhatsNextTask(
   ].filter(Boolean).join(' | ');
 }
 
+export function excludeWhatsNextTasks<T extends { id: string }>(
+  tasks: readonly T[],
+  excludedTaskIds: readonly string[],
+): T[] {
+  const excluded = new Set(excludedTaskIds);
+  return tasks.filter((task) => !excluded.has(task.id));
+}
+
 export async function whatsNext(context?: {
   timeAvailable?: number;
   energy?: 'high' | 'medium' | 'low';
   focus?: string;
+  excludedTaskIds?: readonly string[];
 }): Promise<{ recommendation: string; routing: AIRouteOutcome }> {
   const today = getLocalToday();
   const persistence = await getAIWorkflowPersistence();
@@ -93,11 +102,12 @@ export async function whatsNext(context?: {
   const momentumByTaskId = new Map(
     snapshot.momentumSignals.map((entry) => [entry.taskId, entry]),
   );
-  const candidates = snapshot.tasks.map((task): ScoreInputTask => ({
-    ...task,
-    priority: taskPriority(task.priority),
-    estimatedDuration: durationByTaskId.get(task.id) ?? null,
-  }));
+  const candidates = excludeWhatsNextTasks(snapshot.tasks, context?.excludedTaskIds ?? [])
+    .map((task): ScoreInputTask => ({
+      ...task,
+      priority: taskPriority(task.priority),
+      estimatedDuration: durationByTaskId.get(task.id) ?? null,
+    }));
   const taskById = new Map(candidates.map((task) => [task.id, task]));
   const scoredTasks = computeBatchSmartScores(
     candidates.map((task) => createScoreInput(

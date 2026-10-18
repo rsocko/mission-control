@@ -29,6 +29,7 @@ function renderWithTooltips(ui: React.ReactElement) {
 
 describe('TaskNotesSection', () => {
   it('shows the read-only OWL summary separately from editable Mission Control notes', async () => {
+    const onEditStart = vi.fn();
     renderWithTooltips(
       <TaskNotesSection
         mode="panel"
@@ -43,7 +44,7 @@ describe('TaskNotesSection', () => {
         descRef={createRef<HTMLTextAreaElement>()}
         expandButtonRef={createRef<HTMLButtonElement>()}
         onDescValueChange={vi.fn()}
-        onEditStart={vi.fn()}
+        onEditStart={onEditStart}
         onEditCancel={vi.fn()}
         onEditorBlur={vi.fn()}
         onExpand={vi.fn()}
@@ -61,6 +62,45 @@ describe('TaskNotesSection', () => {
     expect(noteText).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit notes' })).toBeEnabled();
     expect(noteText.closest('.prose')).toHaveClass('[&_p]:text-xs');
+
+    fireEvent.click(noteText);
+    expect(onEditStart).not.toHaveBeenCalled();
+
+    fireEvent.doubleClick(noteText);
+    expect(onEditStart).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit notes' }));
+    expect(onEditStart).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps empty notes as a keyboard-accessible edit affordance', () => {
+    const onEditStart = vi.fn();
+    renderWithTooltips(
+      <TaskNotesSection
+        mode="panel"
+        taskId="task-42"
+        description={null}
+        descValue=""
+        editingDesc={false}
+        canEditDescription
+        supportsAttachments={false}
+        sourceUrl={null}
+        descRef={createRef<HTMLTextAreaElement>()}
+        expandButtonRef={createRef<HTMLButtonElement>()}
+        onDescValueChange={vi.fn()}
+        onEditStart={onEditStart}
+        onEditCancel={vi.fn()}
+        onEditorBlur={vi.fn()}
+        onExpand={vi.fn()}
+        onPaste={vi.fn()}
+        canUpdateDueDate
+        canCreateSubtask
+        onQuickUpdate={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Click to add notes...' }));
+    expect(onEditStart).toHaveBeenCalledOnce();
   });
 
   it('focuses quick update entry and submits it with Enter', async () => {
@@ -101,6 +141,44 @@ describe('TaskNotesSection', () => {
       dueDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       subtaskTitle: 'Check back',
     }));
+  });
+
+  it('sizes quick update relative to the notes card', () => {
+    renderWithTooltips(
+      <TaskNotesSection
+        mode="panel"
+        taskId="task-42"
+        description="Existing notes"
+        descValue="Existing notes"
+        editingDesc={false}
+        canEditDescription
+        supportsAttachments={false}
+        sourceUrl={null}
+        descRef={createRef<HTMLTextAreaElement>()}
+        expandButtonRef={createRef<HTMLButtonElement>()}
+        onDescValueChange={vi.fn()}
+        onEditStart={vi.fn()}
+        onEditCancel={vi.fn()}
+        onEditorBlur={vi.fn()}
+        onExpand={vi.fn()}
+        onPaste={vi.fn()}
+        canUpdateDueDate
+        canCreateSubtask
+        onQuickUpdate={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Quick update' });
+    fireEvent.click(trigger);
+
+    expect(trigger.closest('section')).toHaveClass('@container');
+    expect(trigger.parentElement).toHaveClass('static');
+    expect(screen.getByRole('dialog', { name: 'Quick task update' })).toHaveClass(
+      'inset-x-3',
+      '@[34rem]:left-auto',
+      '@[34rem]:right-3',
+      '@[34rem]:w-[30rem]',
+    );
   });
 
   it('closes quick update with Escape and restores trigger focus', async () => {

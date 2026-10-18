@@ -159,6 +159,7 @@ interface TodayMainPanelProps {
     openNotes: (taskId: string, mode: 'read' | 'edit') => void;
     openSubtasks: (taskId: string) => void;
     addToDay?: (taskId: string) => void;
+    skipSuggestionForToday?: (taskId: string) => void;
     moveToSource?: (taskId: string) => void;
   };
   selection: {
@@ -235,7 +236,8 @@ export function TodayMainPanel({
     moveToList: onMoveTaskToList, deleteTask: onDeleteTask,
     addToProject: onAddTaskToProject, saveTemplateTask: onSaveTemplateTask,
     openNotes: onOpenTaskNotes, openSubtasks: onOpenTaskSubtasks,
-    addToDay: onAddToDay, moveToSource: onMoveToSource,
+    addToDay: onAddToDay, skipSuggestionForToday: onNotToday,
+    moveToSource: onMoveToSource,
   } = taskActions;
   const {
     selectedTaskId, selectTask: onSelectTask, doubleClickTask: onDoubleClickTask,
@@ -476,6 +478,7 @@ export function TodayMainPanel({
 
   const getContextMenuActions = useTaskContextMenuActionFactory({
     complete: onCompleteTask,
+    addToMyDay: onAddToDay,
     setPriority: onSetTaskPriority,
     setStatus: onSetTaskStatus,
     removeFromMyDay: onRemoveFromDay,
@@ -1130,7 +1133,12 @@ export function TodayMainPanel({
 
         {/* Mobile suggestions — visible only on small screens at the bottom of scroll */}
         {suggestions && onAddToDay && (
-          <MobileSuggestions suggestions={suggestions} onAddToDay={onAddToDay} onSelectTask={(taskId) => onSelectTask(taskId)} />
+          <MobileSuggestions
+            suggestions={suggestions}
+            onAddToDay={onAddToDay}
+            onNotToday={onNotToday}
+            onSelectTask={(taskId) => onSelectTask(taskId)}
+          />
         )}
       </div>
     </div>

@@ -23,6 +23,7 @@ export const TASK_REFERENCE_COLUMN_POLICIES = {
   'github_write_outcome_events.task_id': 'history',
   'my_day_exclusions.task_id': 'repoint',
   'my_day_items.task_id': 'repoint',
+  'my_day_suggestion_exclusions.task_id': 'repoint',
   'notifications.related_task_id': 'repoint',
   'priority_sync_log.task_id': 'repoint',
   'project_auto_include_exclusions.task_id': 'repoint',
@@ -67,6 +68,7 @@ export function repointTaskReferences(
   tx.run(sql`UPDATE tasks SET parent_id = ${successorTaskId} WHERE parent_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE my_day_items SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE my_day_exclusions SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
+  tx.run(sql`UPDATE my_day_suggestion_exclusions SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE focus_items SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE weekly_one_thing SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE priority_sync_log SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);

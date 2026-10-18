@@ -468,6 +468,24 @@ export function describeDailyPlanningPersistenceContract(
         expect(ids(group)).not.toContain('soft-deleted');
         expect(ids(group)).not.toContain('child');
       }
+
+      await persistence.myDay.excludeSuggestion({
+        id: 'exclude-high-today',
+        taskId: 'high',
+        date: PLANNING_DATE,
+        excludedAt: PLANNING_NOW,
+      });
+      expect(await persistence.myDay.listSuggestionExclusions(PLANNING_DATE)).toEqual(['high']);
+
+      const excludedView = await persistence.myDay.dayView(dayViewQuery());
+      expect(excludedView.suggestions.aiRecommended.map((task) => task.id)).not.toContain('high');
+      expect(excludedView.suggestions.highPriority.map((task) => task.id)).toContain('high');
+
+      await persistence.myDay.restoreSuggestion({
+        taskId: 'high',
+        date: PLANNING_DATE,
+      });
+      expect(await persistence.myDay.listSuggestionExclusions(PLANNING_DATE)).toEqual([]);
     });
 
     it('serializes weekly one-thing selection and stamps completion once', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeWhatsNextTask } from '@/lib/ai/features/whats-next';
+import { describeWhatsNextTask, excludeWhatsNextTasks } from '@/lib/ai/features/whats-next';
 import type { ScoreInputTask, ScoredTask } from '@/lib/smart-score';
 
 const TASK: ScoreInputTask = {
@@ -59,5 +59,12 @@ describe('what is next signal explanations', () => {
       '2026-09-17',
       undefined,
     )).toContain(String.raw`[Review \[Q4\]\\plan](/tasks/task%2F2)`);
+  });
+
+  it('omits tasks hidden from today from AI next-task candidates', () => {
+    expect(excludeWhatsNextTasks(
+      [TASK, { ...TASK, id: 'task-2', title: 'Second task' }],
+      ['task-1'],
+    ).map((task) => task.id)).toEqual(['task-2']);
   });
 });

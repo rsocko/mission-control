@@ -25,6 +25,11 @@ vi.mock('motion/react', async () => {
   };
 });
 
+vi.mock('@/components/ui/Tooltip', () => ({
+  Tooltip: ({ children }: React.PropsWithChildren) => children,
+  TooltipProvider: ({ children }: React.PropsWithChildren) => children,
+}));
+
 function suggestion(index: number): SuggestionTask {
   return {
     id: `task-${index}`,
@@ -129,6 +134,26 @@ describe('MobileSuggestions pagination', () => {
 
     expect(screen.queryByText('Overdue task 1')).toBeNull();
     expect(screen.getByText('Overdue task 4')).toBeTruthy();
+  });
+
+  it('offers Not today for shortlist items', () => {
+    const onNotToday = vi.fn();
+    render(
+      <MobileSuggestions
+        suggestions={{
+          ...suggestionGroups([]),
+          aiRecommended: [suggestion(1)],
+        }}
+        onAddToDay={vi.fn()}
+        onNotToday={onNotToday}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Hide "Overdue task 1" from today\'s suggestions',
+    }));
+    expect(onNotToday).toHaveBeenCalledWith('task-1');
   });
 
   it('shows recently due tasks as a focused recovery group', () => {

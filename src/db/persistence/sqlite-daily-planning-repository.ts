@@ -552,6 +552,15 @@ export function createSqliteDailyPlanningPersistence(
 
         const taskIds = itemRows.map((row) => String(row.taskId));
         const excluded = new Set(taskIds);
+        const recommendationExcluded = new Set([
+          ...taskIds,
+          ...(sqlite.prepare(`
+            SELECT task_id AS taskId
+            FROM my_day_suggestion_exclusions
+            WHERE date = ?
+            ORDER BY task_id
+          `).all(query.date) as Array<{ taskId: string }>).map((row) => row.taskId),
+        ]);
 
         const tagsByTask = new Map<string, MyDayTagRecord[]>();
         const subtasks = new Map<string, { total: number; done: number }>();
@@ -783,7 +792,13 @@ export function createSqliteDailyPlanningPersistence(
                 t.updated_at DESC,
                 t.id
               LIMIT ?
-            `, [query.dueThrough, query.date, query.date, query.date, limit], excluded),
+            `, [
+              query.dueThrough,
+              query.date,
+              query.date,
+              query.date,
+              limit,
+            ], recommendationExcluded),
             recentlyAdded: listSuggestions(`
               SELECT ${SUGGESTION_COLUMNS} FROM tasks t
               WHERE t.created_at >= ? AND ${openTopVisible}
@@ -798,6 +813,30 @@ export function createSqliteDailyPlanningPersistence(
             `, [limit], excluded),
           },
         };
+      },
+
+      async listSuggestionExclusions(date) {
+        return (sqlite.prepare(`
+          SELECT task_id AS taskId
+          FROM my_day_suggestion_exclusions
+          WHERE date = ?
+          ORDER BY task_id
+        `).all(date) as Array<{ taskId: string }>).map((row) => row.taskId);
+      },
+
+      async excludeSuggestion(command) {
+        sqlite.prepare(`
+          INSERT INTO my_day_suggestion_exclusions (id, task_id, date, excluded_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(task_id, date) DO UPDATE SET excluded_at = excluded.excluded_at
+        `).run(command.id, command.taskId, command.date, command.excludedAt);
+      },
+
+      async restoreSuggestion(command) {
+        sqlite.prepare(`
+          DELETE FROM my_day_suggestion_exclusions
+          WHERE task_id = ? AND date = ?
+        `).run(command.taskId, command.date);
       },
 
       async includeCompletedTasks({ date, dayStart, nextDayStart }): Promise<

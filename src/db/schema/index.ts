@@ -60,6 +60,7 @@ export {
   taskDependencies,
   myDayItems,
   myDayExclusions,
+  myDaySuggestionExclusions,
   focusItems,
   weeklyOneThing,
   prioritySyncLog,

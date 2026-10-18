@@ -391,6 +391,17 @@ export interface MyDayRemoteIdentity {
 
 export interface MyDayPlanningRepository {
   dayView(query: MyDayDayViewQuery): Promise<MyDayDayViewProjection>;
+  listSuggestionExclusions(date: string): Promise<string[]>;
+  excludeSuggestion(command: {
+    id: string;
+    taskId: string;
+    date: string;
+    excludedAt: string;
+  }): Promise<void>;
+  restoreSuggestion(command: {
+    taskId: string;
+    date: string;
+  }): Promise<void>;
   /**
    * Best-effort auto-inclusion of the date's completed tasks. Resolves
    * `skipped-write-contention` instead of throwing when the local database is

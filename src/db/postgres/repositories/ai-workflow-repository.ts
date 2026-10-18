@@ -7,6 +7,7 @@ import type {
   AIWorkflowPersistence,
   TaskBreakdownContext,
 } from '@/db/persistence/ai-workflows';
+import { projectPaymentCheckContext } from '@/lib/ai/payment-check-context';
 import type {
   DailyPlanningPersistence,
   DayPlanSchedule,
@@ -437,6 +438,7 @@ function createPostgresTaskToolsPersistence(pool: Pool): AITaskToolsPersistence 
         conditions.push(`(
           position(lower($${queryParamIndex}::text) in lower(title)) > 0
           OR position(lower($${queryParamIndex}::text) in lower(COALESCE(description, ''))) > 0
+          OR position(lower($${queryParamIndex}::text) in lower(COALESCE(metadata::text, ''))) > 0
         )`);
       }
       params.push(filters.limit);
@@ -444,10 +446,10 @@ function createPostgresTaskToolsPersistence(pool: Pool): AITaskToolsPersistence 
       const rows = await query<{
         id: string; title: string; status: string; microStatus: string | null;
         priority: string; dueDate: string | null; connectorType: string;
-        sourceListName: string | null; description: string | null;
+        sourceListName: string | null; description: string | null; metadata: Record<string, unknown> | null;
       }>(pool, `
         SELECT id, title, status, micro_status AS "microStatus", priority, due_date AS "dueDate",
-               connector_type AS "connectorType", source_list_name AS "sourceListName", description
+               connector_type AS "connectorType", source_list_name AS "sourceListName", description, metadata
         FROM tasks
         ${where}
         ORDER BY updated_at COLLATE "C" DESC, id COLLATE "C" ASC
@@ -463,6 +465,7 @@ function createPostgresTaskToolsPersistence(pool: Pool): AITaskToolsPersistence 
         source: row.connectorType,
         sourceList: row.sourceListName,
         description: row.description ? row.description.slice(0, 100) : null,
+        paymentCheck: projectPaymentCheckContext(row.metadata),
       }));
     },
     listAllTags: () => query(pool, `SELECT id, name, type, color FROM tags`),

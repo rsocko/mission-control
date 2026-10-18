@@ -7,6 +7,7 @@
  */
 
 import type { WorkerPersistenceRepositories } from './worker-repositories';
+import type { AIPaymentCheckContext } from '@/lib/ai/payment-check-context';
 
 export interface AIContextTask {
   id: string;
@@ -216,6 +217,7 @@ export interface TaskToolsSearchResult {
   source: string;
   sourceList: string | null;
   description: string | null;
+  paymentCheck?: AIPaymentCheckContext;
 }
 
 export interface TaskToolsTag {

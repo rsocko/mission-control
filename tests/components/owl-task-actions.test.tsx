@@ -176,4 +176,126 @@ describe('OWL task lifecycle controls', () => {
       }),
     ));
   });
+
+  it('shows posted payment evidence and confirms only through the atomic OWL action', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      task: {
+        status: 'done',
+        statusReason: 'completed',
+        snoozedUntil: null,
+        priority: 'high',
+        metadata: {
+          actionType: 'pay',
+          paymentCheck: { state: 'confirmed', candidates: [] },
+          owlStatus: 'completed',
+        },
+        updatedAt: '2026-10-17T18:30:00.000Z',
+        syncStatus: 'synced',
+      },
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <OwlTaskActions
+        taskId="task-1"
+        metadata={{
+          actionType: 'pay',
+          paymentCheck: {
+            state: 'posted_match',
+            checkedAt: '2026-10-17T18:00:00.000Z',
+            source: 'Tyrion Bill Matching',
+            candidates: [{
+              id: 'candidate-1',
+              payee: 'Synthetic Electric',
+              amount: 128.45,
+              currency: 'USD',
+              transactionDate: '2026-10-16',
+              status: 'posted',
+              accountDisplayName: 'Household checking',
+              accountLastFour: '1234',
+              confidence: 0.94,
+              score: 0.91,
+              matchReasons: ['Payee match', 'Amount match'],
+            }],
+          },
+          sourceActions: [
+            {
+              id: 'check_payment',
+              label: 'Check for payment',
+              method: 'POST',
+              url: '/api/action-queue/actions/task-1/check-payment',
+            },
+            {
+              id: 'confirm_payment_and_complete',
+              label: 'Confirm payment',
+              method: 'POST',
+              url: '/api/action-queue/actions/task-1/confirm-payment-and-complete',
+            },
+          ],
+        }}
+        onTaskUpdate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Posted payment found')).toBeInTheDocument();
+    expect(screen.getByText('Synthetic Electric')).toBeInTheDocument();
+    expect(screen.getByText(/Oct 16, 2026/)).toBeInTheDocument();
+    expect(screen.getByText('$128.45')).toBeInTheDocument();
+    expect(screen.getByText(/Household checking.*1234/)).toBeInTheDocument();
+    expect(screen.getByText('Confidence 94%')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm payment' }));
+    expect(screen.getByText('Confirm this posted transaction as payment?')).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm paid' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tasks/task-1/owl',
+      expect.objectContaining({
+        body: JSON.stringify({
+          action: 'source_action',
+          sourceActionId: 'confirm_payment_and_complete',
+        }),
+      }),
+    ));
+  });
+
+  it('does not offer payment confirmation for pending evidence', () => {
+    render(
+      <OwlTaskActions
+        taskId="task-1"
+        metadata={{
+          actionType: 'pay',
+          paymentCheck: {
+            state: 'pending_match',
+            candidates: [{
+              id: 'candidate-1',
+              payee: 'Synthetic Electric',
+              amount: 128.45,
+              currency: 'USD',
+              transactionDate: '2026-10-17',
+              status: 'pending',
+              accountDisplayName: 'Household checking',
+              accountLastFour: '1234',
+              confidence: 0.88,
+              score: 0.84,
+              matchReasons: ['Payee match'],
+            }],
+          },
+          sourceActions: [{
+            id: 'check_payment',
+            label: 'Check for payment',
+            method: 'POST',
+            url: '/api/action-queue/actions/task-1/check-payment',
+          }],
+        }}
+        onTaskUpdate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Pending transaction found')).toBeInTheDocument();
+    expect(screen.getByText(/cannot confirm that the bill was paid/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm payment' })).not.toBeInTheDocument();
+  });
 });

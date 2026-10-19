@@ -20,7 +20,9 @@ interface MobileSuggestionsProps {
   suggestions: SuggestionGroups;
   onAddToDay: (taskId: string) => void;
   onNotToday?: (taskId: string) => void;
+  onCompleteTask: (taskId: string) => void;
   onSelectTask: (taskId: string) => void;
+  completingIds: ReadonlySet<string>;
   initialExpanded?: boolean;
 }
 
@@ -92,7 +94,9 @@ export function MobileSuggestions({
   suggestions,
   onAddToDay,
   onNotToday,
+  onCompleteTask,
   onSelectTask,
+  completingIds,
   initialExpanded = false,
 }: MobileSuggestionsProps) {
   const [sectionExpanded, setSectionExpanded] = useState(initialExpanded);
@@ -114,7 +118,9 @@ export function MobileSuggestions({
         tasks={suggestions.aiRecommended}
         onAdd={onAddToDay}
         onNotToday={onNotToday}
+        onComplete={(task) => onCompleteTask(task.id)}
         onSelect={onSelectTask}
+        completingIds={completingIds}
         className="mx-4 mb-4"
       />
 

@@ -9,11 +9,13 @@ import {
 } from '@/components/task-list/TaskContextMenu';
 import { ConnectorIcon } from './SortableTaskRow';
 import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { cn } from '@/lib/utils';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
+import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import type { ListGroup } from '@/types/dashboard';
 import type { SourceList, SuggestionTask } from './types';
 
@@ -35,7 +37,9 @@ export function SuggestedForToday({
   tasks,
   onAdd,
   onNotToday,
+  onComplete,
   onSelect,
+  completingIds,
   getContextMenuActions,
   sourceLists = [],
   listGroups = [],
@@ -45,7 +49,9 @@ export function SuggestedForToday({
   tasks: SuggestionTask[];
   onAdd: (taskId: string) => void;
   onNotToday?: (taskId: string) => void;
+  onComplete: (task: SuggestionTask) => void;
   onSelect: (taskId: string) => void;
+  completingIds: ReadonlySet<string>;
   getContextMenuActions?: (task: SuggestionTask) => TaskContextMenuActions;
   sourceLists?: SourceList[];
   listGroups?: ListGroup[];
@@ -83,7 +89,9 @@ export function SuggestedForToday({
             task={task}
             onAdd={onAdd}
             onNotToday={onNotToday}
+            onComplete={onComplete}
             onSelect={onSelect}
+            isCompleting={completingIds.has(task.id)}
             contextMenuActions={getContextMenuActions?.(task)}
             sourceLists={sourceLists}
             listGroups={listGroups}
@@ -99,7 +107,9 @@ function SuggestedTaskRow({
   task,
   onAdd,
   onNotToday,
+  onComplete,
   onSelect,
+  isCompleting,
   contextMenuActions,
   sourceLists,
   listGroups,
@@ -108,20 +118,41 @@ function SuggestedTaskRow({
   task: SuggestionTask;
   onAdd: (taskId: string) => void;
   onNotToday?: (taskId: string) => void;
+  onComplete: (task: SuggestionTask) => void;
   onSelect: (taskId: string) => void;
+  isCompleting: boolean;
   contextMenuActions?: TaskContextMenuActions;
   sourceLists: SourceList[];
   listGroups: ListGroup[];
   projects: HubProject[];
 }) {
+  const canComplete = canEditTaskField(task.editPolicy, 'status');
+  const completionBlockedReason = taskFieldBlockedReason(task.editPolicy, 'status');
   const row = (
     <div className="flex min-h-12 items-center gap-2 px-2">
+      <CompletionBurst celebrating={isCompleting}>
+        <Tooltip content={canComplete ? 'Mark complete' : completionBlockedReason}>
+          <button
+            type="button"
+            onClick={() => onComplete(task)}
+            disabled={isCompleting || !canComplete}
+            aria-label={canComplete ? `Mark "${task.title}" complete` : completionBlockedReason}
+            className="group/status flex h-5 w-5 shrink-0 items-center justify-center disabled:cursor-not-allowed"
+          >
+            <TaskStatusIndicator
+              status={task.status}
+              microStatus={task.microStatus}
+              isCompleting={isCompleting}
+              size="sm"
+            />
+          </button>
+        </Tooltip>
+      </CompletionBurst>
       <button
         type="button"
         onClick={() => onSelect(task.id)}
         className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-2 text-left transition-colors hover:bg-purple-400/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
       >
-        <TaskStatusIndicator status={task.status} microStatus={task.microStatus} size="sm" />
         <ConnectorIcon type={task.connectorType} size={12} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-medium text-[var(--text-primary)]">

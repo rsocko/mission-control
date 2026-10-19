@@ -247,7 +247,9 @@ export function MobileTodayList({
               suggestions={suggestions}
               onAddToDay={onAddToDay}
               onNotToday={onNotToday}
+              onCompleteTask={(taskId) => { void onCompleteTask(taskId); }}
               onSelectTask={onSelectTask}
+              completingIds={completingIds}
             />
           </div>
         </div>

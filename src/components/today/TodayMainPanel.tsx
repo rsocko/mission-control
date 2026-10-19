@@ -1137,7 +1137,9 @@ export function TodayMainPanel({
             suggestions={suggestions}
             onAddToDay={onAddToDay}
             onNotToday={onNotToday}
+            onCompleteTask={(taskId) => { void onCompleteTask(taskId); }}
             onSelectTask={(taskId) => onSelectTask(taskId)}
+            completingIds={completingIds}
           />
         )}
       </div>

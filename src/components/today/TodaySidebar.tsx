@@ -100,7 +100,9 @@ export function TodaySidebar({
           tasks={suggestions.aiRecommended}
           onAdd={onAddToDay}
           onNotToday={onNotToday}
+          onComplete={onCompleteTask}
           onSelect={onSelectTask}
+          completingIds={completingIds}
           getContextMenuActions={getContextMenuActions}
           sourceLists={sourceLists}
           listGroups={listGroups}

@@ -55,6 +55,8 @@ describe('Quick Add suggestion review', () => {
       .toHaveAttribute('aria-checked', 'false');
     expect(screen.getByRole('checkbox', { name: 'Apply project suggestion' }))
       .toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('checkbox', { name: 'Apply tag suggestions' }))
+      .toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('button', { name: 'Release' }))
       .toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Web' }))
@@ -71,6 +73,40 @@ describe('Quick Add suggestion review', () => {
     await waitFor(() => expect(onApply).toHaveBeenCalledWith({
       priority: 'high',
       tagNames: ['Release'],
+    }));
+  });
+
+  it('excludes all tags without clearing individual tag choices', async () => {
+    const onApply = vi.fn<(selection: QuickAddSuggestionSelection) => Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    render(
+      <QuickAddSuggestionReview
+        suggestion={suggestion}
+        taskTitle="Finish launch readiness checklist"
+        projects={projects}
+        availableTags={[]}
+        applying={false}
+        onAvailableTagsChange={vi.fn()}
+        onApply={onApply}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Apply tag suggestions' }));
+
+    expect(screen.getByRole('checkbox', { name: 'Apply tag suggestions' }))
+      .toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('button', { name: 'Release' }))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('1 of 3 selected. Tags will not be applied.'))
+      .toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledWith({
+      priority: 'high',
+      tagNames: [],
     }));
   });
 

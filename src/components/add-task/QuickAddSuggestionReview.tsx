@@ -225,6 +225,9 @@ export function QuickAddSuggestionReview({
       .filter((tag) => defaultSelected('tag', tag.confidence))
       .map((tag) => tag.id),
   ));
+  const [tagsSelected, setTagsSelected] = useState(() => (
+    suggestion.tags.some((tag) => defaultSelected('tag', tag.confidence))
+  ));
   const [showLowConfidenceTags, setShowLowConfidenceTags] = useState(false);
   const [tagQuery, setTagQuery] = useState('');
   const [showTagPicker, setShowTagPicker] = useState(false);
@@ -250,8 +253,9 @@ export function QuickAddSuggestionReview({
   const effectiveEffortSelected = effortSelected && !blockedReasons.effort;
   const effectiveProjectSelected = projectSelected && !blockedReasons.projects;
   const effectivePhaseSelected = phaseSelected && !blockedReasons.phases;
-  const effectiveSelectedTagIds = blockedReasons.tags ? new Set<string>() : selectedTagIds;
-  const selectedTagCount = tags.filter((tag) => effectiveSelectedTagIds.has(tag.id)).length;
+  const effectiveTagsSelected = tagsSelected && !blockedReasons.tags;
+  const effectiveSelectedTagIds = effectiveTagsSelected ? selectedTagIds : new Set<string>();
+  const selectedTagCount = tags.filter((tag) => selectedTagIds.has(tag.id)).length;
   const hasSelection = effectivePrioritySelected
     || effectiveEffortSelected
     || effectiveProjectSelected
@@ -323,8 +327,25 @@ export function QuickAddSuggestionReview({
       color: tag.color,
     }]);
     setSelectedTagIds((current) => new Set(current).add(tag.id));
+    setTagsSelected(true);
     setTagQuery('');
     setShowTagPicker(false);
+  };
+
+  const toggleTag = (tagId: string) => {
+    const next = new Set(selectedTagIds);
+    if (next.has(tagId)) next.delete(tagId);
+    else next.add(tagId);
+    setSelectedTagIds(next);
+    setTagsSelected(next.size > 0);
+  };
+
+  const removeTag = (tagId: string) => {
+    const next = new Set(selectedTagIds);
+    next.delete(tagId);
+    setTags((current) => current.filter((candidate) => candidate.id !== tagId));
+    setSelectedTagIds(next);
+    setTagsSelected(next.size > 0);
   };
 
   const createTag = async () => {
@@ -498,7 +519,13 @@ export function QuickAddSuggestionReview({
 
         {(tags.length > 0 || availableTags.length > 0) && (
           <div className="relative flex min-h-11 flex-wrap items-center gap-1.5 px-2.5 py-1.5">
-            <span className="ml-7 w-14 shrink-0 text-[11px] font-medium text-[var(--text-muted)]">Tags</span>
+            <SelectionToggle
+              checked={effectiveTagsSelected}
+              label="Apply tag suggestions"
+              disabled={Boolean(blockedReasons.tags)}
+              onChange={() => setTagsSelected((selected) => !selected)}
+            />
+            <span className="w-14 shrink-0 text-[11px] font-medium text-[var(--text-muted)]">Tags</span>
             {visibleTags.map((tag) => {
               const selected = selectedTagIds.has(tag.id);
               return (
@@ -507,20 +534,8 @@ export function QuickAddSuggestionReview({
                   tag={tag}
                   selected={selected}
                   disabled={Boolean(blockedReasons.tags)}
-                  onToggle={() => setSelectedTagIds((current) => {
-                      const next = new Set(current);
-                      if (next.has(tag.id)) next.delete(tag.id);
-                      else next.add(tag.id);
-                      return next;
-                    })}
-                  onRemove={() => {
-                      setTags((current) => current.filter((candidate) => candidate.id !== tag.id));
-                      setSelectedTagIds((current) => {
-                        const next = new Set(current);
-                        next.delete(tag.id);
-                        return next;
-                      });
-                    }}
+                  onToggle={() => toggleTag(tag.id)}
+                  onRemove={() => removeTag(tag.id)}
                 />
               );
             })}
@@ -553,7 +568,9 @@ export function QuickAddSuggestionReview({
             />
             {tags.length > 0 && (
               <span className="basis-full pl-[5.25rem] text-[10px] text-[var(--text-muted)]">
-                {selectedTagCount} of {tags.length} selected. Only selected tags will be applied.
+                {effectiveTagsSelected
+                  ? `${selectedTagCount} of ${tags.length} selected. Only selected tags will be applied.`
+                  : `${selectedTagCount} of ${tags.length} selected. Tags will not be applied.`}
               </span>
             )}
           </div>

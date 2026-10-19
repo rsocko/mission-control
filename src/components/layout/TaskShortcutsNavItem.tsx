@@ -13,6 +13,7 @@ import {
   recordRecentTaskShortcut,
   type TaskShortcut,
 } from '@/lib/navigation/task-shortcuts';
+import { useHoverMenu } from '@/lib/hooks/useHoverMenu';
 import { cn } from '@/lib/utils';
 
 interface TaskShortcutsNavItemProps {
@@ -113,10 +114,16 @@ export function TaskShortcutsNavItem({
 }: TaskShortcutsNavItemProps) {
   const { pinned, recent, pinnedIds, togglePinned } = useTaskShortcuts();
   const unpinnedRecent = recent.filter((shortcut) => !pinnedIds.has(shortcut.id));
+  const { openOnHover, closeAfterHover } = useHoverMenu({
+    enabled: expanded,
+    onOpenChange,
+  });
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={onOpenChange} modal={false}>
       <div
+        onMouseEnter={openOnHover}
+        onMouseLeave={closeAfterHover}
         className={cn(
           'relative mx-2 flex h-10 items-center rounded-lg text-[13px] font-medium transition-colors duration-200',
           active
@@ -175,6 +182,8 @@ export function TaskShortcutsNavItem({
           collisionPadding={12}
           aria-label="Task shortcuts"
           aria-labelledby={undefined}
+          onMouseEnter={openOnHover}
+          onMouseLeave={closeAfterHover}
           className="z-50 w-72 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-1.5 shadow-2xl"
         >
           <DropdownMenu.Label className="px-2.5 pb-1.5 pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">

@@ -14,6 +14,7 @@ import {
 import { MONARCH_TRANSACTION_MAX_BACKFILL_DAYS } from './constants';
 import { FinanceAttributionCoordinator } from './attribution-coordinator';
 import { SYNC_ACTIVITY_VERSION } from '@/lib/sync/activity';
+import { enrichTransactionsWithLocationEvidence } from '@/lib/finance/location-inference';
 
 const DEFAULT_BACKFILL_DAYS = 90;
 const DEFAULT_OVERLAP_DAYS = 7;
@@ -145,10 +146,17 @@ export class FinanceSnapshotSynchronizer {
         ) {
           sourceAsOf = provenance.fetchedAt;
         }
+        const enrichedTransactions = await enrichTransactionsWithLocationEvidence({
+          connectorId,
+          config: this.config,
+          transactions: page.transactions,
+          persistence: finance.snapshots,
+          signal: context.signal,
+        });
         const counts = await finance.snapshots.upsertPage({
           connectorId,
           generationId,
-          transactions: page.transactions,
+          transactions: enrichedTransactions,
           provenance,
           observedAt: new Date().toISOString(),
         });
@@ -156,7 +164,7 @@ export class FinanceSnapshotSynchronizer {
         updated += counts.updated;
         synchronized += page.transactions.length;
         await attribution.attributePage(
-          page.transactions,
+          enrichedTransactions,
           provenance.fetchedAt,
           context.signal,
         );

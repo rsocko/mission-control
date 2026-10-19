@@ -50,6 +50,87 @@ afterEach(() => {
 });
 
 describe('MonarchBridgeClient', () => {
+  it('accepts Bridge 1.1 descriptors without changing whitespace or punctuation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      contractVersion: '1.1',
+      provenance: { provider: 'live', fetchedAt: '2026-10-18T12:00:00.000Z' },
+      transactions: [{
+        id: 'tx-descriptor',
+        date: '2026-10-18',
+        amount: -42,
+        merchant: { name: 'Invented Market', logoUrl: null },
+        statementDescriptors: [{
+          kind: 'statement',
+          text: '  INVENTED * MARKET #1842  ',
+          source: { system: 'monarch', field: 'plaidName' },
+        }, {
+          kind: 'provider-description',
+          text: 'POS; Seattle, WA',
+          source: { system: 'monarch', field: 'dataProviderDescription' },
+        }],
+        category: null,
+        account: { id: 'acct-1', displayName: 'Invented Card', mask: null },
+        isPending: false,
+        isRecurring: false,
+        notes: null,
+        tags: [],
+        tagReferences: [],
+        reviewStatus: 'reviewed',
+      }],
+      total: 1,
+      page: { limit: 25, nextCursor: null },
+    }, 200, { 'x-monarch-contract-version': '1.1' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new MonarchBridgeClient(config).getTransactionsPage({
+      startDate: '2026-10-18',
+      endDate: '2026-10-18',
+      limit: 25,
+    });
+
+    expect(result.transactions[0]?.statementDescriptors.map(({ text }) => text)).toEqual([
+      '  INVENTED * MARKET #1842  ',
+      'POS; Seattle, WA',
+    ]);
+  });
+
+  it.each([
+    ['control characters', 'INVENTED\u0000MARKET'],
+    ['oversized UTF-8 text', 'é'.repeat(1_025)],
+  ])('rejects Bridge 1.1 descriptor %s instead of truncating', async (_label, text) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      contractVersion: '1.1',
+      provenance: { provider: 'live', fetchedAt: '2026-10-18T12:00:00.000Z' },
+      transactions: [{
+        id: 'tx-invalid-descriptor',
+        date: '2026-10-18',
+        amount: -42,
+        merchant: { name: 'Invented Market', logoUrl: null },
+        statementDescriptors: [{
+          kind: 'statement',
+          text,
+          source: { system: 'monarch', field: 'plaidName' },
+        }],
+        category: null,
+        account: { id: 'acct-1', displayName: 'Invented Card', mask: null },
+        isPending: false,
+        isRecurring: false,
+        notes: null,
+        tags: [],
+        tagReferences: [],
+        reviewStatus: 'reviewed',
+      }],
+      total: 1,
+      page: { limit: 25, nextCursor: null },
+    }, 200, { 'x-monarch-contract-version': '1.1' })));
+
+    await expect(new MonarchBridgeClient(config).getTransactionsPage({
+      startDate: '2026-10-18',
+      endDate: '2026-10-18',
+      limit: 25,
+    })).rejects.toMatchObject({ code: 'invalid_contract' });
+  });
+
   it('authenticates server-side and accepts nullable v1 transaction fields', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       contractVersion: '1.0',

@@ -17,7 +17,9 @@ import {
   CloudOff,
   ExternalLink,
   Filter,
+  FileText,
   Loader2,
+  MapPin,
   Search,
   ShieldCheck,
   SkipForward,
@@ -74,6 +76,7 @@ type ViewState = 'loading' | 'ready' | 'error';
 type ActionName = 'confirm' | 'correct' | 'skip';
 type MerchantRuleOutcome = 'kid' | 'parent-shared' | 'review';
 type MerchantRuleScope = 'accounts' | 'global';
+type RuleSuggestionMode = 'merchant' | 'merchant-and-location' | 'location-only';
 
 interface CorrectionDraft {
   kidId: string;
@@ -158,6 +161,7 @@ function subscribeToConnectivity(onChange: () => void) {
 export function FinanceQuickReview({ connectorId = null }: { connectorId?: string | null }) {
   const [viewState, setViewState] = useState<ViewState>('loading');
   const [session, setSession] = useState<FinanceReviewSession | null>(null);
+  const [freshnessReference, setFreshnessReference] = useState(0);
   const [mode, setMode] = useState<'ranked' | 'period'>('ranked');
   const [filters, setFilters] = useState<FinanceReviewFilters>(DEFAULT_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -184,6 +188,8 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
   const [ruleConfidence, setRuleConfidence] = useState<'definite' | 'likely'>('likely');
   const [businessEntityPattern, setBusinessEntityPattern] = useState('');
   const [globalScopeConfirmed, setGlobalScopeConfirmed] = useState(false);
+  const [ruleSuggestionMode, setRuleSuggestionMode] = useState<RuleSuggestionMode>('merchant');
+  const [locationOnlyConfirmed, setLocationOnlyConfirmed] = useState(false);
   const [ruleCreatePending, setRuleCreatePending] = useState(false);
   const [createdRule, setCreatedRule] = useState<FinanceMerchantRuleCreateResponse | null>(null);
   const [ruleIdempotencyKey, setRuleIdempotencyKey] = useState<string | null>(null);
@@ -229,6 +235,7 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
       }
       const parsed = financeReviewSessionSchema.safeParse(body);
       if (!parsed.success) throw new Error('Invalid finance review response');
+      setFreshnessReference(Date.now());
       setSession(parsed.data);
       setMode(parsed.data.mode);
       setFilters(parsed.data.filters);
@@ -298,6 +305,7 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
       }
       const parsed = financeReviewSessionSchema.safeParse(body);
       if (!parsed.success) throw new Error('Invalid finance review response');
+      setFreshnessReference(Date.now());
       setSession(parsed.data);
       setDraft(freshDraft(parsed.data.current));
       setCorrecting(false);
@@ -401,6 +409,10 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
           merchantName: draft.payee.trim(),
           kidId: draft.kidId,
           suggestReusableRule: true,
+          ...(ruleSuggestionMode === 'merchant' ? {} : {
+            suggestionMode: ruleSuggestionMode,
+            locationMinimumConfidence: 0.7,
+          }),
         }),
       });
       const body = await response.json().catch(() => null) as unknown;
@@ -419,6 +431,7 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
       setRuleConfidence(parsed.data.suggestion?.confidence ?? 'likely');
       setBusinessEntityPattern(parsed.data.suggestion?.businessEntityPattern ?? '');
       setGlobalScopeConfirmed(false);
+      setLocationOnlyConfirmed(false);
       setStatus(parsed.data.suggestion
         ? 'Rule suggestion ready. It has not been applied.'
         : 'Tyrion did not suggest a reusable rule.');
@@ -457,11 +470,19 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
             confirmedAt: new Date().toISOString(),
             globalScopeConfirmed: ruleScope === 'global' && globalScopeConfirmed,
           },
+          locationOnlyConfirmation: ruleSuggestion.kind === 'location-only'
+            ? {
+                confirmed: true,
+                confirmedAt: new Date().toISOString(),
+              }
+            : null,
           rule: {
             outcome: ruleOutcome,
             kidId: ruleOutcome === 'kid' ? ruleSuggestion.kidId : null,
             pattern: ruleSuggestion.merchantPattern,
             businessEntityPattern: businessEntityPattern.trim() || null,
+            statementDescriptorPattern: ruleSuggestion.statementDescriptorPattern,
+            locationPredicate: ruleSuggestion.locationPredicate,
             scope: ruleScope,
             confidence: ruleConfidence,
           },
@@ -766,6 +787,69 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
                   />
                   <Fact label="Overall confidence" value={confidenceLabel(item.confidence.overall)} />
                 </dl>
+                <div className="grid border-t border-[var(--border)] lg:grid-cols-2 lg:divide-x lg:divide-[var(--border)]">
+                  <section aria-labelledby="statement-descriptors-heading" className="min-w-0 p-4 sm:p-5">
+                    <h3 id="statement-descriptors-heading" className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
+                      <FileText className="size-4 text-sky-300" /> Statement descriptors
+                    </h3>
+                    {item.statementDescriptors.length ? (
+                      <dl className="mt-3 space-y-3">
+                        {item.statementDescriptors.map((descriptor) => (
+                          <div key={`${descriptor.kind}:${descriptor.source.field}`} className="min-w-0">
+                            <dt className="text-xs text-[var(--text-muted)]">
+                              {descriptor.kind === 'statement' ? 'Statement name' : 'Provider description'}
+                            </dt>
+                            <dd className="mt-1 whitespace-pre-wrap break-words text-sm text-[var(--text-primary)]">
+                              {descriptor.text}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : (
+                      <p className="mt-2 text-sm text-[var(--text-muted)]">
+                        No statement descriptor was supplied for this transaction.
+                      </p>
+                    )}
+                  </section>
+                  <section aria-labelledby="transaction-location-heading" className="min-w-0 border-t border-[var(--border)] p-4 sm:p-5 lg:border-t-0">
+                    <h3 id="transaction-location-heading" className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
+                      <MapPin className="size-4 text-emerald-300" /> Transaction geography
+                    </h3>
+                    {item.location.evidence ? (
+                      <div className="mt-3">
+                        <p className="text-sm font-medium text-[var(--text-primary)]">
+                          {[item.location.evidence.locality, item.location.evidence.region, item.location.evidence.countryCode]
+                            .filter(Boolean)
+                            .join(', ')}
+                        </p>
+                        <p className="mt-1 text-xs text-[var(--text-muted)]">
+                          {Math.round(item.location.evidence.confidence * 100)}% confidence · {
+                            item.location.evidence.sourceKind === 'user-confirmed'
+                              ? 'User confirmed'
+                              : `Private AI · ${item.location.evidence.model}`
+                          } · {
+                            Date.parse(item.location.evidence.staleAfter) > freshnessReference
+                              ? `fresh until ${new Date(item.location.evidence.staleAfter).toLocaleDateString()}`
+                              : 'stale; refresh pending'
+                          }
+                        </p>
+                        {item.location.inferenceEvidence && (
+                          <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                            Evidence: {item.location.inferenceEvidence}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-[var(--text-muted)]">
+                        {item.location.errorCode === 'location_inference_uncertain'
+                          ? 'The descriptor did not support a reliable location. No location was guessed.'
+                          : item.location.errorCode
+                            ? 'Private location inference is unavailable. Transaction sync was not blocked.'
+                            : 'No normalized location evidence is available.'}
+                      </p>
+                    )}
+                  </section>
+                </div>
                 <section aria-labelledby="why-selected" className="border-t border-[var(--border)] p-4 sm:p-5">
                   <h3 id="why-selected" className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
                     <CircleHelp className="size-4 text-amber-300" /> Why Tyrion selected this
@@ -845,13 +929,54 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
                           {ruleSuggestion ? 'Refresh rule preview' : 'Preview reusable rule'}
                         </Button>
                       </div>
+                      {item.location.evidence && (
+                        <div className="mt-3 text-xs text-[var(--text-secondary)]">
+                          <span id="merchant-rule-mode-label">Rule match</span>
+                          <Select
+                            value={ruleSuggestionMode}
+                            onValueChange={(value) => {
+                              setRuleSuggestionMode(value as RuleSuggestionMode);
+                              setRuleSuggestion(null);
+                              setLocationOnlyConfirmed(false);
+                            }}
+                          >
+                            <SelectTrigger
+                              aria-labelledby="merchant-rule-mode-label"
+                              className="mt-1 w-full bg-[var(--surface-1)] sm:max-w-sm"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="merchant">Merchant and descriptor</SelectItem>
+                              <SelectItem value="merchant-and-location">Merchant, descriptor, and location</SelectItem>
+                              <SelectItem value="location-only">Location only</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
 
                       {ruleSuggestion && (
                         <div className="mt-4 space-y-4 border-t border-[var(--border)] pt-4">
                           <div className="rounded-lg bg-[var(--surface-1)] p-3">
                             <p className="text-xs font-medium text-[var(--text-primary)]">
-                              Merchant pattern: <span className="break-words">{ruleSuggestion.merchantPattern}</span>
+                              Merchant pattern: <span className="break-words">{ruleSuggestion.merchantPattern ?? 'Any merchant'}</span>
                             </p>
+                            {ruleSuggestion.statementDescriptorPattern && (
+                              <p className="mt-1 whitespace-pre-wrap break-words text-xs text-[var(--text-secondary)]">
+                                Statement descriptor: {ruleSuggestion.statementDescriptorPattern}
+                              </p>
+                            )}
+                            {ruleSuggestion.locationPredicate && (
+                              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                                Location: {[
+                                  ruleSuggestion.locationPredicate.locality,
+                                  ruleSuggestion.locationPredicate.region,
+                                  ruleSuggestion.locationPredicate.countryCode,
+                                ].filter(Boolean).join(', ')} at {Math.round(
+                                  ruleSuggestion.locationPredicate.minimumConfidence * 100,
+                                )}% minimum confidence
+                              </p>
+                            )}
                             <p className="mt-1 text-xs text-[var(--text-muted)]">
                               This advisory has not been applied. Review every setting below, then explicitly create it.
                             </p>
@@ -955,6 +1080,18 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
                               </span>
                             </label>
                           )}
+                          {ruleSuggestion.kind === 'location-only' && (
+                            <label className="flex items-start gap-2 rounded-lg border border-amber-300/40 bg-amber-300/10 p-3 text-xs text-amber-50">
+                              <input
+                                type="checkbox"
+                                checked={locationOnlyConfirmed}
+                                onChange={(event) => setLocationOnlyConfirmed(event.target.checked)}
+                              />
+                              <span>
+                                I understand this rule can assign transactions based on location without a merchant match.
+                              </span>
+                            </label>
+                          )}
 
                           <Button
                             type="button"
@@ -963,6 +1100,7 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
                               || !online
                               || (ruleScope === 'global' && !globalScopeConfirmed)
                               || (businessEntityPattern.trim().length === 1)
+                              || (ruleSuggestion.kind === 'location-only' && !locationOnlyConfirmed)
                             }
                             onClick={() => void createMerchantRule()}
                           >
@@ -977,7 +1115,7 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
                           <strong className="block text-emerald-50">
                             {createdRule.outcome === 'replayed' ? 'Rule already created' : 'Rule created'}
                           </strong>
-                          {createdRule.rule.pattern} is enabled for {
+                          {createdRule.rule.pattern ?? 'This location rule'} is enabled for {
                             createdRule.rule.scope === 'global' ? 'all accounts' : 'this account'
                           }. The transaction correction has not been saved.
                         </div>
@@ -1008,7 +1146,7 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
                   <div>
                     <h3 id="research-heading" className="text-sm font-semibold text-[var(--text-primary)]">Vendor research</h3>
                     <p className="mt-1 text-xs text-[var(--text-muted)]">
-                      Public lookup defaults to normalized vendor name{item.research.coarseLocation ? ' and coarse location' : ''}.
+                      Public lookup uses the normalized vendor name{item.research.coarseLocation ? ' and trusted coarse location' : ''}. Statement descriptors never leave the private inference boundary.
                     </p>
                   </div>
                 </div>

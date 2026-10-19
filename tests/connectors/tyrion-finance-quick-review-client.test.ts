@@ -159,7 +159,7 @@ describe('TyrionFinanceReviewClient', () => {
 
   it('creates a confirmed merchant rule through the exact v2 private endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      contractVersion: '2.0',
+      contractVersion: '2.1',
       outcome: 'created',
       policyVersion: 8,
       rule: {
@@ -168,6 +168,8 @@ describe('TyrionFinanceReviewClient', () => {
         kidId: 'kid-alex',
         pattern: 'INVENTED MARKET',
         businessEntityPattern: null,
+        statementDescriptorPattern: null,
+        locationPredicate: null,
         scope: 'accounts',
         accountRefs: ['account-current'],
         confidence: 'likely',
@@ -176,18 +178,21 @@ describe('TyrionFinanceReviewClient', () => {
     }), { status: 200 }));
 
     const result = await new TyrionFinanceReviewClient(TOKEN, fetchMock).createMerchantRule({
-      contractVersion: '2.0',
+      contractVersion: '2.1',
       expectedPolicyVersion: 7,
       idempotencyKey: '4948bf5e-cd3d-47fe-8935-4e00949d1f3c',
       confirmation: {
         confirmed: true,
         confirmedAt: '2026-10-09T20:00:00.000-04:00',
       },
+      locationOnlyConfirmation: null,
       rule: {
         outcome: 'kid',
         kidId: 'kid-alex',
         pattern: 'INVENTED MARKET',
         businessEntityPattern: null,
+        statementDescriptorPattern: null,
+        locationPredicate: null,
         scope: 'accounts',
         accountRefs: ['account-current'],
         confidence: 'likely',
@@ -209,7 +214,7 @@ describe('TyrionFinanceReviewClient', () => {
 
   it('rejects a merchant rule response that changes the confirmed scope', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      contractVersion: '2.0',
+      contractVersion: '2.1',
       outcome: 'created',
       policyVersion: 8,
       rule: {
@@ -218,6 +223,8 @@ describe('TyrionFinanceReviewClient', () => {
         kidId: null,
         pattern: 'INVENTED MARKET',
         businessEntityPattern: null,
+        statementDescriptorPattern: null,
+        locationPredicate: null,
         scope: 'global',
         accountRefs: [],
         confidence: 'likely',
@@ -226,15 +233,18 @@ describe('TyrionFinanceReviewClient', () => {
     }), { status: 200 }));
 
     await expect(new TyrionFinanceReviewClient(TOKEN, fetchMock).createMerchantRule({
-      contractVersion: '2.0',
+      contractVersion: '2.1',
       expectedPolicyVersion: 7,
       idempotencyKey: '4948bf5e-cd3d-47fe-8935-4e00949d1f3c',
       confirmation: { confirmed: true, confirmedAt: '2026-10-09T20:00:00.000-04:00' },
+      locationOnlyConfirmation: null,
       rule: {
         outcome: 'review',
         kidId: null,
         pattern: 'INVENTED MARKET',
         businessEntityPattern: null,
+        statementDescriptorPattern: null,
+        locationPredicate: null,
         scope: 'accounts',
         accountRefs: ['account-current'],
         confidence: 'likely',

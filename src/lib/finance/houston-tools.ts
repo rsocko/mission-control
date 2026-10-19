@@ -446,6 +446,19 @@ function safeTransaction(row: FinanceAssistantTransaction) {
       businessContext: row.businessContext
         ? safeText(row.businessContext, 'Business context unavailable', 120)
         : null,
+      statementDescriptorsAvailable: row.statementDescriptorCount > 0,
+      coarseLocation: (
+        row.locationCountryCode
+        && row.locationRegion
+        && row.locationConfidence !== null
+      ) ? {
+          countryCode: row.locationCountryCode,
+          region: safeText(row.locationRegion, 'Region unavailable', 80),
+          locality: row.locationLocality
+            ? safeText(row.locationLocality, 'Locality unavailable', 80)
+            : null,
+          confidence: row.locationConfidence,
+        } : null,
     },
   };
 }

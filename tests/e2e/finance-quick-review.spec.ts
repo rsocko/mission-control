@@ -8,6 +8,27 @@ const item = {
   currency: 'USD',
   accountName: 'Household card',
   payee: 'Invented Market',
+  businessContext: 'Invented Neighborhood Foods',
+  statementDescriptors: [{
+    kind: 'statement',
+    text: ' INVENTED  MARKET #1842 ',
+    source: { system: 'monarch', field: 'plaidName' },
+  }],
+  location: {
+    evidence: {
+      countryCode: 'US',
+      region: 'WA',
+      locality: 'Seattle',
+      confidence: 0.88,
+      sourceKind: 'private-ai-inference',
+      model: 'private-finance-model',
+      modelVersion: 'provider:azure',
+      evaluatedAt: '2026-10-08T20:00:00.000Z',
+      staleAfter: '2027-01-06T20:00:00.000Z',
+    },
+    inferenceEvidence: 'Descriptor contains Seattle WA.',
+    errorCode: null,
+  },
   category: { id: 'category-groceries', label: 'Groceries' },
   kid: null,
   monarchReview: { status: 'needs-review', assignedTo: 'Parent' },
@@ -71,6 +92,11 @@ test('desktop keeps review context, filters, and actions usable', async ({ page 
 
   await expect(page.getByRole('heading', { name: 'Finance quick review' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Invented Market' })).toBeVisible();
+  const descriptor = page.getByRole('region', { name: 'Statement descriptors' }).locator('dd');
+  await expect(descriptor).toHaveClass(/whitespace-pre-wrap/);
+  expect(await descriptor.textContent()).toBe(' INVENTED  MARKET #1842 ');
+  await expect(page.getByText('Seattle, WA, US')).toBeVisible();
+  await expect(page.getByText(/88% confidence · Private AI · private-finance-model/)).toBeVisible();
   await expect(page.getByRole('button', { name: /Confirm/ })).toBeVisible();
   await page.getByRole('button', { name: 'Filters' }).click();
   await expect(page.getByLabel('Review mode')).toBeVisible();

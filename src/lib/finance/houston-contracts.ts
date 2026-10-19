@@ -139,6 +139,13 @@ const transactionSchema = z.object({
   }).strict(),
   supportingHints: z.object({
     businessContext: z.string().max(120).nullable(),
+    statementDescriptorsAvailable: z.boolean(),
+    coarseLocation: z.object({
+      countryCode: z.string().regex(/^[A-Z]{2}$/),
+      region: z.string().max(80),
+      locality: z.string().max(80).nullable(),
+      confidence: z.number().min(0).max(1),
+    }).strict().nullable(),
   }).strict(),
 }).strict();
 

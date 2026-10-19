@@ -163,19 +163,64 @@ transaction mirror lifecycle and is removed when that mirrored transaction is
 deleted; rolling back this feature leaves the nullable column in place so older
 application versions continue to ignore it safely.
 
+Tyrion Bridge contract `1.1` additionally supplies an ordered, bounded
+`statementDescriptors` array containing the Monarch `plaidName` and
+`dataProviderDescription` values. Mission Control accepts both Bridge `1.0` and
+`1.1` during rollout. Descriptor text is stored exactly as received, including
+whitespace and punctuation; it is never trimmed or truncated. Empty values are
+omitted by the producer, while non-text values, control characters, invalid
+source/kind pairs, duplicates, and values over 2,048 UTF-8 bytes are rejected.
+Only the normalized descriptors are retained; raw Monarch transaction objects
+are not stored.
+
+Eligible new, changed, or stale descriptor evidence may be sent to Tyrion's
+private `descriptor-inference` preparation operation and then to Mission
+Control's `finance-location-inference` AI feature. That feature is always
+`restricted`, so the provider runtime permits only local Ollama or an approved
+direct private Azure route. It returns coarse country, state/province/region,
+optional locality, confidence, model provenance, evaluation time, and a 90-day
+freshness deadline. Inference is bounded to four concurrent calls per snapshot
+page and at most 16 calls per page, keyed by an exact descriptor fingerprint,
+and does not block transaction synchronization when unavailable or uncertain.
+Fresh matching evidence is reused; changed descriptors or stale evidence are
+evaluated again, and overflow from a historical page remains eligible for a
+later synchronization instead of creating an unbounded model burst.
+
 Each normalized snapshot page is separately submitted to Tyrion's protected
-batch attribution v2 service. Mission Control sends only a deterministic opaque
+batch attribution service. Contract `2.1` sends only a deterministic opaque
 connector-scoped source reference, the stable direct account ID already supplied
-by Tyrion Bridge, date, normalized merchant, observation time, and a structured
-existing manual decision. The account ID is returned verbatim in `accountRef`;
-Mission Control does not apply a second namespace or hash mapping. Direct account
-IDs are private homelab contract data: they may cross this private service
-boundary but must not be logged or returned by operator-readiness responses.
-Card masks and other transaction data never cross the attribution boundary.
+by Tyrion Bridge, date, normalized merchant and business entity, exact bounded
+descriptors, normalized location evidence, observation time, and a structured
+existing manual decision with provenance `mission-control-normalized-v3`.
+Mission Control continues to accept `2.0` responses during rollout, but must be
+deployed with Bridge `1.1` acceptance before Tyrion begins emitting descriptors.
+The account ID is returned verbatim in `accountRef`; Mission Control does not
+apply a second namespace or hash mapping. Direct account IDs are private homelab
+contract data: they may cross this private service boundary but must not be
+logged or returned by operator-readiness responses. Amount, card masks, account
+display names, notes, tags, and raw Monarch data never cross the attribution
+boundary.
 Mission Control authenticates
 with the finance-manager bearer token over private service DNS; Tyrion fixes the
 service actor and household scope server-side. Tyrion remains the sole policy
 and engine runtime.
+
+Finance Quick Review shows exact descriptors and normalized geography with
+confidence, source/model provenance, freshness, and explicit unavailable or
+uncertain states. Merchant rules may combine merchant, business entity,
+statement descriptor, account, and location predicates as logical AND
+conditions. A location predicate may also stand alone, but creation requires a
+second fresh location-only confirmation in addition to the ordinary rule
+confirmation. Mission Control transports and confirms these rules; it does not
+run a parallel rule engine.
+
+Public vendor research is a separate boundary. It may receive the normalized
+vendor name, validated coarse geography from fresh trusted evidence, and
+separately disclosed amount/date. Raw statement descriptors and inference
+evidence are never included in the public web-search request or prompt. Houston
+similarly receives only descriptor availability and bounded coarse geography in
+broad transaction context; exact descriptor text requires a dedicated,
+explicitly requested surface.
 
 The connector stores a random identity namespace beside its token in protected,
 browser-redacted connector credentials. Ordinary SHA-256 derivation produces

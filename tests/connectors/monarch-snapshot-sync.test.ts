@@ -572,13 +572,18 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
     };
     expect(Object.keys(firstAttributionBody.items[0]!).sort()).toEqual([
       'accountRef',
+      'businessEntityName',
       'existingManualDecision',
+      'locationEvidence',
       'merchantName',
       'observedAt',
       'occurredOn',
       'sourceRef',
+      'statementDescriptors',
     ]);
     expect(firstAttributionBody.items[0]!.accountRef).toBe('account-1');
+    expect(firstAttributionBody.items[0]!.statementDescriptors).toEqual([]);
+    expect(firstAttributionBody.items[0]!.locationEvidence).toBeNull();
     expect(JSON.stringify(attributionBodies[0])).not.toMatch(
       /amount|accountId|mask|notes|tags|category|attributed-transaction/,
     );

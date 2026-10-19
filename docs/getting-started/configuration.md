@@ -135,6 +135,14 @@ Finance Quick Review vendor research requires `AI_PROVIDER=openai`, a valid
 `OPENAI_API_KEY`, and an `AI_MODEL` that supports Responses API web search.
 Other configured providers remain available for Houston but return an explicit
 `vendor_research_provider_unavailable` response for vendor research.
+
+Finance statement-descriptor location inference uses the separate
+`finance-location-inference` feature and is always routed as `restricted`.
+Configure either local Ollama or direct private Azure OpenAI for this feature.
+OpenAI public and Bifrost routes are not eligible, even if they are configured
+for standard features or vendor web research. If no approved restricted route
+is available, transaction synchronization continues and Quick Review shows
+location inference as unavailable.
 :::
 
 :::info[Azure through Bifrost]

@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  normalizedLocationEvidenceSchema,
+  statementDescriptorsSchema,
+} from './transaction-evidence';
 
 export const FINANCE_QUICK_REVIEW_CONTRACT_VERSION = '1.0' as const;
 
@@ -60,6 +64,40 @@ const correctionOptionSchema = z.object({
   label: boundedLabelSchema,
 }).strict();
 
+const tyrionStatementDescriptorsSchema = z.array(z.object({
+  kind: z.enum(['statement', 'provider-description']),
+  text: z.string().min(1).refine(
+    (value) => !/[\u0000-\u001f\u007f]/.test(value)
+      && Buffer.byteLength(value, 'utf8') <= 2_048,
+    'Invalid statement descriptor',
+  ),
+  source: z.literal('monarch'),
+}).strict()).min(1).max(2);
+
+export const tyrionDescriptorInferenceRequestSchema = z.object({
+  contractVersion: z.literal(FINANCE_QUICK_REVIEW_CONTRACT_VERSION),
+  statementDescriptors: tyrionStatementDescriptorsSchema,
+}).strict();
+
+export const tyrionDescriptorInferenceEnvelopeSchema = z.object({
+  contractVersion: z.literal(FINANCE_QUICK_REVIEW_CONTRACT_VERSION),
+  purpose: z.literal('transaction-location-inference'),
+  descriptors: tyrionStatementDescriptorsSchema,
+  requestedAt: z.iso.datetime({ offset: true }),
+  privacy: z.object({
+    execution: z.literal('private'),
+    publicWebLookupAllowed: z.literal(false),
+  }).strict(),
+  expectedOutput: z.object({
+    countryCode: z.literal('iso-3166-1-alpha-2'),
+    region: z.literal('normalized-region'),
+    locality: z.literal('optional-normalized-locality'),
+    confidence: z.literal('zero-to-one'),
+    provenanceRequired: z.literal(true),
+    stalenessRequired: z.literal(true),
+  }).strict(),
+}).strict();
+
 const confidenceSignalsSchema = z.object({
   overall: confidenceSchema,
   kids: confidenceSchema.nullable(),
@@ -76,6 +114,20 @@ export const financeReviewItemSchema = z.object({
   accountName: boundedLabelSchema,
   payee: boundedLabelSchema,
   businessContext: boundedLabelSchema.nullable().optional(),
+  statementDescriptors: statementDescriptorsSchema.default([]),
+  location: z.object({
+    evidence: normalizedLocationEvidenceSchema.nullable(),
+    inferenceEvidence: z.string().trim().min(1).max(240).nullable(),
+    errorCode: z.enum([
+      'location_inference_unavailable',
+      'location_inference_uncertain',
+      'location_inference_invalid',
+    ]).nullable(),
+  }).strict().default({
+    evidence: null,
+    inferenceEvidence: null,
+    errorCode: null,
+  }),
   category: correctionOptionSchema.nullable(),
   kid: correctionOptionSchema.nullable(),
   monarchReview: z.object({
@@ -334,23 +386,62 @@ export const tyrionQuickReviewResearchResponseSchema = z.object({
 export const tyrionQuickReviewRuleRequestSchema = z.object({
   contractVersion: z.literal(FINANCE_QUICK_REVIEW_CONTRACT_VERSION),
   merchantName: normalizedTyrionNameSchema,
-  businessEntityName: normalizedTyrionNameSchema.nullable(),
-  accountRef: tyrionOpaqueRefSchema,
-  scope: z.literal('accounts'),
+  businessEntityName: normalizedTyrionNameSchema.nullable().optional(),
+  accountRef: tyrionOpaqueRefSchema.nullable().optional(),
+  scope: z.enum(['global', 'accounts']).optional(),
   kidId: tyrionOpaqueRefSchema,
   suggestReusableRule: z.boolean(),
-}).strict();
+  suggestionMode: z.enum(['merchant', 'merchant-and-location', 'location-only']).optional(),
+  statementDescriptors: z.array(z.object({
+    kind: z.enum(['statement', 'provider-description']),
+    text: z.string().min(1).max(2_048),
+    source: z.literal('monarch'),
+  }).strict()).max(2).optional(),
+  locationEvidence: normalizedLocationEvidenceSchema.nullable().optional(),
+  locationMinimumConfidence: confidenceSchema.nullable().optional(),
+}).strict().superRefine((request, context) => {
+  const scope = request.scope ?? 'global';
+  if ((scope === 'accounts') !== Boolean(request.accountRef)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'accountRef is required only for account-scoped suggestions',
+      path: ['accountRef'],
+    });
+  }
+  if (
+    request.suggestionMode
+    && request.suggestionMode !== 'merchant'
+    && (!request.locationEvidence || request.locationMinimumConfidence === null)
+  ) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Location suggestions require normalized location evidence',
+      path: ['locationEvidence'],
+    });
+  }
+});
 
 export const tyrionQuickReviewRuleResponseSchema = z.object({
   contractVersion: z.literal(FINANCE_QUICK_REVIEW_CONTRACT_VERSION),
   policyVersion: z.number().int().positive(),
   suggestion: z.object({
-    kind: z.literal('merchant'),
-    merchantPattern: z.string().trim().min(1).max(120),
+    kind: z.enum(['merchant', 'location-only']),
+    outcome: z.literal('kid').default('kid'),
+    merchantPattern: z.string().trim().min(1).max(120).nullable(),
     businessEntityPattern: z.string().trim().min(2).max(160).nullable(),
+    statementDescriptorPattern: z.string().min(1).max(160).nullable().default(null),
+    locationPredicate: z.object({
+      countryCode: z.string().regex(/^[A-Z]{2}$/),
+      region: z.string().trim().min(1).max(80),
+      locality: z.string().trim().min(1).max(80).nullable(),
+      minimumConfidence: confidenceSchema,
+    }).strict().nullable().default(null),
+    scope: z.enum(['global', 'accounts']).default('accounts'),
+    accountRefs: z.array(tyrionOpaqueRefSchema).max(32).default([]),
     kidId: tyrionOpaqueRefSchema,
     confidence: z.literal('likely'),
     requiresConfirmation: z.literal(true),
+    requiresLocationOnlyConfirmation: z.boolean().default(false),
   }).strict().nullable(),
 }).strict();
 
@@ -363,6 +454,8 @@ export const financeQuickReviewRuleSuggestionRequestSchema = z.object({
   merchantName: normalizedTyrionNameSchema,
   kidId: tyrionOpaqueRefSchema,
   suggestReusableRule: z.literal(true),
+  suggestionMode: z.enum(['merchant', 'merchant-and-location', 'location-only']).default('merchant'),
+  locationMinimumConfidence: confidenceSchema.nullable().default(null),
 }).strict();
 
 export const financeQuickReviewRuleSuggestionResponseSchema = z.object({
@@ -374,6 +467,8 @@ export type TyrionQuickReviewRankRequest = z.infer<typeof tyrionQuickReviewRankR
 export type TyrionQuickReviewRankResponse = z.infer<typeof tyrionQuickReviewRankResponseSchema>;
 export type TyrionQuickReviewResearchRequest = z.infer<typeof tyrionQuickReviewResearchRequestSchema>;
 export type TyrionQuickReviewResearchResponse = z.infer<typeof tyrionQuickReviewResearchResponseSchema>;
+export type TyrionDescriptorInferenceRequest = z.infer<typeof tyrionDescriptorInferenceRequestSchema>;
+export type TyrionDescriptorInferenceEnvelope = z.infer<typeof tyrionDescriptorInferenceEnvelopeSchema>;
 export type TyrionQuickReviewRuleRequest = z.infer<typeof tyrionQuickReviewRuleRequestSchema>;
 export type TyrionQuickReviewRuleResponse = z.infer<typeof tyrionQuickReviewRuleResponseSchema>;
 export type FinanceQuickReviewRuleSuggestionRequest = z.infer<
@@ -383,7 +478,7 @@ export type FinanceQuickReviewRuleSuggestionResponse = z.infer<
   typeof financeQuickReviewRuleSuggestionResponseSchema
 >;
 
-export const TYRION_MERCHANT_RULE_CONTRACT_VERSION = '2.0' as const;
+export const TYRION_MERCHANT_RULE_CONTRACT_VERSION = '2.1' as const;
 
 const merchantRulePatternSchema = z.string().trim().min(2).max(160)
   .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), 'Pattern contains controls')
@@ -398,8 +493,15 @@ const merchantRuleIdempotencyKeySchema = z.string()
 export const tyrionMerchantRuleSchema = z.object({
   outcome: z.enum(['kid', 'parent-shared', 'review']),
   kidId: tyrionOpaqueRefSchema.nullable(),
-  pattern: merchantRulePatternSchema,
+  pattern: merchantRulePatternSchema.nullable(),
   businessEntityPattern: merchantRulePatternSchema.nullable(),
+  statementDescriptorPattern: merchantRulePatternSchema.nullable(),
+  locationPredicate: z.object({
+    countryCode: z.string().regex(/^[A-Z]{2}$/).nullable(),
+    region: z.string().trim().min(1).max(80).nullable(),
+    locality: z.string().trim().min(1).max(80).nullable(),
+    minimumConfidence: confidenceSchema,
+  }).strict().nullable(),
   scope: z.enum(['global', 'accounts']),
   accountRefs: z.array(merchantRuleAccountRefSchema).max(32)
     .refine((values) => new Set(values).size === values.length, 'Account references must be unique'),
@@ -410,6 +512,13 @@ export const tyrionMerchantRuleSchema = z.object({
       code: 'custom',
       message: 'kidId is required only for kid outcomes',
       path: ['kidId'],
+    });
+  }
+  if (rule.pattern === null && rule.locationPredicate === null) {
+    context.addIssue({
+      code: 'custom',
+      message: 'A merchant pattern or location predicate is required',
+      path: ['pattern'],
     });
   }
   if (rule.scope === 'global' && rule.accountRefs.length !== 0) {
@@ -436,15 +545,38 @@ export const tyrionMerchantRuleCreateRequestSchema = z.object({
     confirmed: z.literal(true),
     confirmedAt: z.iso.datetime({ offset: true }),
   }).strict(),
+  locationOnlyConfirmation: z.object({
+    confirmed: z.literal(true),
+    confirmedAt: z.iso.datetime({ offset: true }),
+  }).strict().nullable(),
   rule: tyrionMerchantRuleSchema,
-}).strict();
+}).strict().superRefine((request, context) => {
+  const locationOnly = request.rule.pattern === null && request.rule.locationPredicate !== null;
+  if (locationOnly !== (request.locationOnlyConfirmation !== null)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Location-only rules require a distinct confirmation',
+      path: ['locationOnlyConfirmation'],
+    });
+  }
+});
 
 export const tyrionMerchantRuleCreateResponseSchema = z.object({
-  contractVersion: z.literal(TYRION_MERCHANT_RULE_CONTRACT_VERSION),
+  contractVersion: z.enum(['2.0', TYRION_MERCHANT_RULE_CONTRACT_VERSION]),
   outcome: z.enum(['created', 'replayed']),
   policyVersion: z.number().int().positive(),
-  rule: tyrionMerchantRuleSchema.extend({
+  rule: z.object({
     id: z.string().trim().min(1).max(256),
+    outcome: z.enum(['kid', 'parent-shared', 'review']),
+    kidId: tyrionOpaqueRefSchema.nullable(),
+    pattern: merchantRulePatternSchema.nullable(),
+    businessEntityPattern: merchantRulePatternSchema.nullable(),
+    statementDescriptorPattern: merchantRulePatternSchema.nullable().default(null),
+    locationPredicate: tyrionMerchantRuleSchema.shape.locationPredicate.default(null),
+    scope: z.enum(['global', 'accounts']),
+    accountRefs: z.array(merchantRuleAccountRefSchema).max(32)
+      .refine((values) => new Set(values).size === values.length, 'Account references must be unique'),
+    confidence: z.enum(['definite', 'likely']),
     enabled: z.literal(true),
   }).strict(),
 }).strict();
@@ -464,11 +596,17 @@ export const financeMerchantRuleCreateRequestSchema = z.object({
   rule: z.object({
     outcome: z.enum(['kid', 'parent-shared', 'review']),
     kidId: tyrionOpaqueRefSchema.nullable(),
-    pattern: merchantRulePatternSchema,
+    pattern: merchantRulePatternSchema.nullable(),
     businessEntityPattern: merchantRulePatternSchema.nullable(),
+    statementDescriptorPattern: merchantRulePatternSchema.nullable(),
+    locationPredicate: tyrionMerchantRuleSchema.shape.locationPredicate,
     scope: z.enum(['global', 'accounts']),
     confidence: z.enum(['definite', 'likely']),
   }).strict(),
+  locationOnlyConfirmation: z.object({
+    confirmed: z.literal(true),
+    confirmedAt: z.iso.datetime({ offset: true }),
+  }).strict().nullable(),
 }).strict().superRefine((request, context) => {
   if ((request.rule.outcome === 'kid') !== (request.rule.kidId !== null)) {
     context.addIssue({
@@ -491,18 +629,28 @@ export const financeMerchantRuleCreateRequestSchema = z.object({
       path: ['confirmation', 'globalScopeConfirmed'],
     });
   }
+  const locationOnly = request.rule.pattern === null && request.rule.locationPredicate !== null;
+  if (locationOnly !== (request.locationOnlyConfirmation !== null)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Location-only rules require a distinct confirmation',
+      path: ['locationOnlyConfirmation'],
+    });
+  }
 });
 
 export const financeMerchantRuleCreateResponseSchema = z.object({
-  contractVersion: z.literal(TYRION_MERCHANT_RULE_CONTRACT_VERSION),
+  contractVersion: z.enum(['2.0', TYRION_MERCHANT_RULE_CONTRACT_VERSION]),
   outcome: z.enum(['created', 'replayed']),
   policyVersion: z.number().int().positive(),
   rule: z.object({
     id: z.string().trim().min(1).max(256),
     outcome: z.enum(['kid', 'parent-shared', 'review']),
     kidId: tyrionOpaqueRefSchema.nullable(),
-    pattern: merchantRulePatternSchema,
+    pattern: merchantRulePatternSchema.nullable(),
     businessEntityPattern: merchantRulePatternSchema.nullable(),
+    statementDescriptorPattern: merchantRulePatternSchema.nullable().default(null),
+    locationPredicate: tyrionMerchantRuleSchema.shape.locationPredicate.default(null),
     scope: z.enum(['global', 'accounts']),
     confidence: z.enum(['definite', 'likely']),
     enabled: z.literal(true),

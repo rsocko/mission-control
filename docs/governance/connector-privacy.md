@@ -15,6 +15,13 @@ process that data and for complying with the upstream service's terms.
   private contract data. For example, Mission Control sends Tyrion Bridge
   account IDs verbatim to Tyrion attribution, but does not log them or return
   them from readiness and aggregate preview responses.
+- Monarch statement descriptors are restricted financial evidence. Mission
+  Control stores only the bounded normalized descriptor DTO, preserves its
+  exact text, and may send it only through Tyrion's private inference
+  preparation operation, the restricted AI route, and private attribution.
+  Public vendor research receives no raw descriptors; it may receive only a
+  normalized vendor name and validated coarse geography, with amount/date
+  disclosed separately by the user.
 - Fixtures, examples, screenshots, and tests must use synthetic identities and
   content.
 

@@ -83,6 +83,7 @@ function snapshotTransaction(
     tags: ['Household'],
     tagReferences: [{ id: 'tag-1', name: 'Household' }],
     ...overrides,
+    statementDescriptors: overrides.statementDescriptors ?? [],
   };
 }
 
@@ -269,6 +270,60 @@ export function describeFinanceWorkerPersistenceContract(
         lastSuccessfulWindowEnd: WINDOW_END,
         needsStableTagBackfill: true,
       });
+    });
+
+    it('round-trips exact descriptors and normalized location evidence', async () => {
+      const descriptors = [{
+        kind: 'statement' as const,
+        text: ' INVENTED  MARKET #1842 ',
+        source: { system: 'monarch' as const, field: 'plaidName' as const },
+      }];
+      const evidence = {
+        countryCode: 'US',
+        region: 'WA',
+        locality: 'Seattle',
+        confidence: 0.88,
+        sourceKind: 'private-ai-inference' as const,
+        model: 'private-finance-model',
+        modelVersion: 'provider:azure',
+        evaluatedAt: '2026-08-30T12:00:00.000Z',
+        staleAfter: '2026-11-28T12:00:00.000Z',
+      };
+      await harness.repositories.snapshots.start(startInput('evidence-generation'));
+      await expect(harness.repositories.snapshots.upsertPage(pageInput(
+        'evidence-generation',
+        [snapshotTransaction('evidence', {
+          statementDescriptors: descriptors,
+          locationEvidence: evidence,
+          locationEvidenceInputFingerprint: 'a'.repeat(64),
+          locationInferenceEvidence: 'Descriptor contains Seattle WA.',
+          locationInferenceErrorCode: null,
+        })],
+      ))).resolves.toEqual({ added: 1, updated: 0 });
+
+      await expect(harness.repositories.snapshots.readLocationEvidence(
+        CONNECTOR_ID,
+        ['evidence'],
+      )).resolves.toEqual(new Map([['evidence', {
+        inputFingerprint: 'a'.repeat(64),
+        evidence,
+        inferenceEvidence: 'Descriptor contains Seattle WA.',
+        errorCode: null,
+      }]]));
+
+      await expect(harness.repositories.snapshots.upsertPage(pageInput(
+        'evidence-generation',
+        [snapshotTransaction('evidence', {
+          statementDescriptors: [{
+            ...descriptors[0],
+            text: ' INVENTED  MARKET SEATTLE WA ',
+          }],
+          locationEvidence: evidence,
+          locationEvidenceInputFingerprint: 'b'.repeat(64),
+          locationInferenceEvidence: 'Descriptor changed.',
+          locationInferenceErrorCode: null,
+        })],
+      ))).resolves.toEqual({ added: 0, updated: 1 });
     });
 
     it('publishes reference values and retains only current plus previous snapshots', async () => {

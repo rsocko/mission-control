@@ -232,6 +232,29 @@ describe('NavRail', () => {
     );
   });
 
+  it('opens recent projects on hover and stays open while crossing into the menu', () => {
+    renderNavRail();
+    fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
+
+    const projectsLink = screen.getByRole('link', { name: 'Projects' });
+    const projectsRow = projectsLink.parentElement;
+    expect(projectsRow).not.toBeNull();
+
+    fireEvent.mouseEnter(projectsRow!);
+    const menu = screen.getByRole('menu', { name: 'Recent projects' });
+    expect(menu).toBeInTheDocument();
+
+    fireEvent.mouseLeave(projectsRow!);
+    act(() => vi.advanceTimersByTime(50));
+    fireEvent.mouseEnter(menu);
+    act(() => vi.advanceTimersByTime(100));
+    expect(menu).toBeInTheDocument();
+
+    fireEvent.mouseLeave(menu);
+    act(() => vi.advanceTimersByTime(120));
+    expect(screen.queryByRole('menu', { name: 'Recent projects' })).not.toBeInTheDocument();
+  });
+
   it('opens pinned and recent task shortcuts without changing the All Tasks destination', async () => {
     vi.useRealTimers();
     const pinned = taskShortcutFromSource({
@@ -263,6 +286,29 @@ describe('NavRail', () => {
     expect(within(menu).getByRole('menuitem', { name: 'Personal tasks Source' })).toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: 'GitHub issues Source' })).toBeInTheDocument();
     expect(within(menu).getAllByText('Personal tasks')).toHaveLength(1);
+  });
+
+  it('opens task shortcuts on hover and stays open while crossing into the menu', () => {
+    renderNavRail();
+    fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
+
+    const tasksLink = screen.getByRole('link', { name: 'All Tasks' });
+    const tasksRow = tasksLink.parentElement;
+    expect(tasksRow).not.toBeNull();
+
+    fireEvent.mouseEnter(tasksRow!);
+    const menu = screen.getByRole('menu', { name: 'Task shortcuts' });
+    expect(menu).toBeInTheDocument();
+
+    fireEvent.mouseLeave(tasksRow!);
+    act(() => vi.advanceTimersByTime(50));
+    fireEvent.mouseEnter(menu);
+    act(() => vi.advanceTimersByTime(100));
+    expect(menu).toBeInTheDocument();
+
+    fireEvent.mouseLeave(menu);
+    act(() => vi.advanceTimersByTime(120));
+    expect(screen.queryByRole('menu', { name: 'Task shortcuts' })).not.toBeInTheDocument();
   });
 
   it('records project detail visits as recently viewed', async () => {

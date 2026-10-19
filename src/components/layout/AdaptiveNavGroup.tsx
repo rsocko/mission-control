@@ -10,11 +10,10 @@ import type {
   NavBadgeTone,
   NavigationCounts,
 } from '@/lib/navigation/badges';
+import { useHoverMenu } from '@/lib/hooks/useHoverMenu';
 import { cn } from '@/lib/utils';
 
-import { useEffect, useRef, type ComponentType } from 'react';
-
-const HOVER_CLOSE_DELAY_MS = 120;
+import type { ComponentType } from 'react';
 
 export interface AdaptiveNavItem {
   href: string;
@@ -106,30 +105,7 @@ export function AdaptiveNavGroup({
 }) {
   const active = items.some((item) => isActive(item.href));
   const aggregateBadge = aggregateBadges(items, counts, preferences);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const cancelPendingClose = () => {
-    if (!closeTimer.current) return;
-    clearTimeout(closeTimer.current);
-    closeTimer.current = null;
-  };
-
-  const openOnHover = () => {
-    cancelPendingClose();
-    onOpenChange(true);
-  };
-
-  const closeAfterHover = () => {
-    cancelPendingClose();
-    closeTimer.current = setTimeout(() => {
-      onOpenChange(false);
-      closeTimer.current = null;
-    }, HOVER_CLOSE_DELAY_MS);
-  };
-
-  useEffect(() => () => {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-  }, []);
+  const { openOnHover, closeAfterHover } = useHoverMenu({ onOpenChange });
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={onOpenChange} modal={false}>

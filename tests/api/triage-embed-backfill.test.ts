@@ -98,19 +98,19 @@ describe('triage embed backfill', () => {
   });
 
   it('rejects overlapping remote backfills', async () => {
-    let release: ((value: { title: string }) => void) | undefined;
-    resolveAndStoreEmbed.mockImplementationOnce(() => new Promise((resolve) => {
+    let release!: (value: { title: string }) => void;
+    const pendingEmbed = new Promise<{ title: string }>((resolve) => {
       release = resolve;
-    }));
+    });
+    resolveAndStoreEmbed.mockReturnValueOnce(pendingEmbed);
 
     const first = post(request('?limit=1&source=github'));
-    await vi.waitFor(() => expect(resolveAndStoreEmbed).toHaveBeenCalledOnce());
-
     const overlap = await post(request('?limit=1&source=github'));
     expect(overlap.status).toBe(409);
 
-    release?.({ title: 'Resolved' });
+    release({ title: 'Resolved' });
     expect((await first).status).toBe(200);
+    expect(resolveAndStoreEmbed).toHaveBeenCalledOnce();
   });
 });
 

@@ -27,6 +27,29 @@ const task: SuggestionTask = {
 };
 
 describe('SuggestedForToday task interactions', () => {
+  it('marks the task complete without opening details', () => {
+    const onComplete = vi.fn();
+    const onSelect = vi.fn();
+
+    render(
+      <TooltipProvider>
+        <SuggestedForToday
+          tasks={[task]}
+          onAdd={vi.fn()}
+          onNotToday={vi.fn()}
+          onComplete={onComplete}
+          onSelect={onSelect}
+          completingIds={new Set()}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark "Suggested task" complete' }));
+
+    expect(onComplete).toHaveBeenCalledWith(task);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it('exposes the standard task context menu', async () => {
     const onComplete = vi.fn();
     const actions: TaskContextMenuActions = {
@@ -46,7 +69,9 @@ describe('SuggestedForToday task interactions', () => {
           tasks={[task]}
           onAdd={vi.fn()}
           onNotToday={vi.fn()}
+          onComplete={vi.fn()}
           onSelect={vi.fn()}
+          completingIds={new Set()}
           getContextMenuActions={() => actions}
         />
       </TooltipProvider>,

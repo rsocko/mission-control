@@ -79,7 +79,9 @@ describe('MobileSuggestions pagination', () => {
           dueThisWeek: [suggestion(1)],
         }}
         onAddToDay={vi.fn()}
+        onCompleteTask={vi.fn()}
         onSelectTask={vi.fn()}
+        completingIds={new Set()}
         initialExpanded
       />,
     );
@@ -95,7 +97,9 @@ describe('MobileSuggestions pagination', () => {
           aiRecommended: [suggestion(1)],
         }}
         onAddToDay={vi.fn()}
+        onCompleteTask={vi.fn()}
         onSelectTask={vi.fn()}
+        completingIds={new Set()}
       />,
     );
 
@@ -113,7 +117,9 @@ describe('MobileSuggestions pagination', () => {
           aiRecommended: candidates,
         }}
         onAddToDay={vi.fn()}
+        onCompleteTask={vi.fn()}
         onSelectTask={vi.fn()}
+        completingIds={new Set()}
       />,
     );
 
@@ -128,7 +134,9 @@ describe('MobileSuggestions pagination', () => {
           aiRecommended: candidates.slice(1),
         }}
         onAddToDay={vi.fn()}
+        onCompleteTask={vi.fn()}
         onSelectTask={vi.fn()}
+        completingIds={new Set()}
       />,
     );
 
@@ -146,7 +154,9 @@ describe('MobileSuggestions pagination', () => {
         }}
         onAddToDay={vi.fn()}
         onNotToday={onNotToday}
+        onCompleteTask={vi.fn()}
         onSelectTask={vi.fn()}
+        completingIds={new Set()}
       />,
     );
 
@@ -164,7 +174,9 @@ describe('MobileSuggestions pagination', () => {
           recentlyDue: [suggestion(2)],
         }}
         onAddToDay={vi.fn()}
+        onCompleteTask={vi.fn()}
         onSelectTask={vi.fn()}
+        completingIds={new Set()}
         initialExpanded
       />,
     );
@@ -180,7 +192,9 @@ describe('MobileSuggestions pagination', () => {
       <MobileSuggestions
         suggestions={suggestionGroups(overdue)}
         onAddToDay={onAddToDay}
+        onCompleteTask={vi.fn()}
         onSelectTask={vi.fn()}
+        completingIds={new Set()}
         initialExpanded
       />,
     );
@@ -196,7 +210,9 @@ describe('MobileSuggestions pagination', () => {
       <MobileSuggestions
         suggestions={suggestionGroups(overdue.filter((task) => task.id !== 'task-6'))}
         onAddToDay={onAddToDay}
+        onCompleteTask={vi.fn()}
         onSelectTask={vi.fn()}
+        completingIds={new Set()}
         initialExpanded
       />,
     );
@@ -211,7 +227,9 @@ describe('MobileSuggestions pagination', () => {
       <MobileSuggestions
         suggestions={suggestionGroups([suggestion(1), suggestion(3), suggestion(2)])}
         onAddToDay={vi.fn()}
+        onCompleteTask={vi.fn()}
         onSelectTask={vi.fn()}
+        completingIds={new Set()}
         initialExpanded
       />,
     );
@@ -231,7 +249,9 @@ describe('MobileSuggestions pagination', () => {
       <MobileSuggestions
         suggestions={replanningGroups()}
         onAddToDay={vi.fn()}
+        onCompleteTask={vi.fn()}
         onSelectTask={vi.fn()}
+        completingIds={new Set()}
         initialExpanded
       />,
     );

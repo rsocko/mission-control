@@ -17,6 +17,10 @@ import {
   type FinanceManualAction,
 } from '@/db/persistence/finance-attribution';
 import {
+  normalizedLocationEvidenceSchema,
+  statementDescriptorsSchema,
+} from '@/lib/finance/transaction-evidence';
+import {
   FinanceDatasetFenceError,
   type FinanceBudgetPublicationCommand,
   type FinanceDataset,
@@ -1278,6 +1282,16 @@ function normalizeReasons(value: unknown): readonly string[] {
   return [];
 }
 
+function normalizeStatementDescriptors(value: unknown) {
+  const parsed = statementDescriptorsSchema.safeParse(value);
+  return parsed.success ? parsed.data : [];
+}
+
+function normalizeLocationEvidence(value: unknown) {
+  const parsed = normalizedLocationEvidenceSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 async function requireFinanceConnector(
   client: Client,
   connectorId: string,
@@ -1999,7 +2013,16 @@ function createAttributionPersistence(
         }
         parameters.push(request.limit + 1);
         const rows = await query<
-          Omit<FinanceAttributionExceptionView, 'reasons'> & { reasons: unknown }
+          Omit<
+            FinanceAttributionExceptionView,
+            'reasons' | 'statementDescriptors' | 'location'
+          > & {
+            reasons: unknown;
+            statementDescriptors: unknown;
+            locationEvidence: unknown;
+            locationInferenceEvidence: string | null;
+            locationInferenceErrorCode: FinanceAttributionExceptionView['location']['errorCode'];
+          }
         >(client, `
           SELECT e.id, e.status,
                  e.reason_code AS "reasonCode", e.retryable,
@@ -2009,6 +2032,10 @@ function createAttributionPersistence(
                  e.first_observed_at AS "firstObservedAt",
                  e.last_observed_at AS "lastObservedAt", e.updated_at AS "updatedAt",
                  t.date, t.amount, t.merchant_name AS "merchantName",
+                 t.statement_descriptors AS "statementDescriptors",
+                 t.location_evidence AS "locationEvidence",
+                 t.location_inference_evidence AS "locationInferenceEvidence",
+                 t.location_inference_error_code AS "locationInferenceErrorCode",
                  COALESCE(t.confirmed_category, t.category_id) AS "categoryId",
                  COALESCE(categories.name, t.confirmed_category, t.original_category) AS "categoryName",
                  t.account_name AS "accountName", t.card_last4 AS "cardLast4",
@@ -2056,6 +2083,12 @@ function createAttributionPersistence(
             ...row,
             retryable: row.retryable === true,
             reasons: normalizeReasons(row.reasons),
+            statementDescriptors: normalizeStatementDescriptors(row.statementDescriptors),
+            location: {
+              evidence: normalizeLocationEvidence(row.locationEvidence),
+              inferenceEvidence: row.locationInferenceEvidence,
+              errorCode: row.locationInferenceErrorCode,
+            },
           })),
           hasMore,
           subjects,

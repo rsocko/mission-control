@@ -20,6 +20,7 @@ import {
   UserRoundCheck,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { TransactionEvidenceDetails } from './TransactionEvidenceDetails';
 import {
   Select,
   SelectContent,
@@ -132,6 +133,7 @@ export function AttributionExceptionReview() {
   const [actionPending, setActionPending] = useState(false);
   const [pageError, setPageError] = useState<{ status: number; message: string } | null>(null);
   const [actionStatus, setActionStatus] = useState('');
+  const [freshnessReference] = useState(() => Date.now());
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null);
   const retryIdentities = useRef(new Map<string, RetryIdentity>());
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -851,6 +853,15 @@ export function AttributionExceptionReview() {
                   <Detail label="Decision method" value={selected.method ? friendly(selected.method) : 'Unavailable'} />
                   <Detail label="Observed" value={new Date(selected.lastObservedAt).toLocaleString()} />
                 </dl>
+
+                <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
+                  <TransactionEvidenceDetails
+                    statementDescriptors={selected.statementDescriptors}
+                    location={selected.location}
+                    freshnessReference={freshnessReference}
+                    headingIdPrefix="attribution-exception"
+                  />
+                </div>
 
                 <section aria-labelledby="category-heading" className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
                   <div className="flex items-center gap-2">

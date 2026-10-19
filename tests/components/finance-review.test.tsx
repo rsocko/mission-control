@@ -57,6 +57,26 @@ const firstException = {
   date: '2026-08-08',
   amount: -84.27,
   merchantName: 'Invented Market',
+  statementDescriptors: [{
+    kind: 'statement',
+    text: ' INVENTED  MARKET #1842 ',
+    source: { system: 'monarch', field: 'plaidName' },
+  }],
+  location: {
+    evidence: {
+      countryCode: 'US',
+      region: 'WA',
+      locality: 'Seattle',
+      confidence: 0.88,
+      sourceKind: 'private-ai-inference',
+      model: 'private-finance-model',
+      modelVersion: 'test-v1',
+      evaluatedAt: '2026-08-08T11:00:00.000Z',
+      staleAfter: '2027-11-06T11:00:00.000Z',
+    },
+    inferenceEvidence: 'Descriptor contains Seattle WA.',
+    errorCode: null,
+  },
   categoryId: 'category-one',
   categoryName: 'Groceries',
   accountName: 'Everyday Checking',
@@ -125,12 +145,44 @@ describe('FinanceReview', () => {
     expect(screen.getAllByText(/Everyday Checking/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Groceries').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$84.27').length).toBeGreaterThan(0);
+    const descriptor = screen.getByRole('region', { name: 'Statement descriptors' }).querySelector('dd');
+    expect(descriptor).not.toBeNull();
+    expect(descriptor).toHaveClass('whitespace-pre-wrap');
+    expect(descriptor?.textContent).toBe(' INVENTED  MARKET #1842 ');
+    expect(screen.getByText('Seattle, WA, US')).toBeInTheDocument();
+    expect(screen.getByText(/88% confidence · Private AI · private-finance-model/)).toBeInTheDocument();
+    expect(screen.getByText('Evidence: Descriptor contains Seattle WA.')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Load next page' }));
     expect(await screen.findByRole('button', { name: /Invented Cafe/ })).toBeInTheDocument();
     expect(fetchMock.mock.calls[2][0]).toContain('cursor=next-page');
     fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
     expect(await screen.findByRole('button', { name: /Invented Market/ })).toBeInTheDocument();
+  });
+
+  it('renders a stable uncertain location state without guessing geography', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse(overview))
+      .mockResolvedValueOnce(jsonResponse({
+        exceptions: [{
+          ...firstException,
+          location: {
+            evidence: null,
+            inferenceEvidence: 'Descriptor only identified a broad vendor footprint.',
+            errorCode: 'location_inference_uncertain',
+          },
+        }],
+        subjects,
+        categories,
+        nextCursor: null,
+      })));
+
+    render(<FinanceReview />);
+
+    expect(await screen.findByText(
+      'The descriptor did not support a reliable location. No location was guessed.',
+    )).toBeInTheDocument();
+    expect(screen.queryByText('Descriptor only identified a broad vendor footprint.')).not.toBeInTheDocument();
   });
 
   it('updates a transaction category from the exception detail', async () => {

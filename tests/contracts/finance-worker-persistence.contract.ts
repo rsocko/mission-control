@@ -877,7 +877,27 @@ export function describeFinanceWorkerPersistenceContract(
         await harness.repositories.snapshots.start(startInput(GENERATION));
         await harness.repositories.snapshots.upsertPage(pageInput(
           GENERATION,
-          [snapshotTransaction('api-attribution')],
+          [snapshotTransaction('api-attribution', {
+            statementDescriptors: [{
+              kind: 'statement',
+              text: ' INVENTED  MARKET #1842 ',
+              source: { system: 'monarch', field: 'plaidName' },
+            }],
+            locationEvidence: {
+              countryCode: 'US',
+              region: 'WA',
+              locality: 'Seattle',
+              confidence: 0.88,
+              sourceKind: 'private-ai-inference',
+              model: 'private-finance-model',
+              modelVersion: 'test-v1',
+              evaluatedAt: '2026-08-30T12:00:00.000Z',
+              staleAfter: '2026-11-28T12:00:00.000Z',
+            },
+            locationEvidenceInputFingerprint: 'c'.repeat(64),
+            locationInferenceEvidence: 'Descriptor contains Seattle WA.',
+            locationInferenceErrorCode: null,
+          })],
         ));
         const rows = await harness.repositories.attribution.readRows(
           CONNECTOR_ID,
@@ -950,6 +970,26 @@ export function describeFinanceWorkerPersistenceContract(
           reasonCode: 'low-confidence',
           retryable: false,
           reasons: ['low-confidence'],
+          statementDescriptors: [{
+            kind: 'statement',
+            text: ' INVENTED  MARKET #1842 ',
+            source: { system: 'monarch', field: 'plaidName' },
+          }],
+          location: {
+            evidence: {
+              countryCode: 'US',
+              region: 'WA',
+              locality: 'Seattle',
+              confidence: 0.88,
+              sourceKind: 'private-ai-inference',
+              model: 'private-finance-model',
+              modelVersion: 'test-v1',
+              evaluatedAt: '2026-08-30T12:00:00.000Z',
+              staleAfter: '2026-11-28T12:00:00.000Z',
+            },
+            inferenceEvidence: 'Descriptor contains Seattle WA.',
+            errorCode: null,
+          },
         });
         expect(page.exceptions[0]).not.toHaveProperty('transactionId');
         expect(page.exceptions[0]).not.toHaveProperty('sourceFingerprint');

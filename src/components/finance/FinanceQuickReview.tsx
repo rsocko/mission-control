@@ -17,9 +17,7 @@ import {
   CloudOff,
   ExternalLink,
   Filter,
-  FileText,
   Loader2,
-  MapPin,
   Search,
   ShieldCheck,
   SkipForward,
@@ -36,6 +34,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { TransactionEvidenceDetails } from './TransactionEvidenceDetails';
 import {
   FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
   financeReviewSessionSchema,
@@ -787,69 +786,12 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
                   />
                   <Fact label="Overall confidence" value={confidenceLabel(item.confidence.overall)} />
                 </dl>
-                <div className="grid border-t border-[var(--border)] lg:grid-cols-2 lg:divide-x lg:divide-[var(--border)]">
-                  <section aria-labelledby="statement-descriptors-heading" className="min-w-0 p-4 sm:p-5">
-                    <h3 id="statement-descriptors-heading" className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
-                      <FileText className="size-4 text-sky-300" /> Statement descriptors
-                    </h3>
-                    {item.statementDescriptors.length ? (
-                      <dl className="mt-3 space-y-3">
-                        {item.statementDescriptors.map((descriptor) => (
-                          <div key={`${descriptor.kind}:${descriptor.source.field}`} className="min-w-0">
-                            <dt className="text-xs text-[var(--text-muted)]">
-                              {descriptor.kind === 'statement' ? 'Statement name' : 'Provider description'}
-                            </dt>
-                            <dd className="mt-1 whitespace-pre-wrap break-words text-sm text-[var(--text-primary)]">
-                              {descriptor.text}
-                            </dd>
-                          </div>
-                        ))}
-                      </dl>
-                    ) : (
-                      <p className="mt-2 text-sm text-[var(--text-muted)]">
-                        No statement descriptor was supplied for this transaction.
-                      </p>
-                    )}
-                  </section>
-                  <section aria-labelledby="transaction-location-heading" className="min-w-0 border-t border-[var(--border)] p-4 sm:p-5 lg:border-t-0">
-                    <h3 id="transaction-location-heading" className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
-                      <MapPin className="size-4 text-emerald-300" /> Transaction geography
-                    </h3>
-                    {item.location.evidence ? (
-                      <div className="mt-3">
-                        <p className="text-sm font-medium text-[var(--text-primary)]">
-                          {[item.location.evidence.locality, item.location.evidence.region, item.location.evidence.countryCode]
-                            .filter(Boolean)
-                            .join(', ')}
-                        </p>
-                        <p className="mt-1 text-xs text-[var(--text-muted)]">
-                          {Math.round(item.location.evidence.confidence * 100)}% confidence · {
-                            item.location.evidence.sourceKind === 'user-confirmed'
-                              ? 'User confirmed'
-                              : `Private AI · ${item.location.evidence.model}`
-                          } · {
-                            Date.parse(item.location.evidence.staleAfter) > freshnessReference
-                              ? `fresh until ${new Date(item.location.evidence.staleAfter).toLocaleDateString()}`
-                              : 'stale; refresh pending'
-                          }
-                        </p>
-                        {item.location.inferenceEvidence && (
-                          <p className="mt-2 text-xs text-[var(--text-secondary)]">
-                            Evidence: {item.location.inferenceEvidence}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="mt-2 text-sm text-[var(--text-muted)]">
-                        {item.location.errorCode === 'location_inference_uncertain'
-                          ? 'The descriptor did not support a reliable location. No location was guessed.'
-                          : item.location.errorCode
-                            ? 'Private location inference is unavailable. Transaction sync was not blocked.'
-                            : 'No normalized location evidence is available.'}
-                      </p>
-                    )}
-                  </section>
-                </div>
+                <TransactionEvidenceDetails
+                  statementDescriptors={item.statementDescriptors}
+                  location={item.location}
+                  freshnessReference={freshnessReference}
+                  headingIdPrefix="quick-review"
+                />
                 <section aria-labelledby="why-selected" className="border-t border-[var(--border)] p-4 sm:p-5">
                   <h3 id="why-selected" className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
                     <CircleHelp className="size-4 text-amber-300" /> Why Tyrion selected this

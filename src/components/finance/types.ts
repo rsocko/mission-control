@@ -135,6 +135,16 @@ export interface AttributionException {
   date: string;
   amount: number;
   merchantName: string | null;
+  statementDescriptors: import('@/lib/finance/transaction-evidence').BridgeStatementDescriptor[];
+  location: {
+    evidence: import('@/lib/finance/transaction-evidence').NormalizedLocationEvidence | null;
+    inferenceEvidence: string | null;
+    errorCode:
+      | 'location_inference_unavailable'
+      | 'location_inference_uncertain'
+      | 'location_inference_invalid'
+      | null;
+  };
   categoryId: string | null;
   categoryName: string | null;
   accountName: string | null;

@@ -5,6 +5,11 @@
  * an in-flight automated response can never replace a newer manual decision.
  */
 
+import type {
+  BridgeStatementDescriptor,
+  NormalizedLocationEvidence,
+} from '@/lib/finance/transaction-evidence';
+
 export const FINANCE_ATTRIBUTION_READ_MAX = 500;
 export const FINANCE_ATTRIBUTION_WRITE_MAX = 100;
 
@@ -160,6 +165,16 @@ export interface FinanceAttributionExceptionView {
   date: string;
   amount: number;
   merchantName: string | null;
+  statementDescriptors: readonly BridgeStatementDescriptor[];
+  location: {
+    evidence: NormalizedLocationEvidence | null;
+    inferenceEvidence: string | null;
+    errorCode:
+      | 'location_inference_unavailable'
+      | 'location_inference_uncertain'
+      | 'location_inference_invalid'
+      | null;
+  };
   categoryId: string | null;
   categoryName: string | null;
   accountName: string | null;

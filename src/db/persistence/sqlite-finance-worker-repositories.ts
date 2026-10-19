@@ -19,6 +19,10 @@ import {
   type FinanceManualAction,
 } from './finance-attribution';
 import {
+  normalizedLocationEvidenceSchema,
+  statementDescriptorsSchema,
+} from '@/lib/finance/transaction-evidence';
+import {
   FinanceDatasetFenceError,
   type FinanceBudgetPublicationCommand,
   type FinanceDataset,
@@ -275,6 +279,26 @@ function parseReasons(value: string | null): readonly string[] {
     return Array.isArray(parsed) ? parsed.map(String) : [];
   } catch {
     return [];
+  }
+}
+
+function parseStatementDescriptors(value: string | null) {
+  if (!value) return [];
+  try {
+    const parsed = statementDescriptorsSchema.safeParse(JSON.parse(value) as unknown);
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseLocationEvidence(value: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = normalizedLocationEvidenceSchema.safeParse(JSON.parse(value) as unknown);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
   }
 }
 
@@ -1835,6 +1859,10 @@ function createAttributionPersistence(
                e.first_observed_at AS firstObservedAt,
                e.last_observed_at AS lastObservedAt, e.updated_at AS updatedAt,
                t.date, t.amount, t.merchant_name AS merchantName,
+               t.statement_descriptors AS statementDescriptors,
+               t.location_evidence AS locationEvidence,
+               t.location_inference_evidence AS locationInferenceEvidence,
+               t.location_inference_error_code AS locationInferenceErrorCode,
                COALESCE(t.confirmed_category, t.category_id) AS categoryId,
                COALESCE(categories.name, t.confirmed_category, t.original_category) AS categoryName,
                t.account_name AS accountName, t.card_last4 AS cardLast4,
@@ -1858,8 +1886,17 @@ function createAttributionPersistence(
         ORDER BY e.updated_at DESC, e.id DESC
         LIMIT ?
       `).all(...parameters) as Array<
-        Omit<FinanceAttributionExceptionView, 'retryable' | 'reasons'>
-        & { retryable: number; reasons: string }
+        Omit<
+          FinanceAttributionExceptionView,
+          'retryable' | 'reasons' | 'statementDescriptors' | 'location'
+        > & {
+          retryable: number;
+          reasons: string;
+          statementDescriptors: string | null;
+          locationEvidence: string | null;
+          locationInferenceEvidence: string | null;
+          locationInferenceErrorCode: FinanceAttributionExceptionView['location']['errorCode'];
+        }
       >;
       const hasMore = rows.length > query.limit;
       const page = hasMore ? rows.slice(0, query.limit) : rows;
@@ -1885,6 +1922,12 @@ function createAttributionPersistence(
           ...row,
           retryable: row.retryable === 1,
           reasons: parseReasons(row.reasons),
+          statementDescriptors: parseStatementDescriptors(row.statementDescriptors),
+          location: {
+            evidence: parseLocationEvidence(row.locationEvidence),
+            inferenceEvidence: row.locationInferenceEvidence,
+            errorCode: row.locationInferenceErrorCode,
+          },
         })),
         hasMore,
         subjects,

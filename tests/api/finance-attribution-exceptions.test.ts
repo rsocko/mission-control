@@ -53,7 +53,10 @@ beforeAll(async () => {
   sqlite.prepare(`
     INSERT INTO finance_transactions (
       id, connector_instance_id, upstream_transaction_id, date, amount,
-      merchant_name, category_id, original_category, account_id, account_name,
+      merchant_name, statement_descriptors, location_evidence,
+      location_evidence_input_fingerprint, location_inference_evidence,
+      location_inference_error_code,
+      category_id, original_category, account_id, account_name,
       card_last4, assigned_kid_id,
       kid_assignment_method, triage_status, is_pending, is_recurring, tags,
       lifecycle_status, source_fingerprint, first_seen_at, last_seen_at, synced_at,
@@ -61,13 +64,38 @@ beforeAll(async () => {
       attribution_retryable
     ) VALUES (
       ?, ?, 'transaction-one', '2026-08-08', -10,
-      'Invented merchant', 'category-one', 'Groceries', 'account-one', 'Everyday Checking',
+      'Invented merchant', ?,
+      ?, ?, 'Descriptor contains Invented City IC.', NULL,
+      'category-one', 'Groceries', 'account-one', 'Everyday Checking',
       '1234', 'kid-one',
       'account-default', 'pending', 0, 0, '[]',
       'active', 'source-hash', ?, ?, ?,
       'attributed', '[]', 'pending', 0
     )
-  `).run(transactionId, connectorId, now, now, now);
+  `).run(
+    transactionId,
+    connectorId,
+    JSON.stringify([{
+      kind: 'statement',
+      text: ' INVENTED  MERCHANT #1042 ',
+      source: { system: 'monarch', field: 'plaidName' },
+    }]),
+    JSON.stringify({
+      countryCode: 'US',
+      region: 'IC',
+      locality: 'Invented City',
+      confidence: 0.91,
+      sourceKind: 'private-ai-inference',
+      model: 'private-finance-model',
+      modelVersion: 'test-v1',
+      evaluatedAt: '2026-08-08T11:00:00.000Z',
+      staleAfter: '2026-11-06T11:00:00.000Z',
+    }),
+    'a'.repeat(64),
+    now,
+    now,
+    now,
+  );
   sqlite.prepare(`
     INSERT INTO finance_categories (
       id, connector_id, upstream_category_id, name, upstream_group_id, group_name,
@@ -133,6 +161,26 @@ describe.sequential('finance attribution exception APIs', () => {
         categoryName: 'Groceries',
         accountName: 'Everyday Checking',
         cardLast4: '1234',
+        statementDescriptors: [{
+          kind: 'statement',
+          text: ' INVENTED  MERCHANT #1042 ',
+          source: { system: 'monarch', field: 'plaidName' },
+        }],
+        location: {
+          evidence: {
+            countryCode: 'US',
+            region: 'IC',
+            locality: 'Invented City',
+            confidence: 0.91,
+            sourceKind: 'private-ai-inference',
+            model: 'private-finance-model',
+            modelVersion: 'test-v1',
+            evaluatedAt: '2026-08-08T11:00:00.000Z',
+            staleAfter: '2026-11-06T11:00:00.000Z',
+          },
+          inferenceEvidence: 'Descriptor contains Invented City IC.',
+          errorCode: null,
+        },
       }],
       nextCursor: null,
       subjects: [{ kidId: 'kid-one', name: 'Household member' }],

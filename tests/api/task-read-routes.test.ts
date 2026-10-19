@@ -149,6 +149,48 @@ describe('GET /api/tasks/quick-sort/suggestions', () => {
     });
   });
 
+  it('returns a low-confidence priority when no stronger urgency signal exists', async () => {
+    taskReads.getQuickSortSuggestionInputs.mockResolvedValue({
+      tasks: [{
+        id: 'task-1',
+        title: 'Archive old notes',
+        description: null,
+        priority: 'none',
+        dueDate: null,
+        createdAt: '2020-01-01T00:00:00.000Z',
+        updatedAt: '2020-01-01T00:00:00.000Z',
+        connectorType: 'local',
+        connectorInstanceId: 'local',
+        sourceListId: null,
+        sourceListName: null,
+        assignee: null,
+        snoozedUntil: null,
+        effort: null,
+      }],
+      sourceRankings: [],
+      tags: [],
+      taskTags: [],
+      projectAffinities: [],
+    });
+
+    const { GET } = await import('@/app/api/tasks/quick-sort/suggestions/route');
+    const response = await GET(new Request(
+      'http://localhost/api/tasks/quick-sort/suggestions?taskIds=task-1',
+    ));
+
+    await expect(response.json()).resolves.toMatchObject({
+      suggestions: {
+        'task-1': {
+          priority: {
+            value: 'low',
+            confidence: 0.25,
+            reason: 'No urgency signals detected',
+          },
+        },
+      },
+    });
+  });
+
   it('suggests projects when a list cohort has a clear assignment pattern', async () => {
     taskReads.getQuickSortSuggestionInputs.mockResolvedValue({
       tasks: [{

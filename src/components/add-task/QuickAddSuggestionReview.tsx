@@ -63,6 +63,28 @@ function confidenceLabel(field: QuickAddSuggestionField, confidence: number) {
   return `${Math.round(confidence * 100)}% · low`;
 }
 
+function ConfidenceBadge({
+  field,
+  confidence,
+}: {
+  field: QuickAddSuggestionField;
+  confidence: number;
+}) {
+  const band = getQuickAddSuggestionConfidenceBand(field, confidence);
+  return (
+    <span
+      className={cn(
+        'shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
+        band === 'high' && 'border-green-500/25 bg-green-500/10 text-green-300',
+        band === 'medium' && 'border-amber-500/25 bg-amber-500/10 text-amber-300',
+        band === 'low' && 'border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]',
+      )}
+    >
+      {confidenceLabel(field, confidence)}
+    </span>
+  );
+}
+
 function defaultSelected(field: QuickAddSuggestionField, confidence: number) {
   return getQuickAddSuggestionConfidenceBand(field, confidence) === 'high';
 }
@@ -229,6 +251,7 @@ export function QuickAddSuggestionReview({
   const effectiveProjectSelected = projectSelected && !blockedReasons.projects;
   const effectivePhaseSelected = phaseSelected && !blockedReasons.phases;
   const effectiveSelectedTagIds = blockedReasons.tags ? new Set<string>() : selectedTagIds;
+  const selectedTagCount = tags.filter((tag) => effectiveSelectedTagIds.has(tag.id)).length;
   const hasSelection = effectivePrioritySelected
     || effectiveEffortSelected
     || effectiveProjectSelected
@@ -338,7 +361,7 @@ export function QuickAddSuggestionReview({
         <Sparkles size={13} className="text-amber-300" />
         <span className="text-xs font-semibold">Review suggestions</span>
         <span className="text-[11px] text-[var(--text-muted)]">
-          Choose only what looks right
+          Checked items will be applied
         </span>
         <button
           type="button"
@@ -370,9 +393,10 @@ export function QuickAddSuggestionReview({
                 setPrioritySelected(true);
               }}
             />
-            <span className="ml-auto hidden truncate text-[11px] text-[var(--text-muted)] md:block">
-              {prioritySuggestion.reason} · {confidenceLabel('priority', prioritySuggestion.confidence)}
+            <span className="ml-auto hidden truncate text-[11px] text-[var(--text-muted)] lg:block">
+              {prioritySuggestion.reason}
             </span>
+            <ConfidenceBadge field="priority" confidence={prioritySuggestion.confidence} />
           </div>
         )}
 
@@ -397,9 +421,10 @@ export function QuickAddSuggestionReview({
                 setEffortSelected(true);
               }}
             />
-            <span className="ml-auto hidden truncate text-[11px] text-[var(--text-muted)] md:block">
-              {effortSuggestion.reason} · {confidenceLabel('effort', effortSuggestion.confidence)}
+            <span className="ml-auto hidden truncate text-[11px] text-[var(--text-muted)] lg:block">
+              {effortSuggestion.reason}
             </span>
+            <ConfidenceBadge field="effort" confidence={effortSuggestion.confidence} />
           </div>
         )}
 
@@ -433,9 +458,12 @@ export function QuickAddSuggestionReview({
               }}
             />
             {projectSuggestion && projectId === projectSuggestion.id && (
-              <span className="hidden truncate text-[11px] text-[var(--text-muted)] md:block">
-                {projectSuggestion.reason} · {confidenceLabel('project', projectSuggestion.confidence)}
-              </span>
+              <>
+                <span className="hidden truncate text-[11px] text-[var(--text-muted)] lg:block">
+                  {projectSuggestion.reason}
+                </span>
+                <ConfidenceBadge field="project" confidence={projectSuggestion.confidence} />
+              </>
             )}
             {selectedProject && (selectedProject.phases?.length ?? 0) > 0 && (
               <>
@@ -461,9 +489,7 @@ export function QuickAddSuggestionReview({
                   ))}
                 </SelectControl>
                 {phaseSuggestion && phaseId === phaseSuggestion.id && (
-                  <span className="hidden text-[11px] text-[var(--text-muted)] xl:block">
-                    {confidenceLabel('phase', phaseSuggestion.confidence)}
-                  </span>
+                  <ConfidenceBadge field="phase" confidence={phaseSuggestion.confidence} />
                 )}
               </>
             )}
@@ -503,9 +529,9 @@ export function QuickAddSuggestionReview({
                 data-suggestion-control
                 type="button"
                 onClick={() => setShowLowConfidenceTags(true)}
-                className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                className="rounded-md border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-1)] hover:text-[var(--text-primary)]"
               >
-                +{hiddenTagCount} more
+                Show {hiddenTagCount} low-confidence {hiddenTagCount === 1 ? 'tag' : 'tags'}
               </button>
             )}
             <TagPickerMenu
@@ -525,6 +551,11 @@ export function QuickAddSuggestionReview({
               triggerLabel="Add tag"
               triggerClassName="rounded-md bg-transparent text-[11px]"
             />
+            {tags.length > 0 && (
+              <span className="basis-full pl-[5.25rem] text-[10px] text-[var(--text-muted)]">
+                {selectedTagCount} of {tags.length} selected. Only selected tags will be applied.
+              </span>
+            )}
           </div>
         )}
       </div>

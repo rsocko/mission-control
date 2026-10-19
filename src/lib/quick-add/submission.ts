@@ -634,23 +634,15 @@ export function getQuickAddSuggestionConfidenceBand(
 export function filterQuickAddSuggestion(
   suggestion: QuickSortSuggestion,
 ): QuickSortSuggestion | null {
-  const priority = suggestion.priority
-    && getQuickAddSuggestionConfidenceBand('priority', suggestion.priority.confidence) !== 'low'
-    ? suggestion.priority
-    : null;
-  const effort = suggestion.effort
-    && getQuickAddSuggestionConfidenceBand('effort', suggestion.effort.confidence) !== 'low'
-    ? suggestion.effort
-    : null;
-  const visibleTags = suggestion.tags.filter(
-    (tag) => getQuickAddSuggestionConfidenceBand('tag', tag.confidence) !== 'low',
-  );
-  const tags = suggestion.tags;
-  const projects = suggestion.projects.filter(
-    (project) => getQuickAddSuggestionConfidenceBand('project', project.confidence) !== 'low',
-  );
-  if (!priority && !effort && visibleTags.length === 0 && projects.length === 0) return null;
-  return { priority, effort, tags, projects };
+  if (
+    !suggestion.priority
+    && !suggestion.effort
+    && suggestion.tags.length === 0
+    && suggestion.projects.length === 0
+  ) {
+    return null;
+  }
+  return suggestion;
 }
 
 export function mergeQuickAddSuggestions(

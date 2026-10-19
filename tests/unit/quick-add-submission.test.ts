@@ -549,7 +549,7 @@ describe('Quick Add follow-up workflows', () => {
       .rejects.toThrow('Undo failed');
   });
 
-  it('keeps low-confidence tags collapsed for review and merges duplicate tags', async () => {
+  it('keeps low-confidence options available for review and merges duplicate tags', async () => {
     const fetcher = vi.fn<typeof fetch>(async () => jsonResponse({
       suggestions: {
         'task-1': {
@@ -573,7 +573,7 @@ describe('Quick Add follow-up workflows', () => {
     const fetched = await fetchQuickAddSuggestion({ fetcher }, 'task-1');
     expect(fetched).toEqual({
       priority: { value: 'high', confidence: 0.8, reason: 'urgent' },
-      effort: null,
+      effort: { value: 3, confidence: 0.2, reason: 'uncertain' },
       tags: [
         { id: 'tag-1', name: 'Release', confidence: 0.9 },
         { id: 'tag-2', name: 'Maybe', confidence: 0.1 },

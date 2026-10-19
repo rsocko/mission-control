@@ -105,8 +105,11 @@ export async function GET(request: Request) {
         } else if (score >= 10) {
           suggestedPriority = { value: 'low', confidence: 0.4, reason: 'Low urgency score' };
         } else {
-          // Very low score — don't suggest anything rather than always suggesting low
-          suggestedPriority = null;
+          suggestedPriority = {
+            value: 'low',
+            confidence: 0.25,
+            reason: 'No urgency signals detected',
+          };
         }
       }
 

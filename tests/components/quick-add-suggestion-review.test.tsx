@@ -60,7 +60,11 @@ describe('Quick Add suggestion review', () => {
     expect(screen.getByRole('button', { name: 'Web' }))
       .toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByText('Maybe')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '+1 more' })).toBeInTheDocument();
+    expect(screen.getByText('1 of 3 selected. Only selected tags will be applied.'))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 low-confidence tag' }));
+    expect(screen.getByRole('button', { name: 'Maybe' }))
+      .toHaveAttribute('aria-pressed', 'false');
 
     fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
 
@@ -68,6 +72,35 @@ describe('Quick Add suggestion review', () => {
       priority: 'high',
       tagNames: ['Release'],
     }));
+  });
+
+  it('shows low-confidence priority as an explicit opt-in suggestion', () => {
+    render(
+      <QuickAddSuggestionReview
+        suggestion={{
+          priority: {
+            value: 'low',
+            confidence: 0.25,
+            reason: 'No urgency signals detected',
+          },
+          effort: null,
+          tags: [],
+          projects: [],
+        }}
+        taskTitle="Archive old notes"
+        projects={[]}
+        availableTags={[]}
+        applying={false}
+        onAvailableTagsChange={vi.fn()}
+        onApply={vi.fn().mockResolvedValue(undefined)}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Suggested priority')).toHaveTextContent('P3');
+    expect(screen.getByText('25% · low')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Apply priority suggestion' }))
+      .toHaveAttribute('aria-checked', 'false');
   });
 
   it('selects priority and effort for application when their values change', async () => {

@@ -220,7 +220,7 @@ function findTrailingDate(text: string, today: Date) {
 }
 
 function findEscapedDateRanges(text: string, today: Date) {
-  const dateProbe = text.replace(/(^|\s)\\(?=\S)/g, (match) =>
+  const dateProbe = text.replace(/(^|[\s([{"'])\\(?=\S)/g, (match) =>
     match.slice(0, -1) + ' '
   );
 
@@ -230,7 +230,7 @@ function findEscapedDateRanges(text: string, today: Date) {
     for (let offset = Math.max(0, match.index - 1); offset < end; offset++) {
       if (
         text[offset] === '\\'
-        && (offset === 0 || /\s/.test(text[offset - 1]))
+        && (offset === 0 || /[\s([{"']/.test(text[offset - 1]))
       ) {
         escapeOffsets.push(offset);
       }

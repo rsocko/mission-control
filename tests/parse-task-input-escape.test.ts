@@ -3,7 +3,7 @@
  * Users can prefix token-triggering characters with \ to prevent detection.
  */
 import { describe, it, expect } from 'vitest';
-import { parseTaskInput } from '@/lib/parse-task-input';
+import { parseTaskInput, parseTaskInputForSubmission } from '@/lib/parse-task-input';
 
 describe('parseTaskInput – backslash escape', () => {
   describe('escaped tags', () => {
@@ -77,6 +77,29 @@ describe('parseTaskInput – backslash escape', () => {
   });
 
   describe('escaped date words', () => {
+    it.each([
+      ['Discuss demo (\\Nov 4-5)', 'Discuss demo (Nov 4-5)'],
+      ['Review [\\next friday]', 'Review [next friday]'],
+      ['Review {\\tomorrow}', 'Review {tomorrow}'],
+      ['Review "\\aug 15"', 'Review "aug 15"'],
+      ["Review '\\sep 20'", "Review 'sep 20'"],
+      ['Review (\\end \\of \\month)', 'Review (end of month)'],
+      ['Review (\\next friday', 'Review (next friday'],
+    ])('strips date escapes after opening punctuation in %s', (input, title) => {
+      for (const preserveText of [false, true]) {
+        for (const naturalLanguageDates of [false, true]) {
+          expect(parseTaskInputForSubmission(input, {
+            preserveText,
+            naturalLanguageDates,
+          })).toMatchObject({
+            title,
+            dueDate: null,
+            dateSuggestion: null,
+          });
+        }
+      }
+    });
+
     it('does not extract \\friday as a due date', () => {
       const result = parseTaskInput('meeting on \\friday at 3pm');
       expect(result.dueDate).toBeNull();
@@ -129,6 +152,15 @@ describe('parseTaskInput – backslash escape', () => {
     it('preserves a literal backslash that is not an escape marker', () => {
       const result = parseTaskInput('back up C:\\aug data');
       expect(result.title).toBe('back up C:\\aug data');
+    });
+
+    it.each([
+      'back up C:\\Nov 4-5',
+      'back up folder\\tomorrow',
+      'back up (C:\\Nov 4-5)',
+      'keep (\\not-a-date)',
+    ])('preserves literal backslashes in %s', (input) => {
+      expect(parseTaskInput(input).title).toBe(input);
     });
   });
 

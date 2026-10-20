@@ -6,6 +6,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ConnectorConfig } from '@/types';
 
+vi.mock('@/lib/connectors/monarch-money/attribution-writeback', async () => ({
+  reconcileAttributionWritebacks: (await import('../helpers/attribution-writeback-completion'))
+    .completeTestAttributionWritebacks,
+}));
+
 type SnapshotSynchronizer = InstanceType<
   typeof import('@/lib/connectors/monarch-money/snapshot-synchronizer')['FinanceSnapshotSynchronizer']
 >;
@@ -104,6 +109,12 @@ beforeAll(async () => {
   vi.resetModules();
   const dbModule = await importInitializedSqliteDatabase();
   sqlite = dbModule.sqlite;
+  const { TyrionAttributionClient } = await import('@/lib/connectors/monarch-money/attribution-client');
+  vi.spyOn(TyrionAttributionClient.prototype, 'attributeRecords').mockImplementation(function (
+    this: InstanceType<typeof TyrionAttributionClient>, request, _transactionIds, signal,
+  ) {
+    return this.attribute(request, signal);
+  });
   const configuredAt = new Date().toISOString();
   sqlite.prepare(`
     INSERT OR IGNORE INTO connector_configs (

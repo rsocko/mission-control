@@ -437,13 +437,14 @@ export function createSqliteFinanceAssistantPersistence(
 
     async findReplayedKidAssignments(idempotencyKey) {
       return sqlite.prepare(`
-        SELECT profiles.name AS kidName
+        SELECT profiles.name AS kidName, audit.connector_id AS connectorId
         FROM finance_attribution_audit audit
         LEFT JOIN kid_profiles profiles ON profiles.id = audit.requested_kid_id
         WHERE audit.idempotency_key = ? AND audit.result_status = 'resolved'
         LIMIT ?
       `).all(idempotencyKey, FINANCE_ASSISTANT_REPLAY_LIMIT) as Array<{
         kidName: string | null;
+        connectorId: string;
       }>;
     },
 
@@ -510,6 +511,13 @@ export function createSqliteFinanceAssistantPersistence(
         }
         const current = readTransactionVersion(command.connectorId, command.transactionId);
         if (!current) return { status: 'transaction-not-found' };
+        if (sqlite.prepare(`
+          SELECT 1 FROM finance_attribution_audit
+          WHERE connector_id = ? AND transaction_id = ? AND requested_decision IS NOT NULL
+            AND writeback_status IN ('pending', 'failed') AND created_at = ?
+        `).get(command.connectorId, command.transactionId, current.manualDecidedAt)) {
+          return { status: 'transaction-conflict' };
+        }
         const expected = command.expectedVersion;
         if (
           current.sourceFingerprint !== expected.sourceFingerprint

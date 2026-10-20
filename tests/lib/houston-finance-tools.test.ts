@@ -13,6 +13,11 @@ import {
 
 vi.unmock('drizzle-orm');
 
+vi.mock('@/lib/connectors/monarch-money/attribution-writeback', async () => ({
+  reconcileAttributionWritebacks: (await import('../helpers/attribution-writeback-completion'))
+    .completeTestAttributionWritebacks,
+}));
+
 const mocks = vi.hoisted(() => ({
   finance: null as FinanceCorePersistence | null,
   sqliteCompatibilityAccess: vi.fn(),

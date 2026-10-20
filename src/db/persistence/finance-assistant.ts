@@ -351,7 +351,7 @@ export interface FinanceAssistantPersistence {
   /** Resolved manual attribution decisions replayed by approval identity. */
   findReplayedKidAssignments(
     idempotencyKey: string,
-  ): Promise<Array<{ kidName: string | null }>>;
+  ): Promise<Array<{ kidName: string | null; connectorId: string }>>;
   /** Succeeded category updates replayed by approval identity. */
   findReplayedCategoryUpdates(
     idempotencyKey: string,

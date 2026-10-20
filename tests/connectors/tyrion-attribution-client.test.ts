@@ -12,6 +12,11 @@ import type {
   AttributionBatchItem,
   AttributionBatchRequest,
 } from '@/lib/connectors/monarch-money/attribution-contract';
+import { tyrionWritebackFixture, writebackBatchItem, writebackJson } from '../helpers/tyrion-writeback-fixture';
+import {
+  attributionProjectionVersion,
+  tagProjectionSchema,
+} from '@/lib/connectors/monarch-money/attribution-writeback-contract';
 
 const config: TyrionAttributionConfig = {
   serviceToken: 'invented-finance-manager-service-token',
@@ -70,6 +75,90 @@ function success(sourceRef = item.sourceRef, policyVersion = 2) {
 }
 
 describe('Tyrion attribution v2.1 client', () => {
+  it('uses canonical string projection tokens rather than numeric action versions', () => {
+    const fixture = tyrionWritebackFixture(item.sourceRef);
+    expect(fixture.projection.decisionVersion).toBe('state:0000000000000001');
+    expect(attributionProjectionVersion(2)).toBe('state:0000000000000002');
+    expect(tagProjectionSchema.safeParse({ ...fixture.projection, decisionVersion: 1 }).success).toBe(false);
+  });
+
+  it('durably registers upstream identities and refreshes with CAS without sending imported tags', async () => {
+    const calls: Array<{ transactionId: string; expectedStateVersion: number | null; item: unknown }> = [];
+    const client = new TyrionAttributionClient(config, vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      calls.push(body);
+      const fixture = tyrionWritebackFixture(body.item.sourceRef, body.expectedStateVersion === null ? 1 : 2);
+      fixture.record.attribution.method = 'account-default';
+      fixture.record.input.existingManualDecision = null;
+      fixture.record.attribution.provenance.decisionSource = 'automated';
+      fixture.record.attribution.review.status = 'not-required';
+      return writebackJson(fixture);
+    }));
+    const response = await client.attributeRecords({
+      contractVersion: '2.1', provenance: 'mission-control-normalized-v3',
+      expectedPolicyVersion: 1, items: [writebackBatchItem(item.sourceRef)],
+    }, ['actual-upstream-id']);
+    expect(calls.map((call) => call.expectedStateVersion)).toEqual([null, 1]);
+    expect(calls.every((call) => call.transactionId === 'actual-upstream-id')).toBe(true);
+    expect(calls[0].item).not.toHaveProperty('tags');
+    expect(response.results[0]).toMatchObject({
+      kidId: 'kid-one', confidence: 'definite', reviewStatus: 'not-required', method: 'account-default',
+    });
+  });
+
+  it('stores ambiguous decisions without projecting proposed assignments', async () => {
+    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const fixture = tyrionWritebackFixture(body.item.sourceRef);
+      fixture.record.attribution.status = 'pending';
+      fixture.record.input.existingManualDecision = null;
+      fixture.record.attribution.confidence = 'likely';
+      fixture.record.attribution.review = { status: 'pending', reasons: ['low-confidence'] };
+      return writebackJson({ ...fixture, projection: null });
+    });
+    const response = await new TyrionAttributionClient(config, fetcher).attributeRecords({
+      contractVersion: '2.1', provenance: 'mission-control-normalized-v3',
+      expectedPolicyVersion: 1, items: [writebackBatchItem(item.sourceRef)],
+    }, ['actual-upstream-id']);
+    expect(response.results[0].status).toBe('pending');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not hide a durable automatic decision whose Monarch projection drifted', async () => {
+    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      return writebackJson(tyrionWritebackFixture(body.item.sourceRef, 1, 'drift'));
+    });
+    await expect(new TyrionAttributionClient(config, fetcher).attributeRecords({
+      contractVersion: '2.1', provenance: 'mission-control-normalized-v3',
+      expectedPolicyVersion: 1, items: [writebackBatchItem(item.sourceRef)],
+    }, ['actual-upstream-id'])).rejects.toMatchObject({ code: 'transaction_tag_drift' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('verifies definite automated parent/shared projections, not just child tags', async () => {
+    let projected = false;
+    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const fixture = tyrionWritebackFixture(body.item.sourceRef, 1, 'projected', null);
+      fixture.record.attribution.method = 'merchant-rule';
+      fixture.record.input.existingManualDecision = null;
+      fixture.record.attribution.provenance.decisionSource = 'automated';
+      fixture.record.attribution.review.status = 'not-required';
+      return writebackJson({ ...fixture, projection: projected ? fixture.projection : null });
+    });
+    const client = new TyrionAttributionClient(config, fetcher);
+    const input: AttributionBatchRequest = {
+      contractVersion: '2.1', provenance: 'mission-control-normalized-v3',
+      expectedPolicyVersion: 1, items: [writebackBatchItem(item.sourceRef)],
+    };
+    await expect(client.attributeRecords(input, ['actual-upstream-id']))
+      .rejects.toMatchObject({ code: 'tag_projection_unverified' });
+    projected = true;
+    await expect(client.attributeRecords(input, ['actual-upstream-id']))
+      .resolves.toMatchObject({ results: [{ status: 'unassigned', kidId: null }] });
+  });
+
   it('uses only the shared finance-manager bearer credential', () => {
     const headers = createAttributionHeaders(config);
 

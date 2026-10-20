@@ -85,6 +85,28 @@ afterEach(() => {
 });
 
 describe('FinanceQuickReview', () => {
+  it('keeps the exact correction identity after a partial write-back failure', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(session))
+      .mockResolvedValueOnce(response({
+        code: 'tag_projection_unavailable',
+        error: 'Attribution saved; Monarch tag write-back is pending',
+        retryable: true,
+      }, 502))
+      .mockResolvedValueOnce(response({ ...session, current: null }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<FinanceQuickReview />);
+    fireEvent.click(await screen.findByRole('button', { name: /Correct/ }));
+    fireEvent.click(screen.getByLabelText('Kids attribution'));
+    fireEvent.click(screen.getByRole('option', { name: 'Alex' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save correction' }));
+    expect(await screen.findByText('Attribution saved; Monarch tag write-back is pending')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Invented Market' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save correction' }));
+    await screen.findByRole('heading', { name: 'Review complete' });
+    expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[2][1].body);
+  });
+
   it('starts the review with the Money connector selected in Quick Sort', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response(session));
     vi.stubGlobal('fetch', fetchMock);

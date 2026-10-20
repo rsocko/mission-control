@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { FinanceAttributionMutationError } from '@/db/persistence/finance-attribution';
 
 const mocks = vi.hoisted(() => ({
   trustedRead: vi.fn(),
@@ -86,6 +87,28 @@ beforeEach(() => {
 });
 
 describe('finance quick review API boundary', () => {
+  it('preserves saved-but-unprojected attribution errors and retryability', async () => {
+    mocks.applyAction.mockRejectedValueOnce(new FinanceAttributionMutationError(
+      'tag_projection_unavailable', 'Attribution saved; Monarch tag write-back is pending', 502,
+    ));
+    const { POST } = await import('@/app/api/finance/quick-review/actions/route');
+    const result = await POST(new Request('https://mc.example/api/finance/quick-review/actions', {
+      method: 'POST',
+      body: JSON.stringify({
+        contractVersion: '1.0', sessionRef: 'session_ref_123456789',
+        resumeToken: 'resume_token_123456789', reviewRef: 'review_ref_1234567890',
+        stateToken: 'state_token_123456789', idempotencyKey: '4948bf5e-cd3d-47fe-8935-4e00949d1f3c',
+        action: 'correct', monarchReviewOutcome: 'reviewed',
+        correction: { kidId: 'kid-one' },
+      }),
+    }));
+    expect(result.status).toBe(502);
+    expect(await result.json()).toEqual({
+      error: 'Attribution saved; Monarch tag write-back is pending',
+      code: 'tag_projection_unavailable', retryable: true,
+    });
+  });
+
   it('starts a server-owned session with the typed request', async () => {
     mocks.startSession.mockResolvedValue({ contractVersion: '1.0', current: null });
     const { POST } = await import('@/app/api/finance/quick-review/session/route');

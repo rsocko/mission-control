@@ -282,7 +282,38 @@ export interface FinanceAttributionExceptionActionResult {
   retryScheduled: boolean;
 }
 
+export interface FinanceAttributionWriteback {
+  id: string;
+  idempotencyKey: string;
+  transactionId: string;
+  upstreamTransactionId: string;
+  action: FinanceManualAction;
+  kidId: string | null;
+  decidedAt: string;
+  observedAt: string;
+  currentDecidedAt: string | null;
+  currentKidId: string | null;
+  currentAction: FinanceManualAction | null;
+  request: string | null;
+  date: string;
+  merchantName: string | null;
+  businessContext: string | null;
+  accountId: string | null;
+  statementDescriptors: readonly BridgeStatementDescriptor[];
+  locationEvidence: NormalizedLocationEvidence | null;
+}
+
 export interface FinanceAttributionPersistence {
+  readWritebacks(connectorId: string, idempotencyKey?: string): Promise<FinanceAttributionWriteback[]>;
+  /** First request wins, so ambiguous HTTP outcomes replay the exact remote CAS. */
+  reserveWritebackRequest(id: string, request: string): Promise<string>;
+  replaceRejectedWritebackRequest(id: string, rejectedRequest: string, request: string): Promise<string>;
+  finishWriteback(input: {
+    id: string;
+    status: 'succeeded' | 'failed' | 'superseded';
+    errorCode: string | null;
+    now: string;
+  }): Promise<void>;
   /**
    * Preserves the API's connector-not-found precedence before request-shape
    * validation while keeping connector ownership in the selected adapter.

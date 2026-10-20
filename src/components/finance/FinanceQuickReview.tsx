@@ -193,6 +193,7 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
   const [createdRule, setCreatedRule] = useState<FinanceMerchantRuleCreateResponse | null>(null);
   const [ruleIdempotencyKey, setRuleIdempotencyKey] = useState<string | null>(null);
   const actionRegionRef = useRef<HTMLDivElement>(null);
+  const actionRetryIdentities = useRef(new Map<string, string>());
 
   const item = session?.current ?? null;
   const businessContext = item ? distinctBusinessContext(item) : null;
@@ -275,17 +276,20 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
           payee: draft.payee.trim(),
         }
       : null;
-    const request: FinanceReviewActionRequest = {
+    const payload: Omit<FinanceReviewActionRequest, 'idempotencyKey'> = {
       contractVersion: FINANCE_QUICK_REVIEW_CONTRACT_VERSION,
       sessionRef: session.sessionRef,
       resumeToken: session.resumeToken,
       reviewRef: item.reviewRef,
       stateToken: item.stateToken,
-      idempotencyKey: crypto.randomUUID(),
       action,
       monarchReviewOutcome: action === 'skip' ? 'unchanged' : 'reviewed',
       correction,
     };
+    const identity = JSON.stringify(payload);
+    const idempotencyKey = actionRetryIdentities.current.get(identity) ?? crypto.randomUUID();
+    actionRetryIdentities.current.set(identity, idempotencyKey);
+    const request: FinanceReviewActionRequest = { ...payload, idempotencyKey };
     try {
       const response = await fetch('/api/finance/quick-review/actions', {
         method: 'POST',
@@ -296,14 +300,15 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
       if (!response.ok) {
         const apiError = body as ApiErrorBody | null;
         setStatus(
-          response.status === 409
+          apiError?.error ?? (response.status === 409
             ? 'This transaction changed in Monarch or the session expired. Refresh before continuing.'
-            : apiError?.error ?? 'The review action could not be completed.',
+            : 'The review action could not be completed.'),
         );
         return;
       }
       const parsed = financeReviewSessionSchema.safeParse(body);
       if (!parsed.success) throw new Error('Invalid finance review response');
+      actionRetryIdentities.current.clear();
       setFreshnessReference(Date.now());
       setSession(parsed.data);
       setDraft(freshDraft(parsed.data.current));

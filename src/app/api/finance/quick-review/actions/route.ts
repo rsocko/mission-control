@@ -7,6 +7,7 @@ import {
 } from '@/lib/finance/quick-review-service';
 import { MonarchBridgeError } from '@/lib/connectors/monarch-money/client';
 import { ApiErrors } from '@/lib/api-error';
+import { FinanceAttributionMutationError } from '@/db/persistence/finance-attribution';
 
 export async function POST(request: Request) {
   const actorType = trustedFinanceMutationActor(request);
@@ -25,11 +26,13 @@ export async function POST(request: Request) {
   try {
     return NextResponse.json(await applyQuickReviewAction(parsed.data, actorType, request.signal));
   } catch (error) {
-    if (error instanceof QuickReviewSessionError || error instanceof MonarchBridgeError) {
+    if (error instanceof QuickReviewSessionError || error instanceof MonarchBridgeError
+      || error instanceof FinanceAttributionMutationError) {
       return NextResponse.json({
         error: error.message,
         code: error.code,
-        retryable: 'retryable' in error ? error.retryable : false,
+        retryable: error instanceof FinanceAttributionMutationError
+          ? error.status >= 500 : 'retryable' in error ? error.retryable : false,
       }, { status: error.status ?? 500 });
     }
     if (error instanceof Error && /not configured|required when multiple/.test(error.message)) {

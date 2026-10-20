@@ -1126,6 +1126,80 @@ export function describeFinanceWorkerPersistenceContract(
         })).rejects.toMatchObject({ code: 'transaction_not_found', status: 404 });
       });
 
+      it('durably reserves one remote request, serializes decisions, and exposes recoverable failures', async () => {
+        const { transactionId } = await seedException();
+        const attribution = harness.repositories.attribution;
+        const command = {
+          connectorId: CONNECTOR_ID, transactionId,
+          action: 'assign-kid' as const, kidId: 'kid-one',
+          idempotencyKey: 'contract-outbox-0001', auditAction: 'manual-resolve' as const,
+          actorType: 'parent-admin' as const, exceptionId: null,
+          expectedExceptionUpdatedAt: null, expectedTransactionVersion: null,
+          now: '2026-08-30T12:31:00.000Z',
+        };
+        await attribution.applyManualDecision(command);
+        const [receipt] = await attribution.readWritebacks(CONNECTOR_ID, command.idempotencyKey);
+        expect(receipt).toMatchObject({
+          transactionId, upstreamTransactionId: 'api-attribution', action: 'assign-kid',
+          kidId: 'kid-one', currentKidId: 'kid-one', currentAction: 'assign-kid',
+          decidedAt: command.now, currentDecidedAt: command.now, request: null,
+          statementDescriptors: [expect.objectContaining({ text: ' INVENTED  MARKET #1842 ' })],
+          locationEvidence: expect.objectContaining({ locality: 'Seattle' }),
+        });
+        expect(await attribution.readWritebacks('other-connector')).toEqual([]);
+        await expect(attribution.reserveWritebackRequest(receipt.id, '{"version":1}'))
+          .resolves.toBe('{"version":1}');
+        await expect(attribution.reserveWritebackRequest(receipt.id, '{"version":2}'))
+          .resolves.toBe('{"version":1}');
+        await expect(attribution.replaceRejectedWritebackRequest(receipt.id, '{"version":0}', '{"version":3}'))
+          .resolves.toBe('{"version":1}');
+        await expect(attribution.replaceRejectedWritebackRequest(receipt.id, '{"version":1}', '{"version":3}'))
+          .resolves.toBe('{"version":3}');
+        await expect(attribution.applyManualDecision({
+          ...command, action: 'parent-expense', kidId: null, idempotencyKey: 'contract-outbox-0002',
+        })).rejects.toMatchObject({ code: 'attribution_writeback_pending', status: 409 });
+        await attribution.finishWriteback({
+          id: receipt.id, status: 'failed', errorCode: 'tag_projection_unavailable',
+          now: '2026-08-30T12:32:00.000Z',
+        });
+        expect(await harness.attributionException('api-attribution')).toMatchObject({
+          status: 'open', reviewState: 'pending',
+        });
+        await attribution.finishWriteback({
+          id: receipt.id, status: 'succeeded', errorCode: null, now: '2026-08-30T12:33:00.000Z',
+        });
+        expect(await attribution.readWritebacks(CONNECTOR_ID)).toEqual([]);
+        expect(await harness.attributionException('api-attribution')).toMatchObject({
+          status: 'resolved', reviewState: 'resolved',
+        });
+        await attribution.finishWriteback({
+          id: receipt.id, status: 'failed', errorCode: 'late-timeout', now: '2026-08-30T12:34:00.000Z',
+        });
+        expect(await attribution.readWritebacks(CONNECTOR_ID)).toEqual([]);
+        await expect(attribution.applyManualDecision({
+          ...command, action: 'parent-expense', kidId: null, idempotencyKey: 'contract-outbox-0002',
+          now: '2026-08-30T12:35:00.000Z',
+        })).resolves.toMatchObject({ status: 'resolved' });
+      });
+
+      it('replays a concurrent identical decision before applying the pending-writeback guard', async () => {
+        const { transactionId } = await seedException();
+        const command = {
+          connectorId: CONNECTOR_ID, transactionId,
+          action: 'parent-expense' as const, kidId: null,
+          idempotencyKey: 'contract-concurrent-outbox',
+          auditAction: 'manual-resolve' as const, actorType: 'parent-admin' as const,
+          exceptionId: null, expectedExceptionUpdatedAt: null,
+          expectedTransactionVersion: null, now: '2026-08-30T12:31:00.000Z',
+        };
+        const results = await Promise.all([
+          harness.repositories.attribution.applyManualDecision(command),
+          harness.repositories.attribution.applyManualDecision(command),
+        ]);
+        expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+        expect(await harness.repositories.attribution.readWritebacks(CONNECTOR_ID)).toHaveLength(1);
+      });
+
       it('enforces exception CAS, action legality, and after-commit retry signalling', async () => {
         const { exceptionId } = await seedException();
         const page = await harness.repositories.attribution.listExceptions({

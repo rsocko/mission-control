@@ -478,9 +478,9 @@ export function createPostgresFinanceAssistantPersistence(
     },
 
     async findReplayedKidAssignments(idempotencyKey) {
-      return query<{ kidName: string | null }>(
+      return query<{ kidName: string | null; connectorId: string }>(
         pool,
-        `SELECT profiles.name AS "kidName"
+        `SELECT profiles.name AS "kidName", audit.connector_id AS "connectorId"
          FROM finance_attribution_audit audit
          LEFT JOIN kid_profiles profiles ON profiles.id = audit.requested_kid_id
          WHERE audit.idempotency_key = $1 AND audit.result_status = 'resolved'
@@ -573,6 +573,14 @@ export function createPostgresFinanceAssistantPersistence(
           ),
         );
         if (current.length === 0) return { status: 'transaction-conflict' };
+        const pendingWriteback = await query(client, `
+          SELECT 1 FROM finance_attribution_audit a
+          INNER JOIN finance_transactions t ON t.id = a.transaction_id
+            AND t.connector_instance_id = a.connector_id AND t.manual_decided_at = a.created_at
+          WHERE a.connector_id = $1 AND a.transaction_id = $2
+            AND a.requested_decision IS NOT NULL AND a.writeback_status IN ('pending', 'failed')
+        `, [command.connectorId, command.transactionId]);
+        if (pendingWriteback.length) return { status: 'transaction-conflict' };
         const projected = await query(
           client,
           `SELECT 1

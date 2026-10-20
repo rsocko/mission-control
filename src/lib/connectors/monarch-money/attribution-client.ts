@@ -5,6 +5,7 @@ import { getPersistedFinanceManagerServiceToken } from './client';
 import {
   attributionBatchRequestSchema,
   attributionBatchResponseSchema,
+  attributionBatchResultSchema,
   attributionErrorResponseSchema,
   attributionPolicyResponseSchema,
   TYRION_ATTRIBUTION_CONTRACT_VERSION,
@@ -20,6 +21,15 @@ import {
   type AttributionPolicyResponse,
 } from './attribution-contract';
 import { getTyrionAttributionPolicySelection } from './config';
+import {
+  attributionActionRequestSchema,
+  attributionActionResponseSchema,
+  attributionRecordRequestSchema,
+  attributionRecordResponseSchema,
+  attributionProjectionVersion,
+  type AttributionActionRequest,
+  type AttributionRecordRequest,
+} from './attribution-writeback-contract';
 import {
   financeConnectorScopedReference,
   financeIdentityNamespaceFromCredentials,
@@ -46,6 +56,8 @@ const stableServiceErrorCodes = new Set([
   'household_currency_unavailable',
   'policy_unavailable',
   'attribution_service_unavailable',
+  'attribution_state_conflict',
+  'idempotency_conflict',
 ]);
 
 export interface TyrionAttributionConfig {
@@ -226,6 +238,114 @@ export class TyrionAttributionClient {
     return parsedResponse.data;
   }
 
+  async saveRecord(request: AttributionRecordRequest, signal?: AbortSignal) {
+    const body = attributionRecordRequestSchema.parse(request);
+    const response = attributionRecordResponseSchema.parse(await this.request(
+      '/api/internal/v2/attribution/records',
+      { method: 'POST', body: JSON.stringify(body) }, signal,
+    ));
+    if (response.record.attribution.sourceRef !== request.item.sourceRef
+      || response.record.input.source.recordRef !== request.item.sourceRef) {
+      throw new TyrionAttributionError('invalid_attribution_correlation',
+        'Tyrion returned a mismatched attribution record', false);
+    }
+    return response;
+  }
+
+  async applyAction(request: AttributionActionRequest, signal?: AbortSignal) {
+    const response = attributionActionResponseSchema.parse(await this.request(
+      '/api/internal/v2/attribution/actions',
+      { method: 'POST', body: JSON.stringify(attributionActionRequestSchema.parse(request)) }, signal,
+    ));
+    if (response.sourceRef !== request.sourceRef
+      || response.attribution.sourceRef !== request.sourceRef
+      || response.attribution.provenance.policyVersion !== request.expectedPolicyVersion) {
+      throw new TyrionAttributionError('invalid_attribution_correlation',
+        'Tyrion returned a mismatched attribution action', false);
+    }
+    return response;
+  }
+
+  async attributeRecords(request: AttributionBatchRequest, transactionIds: readonly string[],
+    signal?: AbortSignal): Promise<AttributionBatchResponse> {
+    if (transactionIds.length !== request.items.length) {
+      throw new TyrionAttributionError('invalid_request', 'Transaction identities do not match attribution items', false);
+    }
+    const results: AttributionBatchResponse['results'] = [];
+    for (const [index, item] of request.items.entries()) {
+      const body = {
+        contractVersion: '2.1',
+        provenance: 'mission-control-normalized-v3',
+        expectedPolicyVersion: request.expectedPolicyVersion,
+        expectedStateVersion: null,
+        transactionId: transactionIds[index],
+        item,
+      } satisfies AttributionRecordRequest;
+      const existing = await this.saveRecord(body, signal);
+      const refreshed = await this.saveRecord({
+        ...body, expectedStateVersion: existing.record.stateVersion,
+      }, signal);
+      const result = refreshed.record.attribution;
+      if (result.provenance.policyVersion !== request.expectedPolicyVersion) {
+        throw new TyrionAttributionError('policy_conflict', 'Tyrion attribution policy version changed', false);
+      }
+      const confirmed = result.review.status !== 'pending'
+        && result.status !== 'pending'
+        && (result.method === 'manual' || result.confidence === 'definite');
+      if (confirmed) {
+        let projection = refreshed.projection;
+        if (projection && ['failed', 'pending'].includes(projection.status)) {
+          projection = (await this.project(item.sourceRef,
+            refreshed.record.stateVersion, 'retry', signal)).projection;
+        }
+        if (projection?.sourceRef !== item.sourceRef
+          || projection.decisionVersion !== attributionProjectionVersion(refreshed.record.stateVersion)
+          || projection.status !== 'projected') {
+          throw new TyrionAttributionError(
+            projection?.status === 'drift' ? 'transaction_tag_drift' : 'tag_projection_unverified',
+            'Attribution is saved in Tyrion, but Monarch tag write-back needs reconciliation',
+            projection?.status !== 'drift',
+          );
+        }
+      }
+      results.push(attributionBatchResultSchema.parse({
+        contractVersion: result.contractVersion,
+        sourceRef: result.sourceRef,
+        status: result.status,
+        kidId: result.kidId,
+        confidence: result.confidence,
+        method: result.method,
+        explanation: result.explanation,
+        reviewStatus: result.review.status,
+        reasons: result.review.reasons,
+        decisionSource: result.provenance.decisionSource,
+        policyVersion: result.provenance.policyVersion,
+        engineVersion: result.provenance.engineVersion,
+        evaluatedAt: result.provenance.evaluatedAt,
+      }));
+    }
+    return attributionBatchResponseSchema.parse({
+      contractVersion: '2.1', policyVersion: request.expectedPolicyVersion,
+      engineVersion: '2.1.0', results,
+    });
+  }
+
+  async project(sourceRef: string, expectedStateVersion: number, action: 'status' | 'retry',
+    signal?: AbortSignal) {
+    const response = attributionRecordResponseSchema.parse(await this.request(
+      '/api/internal/v2/attribution/projection',
+      { method: 'POST', body: JSON.stringify({
+        contractVersion: '2.1', sourceRef, expectedStateVersion, action,
+      }) }, signal,
+    ));
+    if (response.record.attribution.sourceRef !== sourceRef
+      || response.record.stateVersion !== expectedStateVersion) {
+      throw new TyrionAttributionError('invalid_attribution_correlation',
+        'Tyrion returned a mismatched attribution projection', false);
+    }
+    return response;
+  }
+
   async resolvePolicyVersion(signal?: AbortSignal): Promise<number> {
     return this.config.expectedPolicyVersion
       ?? (await this.readCurrentPolicy(signal)).policyVersion;
@@ -300,6 +420,11 @@ export class TyrionAttributionClient {
     init: Pick<RequestInit, 'method' | 'body'>,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    if (typeof init.body === 'string'
+      && new TextEncoder().encode(init.body).byteLength > TYRION_ATTRIBUTION_MAX_BODY_BYTES) {
+      throw new TyrionAttributionError('payload_too_large',
+        'Tyrion attribution request exceeds the size limit', false);
+    }
     const timeoutSignal = AbortSignal.timeout(this.config.timeoutMs);
     const requestSignal = signal
       ? AbortSignal.any([signal, timeoutSignal])

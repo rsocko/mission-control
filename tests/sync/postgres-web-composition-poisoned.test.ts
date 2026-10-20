@@ -73,6 +73,7 @@ const mocks = vi.hoisted(() => {
     })),
   };
   const financeAttribution = {
+    readWritebacks: vi.fn(async () => []),
     assertConnector: vi.fn(async () => undefined),
     listExceptions: vi.fn(async () => ({
       exceptions: [],

@@ -16,6 +16,7 @@ import {
   type FinanceAttributionStateSnapshot,
   type FinanceAttributionSubjectView,
   type FinanceAttributionUnavailableItem,
+  type FinanceAttributionWriteback,
   type FinanceManualAction,
 } from './finance-attribution';
 import {
@@ -469,6 +470,16 @@ function applyManualDecisionInTransaction(
       'Finance transaction was not found',
       404,
     );
+  }
+  const pendingWriteback = sqlite.prepare(`
+    SELECT 1 FROM finance_attribution_audit
+    WHERE connector_id = ? AND transaction_id = ?
+      AND requested_decision IS NOT NULL AND writeback_status IN ('pending', 'failed')
+      AND created_at = ?
+  `).get(command.connectorId, command.transactionId, transaction.manualDecidedAt);
+  if (pendingWriteback) {
+    throw new FinanceAttributionMutationError('attribution_writeback_pending',
+      'Reconcile the previous Tyrion/Monarch write-back before changing this decision', 409);
   }
   const expectedVersion = command.expectedTransactionVersion;
   if (
@@ -1516,6 +1527,111 @@ function createAttributionPersistence(
   return {
     async assertConnector(connectorId) {
       requireFinanceConnector(sqlite, connectorId);
+    },
+
+    async readWritebacks(connectorId, idempotencyKey) {
+      const rows = sqlite.prepare(`
+        SELECT a.id, a.idempotency_key AS idempotencyKey,
+               a.transaction_id AS transactionId, a.requested_decision AS action,
+               a.requested_kid_id AS kidId, a.created_at AS decidedAt,
+               a.writeback_request AS request,
+               CASE WHEN t.lifecycle_status = 'active' THEN t.manual_decided_at END AS currentDecidedAt,
+               t.assigned_kid_id AS currentKidId, t.manual_decision_action AS currentAction,
+               t.upstream_transaction_id AS upstreamTransactionId, t.date, t.last_seen_at AS observedAt,
+               t.merchant_name AS merchantName, t.business_context AS businessContext,
+               t.account_id AS accountId, t.statement_descriptors AS statementDescriptors,
+               t.location_evidence AS locationEvidence
+        FROM finance_attribution_audit a
+        INNER JOIN finance_transactions t ON t.id = a.transaction_id
+          AND t.connector_instance_id = a.connector_id
+        WHERE a.connector_id = ? AND a.result_status = 'resolved'
+          AND a.requested_decision IS NOT NULL
+          AND a.writeback_status IN ('pending', 'failed')
+          AND (? IS NULL OR a.idempotency_key = ?)
+        ORDER BY COALESCE(a.writeback_updated_at, a.created_at), a.id LIMIT 100
+      `).all(connectorId, idempotencyKey ?? null, idempotencyKey ?? null) as Array<
+        Omit<FinanceAttributionWriteback, 'statementDescriptors' | 'locationEvidence'>
+        & { statementDescriptors: string; locationEvidence: string | null }
+      >;
+      return rows.map((row) => ({
+        ...row,
+        statementDescriptors: statementDescriptorsSchema.parse(JSON.parse(row.statementDescriptors)),
+        locationEvidence: row.locationEvidence
+          ? normalizedLocationEvidenceSchema.parse(JSON.parse(row.locationEvidence)) : null,
+      }));
+    },
+
+    async reserveWritebackRequest(id, request) {
+      const row = sqlite.prepare(`
+        UPDATE finance_attribution_audit
+        SET writeback_request = COALESCE(writeback_request, ?)
+        WHERE id = ? RETURNING writeback_request AS request
+      `).get(request, id) as { request: string } | undefined;
+      if (!row) throw new Error('Attribution write-back receipt was not found');
+      return row.request;
+    },
+
+    async replaceRejectedWritebackRequest(id, rejectedRequest, request) {
+      const row = sqlite.prepare(`
+        UPDATE finance_attribution_audit
+        SET writeback_request = CASE WHEN writeback_request = ? THEN ? ELSE writeback_request END
+        WHERE id = ? RETURNING writeback_request AS request
+      `).get(rejectedRequest, request, id) as { request: string } | undefined;
+      if (!row) throw new Error('Attribution write-back receipt was not found');
+      return row.request;
+    },
+
+    async finishWriteback(input) {
+      sqlite.transaction(() => {
+        const updated = sqlite.prepare(`
+          UPDATE finance_attribution_audit
+          SET writeback_status = ?, writeback_error_code = ?, writeback_updated_at = ? WHERE id = ?
+            AND (writeback_status <> 'succeeded' OR ? = 'succeeded')
+        `).run(input.status, input.errorCode, input.now, input.id, input.status);
+        if (!updated.changes) return;
+        const audit = sqlite.prepare(`
+          SELECT connector_id AS connectorId, transaction_id AS transactionId,
+                 created_at AS decidedAt, requested_kid_id AS kidId, requested_decision AS action
+          FROM finance_attribution_audit WHERE id = ?
+        `).get(input.id) as {
+          connectorId: string; transactionId: string; decidedAt: string; kidId: string | null; action: string;
+        };
+        if (input.status === 'superseded') return;
+        const current = sqlite.prepare(`
+          SELECT source_fingerprint AS sourceFingerprint FROM finance_transactions
+          WHERE id = ? AND connector_instance_id = ? AND manual_decided_at = ?
+            AND assigned_kid_id IS ? AND manual_decision_action = ?
+        `).get(audit.transactionId, audit.connectorId, audit.decidedAt, audit.kidId, audit.action) as
+          { sourceFingerprint: string } | undefined;
+        if (!current) return;
+        sqlite.prepare(`
+          UPDATE finance_transactions
+          SET attribution_last_error_code = ?, attribution_retryable = ?,
+              attribution_updated_at = ?
+          WHERE id = ? AND connector_instance_id = ?
+        `).run(input.errorCode, input.status === 'failed' ? 1 : 0, input.now,
+          audit.transactionId, audit.connectorId);
+        if (input.status === 'failed') {
+          sqlite.prepare(`
+            INSERT INTO finance_attribution_exceptions (
+              id, connector_id, transaction_id, status, reason_code, retryable,
+              review_state, source_fingerprint, occurrence_count, created_at,
+              first_observed_at, last_observed_at, updated_at
+            ) VALUES (?, ?, ?, 'open', 'writeback-failed', 1, 'pending', ?, 1, ?, ?, ?, ?)
+            ON CONFLICT(connector_id, transaction_id) DO UPDATE SET
+              status = 'open', reason_code = 'writeback-failed', retryable = 1,
+              review_state = 'pending', resolved_at = NULL,
+              last_observed_at = excluded.last_observed_at, updated_at = excluded.updated_at
+          `).run(idFactory(), audit.connectorId, audit.transactionId, current.sourceFingerprint,
+            input.now, input.now, input.now, input.now);
+        } else {
+          sqlite.prepare(`
+            UPDATE finance_attribution_exceptions
+            SET status = 'resolved', review_state = 'resolved', resolved_at = ?, updated_at = ?
+            WHERE connector_id = ? AND transaction_id = ? AND reason_code = 'writeback-failed'
+          `).run(input.now, input.now, audit.connectorId, audit.transactionId);
+        }
+      }).immediate();
     },
 
     async readRows(connectorId, upstreamTransactionIds) {

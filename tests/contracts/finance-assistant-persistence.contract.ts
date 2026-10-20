@@ -1165,7 +1165,9 @@ export function describeFinanceAssistantPersistenceContract(
           decidedAt: BASE_TIME,
           expectedVersion: EXPECTED_VERSION,
         });
-        expect(await assistant.findReplayedKidAssignments(key)).toEqual([{ kidName: 'Avery' }]);
+        expect(await assistant.findReplayedKidAssignments(key)).toEqual([{
+          kidName: 'Avery', connectorId: CONNECTOR_ID,
+        }]);
         expect(await assistant.findReplayedKidAssignments('houston:unknown')).toEqual([]);
       });
 

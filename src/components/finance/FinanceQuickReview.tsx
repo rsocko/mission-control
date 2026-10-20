@@ -787,8 +787,20 @@ export function FinanceQuickReview({ connectorId = null }: { connectorId?: strin
                   <Fact label="Overall confidence" value={confidenceLabel(item.confidence.overall)} />
                 </dl>
                 <TransactionEvidenceDetails
+                  key={item.reviewRef}
                   statementDescriptors={item.statementDescriptors}
                   location={item.location}
+                  transactionData={{
+                    date: item.date,
+                    amount: item.amount,
+                    currency: item.currency,
+                    payee: item.payee,
+                    businessContext: item.businessContext ?? null,
+                    accountName: item.accountName,
+                    categoryName: item.category?.label ?? null,
+                    monarchReview: item.monarchReview,
+                    sourceAsOf: session?.sourceAsOf ?? null,
+                  }}
                   freshnessReference={freshnessReference}
                   headingIdPrefix="quick-review"
                 />

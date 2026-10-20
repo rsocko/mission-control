@@ -121,6 +121,21 @@ describe('FinanceQuickReview', () => {
     })).toHaveClass('whitespace-pre-wrap');
     expect(screen.getByText('Seattle, WA, US')).toBeInTheDocument();
     expect(screen.getByText(/88% confidence · Private AI/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('View available transaction data'));
+    const availableData = screen.getByLabelText('Available transaction data');
+    expect(availableData.closest('details')).toHaveAttribute('open');
+    const parsedData = JSON.parse(availableData.textContent ?? '');
+    expect(parsedData).toMatchObject({
+      transaction: {
+        payee: item.payee,
+        businessContext: item.businessContext,
+        sourceAsOf: session.sourceAsOf,
+      },
+      statementDescriptors: item.statementDescriptors,
+      location: item.location,
+    });
+    expect(parsedData.transaction).not.toHaveProperty('stateToken');
+    expect(parsedData.transaction).not.toHaveProperty('reviewRef');
 
     fireEvent.click(screen.getByRole('button', { name: /Confirm/ }));
 

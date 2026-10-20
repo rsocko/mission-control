@@ -205,9 +205,18 @@ with the finance-manager bearer token over private service DNS; Tyrion fixes the
 service actor and household scope server-side. Tyrion remains the sole policy
 and engine runtime.
 
-Finance Quick Review shows exact descriptors and normalized geography with
+Finance Quick Review and attribution exception review show exact descriptors and normalized geography with
 confidence, source/model provenance, freshness, and explicit unavailable or
-uncertain states. Merchant rules may combine merchant, business entity,
+uncertain states. Both offer a collapsed "View available transaction data"
+section with a formatted JSON view of the normalized fields available to that
+review, exact descriptor text and source field names, and separate derived
+location evidence. Exception review additionally includes stored business
+context, notes, tags, pending/recurring flags, source fetch time, and sync time.
+This is not the full raw Monarch record: empty descriptors indicate only that
+none are stored locally, including for older snapshots or bridge versions.
+The view does not expose upstream identifiers, credentials, or internal
+attribution state tokens and does not send data to public vendor research.
+Merchant rules may combine merchant, business entity,
 statement descriptor, account, and location predicates as logical AND
 conditions. A location predicate may also stand alone, but creation requires a
 second fresh location-only confirmation in addition to the ordinary rule

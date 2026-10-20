@@ -135,6 +135,14 @@ export interface AttributionException {
   date: string;
   amount: number;
   merchantName: string | null;
+  businessContext: string | null;
+  notes: string | null;
+  tags: unknown;
+  isPending: boolean;
+  isRecurring: boolean;
+  provenanceProvider: 'demo' | 'live' | null;
+  provenanceFetchedAt: string | null;
+  syncedAt: string;
   statementDescriptors: import('@/lib/finance/transaction-evidence').BridgeStatementDescriptor[];
   location: {
     evidence: import('@/lib/finance/transaction-evidence').NormalizedLocationEvidence | null;

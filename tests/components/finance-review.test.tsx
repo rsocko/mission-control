@@ -57,6 +57,14 @@ const firstException = {
   date: '2026-08-08',
   amount: -84.27,
   merchantName: 'Invented Market',
+  businessContext: 'Neighborhood Foods',
+  notes: 'Lunch in Hazlet NJ',
+  tags: ['Family'],
+  isPending: false,
+  isRecurring: false,
+  provenanceProvider: 'live',
+  provenanceFetchedAt: '2026-08-08T11:45:00.000Z',
+  syncedAt: '2026-08-08T12:00:00.000Z',
   statementDescriptors: [{
     kind: 'statement',
     text: ' INVENTED  MARKET #1842 ',
@@ -152,9 +160,37 @@ describe('FinanceReview', () => {
     expect(screen.getByText('Seattle, WA, US')).toBeInTheDocument();
     expect(screen.getByText(/88% confidence · Private AI · private-finance-model/)).toBeInTheDocument();
     expect(screen.getByText('Evidence: Descriptor contains Seattle WA.')).toBeInTheDocument();
+    const data = screen.getByLabelText('Available transaction data');
+    const disclosure = data.closest('details');
+    expect(disclosure).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByText('View available transaction data'));
+    expect(disclosure).toHaveAttribute('open');
+    expect(JSON.parse(data.textContent ?? '')).toEqual({
+      transaction: {
+        date: firstException.date,
+        amount: firstException.amount,
+        merchantName: firstException.merchantName,
+        businessContext: firstException.businessContext,
+        categoryName: firstException.categoryName,
+        accountName: firstException.accountName,
+        cardLast4: firstException.cardLast4,
+        notes: firstException.notes,
+        tags: firstException.tags,
+        isPending: false,
+        isRecurring: false,
+        provenanceProvider: 'live',
+        provenanceFetchedAt: firstException.provenanceFetchedAt,
+        syncedAt: firstException.syncedAt,
+      },
+      statementDescriptors: firstException.statementDescriptors,
+      location: firstException.location,
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Load next page' }));
     expect(await screen.findByRole('button', { name: /Invented Cafe/ })).toBeInTheDocument();
+    expect(screen.getByLabelText('Available transaction data').closest('details'))
+      .not.toHaveAttribute('open');
+    expect(screen.getByLabelText('Available transaction data')).toHaveTextContent('Invented Cafe');
     expect(fetchMock.mock.calls[2][0]).toContain('cursor=next-page');
     fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
     expect(await screen.findByRole('button', { name: /Invented Market/ })).toBeInTheDocument();
@@ -182,7 +218,41 @@ describe('FinanceReview', () => {
     expect(await screen.findByText(
       'The descriptor did not support a reliable location. No location was guessed.',
     )).toBeInTheDocument();
-    expect(screen.queryByText('Descriptor only identified a broad vendor footprint.')).not.toBeInTheDocument();
+    expect(screen.getByText('Evidence: Descriptor only identified a broad vendor footprint.'))
+      .toBeInTheDocument();
+  });
+
+  it('distinguishes missing local descriptors from absent upstream data', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse(overview))
+      .mockResolvedValueOnce(jsonResponse({
+        exceptions: [{
+          ...firstException,
+          statementDescriptors: [],
+          notes: null,
+          tags: [],
+          location: { evidence: null, inferenceEvidence: null, errorCode: null },
+        }],
+        subjects,
+        categories,
+        nextCursor: null,
+      })));
+
+    render(<FinanceReview />);
+    expect(await screen.findByText(
+      'No statement descriptor is stored in Mission Control for this transaction.',
+    )).toBeInTheDocument();
+    expect(screen.getByText(
+      'No inferred or user-confirmed location is stored in Mission Control.',
+    )).toBeInTheDocument();
+    fireEvent.click(screen.getByText('View available transaction data'));
+    expect(screen.getByText(/Missing or empty fields do not prove Monarch/)).toBeVisible();
+    expect(JSON.parse(screen.getByLabelText('Available transaction data').textContent ?? ''))
+      .toMatchObject({
+        transaction: { notes: null, tags: [] },
+        statementDescriptors: [],
+        location: { evidence: null, inferenceEvidence: null, errorCode: null },
+      });
   });
 
   it('updates a transaction category from the exception detail', async () => {

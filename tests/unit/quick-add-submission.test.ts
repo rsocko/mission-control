@@ -140,6 +140,33 @@ describe('Quick Add submission planning', () => {
 });
 
 describe('Quick Add task creation', () => {
+  it('does not send a parenthesized date escape to a TODO-backed task', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse({ id: 'task-1', editPolicy: editableTaskPolicy })
+    );
+
+    await createQuickAddTask({ fetcher }, {
+      task: task('Discuss demo (\\Nov 4-5)'),
+      destination: {
+        ...localDestination,
+        id: 'connector-1',
+        connectorType: 'microsoft-todo',
+      },
+      resolvedDestination: { listId: 'list-1', listName: 'Work', requiresSelection: false },
+      addToMyDay: false,
+      contextProject: null,
+      contextProjectActive: false,
+    });
+
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({
+      title: 'Discuss demo (Nov 4-5)',
+      dueDate: null,
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'connector-1',
+      sourceListId: 'list-1',
+    });
+  });
+
   it('applies a recognized trailing date and removes it from the saved title', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-02T12:00:00'));

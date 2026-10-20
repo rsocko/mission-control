@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+test.use({ serviceWorkers: 'block' });
+
 const overview = {
   connectors: [{ id: 'finance-one', name: 'Tyrion' }],
   connector: { id: 'finance-one', name: 'Tyrion' },
@@ -42,6 +44,14 @@ const exception = {
   date: '2026-10-08',
   amount: -184.62,
   merchantName: 'Invented Market',
+  businessContext: 'Neighborhood Foods',
+  notes: 'Lunch in Hazlet NJ',
+  tags: ['Family'],
+  isPending: false,
+  isRecurring: false,
+  provenanceProvider: 'live',
+  provenanceFetchedAt: '2026-10-08T20:00:00.000Z',
+  syncedAt: '2026-10-08T20:00:00.000Z',
   statementDescriptors: [{
     kind: 'statement',
     text: ' INVENTED  MARKET #1842 ',
@@ -97,7 +107,7 @@ async function mockReview(page: Page) {
   });
 }
 
-test('attribution exception detail shows exact transaction evidence', async ({ page }) => {
+async function checkTransactionEvidence(page: Page) {
   await mockReview(page);
   await page.goto('/finance/review');
 
@@ -108,4 +118,27 @@ test('attribution exception detail shows exact transaction evidence', async ({ p
   await expect(page.getByText('Seattle, WA, US')).toBeVisible();
   await expect(page.getByText(/88% confidence · Private AI · private-finance-model/)).toBeVisible();
   await expect(page.getByText('Evidence: Descriptor contains Seattle WA.')).toBeVisible();
-});
+  const data = page.getByLabel('Available transaction data');
+  await expect(data).toBeHidden();
+  const disclosure = page.getByText('View available transaction data');
+  await disclosure.focus();
+  await page.keyboard.press('Enter');
+  await expect(data).toBeVisible();
+  const parsed = JSON.parse(await data.textContent() ?? '');
+  expect(parsed.transaction.notes).toBe('Lunch in Hazlet NJ');
+  expect(parsed.statementDescriptors).toEqual(exception.statementDescriptors);
+  expect(parsed.transaction).not.toHaveProperty('upstreamTransactionId');
+  await expect(page.getByText(/not the full raw Monarch record/)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    document.documentElement.scrollWidth <= window.innerWidth
+  ))).toBe(true);
+}
+
+for (const viewport of [{ width: 1440, height: 1080 }, { width: 390, height: 844 }]) {
+  test(`attribution exception evidence and data disclosure at ${viewport.width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport);
+    await checkTransactionEvidence(page);
+    await page.getByLabel('Available transaction data').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath('transaction-details.png') });
+  });
+}

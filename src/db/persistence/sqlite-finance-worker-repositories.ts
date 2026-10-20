@@ -1859,6 +1859,11 @@ function createAttributionPersistence(
                e.first_observed_at AS firstObservedAt,
                e.last_observed_at AS lastObservedAt, e.updated_at AS updatedAt,
                t.date, t.amount, t.merchant_name AS merchantName,
+               t.business_context AS businessContext, t.notes, t.tags,
+               t.is_pending AS isPending, t.is_recurring AS isRecurring,
+               t.provenance_provider AS provenanceProvider,
+               t.provenance_fetched_at AS provenanceFetchedAt,
+               t.synced_at AS syncedAt,
                t.statement_descriptors AS statementDescriptors,
                t.location_evidence AS locationEvidence,
                t.location_inference_evidence AS locationInferenceEvidence,
@@ -1888,9 +1893,12 @@ function createAttributionPersistence(
       `).all(...parameters) as Array<
         Omit<
           FinanceAttributionExceptionView,
-          'retryable' | 'reasons' | 'statementDescriptors' | 'location'
+          'retryable' | 'reasons' | 'statementDescriptors' | 'location' | 'tags' | 'isPending' | 'isRecurring'
         > & {
           retryable: number;
+          tags: string;
+          isPending: number;
+          isRecurring: number;
           reasons: string;
           statementDescriptors: string | null;
           locationEvidence: string | null;
@@ -1921,6 +1929,9 @@ function createAttributionPersistence(
         exceptions: page.map((row) => ({
           ...row,
           retryable: row.retryable === 1,
+          tags: JSON.parse(row.tags) as unknown,
+          isPending: row.isPending === 1,
+          isRecurring: row.isRecurring === 1,
           reasons: parseReasons(row.reasons),
           statementDescriptors: parseStatementDescriptors(row.statementDescriptors),
           location: {

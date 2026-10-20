@@ -878,6 +878,11 @@ export function describeFinanceWorkerPersistenceContract(
         await harness.repositories.snapshots.upsertPage(pageInput(
           GENERATION,
           [snapshotTransaction('api-attribution', {
+            businessContext: 'Neighborhood Foods',
+            notes: 'Lunch in Hazlet NJ',
+            tags: ['Family'],
+            isPending: true,
+            isRecurring: false,
             statementDescriptors: [{
               kind: 'statement',
               text: ' INVENTED  MARKET #1842 ',
@@ -970,6 +975,14 @@ export function describeFinanceWorkerPersistenceContract(
           reasonCode: 'low-confidence',
           retryable: false,
           reasons: ['low-confidence'],
+          businessContext: 'Neighborhood Foods',
+          notes: 'Lunch in Hazlet NJ',
+          tags: ['Family'],
+          isPending: true,
+          isRecurring: false,
+          provenanceProvider: 'live',
+          provenanceFetchedAt: BASE_TIME,
+          syncedAt: BASE_TIME,
           statementDescriptors: [{
             kind: 'statement',
             text: ' INVENTED  MARKET #1842 ',

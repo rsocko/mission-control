@@ -149,7 +149,7 @@ export interface FinanceAttributionExceptionCursor {
 /**
  * The exact public exception projection the attribution-exception API returns.
  * It deliberately excludes transaction identifiers, raw provider output, source
- * sequences, detector versions, and persistence metadata.
+ * sequences, detector versions, and internal persistence identifiers.
  */
 export interface FinanceAttributionExceptionView {
   id: string;
@@ -165,6 +165,14 @@ export interface FinanceAttributionExceptionView {
   date: string;
   amount: number;
   merchantName: string | null;
+  businessContext: string | null;
+  notes: string | null;
+  tags: unknown;
+  isPending: boolean;
+  isRecurring: boolean;
+  provenanceProvider: 'demo' | 'live' | null;
+  provenanceFetchedAt: string | null;
+  syncedAt: string;
   statementDescriptors: readonly BridgeStatementDescriptor[];
   location: {
     evidence: NormalizedLocationEvidence | null;

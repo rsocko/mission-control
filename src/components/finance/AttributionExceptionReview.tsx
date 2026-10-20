@@ -634,8 +634,8 @@ export function AttributionExceptionReview() {
           )}
         </main>
       ) : (
-        <main className="mx-auto grid min-h-0 w-full max-w-7xl flex-1 lg:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.28fr)]">
-          <section aria-labelledby="exception-list-heading" className="min-h-0 overflow-y-auto border-b border-[var(--border)] lg:border-b-0 lg:border-r">
+        <main className="mx-auto min-h-0 w-full max-w-7xl flex-1 overflow-y-auto lg:grid lg:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.28fr)] lg:overflow-hidden">
+          <section aria-labelledby="exception-list-heading" className="max-h-96 min-h-0 overflow-y-auto border-b border-[var(--border)] lg:max-h-none lg:border-b-0 lg:border-r">
             <div className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--surface-1)] px-4 py-3">
               <h2 id="exception-list-heading" className="text-sm font-semibold text-[var(--text-primary)]">
                 Current exceptions
@@ -823,7 +823,7 @@ export function AttributionExceptionReview() {
           </section>
 
           {selected && (
-            <section aria-labelledby="exception-detail-heading" className="min-h-0 overflow-y-auto p-4 sm:p-6">
+            <section aria-labelledby="exception-detail-heading" className="min-h-0 p-4 sm:p-6 lg:overflow-y-auto">
               <div className="mx-auto max-w-2xl space-y-5">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
@@ -856,8 +856,25 @@ export function AttributionExceptionReview() {
 
                 <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
                   <TransactionEvidenceDetails
+                    key={selected.id}
                     statementDescriptors={selected.statementDescriptors}
                     location={selected.location}
+                    transactionData={{
+                      date: selected.date,
+                      amount: selected.amount,
+                      merchantName: selected.merchantName,
+                      businessContext: selected.businessContext,
+                      categoryName: selected.categoryName,
+                      accountName: selected.accountName,
+                      cardLast4: selected.cardLast4,
+                      notes: selected.notes,
+                      tags: selected.tags,
+                      isPending: selected.isPending,
+                      isRecurring: selected.isRecurring,
+                      provenanceProvider: selected.provenanceProvider,
+                      provenanceFetchedAt: selected.provenanceFetchedAt,
+                      syncedAt: selected.syncedAt,
+                    }}
                     freshnessReference={freshnessReference}
                     headingIdPrefix="attribution-exception"
                   />

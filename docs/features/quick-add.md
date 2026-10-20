@@ -41,6 +41,8 @@ Buy a birthday gift next Saturday
 
 Quick Add keeps the complete title while editing and shows **Use Next Saturday**. Clicking the suggestion applies it immediately; creating the task also accepts any visible date suggestion. The due date is then applied and, unless title preservation is enabled, the date phrase is removed from the saved title. Escape a date phrase with `\` or disable natural-language date suggestions to keep it as ordinary title text.
 
+Date-escape backslashes are removed from the saved title, including after opening parentheses, brackets, braces, or quotes: `Review (\Nov 4-5)` saves as `Review (Nov 4-5)` without setting a due date. Literal backslashes in paths are preserved.
+
 ## Title preservation
 
 By default, recognized metadata tokens are removed from the saved title after their values are applied. Enable **Preserve metadata tokens** under **Settings > Other > Quick Add parsing** to retain the original tokens in the title.

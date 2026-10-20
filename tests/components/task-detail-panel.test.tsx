@@ -897,7 +897,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
       const body = JSON.parse(String(patchCall?.[1]?.body)) as { description: string };
       expect(body.description).toContain('Detailed notes');
       expect(body.description).toMatch(
-        /## Updates\n\n- \*\*\d{4}-\d{2}-\d{2} \d{2}:\d{2}\*\* — Called vendor and left a voicemail/,
+        /## Updates\n\n- \*\*\d{4}-\d{2}-\d{2} \d{1,2}:\d{2} (?:AM|PM)\*\* — Called vendor and left a voicemail/,
       );
     });
     expect(screen.queryByRole('dialog', { name: 'Quick task update' })).not.toBeInTheDocument();

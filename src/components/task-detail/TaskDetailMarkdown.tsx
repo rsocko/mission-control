@@ -18,6 +18,7 @@ import {
 } from '@/lib/github-user-attachments';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
+import { formatQuickUpdateTimestamps } from './task-quick-update';
 
 interface MarkdownNode {
   type: string;
@@ -254,7 +255,7 @@ export const TaskDetailMarkdown = dynamic(
                 },
               }}
             >
-              {props.children}
+              {formatQuickUpdateTimestamps(props.children)}
             </ReactMarkdown>
           </MarkdownSourceUrlContext.Provider>
         </MarkdownTaskIdContext.Provider>

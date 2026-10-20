@@ -14,11 +14,35 @@ function formatLocalTimestamp(date: Date): string {
     String(date.getMonth() + 1).padStart(2, '0'),
     String(date.getDate()).padStart(2, '0'),
   ].join('-');
+  const hour = date.getHours();
   const timePart = [
-    String(date.getHours()).padStart(2, '0'),
+    String(hour % 12 || 12),
     String(date.getMinutes()).padStart(2, '0'),
   ].join(':');
-  return `${datePart} ${timePart}`;
+  return `${datePart} ${timePart} ${hour >= 12 ? 'PM' : 'AM'}`;
+}
+
+export function formatQuickUpdateTimestamps(markdown: string): string {
+  let inUpdatesSection = false;
+  return markdown.split('\n').map((line) => {
+    if (/^## Updates[ \t]*\r?$/.test(line)) {
+      inUpdatesSection = true;
+      return line;
+    }
+    if (/^#{1,6}(?:[ \t]+|$)/.test(line)) {
+      inUpdatesSection = false;
+      return line;
+    }
+    if (!inUpdatesSection) return line;
+
+    return line.replace(
+      /^(\s*-\s+\*\*\d{4}-\d{2}-\d{2} )([01]\d|2[0-3]):([0-5]\d)(\*\* —)/,
+      (_match, prefix: string, hourText: string, minute: string, suffix: string) => {
+        const hour = Number(hourText);
+        return `${prefix}${hour % 12 || 12}:${minute} ${hour >= 12 ? 'PM' : 'AM'}${suffix}`;
+      },
+    );
+  }).join('\n');
 }
 
 function capitalizeSentence(value: string): string {

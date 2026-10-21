@@ -45,6 +45,8 @@ import {
   MonarchBridgeClient,
   MonarchBridgeError,
 } from '@/lib/connectors/monarch-money/client';
+import { reconcileAttributionWritebacks } from '@/lib/connectors/monarch-money/attribution-writeback';
+import { FinanceAttributionMutationError } from '@/db/persistence/finance-attribution';
 
 const MAX_OUTPUT_BYTES = 16 * 1024;
 const DAY_MS = 86_400_000;
@@ -977,6 +979,10 @@ function mutationFailure(
     else if (/No current finance category/.test(error.message)) code = 'category_not_found';
     else if (/More than one current finance category/.test(error.message)) code = 'category_ambiguous';
     message = error.message;
+  } else if (error instanceof FinanceAttributionMutationError) {
+    code = 'mutation_unavailable';
+    message = error.message;
+    retryable = error.status === 502;
   } else if (error instanceof HoustonFinanceAttributionError) {
     code = /conflict|superseded|idempotency/.test(error.code)
       ? 'mutation_conflict'
@@ -1011,6 +1017,9 @@ async function replayedKidAssignment(
       'idempotency_conflict',
       'Approval identity matched more than one attribution decision',
     );
+  }
+  if (rows[0]) {
+    await reconcileAttributionWritebacks(rows[0].connectorId, { idempotencyKey });
   }
   return rows.length === 1
     ? safeText(rows[0].kidName, 'Household member', 100)
@@ -1106,6 +1115,7 @@ export async function assignFinanceTransactionKid(
         'The approved kid assignment could not be applied',
       );
     }
+    await reconcileAttributionWritebacks(connector.id, { idempotencyKey });
     outcome = 'succeeded';
     return assignFinanceTransactionKidOutputSchema.parse({
       kind: 'finance-kid-assignment',

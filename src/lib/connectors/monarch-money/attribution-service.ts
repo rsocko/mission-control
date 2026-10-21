@@ -16,6 +16,7 @@ import {
 } from '@/db/persistence/finance-attribution';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { getSyncJobRepository, isDurableSyncMode } from '@/lib/sync/job-runtime';
+import { reconcileAttributionWritebacks } from './attribution-writeback';
 
 /**
  * Request-independent policy for the manual/API attribution surface.
@@ -85,6 +86,7 @@ export async function applyManualAttributionDecision(input: ManualDecisionInput)
     expectedTransactionVersion: input.expectedTransactionVersion ?? null,
     now: new Date().toISOString(),
   });
+  await reconcileAttributionWritebacks(input.connectorId, { idempotencyKey });
   return {
     status: result.status,
     transactionId: result.transactionId,
@@ -220,6 +222,9 @@ export async function actOnAttributionException(input: {
     actorType: input.actorType,
     now: new Date().toISOString(),
   });
+  if (input.action === 'approve' || input.action === 'manual-resolve') {
+    await reconcileAttributionWritebacks(input.connectorId, { idempotencyKey });
+  }
   // Strictly after commit, and never for an idempotent replay: a queued retry
   // must not become observable before the exception transition it belongs to.
   if (result.retryScheduled && isDurableSyncMode()) {

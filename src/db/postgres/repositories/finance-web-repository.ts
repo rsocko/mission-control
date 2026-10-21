@@ -341,8 +341,12 @@ export function createPostgresFinanceWebPersistence(pool: Pool): FinanceWebPersi
           WHERE connector_id = $1 AND status = 'retry_requested'
         `, [connector.id]),
         query<{ count: number | string }>(pool, `
-          SELECT count(*) AS count FROM finance_mutation_audit
-          WHERE connector_id = $1 AND status = 'failed'
+          SELECT (
+            SELECT count(*) FROM finance_mutation_audit WHERE connector_id = $1 AND status = 'failed'
+          ) + (
+            SELECT count(*) FROM finance_attribution_audit
+            WHERE connector_id = $1 AND writeback_status = 'failed'
+          ) AS count
         `, [connector.id]),
         query<{ count: number | string }>(pool, `
           SELECT count(*) AS count FROM notifications

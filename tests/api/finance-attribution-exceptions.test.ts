@@ -5,6 +5,11 @@ import type Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
+vi.mock('@/lib/connectors/monarch-money/attribution-writeback', async () => ({
+  reconcileAttributionWritebacks: (await import('../helpers/attribution-writeback-completion'))
+    .completeTestAttributionWritebacks,
+}));
+
 const { requestRetryMock } = vi.hoisted(() => ({
   requestRetryMock: vi.fn(),
 }));

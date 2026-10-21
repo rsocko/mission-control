@@ -335,9 +335,14 @@ export function createSqliteFinanceWebPersistence(
         WHERE connector_id = ? AND status = 'retry_requested'
       `, connector.id);
       const failedWritebacks = count(sqlite, `
-        SELECT count(*) AS count FROM finance_mutation_audit
-        WHERE connector_id = ? AND status = 'failed'
-      `, connector.id);
+        SELECT (
+          SELECT count(*) FROM finance_mutation_audit
+          WHERE connector_id = ? AND status = 'failed'
+        ) + (
+          SELECT count(*) FROM finance_attribution_audit
+          WHERE connector_id = ? AND writeback_status = 'failed'
+        ) AS count
+      `, connector.id, connector.id);
       const openAlerts = count(sqlite, `
         SELECT count(*) AS count FROM notifications
         WHERE connector_instance_id = ? AND category = 'finance'

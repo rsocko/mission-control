@@ -14,6 +14,7 @@ import {
   type FinanceAttributionRow,
   type FinanceAttributionSubjectView,
   type FinanceAttributionUnavailableItem,
+  type FinanceAttributionWriteback,
   type FinanceManualAction,
 } from '@/db/persistence/finance-attribution';
 import {
@@ -1469,6 +1470,21 @@ async function applyManualDecisionInTransaction(
       404,
     );
   }
+  const lockedReplay = await findAttributionActionAudit(client, command.connectorId, command.idempotencyKey);
+  if (lockedReplay) {
+    assertManualDecisionReplay(lockedReplay, command);
+    return true;
+  }
+  const pendingWriteback = await query(client, `
+    SELECT 1 FROM finance_attribution_audit
+    WHERE connector_id = $1 AND transaction_id = $2
+      AND requested_decision IS NOT NULL AND writeback_status IN ('pending', 'failed')
+      AND created_at = $3
+  `, [command.connectorId, command.transactionId, transactionRow.manualDecidedAt]);
+  if (pendingWriteback.length) {
+    throw new FinanceAttributionMutationError('attribution_writeback_pending',
+      'Reconcile the previous Tyrion/Monarch write-back before changing this decision', 409);
+  }
   const expectedVersion = command.expectedTransactionVersion;
   if (
     expectedVersion
@@ -1667,6 +1683,100 @@ function createAttributionPersistence(
   return {
     async assertConnector(connectorId) {
       await requireFinanceConnector(pool, connectorId);
+    },
+
+    async readWritebacks(connectorId, idempotencyKey) {
+      const rows = await query<FinanceAttributionWriteback>(pool, `
+        SELECT a.id, a.idempotency_key AS "idempotencyKey",
+               a.transaction_id AS "transactionId", a.requested_decision AS action,
+               a.requested_kid_id AS "kidId", a.created_at AS "decidedAt",
+               a.writeback_request AS request,
+               CASE WHEN t.lifecycle_status = 'active' THEN t.manual_decided_at END AS "currentDecidedAt",
+               t.assigned_kid_id AS "currentKidId", t.manual_decision_action AS "currentAction",
+               t.upstream_transaction_id AS "upstreamTransactionId", t.date, t.last_seen_at AS "observedAt",
+               t.merchant_name AS "merchantName", t.business_context AS "businessContext",
+               t.account_id AS "accountId", t.statement_descriptors AS "statementDescriptors",
+               t.location_evidence AS "locationEvidence"
+        FROM finance_attribution_audit a
+        INNER JOIN finance_transactions t ON t.id = a.transaction_id
+          AND t.connector_instance_id = a.connector_id
+        WHERE a.connector_id = $1 AND a.result_status = 'resolved'
+          AND a.requested_decision IS NOT NULL
+          AND a.writeback_status IN ('pending', 'failed')
+          AND ($2::text IS NULL OR a.idempotency_key = $2)
+        ORDER BY COALESCE(a.writeback_updated_at, a.created_at), a.id LIMIT 100
+      `, [connectorId, idempotencyKey ?? null]);
+      return rows.map((row) => ({
+        ...row,
+        statementDescriptors: statementDescriptorsSchema.parse(row.statementDescriptors),
+        locationEvidence: row.locationEvidence
+          ? normalizedLocationEvidenceSchema.parse(row.locationEvidence) : null,
+      }));
+    },
+
+    async reserveWritebackRequest(id, request) {
+      const rows = await query<{ request: string }>(pool, `
+        UPDATE finance_attribution_audit
+        SET writeback_request = COALESCE(writeback_request, $1)
+        WHERE id = $2 RETURNING writeback_request AS request
+      `, [request, id]);
+      if (!rows[0]) throw new Error('Attribution write-back receipt was not found');
+      return rows[0].request;
+    },
+
+    async replaceRejectedWritebackRequest(id, rejectedRequest, request) {
+      const [row] = await query<{ request: string }>(pool, `
+        UPDATE finance_attribution_audit
+        SET writeback_request = CASE WHEN writeback_request = $1 THEN $2 ELSE writeback_request END
+        WHERE id = $3 RETURNING writeback_request AS request
+      `, [rejectedRequest, request, id]);
+      if (!row) throw new Error('Attribution write-back receipt was not found');
+      return row.request;
+    },
+
+    async finishWriteback(input) {
+      await transaction(pool, async (client) => {
+        const [audit] = await query<{
+          connectorId: string; transactionId: string; decidedAt: string; kidId: string | null; action: string;
+        }>(client, `
+          UPDATE finance_attribution_audit
+          SET writeback_status = $1, writeback_error_code = $2, writeback_updated_at = $4 WHERE id = $3
+            AND (writeback_status <> 'succeeded' OR $1 = 'succeeded')
+          RETURNING connector_id AS "connectorId", transaction_id AS "transactionId",
+                    created_at AS "decidedAt", requested_kid_id AS "kidId", requested_decision AS action
+        `, [input.status, input.errorCode, input.id, input.now]);
+        if (!audit) return;
+        if (input.status === 'superseded') return;
+        const [current] = await query<{ sourceFingerprint: string }>(client, `
+          UPDATE finance_transactions
+          SET attribution_last_error_code = $1, attribution_retryable = $2,
+              attribution_updated_at = $3
+          WHERE id = $4 AND connector_instance_id = $5 AND manual_decided_at = $6
+            AND assigned_kid_id IS NOT DISTINCT FROM $7 AND manual_decision_action = $8
+          RETURNING source_fingerprint AS "sourceFingerprint"
+        `, [input.errorCode, input.status === 'failed', input.now,
+          audit.transactionId, audit.connectorId, audit.decidedAt, audit.kidId, audit.action]);
+        if (!current) return;
+        if (input.status === 'failed') {
+          await client.query(`
+            INSERT INTO finance_attribution_exceptions (
+              id, connector_id, transaction_id, status, reason_code, retryable,
+              review_state, source_fingerprint, occurrence_count, created_at,
+              first_observed_at, last_observed_at, updated_at
+            ) VALUES ($1, $2, $3, 'open', 'writeback-failed', true, 'pending', $4, 1, $5, $5, $5, $5)
+            ON CONFLICT(connector_id, transaction_id) DO UPDATE SET
+              status = 'open', reason_code = 'writeback-failed', retryable = true,
+              review_state = 'pending', resolved_at = NULL,
+              last_observed_at = excluded.last_observed_at, updated_at = excluded.updated_at
+          `, [idFactory(), audit.connectorId, audit.transactionId, current.sourceFingerprint, input.now]);
+        } else {
+          await client.query(`
+            UPDATE finance_attribution_exceptions
+            SET status = 'resolved', review_state = 'resolved', resolved_at = $1, updated_at = $1
+            WHERE connector_id = $2 AND transaction_id = $3 AND reason_code = 'writeback-failed'
+          `, [input.now, audit.connectorId, audit.transactionId]);
+        }
+      });
     },
 
     async readRows(connectorId, upstreamTransactionIds) {

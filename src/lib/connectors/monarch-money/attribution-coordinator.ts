@@ -5,7 +5,10 @@ import type {
   FinanceAttributionRow,
   FinanceAttributionStateSnapshot,
 } from '@/db/persistence/finance-attribution';
-import { FINANCE_ATTRIBUTION_WRITE_MAX } from '@/db/persistence/finance-attribution';
+import {
+  FINANCE_ATTRIBUTION_WRITE_MAX,
+  FinanceAttributionMutationError,
+} from '@/db/persistence/finance-attribution';
 import type { FinanceWorkerPersistence } from '@/db/persistence/finance-worker';
 import type { ConnectorConfig } from '@/types';
 import {
@@ -28,9 +31,11 @@ import {
 import { attributionStatementDescriptors } from '@/lib/finance/transaction-evidence';
 import type { MonarchTransaction } from './client';
 import { createFinanceIdentityNamespace } from './identity';
+import { reconcileAttributionWritebacks } from './attribution-writeback';
 
 interface PreparedAttributionItem {
   transactionId: string;
+  upstreamTransactionId: string;
   sourceFingerprint: string;
   item: AttributionBatchItem;
   manualDecision: ManualDecision;
@@ -69,6 +74,9 @@ function sanitizedFailure(error: unknown): AttributionFailure {
       retryable: error.retryable,
     };
   }
+  if (error instanceof FinanceAttributionMutationError) {
+    return { code: error.code, message: error.message, retryable: error.status >= 500 };
+  }
   return {
     code: 'attribution_service_unavailable',
     message: 'Tyrion attribution service is unavailable',
@@ -77,12 +85,14 @@ function sanitizedFailure(error: unknown): AttributionFailure {
 }
 
 function failureReason(code: string): string {
+  if (/tag_|writeback/.test(code)) return 'writeback-failed';
   if (code === 'policy_unavailable') return 'policy-unavailable';
   if (code === 'policy_conflict') return 'policy-version-mismatch';
   return 'engine-unavailable';
 }
 
 function failureExplanation(code: string): string {
+  if (/tag_|writeback/.test(code)) return 'Attribution write-back needs Tyrion/Monarch reconciliation';
   if (code === 'policy_unavailable') return 'Tyrion attribution policy is unavailable';
   if (code === 'policy_conflict') return 'Tyrion attribution policy version changed';
   if (code === 'attribution_timeout') return 'Tyrion attribution request timed out';
@@ -146,6 +156,7 @@ function prepareItems(
     const manualDecision = manualDecisionFromRow(row);
     return {
       transactionId: row.id,
+      upstreamTransactionId: transaction.id,
       sourceFingerprint: row.sourceFingerprint,
       manualDecision,
       stateSnapshot: attributionStateSnapshot(row),
@@ -261,6 +272,20 @@ export class FinanceAttributionCoordinator {
         this.terminalFailure = sanitizedFailure(error);
       }
     }
+    if (this.client && !this.terminalFailure) {
+      try {
+        await reconcileAttributionWritebacks(this.connectorId, {
+          persistence: this.dependencies.persistence,
+          financeConfig: this.financeConfig,
+          client: this.client,
+          signal,
+        });
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        this.attempted = true;
+        this.terminalFailure = sanitizedFailure(error);
+      }
+    }
     if (transactions.length === 0) return;
     const rows = await this.dependencies.persistence.attribution.readRows(
       this.connectorId,
@@ -333,7 +358,9 @@ export class FinanceAttributionCoordinator {
       const batch = prepared.slice(offset, offset + request.items.length);
       this.attempted = true;
       try {
-        const response = await this.client.attribute(request, signal);
+        const response = await this.client.attributeRecords(
+          request, batch.map((item) => item.upstreamTransactionId), signal,
+        );
         const appliedAt = new Date().toISOString();
         await this.dependencies.persistence.attribution.applyResults({
           connectorId: this.connectorId,

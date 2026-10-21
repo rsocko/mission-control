@@ -489,12 +489,18 @@ export const financeAttributionAudit = sqliteTable('finance_attribution_audit', 
   requestedKidId: text('requested_kid_id'),
   requestedDecision: text('requested_decision').$type<'assign-kid' | 'parent-expense'>(),
   resultStatus: text('result_status').notNull(),
+  writebackStatus: text('writeback_status').notNull().default('pending'),
+  writebackRequest: text('writeback_request'),
+  writebackErrorCode: text('writeback_error_code'),
+  writebackUpdatedAt: text('writeback_updated_at'),
   createdAt: text('created_at').notNull(),
 }, (table) => [
   uniqueIndex('idx_finance_attribution_audit_idempotency')
     .on(table.connectorId, table.idempotencyKey),
   index('idx_finance_attribution_audit_transaction')
     .on(table.connectorId, table.transactionId, table.createdAt),
+  index('idx_finance_attribution_writeback')
+    .on(table.connectorId, table.writebackStatus, table.createdAt),
 ]);
 
 export const financeAttentionRepairAudit = sqliteTable('finance_attention_repair_audit', {

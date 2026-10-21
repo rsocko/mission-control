@@ -9,10 +9,7 @@ import type {
 import { getTimezone } from '@/lib/mode';
 import { connectorLogger } from '@/lib/logger';
 import { getLocalToday } from '@/lib/utils/date';
-import {
-  compareRecurringOccurrencePriority,
-  resetRecurringSuccessorSubtasks,
-} from '@/lib/sync/recurring-task-reconciliation';
+import { resetRecurringSuccessorSubtasks } from '@/lib/sync/recurring-task-reconciliation';
 import { MICROSOFT_TODO_TASK_AUTHORITY } from '../task-source-profiles';
 import { mergeAsyncStreams } from '../task-page-stream';
 import { isMicroStatusSyncEnabled, updateTagsWithMicroStatus } from '@/lib/micro-status';
@@ -76,16 +73,6 @@ type TodoGraphBatchResponse = {
     };
   }>;
 };
-
-function removeBufferedRecurringTask(tasks: TaskItem[], sourceId: string): void {
-  const index = tasks.findIndex(task => task.sourceId === sourceId);
-  if (index === -1) return;
-  const parentId = tasks[index].id;
-  tasks.splice(index, 1);
-  for (let childIndex = tasks.length - 1; childIndex >= 0; childIndex--) {
-    if (tasks[childIndex].parentId === parentId) tasks.splice(childIndex, 1);
-  }
-}
 
 function parseParentTaskSourceId(sourceId: string): { listId: string; taskId: string } {
   const { listId, taskId, checklistItemId } = parseSourceId(sourceId);
@@ -583,10 +570,94 @@ export class MicrosoftTodoConnector implements IConnector {
       body.categories = await this.getCategoriesWithMicroStatus(listId, taskId, updates.microStatus || null);
     }
 
+    if (updates.dueDate) {
+      const recurringTask = await this.updateRecurringDueDate(listId, taskId, updates.dueDate);
+      if (recurringTask) {
+        delete body.dueDateTime;
+        if (Object.keys(body).length === 0) {
+          return mapGraphTask(recurringTask, listId, '', this.type, this.id);
+        }
+      }
+    }
+
     const res = await this.client.graphFetch(graphTodoTaskPath(listId, taskId), { method: 'PATCH', body: JSON.stringify(body) });
     if (!res.ok) throw new Error(`Failed to update task: ${res.status}`);
     const updated = await res.json();
     return mapGraphTask(updated, listId, '', this.type, this.id);
+  }
+
+  private async updateRecurringDueDate(
+    listId: string,
+    taskId: string,
+    dueDate: string,
+  ): Promise<GraphTodoTask | null> {
+    const graphPath = graphTodoTaskPath(listId, taskId);
+    const currentRes = await this.client.graphFetch(graphPath);
+    if (!currentRes.ok) throw new Error(`Failed to read task before due-date update: ${currentRes.status}`);
+    const current = await currentRes.json() as GraphTodoTask;
+    if (!current.recurrence) return null;
+    if (current.dueDateTime?.dateTime.slice(0, 10) === dueDate) return current;
+    if (current.recurrence.range.type !== 'noEnd'
+      || !['daily', 'weekly', 'absoluteMonthly', 'absoluteYearly'].includes(current.recurrence.pattern.type)) {
+      throw new Error('Cannot safely update due date: unsupported native To Do recurrence');
+    }
+
+    const substratePath = `/taskfolders/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}`;
+    const nativeRes = await this.client.substrateFetch(substratePath);
+    if (!nativeRes.ok) throw new Error(`Failed to read native recurrence: ${nativeRes.status}`);
+    const native = await nativeRes.json() as {
+      Id: string;
+      Recurrence?: {
+        RecurrenceType?: string;
+        IntervalType?: string;
+        Interval?: number;
+        WeekDays?: string[];
+        FirstDayOfWeek?: string;
+      } | null;
+    };
+    const recurrence = native.Recurrence;
+    if (native.Id !== taskId || !recurrence?.RecurrenceType
+      || !['Daily', 'Weekly', 'WeekDays', 'Monthly', 'Yearly', 'Custom'].includes(recurrence.RecurrenceType)) {
+      throw new Error('Cannot safely update due date: unsupported native To Do recurrence');
+    }
+    if (recurrence.RecurrenceType === 'Custom'
+      && (!['Days', 'Weeks', 'Months', 'Years'].includes(recurrence.IntervalType ?? '')
+        || typeof recurrence.Interval !== 'number'
+        || !Number.isInteger(recurrence.Interval) || recurrence.Interval < 1
+        || (recurrence.IntervalType === 'Weeks' && !recurrence.WeekDays?.length))) {
+      throw new Error('Cannot safely update due date: invalid native To Do custom recurrence');
+    }
+
+    // Graph's due-date-only PATCH can create another open occurrence. Match
+    // native Skip instead, carrying the source's rule (not our local projection).
+    const res = await this.client.substrateFetch(substratePath, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        DueDateTime: { DateTime: dueDate, TimeZone: getTimezone() },
+        Recurrence: {
+          FirstDayOfWeek: recurrence.FirstDayOfWeek ?? 'Sunday',
+          RecurrenceType: recurrence.RecurrenceType,
+          ...(recurrence.RecurrenceType === 'Custom' ? {
+            IntervalType: recurrence.IntervalType,
+            Interval: recurrence.Interval,
+            ...(recurrence.IntervalType === 'Weeks' ? { WeekDays: recurrence.WeekDays } : {}),
+          } : {}),
+        },
+      }),
+    });
+    if (!res.ok) throw new Error(`Failed to update native recurring task due date: ${res.status}`);
+    const updated = await res.json() as {
+      Id: string;
+      DueDateTime?: { DateTime: string } | null;
+    };
+    if (updated.Id !== taskId) throw new Error('Native To Do due-date update changed the task identity');
+    if (updated.DueDateTime?.DateTime.slice(0, 10) !== dueDate) {
+      throw new Error('Native To Do due-date update did not apply the requested date');
+    }
+
+    const refreshed = await this.client.graphFetch(graphPath);
+    if (!refreshed.ok) throw new Error(`Failed to refresh recurring task after due-date update: ${refreshed.status}`);
+    return await refreshed.json() as GraphTodoTask;
   }
 
   async completeTask(sourceId: string): Promise<void> {
@@ -1008,8 +1079,6 @@ export class MicrosoftTodoConnector implements IConnector {
       ? checkpoint.replace(GRAPH_BASE_URL, '')
       : `${graphTodoTasksPath(listId)}/delta`;
     const recurringTasks: TaskItem[] = [];
-    const recentCompletedRecurring = new Map<string, { completedAt: string; sourceId: string }>();
-    const nearestOpenRecurring = new Map<string, { dueDate: string | null; updatedAt: string; sourceId: string }>();
     let url = initialUrl;
     let restartedExpiredCheckpoint = false;
 
@@ -1052,37 +1121,6 @@ export class MicrosoftTodoConnector implements IConnector {
         const linkedResources = enrichments.linkedResources.get(graphTask.id);
         if (linkedResources) graphTask.linkedResources = linkedResources;
 
-        if (graphTask.recurrence && graphTask.status === 'completed') {
-          const titleKey = (graphTask.title || '').trim().toLowerCase();
-          const completedAt = graphTask.completedDateTime?.dateTime || graphTask.lastModifiedDateTime || '';
-          const sourceId = `${listId}:${graphTask.id}`;
-          const existing = recentCompletedRecurring.get(titleKey);
-          if (existing && existing.completedAt >= completedAt) continue;
-          if (existing) {
-            removeBufferedRecurringTask(recurringTasks, existing.sourceId);
-          }
-          recentCompletedRecurring.set(titleKey, { completedAt, sourceId });
-        }
-
-        if (graphTask.recurrence && graphTask.status !== 'completed') {
-          const titleKey = (graphTask.title || '').trim().toLowerCase();
-          const openKey = `${titleKey}::${listId}`;
-          const dueDate = graphTask.dueDateTime?.dateTime?.slice(0, 10) || null;
-          const updatedAt = graphTask.lastModifiedDateTime || graphTask.createdDateTime || '';
-          const sourceId = `${listId}:${graphTask.id}`;
-          const existing = nearestOpenRecurring.get(openKey);
-          if (existing) {
-            const existingBetter = compareRecurringOccurrencePriority(
-              existing,
-              { dueDate, updatedAt },
-              getLocalToday(),
-            ) <= 0;
-            if (existingBetter) continue;
-            removeBufferedRecurringTask(recurringTasks, existing.sourceId);
-          }
-          nearestOpenRecurring.set(openKey, { dueDate, updatedAt, sourceId });
-        }
-
         const task = mapGraphTask(graphTask, listId, listName, this.type, this.id, wellKnownListName);
         const checklistTasks = checklistItems.map(item =>
           mapChecklistItem(
@@ -1101,6 +1139,8 @@ export class MicrosoftTodoConnector implements IConnector {
           pageTasks.push(task, ...checklistTasks);
           continue;
         }
+        // Delta checkpoints acknowledge every source ID, so dropping a same-title
+        // occurrence here could permanently hide its completion from local sync.
         recurringTasks.push(task, ...checklistTasks);
       }
 

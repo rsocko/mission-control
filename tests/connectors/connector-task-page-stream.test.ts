@@ -338,7 +338,7 @@ describe('connector task page streams', () => {
     expect(graphFetch).toHaveBeenCalledWith('/me/todo/lists/list-1/tasks/delta');
   });
 
-  it('keeps only the latest completed recurring occurrence across pages and passes', async () => {
+  it.each([undefined, new Date('2026-08-01T00:00:00Z')])('preserves every completed provider occurrence across pages (since: %s)', async (since) => {
     const graphFetch = vi.fn(async (url: string) => {
       if (url === '/me/todo/lists?$top=100') {
         return new Response(JSON.stringify({ value: [{ id: 'list-1', displayName: 'Tasks' }] }));
@@ -371,19 +371,21 @@ describe('connector task page streams', () => {
     const connector = new MicrosoftTodoConnector();
     await connector.initialize(config('todo-completed', 'microsoft-todo', {}));
 
-    const iterator = connector.fetchTasks();
+    const iterator = connector.fetchTasks(since);
     await iterator.next();
     await iterator.next();
     const selected = await iterator.next();
 
     expect(selected.value?.map(task => task.sourceId)).toEqual([
+      'list-1:old-completed',
+      'list-1:old-completed:old-child',
       'list-1:new-completed',
       'list-1:new-completed:new-child',
     ]);
     await iterator.return();
   });
 
-  it('applies open recurring occurrence precedence across network pages', async () => {
+  it.each([undefined, new Date('2026-08-01T00:00:00Z')])('preserves distinct open provider occurrences across pages (since: %s)', async (since) => {
     const graphFetch = vi.fn(async (url: string) => {
       if (url === '/me/todo/lists?$top=100') {
         return new Response(JSON.stringify({ value: [{ id: 'list-1', displayName: 'Tasks' }] }));
@@ -413,14 +415,83 @@ describe('connector task page streams', () => {
     const connector = new MicrosoftTodoConnector();
     await connector.initialize(config('todo-open', 'microsoft-todo', {}));
 
-    const iterator = connector.fetchTasks(new Date('2026-08-01T00:00:00Z'));
+    const iterator = connector.fetchTasks(since);
     await iterator.next();
     await iterator.next();
     const selected = await iterator.next();
 
-    expect(selected.value?.map(task => task.sourceId)).toEqual(['list-1:nearer-open']);
+    expect(selected.value?.map(task => task.sourceId)).toEqual([
+      'list-1:later-open',
+      'list-1:nearer-open',
+    ]);
     await iterator.return();
   });
+
+  it.each([false, true])(
+    'delivers the original completion alongside its replacement after a due-date advance (reverse: %s)',
+    async (reverse) => {
+      const occurrences = [
+        recurringGraphTask('original', 'Daily review', {
+          status: 'completed',
+          createdDateTime: '2020-01-01T00:00:00Z',
+          completedDateTime: { dateTime: '2026-10-21T18:12:47Z', timeZone: 'UTC' },
+        }),
+        recurringGraphTask('other-completed', 'Daily review', {
+          status: 'completed',
+          completedDateTime: { dateTime: '2026-10-21T18:13:00Z', timeZone: 'UTC' },
+        }),
+        recurringGraphTask('replacement', 'Daily review', {
+          createdDateTime: '2026-10-21T18:12:48Z',
+          dueDateTime: { dateTime: '2026-10-22T00:00:00', timeZone: 'UTC' },
+        }),
+      ];
+      if (reverse) occurrences.reverse();
+      const graphFetch = vi.fn(async (url: string, options?: RequestInit) => {
+        if (url === '/me/todo/lists?$top=100') {
+          return Response.json({ value: [{ id: 'list-1', displayName: 'Tasks' }] });
+        }
+        if (url === '/$batch') return emptyChecklistBatch(options);
+        if (url.includes('/tasks/delta')) {
+          return Response.json({
+            value: occurrences,
+            '@odata.deltaLink': 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=advanced',
+          });
+        }
+        throw new Error(`Unexpected Graph request: ${url}`);
+      });
+      clients.microsoft = {
+        graphFetch,
+        substrateFetch: vi.fn(async () => Response.json({ value: [] })),
+      };
+
+      const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
+      const connector = new MicrosoftTodoConnector();
+      await connector.initialize(config('todo-advanced', 'microsoft-todo', {}));
+
+      const tasks = [];
+      for await (const page of connector.fetchTasks(new Date('2026-10-21T18:00:00Z'))) {
+        tasks.push(...page);
+      }
+      expect(tasks).toHaveLength(3);
+      expect(tasks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ sourceId: 'list-1:original', status: 'done' }),
+        expect.objectContaining({ sourceId: 'list-1:other-completed', status: 'done' }),
+        expect.objectContaining({
+          sourceId: 'list-1:replacement',
+          status: 'todo',
+          dueDate: '2026-10-22',
+          createdAt: '2026-10-21T18:12:48Z',
+        }),
+      ]));
+      await connector.commitTaskFetch();
+      expect(taskDelta.replace).toHaveBeenCalledWith(expect.objectContaining({
+        checkpoints: [{
+          listSourceId: 'list-1',
+          deltaLink: 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=advanced',
+        }],
+      }));
+    },
+  );
 
   it('prefetches the next GitHub issues page without accumulating the repository', async () => {
     const graphqlFetch = vi.fn()

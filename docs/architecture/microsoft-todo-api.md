@@ -427,6 +427,56 @@ Mission Control only performs recurrence cleanup or materialization for canonica
 rules whose occurrence owner is `mission-control`, such as completion-anchored
 local tasks.
 
+The Graph delta reader must deliver every occurrence and its checklist items,
+including same-title completed occurrences. Selecting only the latest completed
+or nearest open occurrence before committing a delta checkpoint can hide status
+updates permanently and leave an older local row incorrectly open.
+
+**Skip to current** updates the existing occurrence; it does not create a Mission
+Control successor for a source-backed task. The public Graph API has no dedicated
+skip action. A due-date-only Graph PATCH reproduced a second open provider task
+for both daily and quarterly recurrence. This is an upstream write-side problem,
+not just local successor materialization or dropped delta updates.
+
+Native To Do web app Skip was captured on October 21, 2026 (version 2.134.1).
+It uses `PATCH /taskfolders/{listId}/tasks/{taskId}` through Substrate, sending
+`DueDateTime` **together with the native `Recurrence` definition**:
+
+```json
+{
+  "DueDateTime": { "DateTime": "2026-11-11", "TimeZone": "America/New_York" },
+  "Recurrence": {
+    "FirstDayOfWeek": "Sunday",
+    "RecurrenceType": "Custom",
+    "IntervalType": "Months",
+    "Interval": 3
+  }
+}
+```
+
+Native daily and quarterly Skip each retained the original provider ID and
+produced exactly one open Mission Control row after connector sync. The connector
+uses this native path for recurring date changes, including Skip and worker
+retries. It reads the current provider rule rather than rebuilding it from a
+local recurrence label, excludes read-only native fields, and omits the due date
+from any subsequent Graph update of other fields. A replay whose source date
+already matches performs no date mutation.
+
+Substrate is a private API. Failures must be surfaced, never retried via the unsafe
+Graph date path. Unsupported native rules, relative Graph patterns, and finite
+Graph recurrence ranges fail explicitly rather than losing their semantics.
+The native response must retain the provider ID and confirm the requested date.
+Non-recurring date writes and completion continue using Graph.
+
+After deploying, run a full connector sync to reread source state rather
+than relying on an incremental checkpoint that already acknowledged those updates.
+For cleanup, compare both linked tasks in To Do first. Deleting a Microsoft To Do
+task in Mission Control also deletes it upstream; creation date alone does not
+identify a disposable copy. If both are genuinely open upstream, preserve the
+intended recurrence and any unique checklist, notes, and local organization before
+deleting the unwanted upstream task. Do not complete an unwanted copy merely to
+remove it, since completion can generate another recurrence.
+
 ---
 
 ## How the To Do Web App Works

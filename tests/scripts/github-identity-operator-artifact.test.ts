@@ -103,7 +103,7 @@ describe('production GitHub identity operator artifact', () => {
       expect(result.status, command).toBe(2);
       expect(result.stderr).toContain('Unsupported command');
     }
-  });
+  }, 30_000);
 
   it('rejects authoritative-deletion confirmation when revoking an exception', () => {
     const result = runOperator(

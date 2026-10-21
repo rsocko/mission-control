@@ -451,6 +451,11 @@ if (connectionString) {
         expectedTransactionVersion: null,
         now: NOW,
       };
+      await expect(attribution.applyManualDecision({
+        ...decision,
+        idempotencyKey: 'pg-manual-decision-0002',
+        kidId: 'kid-unknown',
+      })).rejects.toMatchObject({ code: 'unknown_attribution_subject', status: 409 });
       await expect(attribution.applyManualDecision(decision)).resolves.toMatchObject({
         status: 'resolved',
         replayed: false,
@@ -464,11 +469,6 @@ if (connectionString) {
         kidId: 'kid-one',
         action: 'parent-expense',
       })).rejects.toMatchObject({ code: 'invalid_manual_decision', status: 400 });
-      await expect(attribution.applyManualDecision({
-        ...decision,
-        idempotencyKey: 'pg-manual-decision-0002',
-        kidId: 'kid-unknown',
-      })).rejects.toMatchObject({ code: 'unknown_attribution_subject', status: 409 });
       await expect(attribution.applyManualDecision({
         ...decision,
         idempotencyKey: 'pg-manual-decision-0003',

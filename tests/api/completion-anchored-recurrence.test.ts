@@ -1,6 +1,14 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { parseTaskMetadataCompat } from '@/lib/tasks/metadata-compat';
 import { canonicalizeLegacyRecurrence } from '@/lib/recurrence/canonical';
+
+const { sourceDateUpdate } = vi.hoisted(() => ({
+  sourceDateUpdate: vi.fn(async () => ({ status: 'todo' })),
+}));
+
+vi.mock('@/lib/connectors/runtime', () => ({
+  getOrInitializeConnector: vi.fn(async () => ({ updateTask: sourceDateUpdate })),
+}));
 
 vi.mock('@/lib/semantic-index/publication-service', () => ({
   publishSemanticEntityDelete: vi.fn(async () => undefined),
@@ -42,6 +50,10 @@ describe('completion-anchored task recurrence', () => {
     delete process.env.MC_DB_PATH;
     delete process.env.MC_MODE;
     delete process.env.TZ;
+  });
+
+  afterEach(() => {
+    process.env.MC_MODE = 'demo';
   });
 
   it('preserves the completed occurrence and creates one associated successor', async () => {
@@ -539,6 +551,98 @@ describe('completion-anchored task recurrence', () => {
     await expect(response.json()).resolves.toMatchObject({
       error: 'This recurrence is owned by its provider and must be changed there',
     });
+  });
+
+  it('advances a source-backed due date in place without materializing a local successor', async () => {
+    const id = 'source-backed-skip';
+    const createdAt = '2020-01-01T00:00:00.000Z';
+    await db.insert(schema.connectorConfigs).values({
+      id: 'todo-skip',
+      type: 'microsoft-todo',
+      name: 'To Do skip test',
+      capabilities: {
+        read: true, write: true, delete: true, sync: true,
+        subtasks: true, lists: true, tags: true, tagWriteBack: true,
+        dueDate: true,
+      },
+      createdAt,
+      updatedAt: createdAt,
+    });
+    const providerRule = canonicalizeLegacyRecurrence({
+      recurrence: 'weekly',
+      mode: 'schedule',
+      startDate: '2026-09-21',
+      timezone: 'UTC',
+      seriesIdentity: {
+        kind: 'connector',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-skip',
+        externalSeriesId: 'original',
+        stability: 'derived',
+      },
+      source: {
+        owner: 'connector',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-skip',
+        support: { status: 'supported', reasons: [] },
+        raw: {},
+      },
+    });
+    await db.insert(schema.tasks).values({
+      id,
+      sourceId: 'list:original',
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-skip',
+      title: 'Source-backed skip',
+      status: 'todo',
+      dueDate: '2026-09-21',
+      createdAt,
+      updatedAt: createdAt,
+      lastSyncedAt: createdAt,
+      metadata: JSON.stringify({ recurrence: 'weekly', canonicalRecurrence: providerRule }),
+    });
+    await db.insert(schema.taskSchedules).values({
+      taskId: id,
+      scheduledDate: '2026-09-21',
+      recurrence: 'weekly',
+      recurrenceMode: 'schedule',
+    });
+    const beforeCount = sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get();
+
+    process.env.MC_MODE = 'live';
+    sourceDateUpdate.mockClear();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await patchTask(new Request(`http://localhost/api/tasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dueDate: '2026-10-26' }),
+      }), { params: Promise.resolve({ id }) });
+      expect(response.status).toBe(200);
+      expect(await response.json()).not.toHaveProperty('recurrenceNextTaskId');
+      await vi.waitFor(() => {
+        expect(sourceDateUpdate).toHaveBeenCalledTimes(attempt + 1);
+        expect(sqlite.prepare('SELECT sync_status FROM tasks WHERE id = ?').get(id))
+          .toMatchObject({ sync_status: 'synced' });
+      });
+    }
+    expect(sourceDateUpdate).toHaveBeenLastCalledWith('list:original', expect.objectContaining({
+      dueDate: '2026-10-26',
+    }));
+
+    const task = sqlite.prepare(
+      'SELECT source_id, status, due_date, created_at, metadata FROM tasks WHERE id = ?',
+    ).get(id) as { metadata: string };
+    expect(task).toMatchObject({
+      source_id: 'list:original',
+      status: 'todo',
+      due_date: '2026-10-26',
+      created_at: createdAt,
+    });
+    expect(parseTaskMetadataCompat(task.metadata).metadata.canonicalRecurrence).toEqual(providerRule);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual(beforeCount);
+    expect(sqlite.prepare(
+      'SELECT task_id FROM task_recurrence_occurrences WHERE task_id = ?',
+    ).all(id)).toHaveLength(0);
   });
 
   it('rejects unsupported local recurrence strings instead of approximating them', async () => {

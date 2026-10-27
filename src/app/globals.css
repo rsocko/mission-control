@@ -531,7 +531,7 @@ html:not([data-navigated]) ::view-transition-new(main-content) {
   padding-bottom: var(--safe-area-inset-bottom);
 }
 
-/* The application shell owns the visual viewport; routes own scrolling within it. */
+/* RootLayout clips document overflow; the shell owns the viewport and routes own scrolling. */
 .app-viewport {
   height: 100vh;
   height: 100dvh;

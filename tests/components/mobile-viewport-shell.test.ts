@@ -7,6 +7,14 @@ function readSource(path: string) {
 }
 
 describe('mobile viewport shell contract', () => {
+  it('bounds the document and clips positioned overflow outside the app shell', () => {
+    const layout = readSource('src/app/layout.tsx');
+
+    expect(layout).toContain('h-full overflow-hidden antialiased dark');
+    expect(layout).toContain('<body className="relative h-full overflow-clip flex flex-col');
+    expect(layout).not.toContain('min-h-full flex flex-col');
+  });
+
   it('uses a dynamic viewport with a legacy fallback and internal scrolling', () => {
     const styles = readSource('src/app/globals.css');
     const shell = readSource('src/components/layout/AppShell.tsx');

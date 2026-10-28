@@ -71,10 +71,10 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full overflow-hidden antialiased dark`}
       style={{ backgroundColor: APP_DARK_BACKGROUND }}
     >
-      <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--text-primary)]" style={{ backgroundColor: APP_DARK_BACKGROUND }}>
+      <body className="relative h-full overflow-clip flex flex-col bg-[var(--background)] text-[var(--text-primary)]" style={{ backgroundColor: APP_DARK_BACKGROUND }}>
         <SerwistProvider swUrl="/serwist/sw.js">
         <ReactQueryProvider>
         <AppMotionProvider>

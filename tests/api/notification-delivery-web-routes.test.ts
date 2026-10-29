@@ -394,9 +394,9 @@ describe('notification delivery web routes', () => {
     expect(pushResponse.status).toBe(200);
     expect(calls.creationInputs).toEqual([
       expect.objectContaining({
-        sourceId: expect.stringContaining('push:triage_nudge:'),
+        sourceId: 'push:triage_nudge',
         dedupeKey: expect.stringContaining('push:triage_nudge:'),
-        occurrenceKey: '6',
+        occurrenceKey: expect.stringMatching(/^\d{4}-\d{2}-\d{2}:6$/),
       }),
     ]);
   });

@@ -2525,7 +2525,10 @@ The adapters preserve these workflow boundaries:
   required retry safety; no additional lock namespace is introduced. Startup
   registers the same backend-neutral morning, triage-nudge, carry-forward, and
   Home Assistant summary handlers before starting the scheduler under either
-  database backend.
+  database backend. Triage nudges reuse the stable `push:triage_nudge` source
+  identity across days and queue growth; date-and-count delivery occurrences
+  retain daily high-water deduplication without accumulating inbox cards.
+  Migrations collapse existing triage nudges to the newest record.
 - Notification triage extracts only its pure classifier. The broader AI triage
   route and its SQLite-backed historical query remain outside this layer.
 

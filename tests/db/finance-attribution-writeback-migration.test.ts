@@ -32,9 +32,12 @@ describe('attribution write-back migrations', () => {
     const sqlite = readFileSync(join('drizzle', '0159_finance_attribution_writeback.sql'), 'utf8');
     const postgres = readFileSync(join('drizzle', 'postgres', '0037_finance_attribution_writeback.sql'), 'utf8');
     expect(postgres).toBe(sqlite);
-    for (const path of [join('drizzle', 'meta', '_journal.json'), join('drizzle', 'postgres', 'meta', '_journal.json')]) {
+    for (const [path, index, tag] of [
+      [join('drizzle', 'meta', '_journal.json'), 159, '0159_finance_attribution_writeback'],
+      [join('drizzle', 'postgres', 'meta', '_journal.json'), 37, '0037_finance_attribution_writeback'],
+    ] as const) {
       const journal = JSON.parse(readFileSync(path, 'utf8'));
-      expect(journal.entries.at(-1).tag).toMatch(/finance_attribution_writeback$/);
+      expect(journal.entries[index]).toMatchObject({ idx: index, tag });
     }
   });
 });

@@ -277,7 +277,7 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(38);
+    expect(migrations).toHaveLength(39);
     expect(migrations).toContain('0020_paperclip_provider_config.sql');
     expect(migrations).toContain('0021_tough_arachne.sql');
     expect(migrations).toContain('0022_exotic_ben_urich.sql');
@@ -296,6 +296,7 @@ describe('PostgreSQL schema', () => {
     expect(migrations).toContain('0035_clumsy_galactus.sql');
     expect(migrations).toContain('0036_finance_transaction_location_evidence.sql');
     expect(migrations).toContain('0037_finance_attribution_writeback.sql');
+    expect(migrations).toContain('0038_dedupe_triage_notifications.sql');
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.

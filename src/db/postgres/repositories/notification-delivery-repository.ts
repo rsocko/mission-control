@@ -1506,8 +1506,12 @@ export function createPostgresNotificationDeliveryRepository(
           WHERE connector_type = 'system'
             AND connector_instance_id = 'push-triggers'
             AND template_key = 'triage_nudge'
-            AND source_id LIKE $1
-        `, [`${sourcePrefix.replace(/[%_\\]/g, '\\$&')}%`]);
+            AND (source_id LIKE $1
+              OR (source_id = 'push:triage_nudge' AND dedupe_key = $2))
+        `, [
+          `${sourcePrefix.replace(/[%_\\]/g, '\\$&')}%`,
+          `push:triage_nudge:${localDate}`,
+        ]);
         let highWater: number | null = null;
         for (const row of prior.rows) {
           const metadata = asObject(row.metadata);

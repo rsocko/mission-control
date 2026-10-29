@@ -519,8 +519,12 @@ export function createSqliteNotificationDeliveryRepository(
           WHERE connector_type = 'system'
             AND connector_instance_id = 'push-triggers'
             AND template_key = 'triage_nudge'
-            AND source_id LIKE ? ESCAPE '\\'
-        `).all(`${sourcePrefix.replace(/[%_\\]/g, '\\$&')}%`) as Array<{
+            AND (source_id LIKE ? ESCAPE '\\'
+              OR (source_id = 'push:triage_nudge' AND dedupe_key = ?))
+        `).all(
+          `${sourcePrefix.replace(/[%_\\]/g, '\\$&')}%`,
+          `push:triage_nudge:${localDate}`,
+        ) as Array<{
           source_id: string;
           metadata: unknown;
         }>;

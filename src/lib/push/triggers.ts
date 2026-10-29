@@ -28,9 +28,8 @@ type ScheduledPushPayload = Omit<MissionControlPushPayload, 'notificationId' | '
  * Write a notification record to the notifications table so it shows
  * in the mobile notification screen alongside push delivery.
  *
- * Uses a date-based dedupeKey for daily idempotency — if a notification
- * with the same dedupeKey already exists, the insert is skipped and
- * the function returns null (caller should skip push delivery).
+ * Daily summaries use date-based identities. Recurring triage nudges reuse
+ * one inbox record, with separate occurrence keys for delivery idempotency.
  */
 async function writeNotificationRecord(opts: {
   title: string;
@@ -39,13 +38,14 @@ async function writeNotificationRecord(opts: {
   category: string;
   level: 'fyi' | 'heads_up';
   navigationTarget?: string;
+  sourceId?: string;
   occurrenceKey?: string;
   metadata?: Record<string, unknown>;
 }): Promise<CreateNotificationResult> {
   const today = getLocalToday();
   const dedupeKey = `push:${opts.templateKey}:${today}`;
   return createNotification({
-    sourceId: opts.occurrenceKey ? `${dedupeKey}:${opts.occurrenceKey}` : dedupeKey,
+    sourceId: opts.sourceId ?? dedupeKey,
     connectorType: 'system',
     connectorInstanceId: 'push-triggers',
     title: opts.title,
@@ -56,6 +56,7 @@ async function writeNotificationRecord(opts: {
     dedupeKey,
     navigationTarget: opts.navigationTarget,
     occurrenceKey: opts.occurrenceKey,
+    sourceActivityKey: opts.occurrenceKey,
     metadata: opts.metadata,
   });
 }
@@ -177,7 +178,8 @@ export async function triggerMorningNotification(): Promise<boolean> {
  * #1540 — Triage queue threshold nudge.
  *
  * Sends a notification when unprocessed triage items exceed the threshold.
- * Includes deduplication to prevent re-notifying for the same breach.
+ * Reuses one notification across days and queue growth, while deduplicating
+ * delivery for each daily high-water mark.
  */
 export async function triggerTriageNudge(): Promise<boolean> {
   const repository = (await getWorkerPersistenceRepositories()).notificationDelivery;
@@ -210,7 +212,8 @@ export async function triggerTriageNudge(): Promise<boolean> {
     category: 'tasks',
     level: 'heads_up',
     navigationTarget: '/triage',
-    occurrenceKey: String(count),
+    sourceId: 'push:triage_nudge',
+    occurrenceKey: `${today}:${count}`,
     metadata: { queueSize: count },
   });
   logger.info(
@@ -225,7 +228,7 @@ export async function triggerTriageNudge(): Promise<boolean> {
     },
     'Triage nudge created',
   );
-  return result.created && result.deliveryEvents.some(event => event.status === 'pending');
+  return result.deliveryEvents.some(event => event.status === 'pending');
 }
 
 /**

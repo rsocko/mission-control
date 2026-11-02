@@ -46,6 +46,17 @@
   "content_scripts": [
     {
       "matches": [
+        "https://twitter.com/*",
+        "https://x.com/*",
+        "https://www.twitter.com/*",
+        "https://www.x.com/*"
+      ],
+      "js": ["page-fetch-relay.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
         "<all_urls>"
       ],
       "js": [
@@ -107,7 +118,9 @@
     {
       "matches": [
         "https://twitter.com/*",
-        "https://x.com/*"
+        "https://x.com/*",
+        "https://www.twitter.com/*",
+        "https://www.x.com/*"
       ],
       "js": [
         "content-scripts/import/common.js",

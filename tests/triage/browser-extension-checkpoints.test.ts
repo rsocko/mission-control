@@ -37,7 +37,10 @@ function item(id: string): Item {
   return { sourceId: id, sourceUrl: `https://example.com/${id}` };
 }
 
-function loadCommon(histories = new Map<string, Checkpoint>()) {
+function loadCommon(
+  histories = new Map<string, Checkpoint>(),
+  batchResult = (items: Item[]) => ({ imported: items.length, skipped: 0, errors: [] as string[] }),
+) {
   const window = new Window({ url: 'https://www.reddit.com/user/test/saved' });
   let failId: string | null = null;
   let storageError = false;
@@ -56,7 +59,7 @@ function loadCommon(histories = new Map<string, Checkpoint>()) {
       if (message.items.some((entry: Item) => entry.sourceId === failId)) {
         return { imported: 0, skipped: 0, errors: ['Server rejected batch'] };
       }
-      return { imported: message.items.length, skipped: 0, errors: [] };
+      return batchResult(message.items);
     }
     return {};
   });
@@ -77,6 +80,23 @@ function options(fetchPage: (cursor: number) => Promise<{ items: Item[]; nextCur
 }
 
 describe('browser-local import checkpoints', () => {
+  it('continues past 99 local duplicates and an acknowledged refresh into unfinished Reddit history', async () => {
+    const known = Array.from({ length: 99 }, (_, index) => item(`known-${index}`));
+    const harness = loadCommon(new Map([['test/saved', {
+      seenIds: known.map((entry) => entry.sourceId), completed: false,
+    }]]), (items) => items[0].sourceId === 'refreshed'
+      ? { imported: 0, skipped: 1, errors: [] }
+      : { imported: items.length, skipped: 0, errors: [] });
+    const fetchPage = vi.fn(async (cursor: number) => cursor === 0
+      ? { items: [item('refreshed'), ...known], nextCursor: 1 }
+      : { items: [item('oldest')], nextCursor: null });
+    expect(await harness.common.runPagedImport(options(fetchPage))).toMatchObject({
+      imported: 1, skipped: 100, completed: true, errors: [],
+    });
+    expect(fetchPage.mock.calls.map(([cursor]) => cursor)).toEqual([0, 1]);
+    expect(harness.histories.get('test/saved')?.seenIds).toContain('refreshed');
+  });
+
   it('resolves Reddit /user/me to the actual account instead of sharing an account-agnostic checkpoint', async () => {
     const window = new Window({ url: 'https://www.reddit.com/user/me/saved' });
     const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ name: 'actual-account' }) }));
@@ -278,7 +298,7 @@ describe('background import ownership', () => {
       let listener: Listener;
       const session = { importState_reddit: { tabId: 1, runId: 'current', done: false, apiUrl: 'https://mc.example.com' } };
       const config = { apiUrl: 'https://mc.example.com', captureKey: 'test-key' };
-      const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ imported: 1, skipped: 0, errors: [] }) }));
+      const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ imported: 0, skipped: 0, refreshed: 1, errors: [] }) }));
       vm.runInContext(fs.readFileSync(path.join(extensionDir, 'background/bulk-import.js'), 'utf8'), vm.createContext({
         chrome: {
           storage: { session: storageArea(session), sync: storageArea(config) },
@@ -292,7 +312,7 @@ describe('background import ownership', () => {
       expect((await send('old')).error).toContain('no longer active');
       expect((await send('current', 2)).error).toContain('no longer active');
       expect(fetch).not.toHaveBeenCalled();
-      expect(await send('current')).toEqual({ imported: 1, skipped: 0, errors: [] });
+      expect(await send('current')).toEqual({ imported: 0, skipped: 1, errors: [] });
       expect(fetch).toHaveBeenCalledOnce();
       config.apiUrl = 'https://other.example.com';
       expect((await send('current')).error).toContain('settings changed');
@@ -337,7 +357,7 @@ describe('background import ownership', () => {
   describe('extension import context UI', () => {
     it.each(['https://x.com/i/history', 'https://x.com/i/bookmarks', 'https://twitter.com/alice/likes?tab=all'])('recognizes the X saved route %s', async (url) => {
       const { window } = await loadPopup(url);
-      expect(window.document.getElementById('importBtn')?.textContent).toBe('Start Capture');
+      expect(window.document.getElementById('importBtn')?.textContent).toBe('Import Saved Items');
       expect(window.document.getElementById('importBanner')?.getAttribute('data-needs-redirect')).toBe('false');
     });
 
@@ -347,7 +367,7 @@ describe('background import ownership', () => {
       });
       await vi.waitFor(() => expect(harness.window.document.getElementById('activeImports')?.textContent).toContain('Instagram: 13 imported, 603 skipped in another tab'));
       harness.progress({ type: 'mc-import-progress', platform: 'instagram', imported: 20, done: false }, 2);
-      expect(harness.window.document.getElementById('importBtn')?.textContent).toBe('Start Capture');
+      expect(harness.window.document.getElementById('importBtn')?.textContent).toBe('Import Saved Items');
       expect(harness.window.document.getElementById('importStatus')?.textContent).toBe('');
       harness.window.document.querySelector<HTMLButtonElement>('#activeImports button')?.click();
       await vi.waitFor(() => expect(harness.chrome.tabs.update).toHaveBeenCalledWith(2, { active: true }));
@@ -368,7 +388,7 @@ describe('background import ownership', () => {
         importState_twitter: { tabId: 2, imported: 4, done: false, live: true },
       });
       await vi.waitFor(() => expect(harness.window.document.querySelector<HTMLButtonElement>('#importBtn')?.disabled).toBe(true));
-      expect(harness.window.document.getElementById('importBtn')?.textContent).toBe('Start Capture');
+      expect(harness.window.document.getElementById('importBtn')?.textContent).toBe('Import Saved Items');
       expect(harness.window.document.getElementById('importStatus')?.textContent).toContain('another tab');
     });
   });

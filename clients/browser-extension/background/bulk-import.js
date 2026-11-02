@@ -20,7 +20,8 @@
     if (!response.ok) throw new Error(data.error || `Bulk import failed: ${response.status}`);
     return {
       imported: data.imported ?? 0,
-      skipped: data.skipped ?? 0,
+      // Refreshed items already exist; count them as acknowledged duplicates.
+      skipped: (data.skipped ?? 0) + (data.refreshed ?? 0),
       errors: Array.isArray(data.errors) ? data.errors : [],
     };
   }

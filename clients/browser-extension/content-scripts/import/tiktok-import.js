@@ -73,6 +73,7 @@ async function fetchCollections(secUid) {
       const response = await relayFetch(url, { credentials: 'include' });
       if (!response.ok) throw new Error(`TikTok collection_list failed: ${response.status}`);
       const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+      if (!Array.isArray(data?.collectionList)) throw new Error('TikTok did not return a collections list. Refresh the page and try again.');
       return {
         items: Array.isArray(data?.collectionList) ? data.collectionList : [],
         nextCursor: data?.hasMore ? data.cursor || cursor + TIKTOK_COLLECTION_PAGE_SIZE : null,
@@ -84,16 +85,21 @@ async function fetchCollections(secUid) {
 /**
  * Fetch items from a single collection.
  */
-async function fetchCollectionItems(collectionId) {
-  const { collectPages, relayFetch } = window.MCImportCommon;
-  return collectPages({
+async function fetchCollectionItems(collectionId, session, username, collectionName) {
+  const { runPagedImport, relayFetch } = window.MCImportCommon;
+  return runPagedImport({
+    platform: 'tiktok',
+    session,
+    ordered: false,
     maxPages: TIKTOK_MAX_PAGES,
     initialCursor: 0,
+    normalizeItems: (items) => items.map((item) => normalizeTikTokItem(item, username, collectionName, collectionId)),
     async fetchPage(cursor) {
       const url = `https://www.tiktok.com/api/collection/item_list/?aid=1988&count=${TIKTOK_ITEM_PAGE_SIZE}&cursor=${cursor}&collectionId=${collectionId}&sourceType=113`;
       const response = await relayFetch(url, { credentials: 'include' });
       if (!response.ok) throw new Error(`TikTok item_list failed: ${response.status}`);
       const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+      if (!Array.isArray(data?.itemList)) throw new Error('TikTok did not return an items list. Refresh the page and try again.');
       return {
         items: Array.isArray(data?.itemList) ? data.itemList : [],
         nextCursor: data?.hasMore ? data.cursor || cursor + TIKTOK_ITEM_PAGE_SIZE : null,
@@ -144,6 +150,7 @@ async function runTikTokImport() {
 
   reportProgress('tiktok', { imported: 0, skipped: 0, done: false });
   const session = createImportSession('tiktok', TIKTOK_BATCH_SIZE);
+  let completed = true;
 
   // Fetch all collections
   let collections;
@@ -164,24 +171,23 @@ async function runTikTokImport() {
     const collectionId = collection.id;
     const collectionName = collection.name || `Collection ${collectionId}`;
 
-    let items;
+    const collectionSession = createImportSession('tiktok', TIKTOK_BATCH_SIZE, `${secUid}/collection/${collectionId}`, session.snapshot);
     try {
-      items = await fetchCollectionItems(collectionId);
+      const result = await fetchCollectionItems(collectionId, collectionSession, username, collectionName);
+      session.merge(result);
+      completed &&= result.completed;
     } catch (err) {
       session.addError(new Error(`Collection "${collectionName}": ${err.message}`));
+      completed = false;
       continue;
     }
-
-    const normalized = items.map((item) => normalizeTikTokItem(item, username, collectionName, collectionId)).filter(Boolean);
-    await session.submit(normalized);
   }
 
-  session.finish();
+  await session.finish({ completed: completed && !session.snapshot().errors.length, hint: completed ? 'Finished available collections.' : 'History incomplete. Run again to continue.' });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'mc-start-import' && message.platform === 'tiktok') {
-    runTikTokImport();
-    sendResponse({ started: true });
+    window.MCImportCommon.startImport('tiktok', runTikTokImport, message, sendResponse);
   }
 });

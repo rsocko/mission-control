@@ -79,6 +79,7 @@ async function fetchPinterestBoards(csrfToken, username) {
       });
       if (!response.ok) throw new Error(`Pinterest BoardsResource failed: ${response.status}`);
       const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+      if (!Array.isArray(data?.resource_response?.data)) throw new Error('Pinterest did not return a boards list. Refresh the page and try again.');
       const next = data?.resource_response?.bookmark;
       return {
         items: Array.isArray(data?.resource_response?.data) ? data.resource_response.data : [],
@@ -91,11 +92,15 @@ async function fetchPinterestBoards(csrfToken, username) {
 /**
  * Fetch pins from a single board.
  */
-async function fetchBoardPins(csrfToken, username, boardId, boardSlug) {
-  const { collectPages, relayFetch } = window.MCImportCommon;
-  return collectPages({
+async function fetchBoardPins(csrfToken, username, boardId, boardSlug, session, boardName) {
+  const { runPagedImport, relayFetch } = window.MCImportCommon;
+  return runPagedImport({
+    platform: 'pinterest',
+    session,
+    ordered: false,
     maxPages: PINTEREST_MAX_PAGES,
     initialCursor: null,
+    normalizeItems: (pins) => pins.map((pin) => normalizePinterestPin(pin, boardName, boardId)),
     async fetchPage(bookmark) {
       const options = { board_id: boardId, field_set_key: 'partner_react_grid_pin' };
       if (bookmark) options.bookmarks = [bookmark];
@@ -108,6 +113,7 @@ async function fetchBoardPins(csrfToken, username, boardId, boardSlug) {
       });
       if (!response.ok) throw new Error(`Pinterest BoardFeedResource failed: ${response.status}`);
       const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+      if (!Array.isArray(data?.resource_response?.data)) throw new Error('Pinterest did not return a pins list. Refresh the page and try again.');
       const next = data?.resource_response?.bookmark;
       return {
         items: Array.isArray(data?.resource_response?.data) ? data.resource_response.data : [],
@@ -159,6 +165,7 @@ async function runPinterestImport() {
 
   reportProgress('pinterest', { imported: 0, skipped: 0, done: false });
   const session = createImportSession('pinterest', PINTEREST_BATCH_SIZE);
+  let completed = true;
 
   // Check if we're on a specific board page
   const boardInfo = extractPinterestBoard();
@@ -206,25 +213,23 @@ async function runPinterestImport() {
       continue;
     }
 
-    let pins;
+    const boardSession = createImportSession('pinterest', PINTEREST_BATCH_SIZE, `${username}/board/${boardId}`, session.snapshot);
     try {
-      pins = await fetchBoardPins(csrfToken, username, boardId, boardSlug);
+      const result = await fetchBoardPins(csrfToken, username, boardId, boardSlug, boardSession, boardName);
+      session.merge(result);
+      completed &&= result.completed;
     } catch (err) {
       session.addError(new Error(`Board "${boardName}": ${err.message}`));
+      completed = false;
       continue;
     }
-
-    const normalized = pins.map((pin) => normalizePinterestPin(pin, boardName, boardId)).filter(Boolean);
-
-    await session.submit(normalized);
   }
 
-  session.finish();
+  await session.finish({ completed: completed && !session.snapshot().errors.length, hint: completed ? 'Finished available boards.' : 'History incomplete. Run again to continue.' });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'mc-start-import' && message.platform === 'pinterest') {
-    runPinterestImport();
-    sendResponse({ started: true });
+    window.MCImportCommon.startImport('pinterest', runPinterestImport, message, sendResponse);
   }
 });

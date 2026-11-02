@@ -216,7 +216,10 @@ function startTwitterCapture() {
 
   sentIds = new Set();
   consecutiveHighSkipBatches = 0;
-  importSession = createImportSession('twitter', TWITTER_BATCH_SIZE);
+  const account = document.cookie.split('; ').find((cookie) => cookie.startsWith('twid='))?.slice(5);
+  const profile = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]')?.getAttribute('href');
+  const username = profile?.match(/^\/([^/]+)\/?$/)?.[1];
+  importSession = createImportSession('twitter', TWITTER_BATCH_SIZE, `${account || username || `unknown-${Date.now()}`}:${window.location.pathname}`);
   processing = Promise.resolve();
 
   stopObserving = observeFetch(TWITTER_GRAPHQL_PATTERNS, (url, body) => {
@@ -240,7 +243,7 @@ async function finishTwitterCapture() {
     stopObserving = null;
   }
   await processing;
-  importSession?.finish();
+  await importSession?.finish({ completed: false, hint: 'Capture finished. Keep scrolling in a later capture to import older items; full history is not confirmed.' });
   importSession = null;
 }
 
@@ -248,8 +251,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.platform !== 'twitter') return undefined;
 
   if (message.type === 'mc-start-import') {
-    startTwitterCapture();
-    sendResponse({ started: true });
+    window.MCImportCommon.startImport('twitter', startTwitterCapture, message, sendResponse);
   } else if (message.type === 'mc-stop-import') {
     finishTwitterCapture().then(() => sendResponse({ stopped: true }));
     return true;

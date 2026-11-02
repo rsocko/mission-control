@@ -1,9 +1,12 @@
 (function () {
   const CONFIG_ERROR = 'Mission Control is not configured — open the extension popup and save your settings first.';
 
-  async function postBulkItems(items, options = {}) {
+  async function postBulkItems(items, options = {}, expectedApiUrl) {
     const { apiUrl, captureKey } = await chrome.storage.sync.get(['apiUrl', 'captureKey']);
     if (!apiUrl || !captureKey) throw new Error(CONFIG_ERROR);
+    if (expectedApiUrl != null && apiUrl !== expectedApiUrl) {
+      throw new Error('Mission Control settings changed during this import. Reload the source tab and start again.');
+    }
 
     const response = await fetch(`${apiUrl}/api/triage/import/bulk`, {
       method: 'POST',
@@ -64,7 +67,17 @@
     return { imported, skipped, errors, closed, batchId };
   }
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  async function importBatch(message, sender) {
+    const key = `importState_${message.platform}`;
+    const data = await chrome.storage.session.get(key);
+    const state = data[key];
+    if (!state || state.done || state.tabId !== sender.tab?.id || state.runId !== message.runId) {
+      throw new Error('This import is no longer active. Start a new import from the extension.');
+    }
+    return postBulkItems(message.items, { refreshThumbnails: true }, state.apiUrl);
+  }
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type === 'mc-send-tabs-batch') {
       sendTabs(message)
         .then(sendResponse)
@@ -73,7 +86,7 @@
     }
 
     if (message?.type === 'mc-bulk-import-batch') {
-      postBulkItems(message.items, { refreshThumbnails: true })
+      importBatch(message, sender)
         .then(sendResponse)
         .catch((error) => sendResponse({ error: error.message || 'Network error reaching Mission Control' }));
       return true;

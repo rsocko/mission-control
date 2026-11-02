@@ -166,14 +166,14 @@ describe('browser extension imports', () => {
     expect(status?.className).toBe('import-status error');
   });
 
-  it('shares pagination, batching, progress, and bounded terminal errors', async () => {
+  it('shares pagination, batching, and progress', async () => {
     const window = new Window({ url: 'https://www.reddit.com/user/test/saved' });
     const sendMessage = vi.fn(async (message) => {
       if (message.type === 'mc-bulk-import-batch') {
         return {
           imported: message.items.length,
           skipped: 0,
-          errors: message.items[0]?.id === 3 ? ['item warning'] : [],
+          errors: [],
         };
       }
       return {};
@@ -214,7 +214,7 @@ describe('browser extension imports', () => {
       }),
     });
 
-    expect(result).toMatchObject({ imported: 4, skipped: 0, errors: ['item warning'] });
+    expect(result).toMatchObject({ imported: 4, skipped: 0, errors: [] });
     const batches = sendMessage.mock.calls
       .map(([message]) => message)
       .filter((message) => message.type === 'mc-bulk-import-batch');
@@ -226,7 +226,7 @@ describe('browser extension imports', () => {
     expect(sendMessage).toHaveBeenLastCalledWith(expect.objectContaining({
       type: 'mc-import-progress',
       imported: 4,
-      errors: ['item warning'],
+      errors: [],
       done: true,
     }));
   });

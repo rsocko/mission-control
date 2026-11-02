@@ -22,7 +22,7 @@ const SOURCES = [
     id: 'twitter',
     name: 'X / Twitter',
     icon: 'icons/sources/twitter.svg',
-    url: 'https://x.com/i/bookmarks',
+    url: 'https://x.com/i/history',
     hostMatch: ['x.com', 'twitter.com'],
     importable: true,
     // X's Bookmarks/Likes API is undocumented and rotates often, so instead of
@@ -30,13 +30,14 @@ const SOURCES = [
     // captures tweets as the user scrolls their own timeline. The popup shows
     // a Start/Finish toggle instead of a single "Import" action.
     livePassive: true,
-    readyPattern: /\/(i\/bookmarks|[^/]+\/likes)/i,
+    readyPattern: /^https:\/\/(?:www\.)?(?:x|twitter)\.com\/(?:i\/(?:bookmarks|history)(?:\/|[?#]|$)|[^/]+\/likes(?:\/|[?#]|$))/i,
   },
 ];
 
 let currentTab = null;
 let initRequestId = 0;
 let panelWindowId = null;
+let restoreRequestId = 0;
 
 function closeTransientUi() {
   if (!isSidePanel) window.close();
@@ -76,7 +77,7 @@ async function init() {
 
   const matchesHost = (source) => {
     const patterns = Array.isArray(source.hostMatch) ? source.hostMatch : [source.hostMatch];
-    return patterns.some((p) => activeHost.includes(p));
+    return patterns.some((p) => activeHost === p || activeHost.endsWith(`.${p}`));
   };
   const matchedSource = SOURCES.find(s => s.importable && matchesHost(s));
 
@@ -108,6 +109,7 @@ async function showOpenMcBtn() {
 function renderDynamicContent({ tab, isInternal, matchedSource }) {
   const container = $('dynamicContent');
   let html = '';
+  html += '<div id="activeImports" class="import-status" role="status" aria-live="polite"></div>';
 
   // Import banner (if on an importable site)
   if (matchedSource) {
@@ -145,7 +147,9 @@ function renderDynamicContent({ tab, isInternal, matchedSource }) {
             : desc}
         </div>
         <button class="${primaryBtnClass}" id="importBtn" type="button">${primaryBtnLabel}</button>
-        <div class="import-status" id="importStatus"></div>
+        <div class="import-status" id="importStatus" role="status" aria-live="polite"></div>
+        <div class="import-history" id="importHistory"></div>
+        <button class="history-reset" id="resetHistoryBtn" type="button">Rescan saved history</button>
       </div>
     `;
   }
@@ -210,6 +214,7 @@ function renderDynamicContent({ tab, isInternal, matchedSource }) {
 
   // Add "Send All Tabs" trigger button (always shown in main view)
   sendTabsController.renderTrigger(container);
+  restoreImportUi(matchedSource, tab?.id);
 }
 
 /**
@@ -246,11 +251,10 @@ function bindEvents(matchedSource) {
   if (matchedSource) {
     const importBtn = $('importBtn');
     const banner = $('importBanner');
-    const needsRedirect = banner?.dataset.needsRedirect === 'true';
 
     if (importBtn) {
       importBtn.addEventListener('click', async () => {
-        if (needsRedirect) {
+        if (banner?.dataset.needsRedirect === 'true') {
           // Navigate to the correct page — import will be available there
           const targetUrl = await resolveRedirectUrl(matchedSource, currentTab?.url);
           await chrome.tabs.update(currentTab.id, { url: targetUrl });
@@ -260,6 +264,16 @@ function bindEvents(matchedSource) {
         } else {
           startImport(matchedSource);
         }
+        $('resetHistoryBtn')?.addEventListener('click', async () => {
+          try {
+            const response = await chrome.runtime.sendMessage({ type: 'mc-reset-import-history', platform: matchedSource.id });
+            if (response?.error) throw new Error(response.error);
+            $('importHistory').textContent = 'Local checkpoint cleared. The next import will check all saved items.';
+          } catch (error) {
+            $('importStatus').textContent = error.message || 'Could not clear import history.';
+            $('importStatus').className = 'import-status error';
+          }
+        });
       });
     }
   }
@@ -306,8 +320,18 @@ async function startImport(source) {
   const statusEl = $('importStatus');
 
   // Prevent double-click
-  const existing = await getImportState(source.id);
-  if (existing && !existing.done) return;
+  let existing;
+  try {
+    existing = await getImportState(source.id);
+  } catch (error) {
+    statusEl.textContent = `Could not read import state: ${error.message}`;
+    statusEl.className = 'import-status error';
+    return;
+  }
+  if (existing && !existing.done) {
+    statusEl.textContent = `Already importing ${source.name} in ${existing.tabId === currentTab?.id ? 'this tab' : 'another tab'}.`;
+    return;
+  }
 
   btn.disabled = false;
   if (source.livePassive) {
@@ -319,17 +343,16 @@ async function startImport(source) {
   }
   statusEl.textContent = 'Starting import...';
   statusEl.className = 'import-status';
-  await setImportState(source.id, { imported: 0, skipped: 0, done: false });
-
   try {
-    await chrome.tabs.sendMessage(currentTab.id, { type: 'mc-start-import', platform: source.id });
-  } catch {
-    statusEl.textContent = 'Could not reach the page. Try reloading it first.';
+    const response = await chrome.runtime.sendMessage({ type: 'mc-request-import', platform: source.id, tabId: currentTab.id });
+    if (response?.error) throw new Error(response.error);
+    if (!response?.started) throw new Error('Could not reach the page. Try reloading it first.');
+  } catch (error) {
+    statusEl.textContent = error.message || 'Could not reach the page. Try reloading it first.';
     statusEl.className = 'import-status error';
     btn.disabled = false;
     btn.textContent = source.livePassive ? 'Start Capture' : 'Import Saved Items';
     delete btn.dataset.capturing;
-    await setImportState(source.id, null);
   }
 }
 
@@ -351,33 +374,39 @@ async function finishCapture(source) {
 }
 
 // Live progress from content scripts
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.type !== 'mc-import-progress') return;
+  if ($('importBanner')?.dataset.sourceId !== message.platform) return;
+  if (sender?.tab && sender.tab.id !== currentTab?.id) return;
+  // Real content-script progress is rendered from the worker's validated state.
+  if (sender?.tab) return;
+  renderImportProgress(message);
+});
 
+function renderImportProgress(message) {
   const terminalErrors = Array.isArray(message.errors)
     ? message.errors.filter((error) => typeof error === 'string' && error.trim())
     : [];
-  const state = {
-    imported: message.imported ?? 0,
-    skipped: message.skipped ?? 0,
-    done: !!message.done,
-    error: message.error || terminalErrors[0] || null,
-  };
-  setImportState(message.platform, state.done ? null : state);
-
   const btn = $('importBtn');
   const statusEl = $('importStatus');
   if (!btn || !statusEl) return;
 
   const isPassive = SOURCES.find((s) => s.id === message.platform)?.livePassive;
   const counts = `${message.imported ?? 0} imported, ${message.skipped ?? 0} skipped`;
+  const source = SOURCES.find((s) => s.id === message.platform);
+  function resetButton() {
+    const needsRedirect = !!source?.readyPattern && !source.readyPattern.test(currentTab?.url || '');
+    $('importBanner').dataset.needsRedirect = String(needsRedirect);
+    btn.classList.toggle('btn-redirect-primary', needsRedirect);
+    btn.disabled = false;
+    btn.textContent = needsRedirect ? 'Go to Saved & Import' : isPassive ? 'Start Capture' : 'Import Saved Items';
+    delete btn.dataset.capturing;
+  }
 
   if (message.error) {
     statusEl.textContent = message.error;
     statusEl.className = 'import-status error';
-    btn.disabled = false;
-    btn.textContent = isPassive ? 'Start Capture' : 'Import Saved Items';
-    delete btn.dataset.capturing;
+    resetButton();
     return;
   }
 
@@ -385,28 +414,30 @@ chrome.runtime.onMessage.addListener((message) => {
     const remaining = terminalErrors.length > 1 ? ` (+${terminalErrors.length - 1} more)` : '';
     statusEl.textContent = `Finished with errors - ${counts}. ${terminalErrors[0]}${remaining}`;
     statusEl.className = 'import-status error';
-    btn.disabled = false;
-    btn.textContent = isPassive ? 'Start Capture' : 'Import Saved Items';
-    delete btn.dataset.capturing;
+    resetButton();
     return;
   }
 
   if (message.done) {
-    statusEl.textContent = `Done - ${counts}`;
+    statusEl.textContent = `Done - ${counts}${message.hint ? `. ${message.hint}` : ''}`;
     statusEl.className = 'import-status success';
-    btn.disabled = false;
-    btn.textContent = isPassive ? 'Start Capture' : 'Import Saved Items';
-    delete btn.dataset.capturing;
+    resetButton();
   } else if (isPassive) {
+    $('importBanner').dataset.needsRedirect = 'false';
+    btn.classList.remove('btn-redirect-primary');
     statusEl.textContent = message.hint ? `${counts} — ${message.hint}` : `Capturing... ${counts}`;
     statusEl.className = 'import-status';
     btn.disabled = false;
     btn.textContent = 'Finish';
     btn.dataset.capturing = 'true';
   } else {
+    $('importBanner').dataset.needsRedirect = 'false';
+    btn.classList.remove('btn-redirect-primary');
     statusEl.textContent = `Importing... ${counts}`;
+    btn.disabled = true;
+    btn.textContent = 'Importing...';
   }
-});
+}
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -475,17 +506,83 @@ function importStateKey(platform) { return `importState_${platform}`; }
 async function getImportState(platform) {
   const key = importStateKey(platform);
   const data = await chrome.storage.session.get(key);
-  return data[key] || null;
+  return Number.isInteger(data[key]?.tabId) ? data[key] : null;
 }
 
-async function setImportState(platform, state) {
-  const key = importStateKey(platform);
-  if (state) {
-    await chrome.storage.session.set({ [key]: state });
-  } else {
-    await chrome.storage.session.remove(key);
+async function restoreImportUi(source, tabId) {
+  const requestId = ++restoreRequestId;
+  try {
+    const states = await chrome.storage.session.get(null);
+    if (requestId !== restoreRequestId || currentTab?.id !== tabId) return;
+    const others = Object.entries(states)
+      .filter(([key, state]) => key.startsWith('importState_') && Number.isInteger(state.tabId) && !state.done && state.tabId !== tabId);
+    const notice = $('activeImports');
+    if (notice) {
+      notice.replaceChildren();
+      for (const [key, state] of others) {
+        const name = SOURCES.find((item) => item.id === key.slice('importState_'.length))?.name || state.platform;
+        const row = document.createElement('div');
+        row.textContent = `${name}: ${state.imported ?? 0} imported, ${state.skipped ?? 0} skipped in another tab. `;
+        const button = document.createElement('button');
+        button.className = 'history-reset';
+        button.textContent = 'View import tab';
+        button.addEventListener('click', async () => {
+          try {
+            const tab = await chrome.tabs.update(state.tabId, { active: true });
+            if (tab?.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
+          } catch (error) {
+            notice.textContent = `Could not open import tab: ${error.message}`;
+          }
+        });
+        row.append(button);
+        notice.append(row);
+      }
+    }
+    if (!source) return;
+    const storedState = states[importStateKey(source.id)];
+    const state = Number.isInteger(storedState?.tabId) ? storedState : null;
+    if (state?.tabId === tabId) renderImportProgress({ platform: source.id, ...state });
+    else if (state && !state.done) {
+      $('importBtn').disabled = true;
+      $('importStatus').textContent = `${source.name} is importing in another tab.`;
+    } else {
+      const btn = $('importBtn');
+      if (btn) btn.disabled = false;
+    }
+    if ($('resetHistoryBtn')) $('resetHistoryBtn').disabled = !!state && !state.done;
+
+    if (chrome.storage.local) {
+      const key = `lastImport_${source.id}`;
+      const data = await chrome.storage.local.get(key);
+      const { apiUrl } = await chrome.storage.sync.get('apiUrl');
+      if (requestId !== restoreRequestId || currentTab?.id !== tabId || $('importBanner')?.dataset.sourceId !== source.id) return;
+      const history = data[key];
+      const el = $('importHistory');
+      if (el && history && history.apiUrl === apiUrl) {
+        el.textContent = `${history.lastImportedAt ? `Last imported: ${new Date(history.lastImportedAt).toLocaleString()}. ` : ''}${history.completed ? 'Saved history caught up.' : 'Full history not yet confirmed.'} Feed: ${history.scope}.`;
+        if (/^https?:\/\//i.test(history.earliestItem?.sourceUrl || '')) {
+          const link = document.createElement('a');
+          link.href = history.earliestItem.sourceUrl;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = history.ordered ? 'Oldest reached item' : 'Previously captured item';
+          el.append(document.createElement('br'), link);
+        }
+      } else if (el) {
+        el.textContent = '';
+      }
+    }
+  } catch (error) {
+    const el = $('activeImports');
+    if (el) el.textContent = `Could not restore import progress: ${error.message}`;
   }
 }
+
+chrome.storage.onChanged?.addListener((_changes, area) => {
+  if (area !== 'session' && area !== 'local') return;
+  const source = SOURCES.find((item) => item.id === $('importBanner')?.dataset.sourceId);
+  restoreImportUi(source, currentTab?.id);
+});
 
 // ─── Start ───────────────────────────────────────────────────────────────────
 

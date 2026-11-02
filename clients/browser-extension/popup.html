@@ -191,6 +191,23 @@
     }
     .import-status.error { color: #f87171; }
     .import-status.success { color: #4ade80; }
+    .import-status, .import-history { overflow-wrap: anywhere; line-height: 1.5; }
+    #activeImports:not(:empty) { margin: 0 0 12px; text-align: left; }
+    .import-history { font-size: 11px; color: #94a3b8; margin-top: 8px; }
+    .import-history a { color: #c7d2fe; text-underline-offset: 2px; }
+    .history-reset {
+      background: transparent;
+      border: none;
+      color: #c7d2fe;
+      font: inherit;
+      font-size: 11px;
+      padding: 6px 0;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .history-reset:disabled { color: #94a3b8; cursor: not-allowed; }
+    .history-reset:focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
 
     /* ─── Divider ─── */
     .divider {

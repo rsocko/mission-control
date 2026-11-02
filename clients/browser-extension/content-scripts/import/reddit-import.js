@@ -40,7 +40,7 @@ async function fetchRedditUsername() {
 async function extractRedditUsername() {
   // Fast synchronous check first, then fall back to API call.
   const fromPage = extractRedditUsernameFromPage();
-  if (fromPage) return fromPage;
+  if (fromPage && fromPage.toLowerCase() !== 'me') return fromPage;
   return fetchRedditUsername();
 }
 
@@ -227,6 +227,7 @@ async function runRedditImport() {
 
   await runPagedImport({
     platform: 'reddit',
+    scope: `${username.toLowerCase()}/saved`,
     batchSize: REDDIT_BATCH_SIZE,
     maxPages: REDDIT_MAX_PAGES,
     async fetchPage(after) {
@@ -239,6 +240,7 @@ async function runRedditImport() {
       throw new Error(`Reddit saved.json request failed: ${response.status} ${response.statusText}`);
     }
     const payload = await response.json();
+    if (!Array.isArray(payload?.data?.children)) throw new Error('Reddit did not return a saved-items list. Refresh the page and try again.');
     return {
       items: Array.isArray(payload?.data?.children) ? payload.data.children : [],
       nextCursor: payload?.data?.after || null,
@@ -250,7 +252,6 @@ async function runRedditImport() {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'mc-start-import' && message.platform === 'reddit') {
-    runRedditImport();
-    sendResponse({ started: true });
+    window.MCImportCommon.startImport('reddit', runRedditImport, message, sendResponse);
   }
 });

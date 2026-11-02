@@ -103,7 +103,10 @@ async function runFacebookImport() {
 
   const seen = new Set();
   let stallRounds = 0;
-  const session = createImportSession('facebook', FB_BATCH_SIZE);
+  const account = document.cookie.split('; ').find((cookie) => cookie.startsWith('c_user='))?.slice(7);
+  // Unknown accounts never share durable deduplication history.
+  const scope = `${account || `unknown-${Date.now()}`}:${window.location.pathname}${window.location.search}`;
+  const session = createImportSession('facebook', FB_BATCH_SIZE, scope);
 
   for (let round = 0; round < FB_MAX_SCROLL_ROUNDS; round += 1) {
     const items = scrapeVisibleSavedItems().filter((item) => !seen.has(item.sourceUrl));
@@ -123,12 +126,11 @@ async function runFacebookImport() {
     await wait(FB_SCROLL_WAIT_MS);
   }
 
-  session.finish();
+  await session.finish({ completed: false, hint: 'Stopped scrolling. Full history cannot be confirmed from the rendered page.' });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'mc-start-import' && message.platform === 'facebook') {
-    runFacebookImport();
-    sendResponse({ started: true });
+    window.MCImportCommon.startImport('facebook', runFacebookImport, message, sendResponse);
   }
 });

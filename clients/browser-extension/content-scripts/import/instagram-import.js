@@ -123,9 +123,11 @@ async function runInstagramImport(options) {
 
   // Determine which feed to fetch: a specific collection or all saved posts
   const collectionId = options?.collectionId || detectCollectionId();
+  const accountId = document.cookie.split('; ').find((cookie) => cookie.startsWith('ds_user_id='))?.slice(11);
 
   await runPagedImport({
     platform: 'instagram',
+    scope: `${accountId || window.location.pathname.split('/')[1]}/saved/${collectionId || 'all-posts'}`,
     batchSize: IG_BATCH_SIZE,
     maxPages: IG_MAX_PAGES,
     async fetchPage(maxId) {
@@ -151,6 +153,8 @@ async function runInstagramImport(options) {
       } catch {
         throw new Error('Instagram saved posts response was not valid JSON');
       }
+      if (!Array.isArray(payload.items)) throw new Error('Instagram did not return a saved-items list. Refresh the page and try again.');
+      if (payload.more_available && !payload.next_max_id) throw new Error('Instagram did not return the next saved-items cursor. Try a rescan.');
       return {
         items: Array.isArray(payload.items) ? payload.items : [],
         nextCursor: payload.more_available ? payload.next_max_id || null : null,
@@ -183,8 +187,7 @@ function getLoggedInUsername() {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'mc-start-import' && message.platform === 'instagram') {
-    runInstagramImport();
-    sendResponse({ started: true });
+    window.MCImportCommon.startImport('instagram', runInstagramImport, message, sendResponse);
   }
   if (message?.type === 'mc-get-instagram-username') {
     sendResponse({ username: getLoggedInUsername() });

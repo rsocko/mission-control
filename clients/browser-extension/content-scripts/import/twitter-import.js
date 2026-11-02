@@ -1,23 +1,10 @@
 // twitter-import.js — captures the logged-in user's X/Twitter Bookmarks and
 // Likes into Mission Control's Triage Queue.
 //
-// Unlike Instagram/TikTok, X's Bookmarks/Likes data comes from an internal
-// GraphQL API (`/i/api/graphql/{queryId}/OperationName`) where the queryId
-// and required `features` payload are undocumented and rotate frequently.
-// Hardcoding them would break unpredictably and needs re-reverse-engineering
-// each time X ships a web client update. Instead of synthesizing our own
-// requests, this passively observes the GraphQL responses the page *already*
-// produces as the user scrolls their own Bookmarks/Likes timeline (via
-// common.js's observeFetch, backed by the MAIN-world fetch patch in
-// page-fetch-relay.js) and harvests tweets straight out of them. This makes
-// zero extra network requests beyond the user's own browsing and self-heals
-// when X changes its API shape, at the cost of requiring the user to scroll
-// instead of a single "Import" click doing full auto-pagination.
-//
-// Both Bookmarks and Likes are newest-first, so once the backend starts
-// reporting a batch as mostly/all duplicates, the user has caught back up to
-// previously-imported tweets — but we don't auto-stop, since they may be
-// revisiting a partial prior run rather than doing a fresh full pass.
+// Uses X's native timeline to load older items automatically, without
+// hardcoded GraphQL query IDs, feature flags, or signed request headers.
+// The document-start relay buffers fetch/XHR responses; DOM capture also
+// includes tweets that were rendered before the extension started importing.
 
 const TWITTER_GRAPHQL_PATTERNS = ['/Bookmarks', '/Likes'];
 const TWITTER_BATCH_SIZE = 25;
@@ -27,6 +14,11 @@ let sentIds = new Set();
 let consecutiveHighSkipBatches = 0;
 let importSession = null;
 let processing = Promise.resolve();
+let captureTask = null;
+let cancelled = false;
+let reachedEnd = false;
+let activeContext = null;
+let activity = 0;
 
 /**
  * Recursively walks an arbitrary JSON tree looking for GraphQL "Tweet"
@@ -53,6 +45,7 @@ function findTweetResults(node, out, seen) {
       seen.add(tweet.rest_id);
       out.push(tweet);
     }
+    return; // Quoted/retweeted objects are not separate saved-list entries.
   }
 
   for (const key of Object.keys(node)) {
@@ -65,8 +58,9 @@ function extractTweets(responseBody) {
   try {
     payload = JSON.parse(responseBody);
   } catch {
-    return [];
+    throw new Error('X returned an unreadable saved-items response. Reload X and try again.');
   }
+  if (payload.errors?.length) throw new Error(payload.errors[0].message || 'X could not load saved items.');
   const out = [];
   findTweetResults(payload, out, new Set());
   return out;
@@ -120,7 +114,7 @@ function normalizeTweet(tweet, sourceContext) {
   if (!id) return null;
 
   const legacy = tweet.legacy || {};
-  const fullText = legacy.full_text || '';
+  const fullText = tweet.note_tweet?.note_tweet_results?.result?.text || legacy.full_text || '';
   const screenName = getScreenName(tweet);
   const displayName = getDisplayName(tweet);
   const url = `https://x.com/i/web/status/${id}`;
@@ -156,12 +150,36 @@ function detectSourceContext(url) {
   return 'unknown';
 }
 
-async function handleObservedResponse(url, body) {
+function hasTimelineEnd(node) {
+  if (!node || typeof node !== 'object') return false;
+  if (node.type === 'TimelineTerminateTimeline' && node.direction === 'Bottom') return true;
+  if (node.cursorType === 'Bottom' && node.value === '') return true;
+  return Object.values(node).some(hasTimelineEnd);
+}
+
+function visibleTweets() {
+  return [...document.querySelectorAll('article[data-testid="tweet"]')].flatMap((article) => {
+    const time = article.querySelector('time');
+    const link = time?.closest('a')?.getAttribute('href');
+    const id = link?.match(/\/status\/(\d+)/)?.[1];
+    if (!id) return [];
+    return [{
+      rest_id: id,
+      legacy: {
+        full_text: article.querySelector('[data-testid="tweetText"]')?.textContent || '',
+        created_at: time.getAttribute('datetime'),
+        entities: { media: [...article.querySelectorAll('[data-testid="tweetPhoto"] img')].map((img) => ({
+          type: 'photo', media_url_https: img.src,
+        })) },
+      },
+    }];
+  });
+}
+
+async function submitTweets(tweets, sourceContext) {
   const { reportProgress } = window.MCImportCommon;
   const session = importSession;
   if (!session) return;
-  const sourceContext = detectSourceContext(url);
-  const tweets = extractTweets(body);
   if (!tweets.length) return;
 
   const fresh = [];
@@ -172,6 +190,7 @@ async function handleObservedResponse(url, body) {
     if (normalized) fresh.push(normalized);
   }
   if (!fresh.length) return;
+  activity += 1;
 
   const before = session.snapshot();
   const after = await session.submit(fresh);
@@ -195,20 +214,79 @@ async function handleObservedResponse(url, body) {
     skipped: after.skipped,
     done: false,
     hint: caughtUp
-      ? 'Mostly seeing already-saved tweets — you may have reached where you left off. Keep scrolling if you want to go further back, or click Finish.'
+      ? 'Mostly seeing already-saved tweets. Automatically checking older items; click Finish to stop.'
       : undefined,
   });
+}
+
+async function handleObservedResponse(url, body, status, buffered) {
+  if (detectSourceContext(url) !== activeContext) return;
+  if (status >= 400) throw new Error(`X saved-items request failed (${status}). Reload X and try again.`);
+  const tweets = extractTweets(body);
+  activity += 1;
+  if (!buffered) reachedEnd ||= hasTimelineEnd(JSON.parse(body));
+  await submitTweets(tweets, activeContext);
+}
+
+async function runTwitterCapture() {
+  let idle = 0;
+  let previousActivity = -1;
+  const startPath = window.location.pathname;
+  try {
+    await Promise.resolve();
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    for (let step = 0; step < 200 && !cancelled; step += 1) {
+      if (window.location.pathname !== startPath || getActiveContext() !== activeContext) {
+        throw new Error('The X saved feed changed. Return to the feed and start a new import.');
+      }
+      // Serialize DOM and API batches so concurrent checkpoint writes cannot
+      // lose acknowledged IDs. Buffered API metadata wins over the fallback.
+      processing = processing
+        .then(() => submitTweets(visibleTweets(), activeContext))
+        .catch((error) => importSession.addError(error));
+      await processing;
+      if (importSession.snapshot().errors.length || reachedEnd) break;
+      idle = activity === previousActivity ? idle + 1 : 0;
+      previousActivity = activity;
+      if (idle >= 10) break;
+      const scroller = document.scrollingElement || document.documentElement;
+      window.scrollTo({
+        top: Math.min(scroller.scrollHeight, scroller.scrollTop + Math.max(400, window.innerHeight * 0.8)),
+        behavior: 'instant',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  } catch (error) {
+    importSession.addError(error);
+  } finally {
+    stopObserving?.();
+    stopObserving = null;
+    await processing;
+    const state = importSession.snapshot();
+    if (!cancelled && !state.imported && !state.skipped && !reachedEnd && !state.errors.length) {
+      importSession.addError(new Error('No saved tweets were found. Open your Bookmarks or Likes feed, reload X, and try again.'));
+    }
+    await importSession.finish({
+      completed: reachedEnd && !cancelled,
+      hint: reachedEnd && !cancelled
+        ? 'X confirmed the end of this saved feed.'
+        : 'History incomplete. Run again to continue; already-saved items will be skipped.',
+    });
+    importSession = null;
+  }
+}
+
+function getActiveContext() {
+  if (/\/likes\/?$/.test(window.location.pathname)) return 'likes';
+  const tab = document.querySelector('[role="tab"][aria-selected="true"]')?.textContent || '';
+  return /likes/i.test(tab) ? 'likes' : 'bookmarks';
 }
 
 function startTwitterCapture() {
   const { createImportSession, reportProgress, observeFetch } = window.MCImportCommon;
 
-  // Content scripts persist across in-app (SPA) navigation on x.com/twitter.com
-  // but not across a full page reload. So capture should be started *before*
-  // navigating to the Bookmarks/Likes tab via X's own nav — that way the
-  // GraphQL request triggered by that in-app navigation is already observed,
-  // rather than missed because the observer wasn't installed yet.
-  if (stopObserving) {
+  if (importSession) {
     const state = importSession.snapshot();
     reportProgress('twitter', { live: true, imported: state.imported, skipped: state.skipped, done: false, error: 'Capture already running.' });
     return;
@@ -216,35 +294,37 @@ function startTwitterCapture() {
 
   sentIds = new Set();
   consecutiveHighSkipBatches = 0;
-  const account = document.cookie.split('; ').find((cookie) => cookie.startsWith('twid='))?.slice(5);
+  cancelled = false;
+  reachedEnd = false;
+  activity = 0;
+  activeContext = getActiveContext();
+  const accountCookie = document.cookie.split('; ').find((cookie) => cookie.startsWith('twid='))?.slice(5);
+  const account = accountCookie ? decodeURIComponent(accountCookie).replace(/^u=/, '') : null;
   const profile = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]')?.getAttribute('href');
   const username = profile?.match(/^\/([^/]+)\/?$/)?.[1];
-  importSession = createImportSession('twitter', TWITTER_BATCH_SIZE, `${account || username || `unknown-${Date.now()}`}:${window.location.pathname}`);
+  importSession = createImportSession('twitter', TWITTER_BATCH_SIZE, `${account || username || `unknown-${Date.now()}`}:${activeContext}`);
   processing = Promise.resolve();
 
-  stopObserving = observeFetch(TWITTER_GRAPHQL_PATTERNS, (url, body) => {
+  stopObserving = observeFetch(TWITTER_GRAPHQL_PATTERNS, (url, body, status, buffered) => {
     processing = processing
-      .then(() => handleObservedResponse(url, body))
+      .then(() => handleObservedResponse(url, body, status, buffered))
       .catch((error) => importSession?.addError(error));
-  });
+  }, (error) => importSession?.addError(error));
 
   reportProgress('twitter', {
     live: true,
     imported: 0,
     skipped: 0,
     done: false,
-    hint: 'Capturing — open your Bookmarks or Likes tab (via X\'s own nav, not a page reload) and scroll to load more. Click Finish when done.',
+    hint: 'Importing this saved feed and loading older items automatically. Keep this tab open; click Finish to stop.',
   });
+  captureTask = runTwitterCapture();
+  return captureTask;
 }
 
 async function finishTwitterCapture() {
-  if (stopObserving) {
-    stopObserving();
-    stopObserving = null;
-  }
-  await processing;
-  await importSession?.finish({ completed: false, hint: 'Capture finished. Keep scrolling in a later capture to import older items; full history is not confirmed.' });
-  importSession = null;
+  cancelled = true;
+  await captureTask;
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

@@ -39,6 +39,13 @@
   function injectRelay() {
     if (relayLoadPromise) return relayLoadPromise;
 
+    let ready = false;
+    const onReady = () => { ready = true; };
+    window.addEventListener('mc-relay-ready', onReady);
+    window.dispatchEvent(new CustomEvent('mc-relay-check'));
+    window.removeEventListener('mc-relay-ready', onReady);
+    if (ready) return Promise.resolve();
+
     relayLoadPromise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = chrome.runtime.getURL('page-fetch-relay.js');
@@ -316,14 +323,14 @@
    * and forward the body of any response whose URL contains one of `patterns`
    * to `onMatch(url, body)`. Returns a function that stops observing.
    */
-  function observeFetch(patterns, onMatch) {
+  function observeFetch(patterns, onMatch, onError = console.error) {
     let stopped = false;
 
     function handler(e) {
-      const { url, body } = e.detail || {};
+      const { url, body, status, buffered } = e.detail || {};
       if (!url) return;
       if (patterns.some((p) => url.includes(p))) {
-        onMatch(url, body);
+        onMatch(url, body, status, buffered);
       }
     }
 
@@ -334,7 +341,7 @@
         window.dispatchEvent(new CustomEvent('mc-observe-fetch-pattern', { detail: { pattern } }));
       }
     }).catch((err) => {
-      if (!stopped) console.error('[MC Triage] Failed to initialize fetch observer:', err);
+      if (!stopped) onError(err);
     });
 
     return () => {

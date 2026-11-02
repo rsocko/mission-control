@@ -25,11 +25,7 @@ const SOURCES = [
     url: 'https://x.com/i/history',
     hostMatch: ['x.com', 'twitter.com'],
     importable: true,
-    // X's Bookmarks/Likes API is undocumented and rotates often, so instead of
-    // one-click auto-pagination (like Instagram/TikTok), this passively
-    // captures tweets as the user scrolls their own timeline. The popup shows
-    // a Start/Finish toggle instead of a single "Import" action.
-    livePassive: true,
+    liveCapture: true,
     readyPattern: /^https:\/\/(?:www\.)?(?:x|twitter)\.com\/(?:i\/(?:bookmarks|history)(?:\/|[?#]|$)|[^/]+\/likes(?:\/|[?#]|$))/i,
   },
 ];
@@ -113,9 +109,9 @@ function renderDynamicContent({ tab, isInternal, matchedSource }) {
 
   // Import banner (if on an importable site)
   if (matchedSource) {
-    const importLabel = matchedSource.livePassive ? 'Start Capture' : 'Import Saved Items';
-    const desc = matchedSource.livePassive
-      ? `Passively captures tweets as you scroll your Bookmarks or Likes tab (no auto-pagination, so nothing changes about how ${matchedSource.name} works).`
+    const importLabel = 'Import Saved Items';
+    const desc = matchedSource.liveCapture
+      ? 'Imports your open Bookmarks or Likes feed and scrolls automatically to load older items. Keep the X tab open while importing.'
       : `Bulk-import your saved items from ${matchedSource.name} into Mission Control's Triage Queue.`;
 
     // Check if user is on the correct page for this platform's import to work.
@@ -259,7 +255,7 @@ function bindEvents(matchedSource) {
           const targetUrl = await resolveRedirectUrl(matchedSource, currentTab?.url);
           await chrome.tabs.update(currentTab.id, { url: targetUrl });
           closeTransientUi();
-        } else if (matchedSource.livePassive && importBtn.dataset.capturing === 'true') {
+        } else if (matchedSource.liveCapture && importBtn.dataset.capturing === 'true') {
           finishCapture(matchedSource);
         } else {
           startImport(matchedSource);
@@ -334,7 +330,7 @@ async function startImport(source) {
   }
 
   btn.disabled = false;
-  if (source.livePassive) {
+  if (source.liveCapture) {
     btn.textContent = 'Finish';
     btn.dataset.capturing = 'true';
   } else {
@@ -351,7 +347,7 @@ async function startImport(source) {
     statusEl.textContent = error.message || 'Could not reach the page. Try reloading it first.';
     statusEl.className = 'import-status error';
     btn.disabled = false;
-    btn.textContent = source.livePassive ? 'Start Capture' : 'Import Saved Items';
+    btn.textContent = 'Import Saved Items';
     delete btn.dataset.capturing;
   }
 }
@@ -391,7 +387,7 @@ function renderImportProgress(message) {
   const statusEl = $('importStatus');
   if (!btn || !statusEl) return;
 
-  const isPassive = SOURCES.find((s) => s.id === message.platform)?.livePassive;
+  const isLiveCapture = SOURCES.find((s) => s.id === message.platform)?.liveCapture;
   const counts = `${message.imported ?? 0} imported, ${message.skipped ?? 0} skipped`;
   const source = SOURCES.find((s) => s.id === message.platform);
   function resetButton() {
@@ -399,7 +395,7 @@ function renderImportProgress(message) {
     $('importBanner').dataset.needsRedirect = String(needsRedirect);
     btn.classList.toggle('btn-redirect-primary', needsRedirect);
     btn.disabled = false;
-    btn.textContent = needsRedirect ? 'Go to Saved & Import' : isPassive ? 'Start Capture' : 'Import Saved Items';
+    btn.textContent = needsRedirect ? 'Go to Saved & Import' : 'Import Saved Items';
     delete btn.dataset.capturing;
   }
 
@@ -419,13 +415,14 @@ function renderImportProgress(message) {
   }
 
   if (message.done) {
-    statusEl.textContent = `Done - ${counts}${message.hint ? `. ${message.hint}` : ''}`;
-    statusEl.className = 'import-status success';
+    const incomplete = isLiveCapture && message.completed !== true;
+    statusEl.textContent = `${incomplete ? 'Stopped' : 'Done'} - ${counts}${message.hint ? `. ${message.hint}` : ''}`;
+    statusEl.className = incomplete ? 'import-status' : 'import-status success';
     resetButton();
-  } else if (isPassive) {
+  } else if (isLiveCapture) {
     $('importBanner').dataset.needsRedirect = 'false';
     btn.classList.remove('btn-redirect-primary');
-    statusEl.textContent = message.hint ? `${counts} — ${message.hint}` : `Capturing... ${counts}`;
+    statusEl.textContent = message.hint ? `${counts} — ${message.hint}` : `Importing... ${counts}`;
     statusEl.className = 'import-status';
     btn.disabled = false;
     btn.textContent = 'Finish';

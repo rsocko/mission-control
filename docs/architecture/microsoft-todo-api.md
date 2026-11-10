@@ -423,6 +423,14 @@ source-owned occurrence is stale or suppress it because another occurrence has a
 later due or completion date. A full sync therefore recovers any active upstream
 occurrence that was previously removed locally.
 
+To Do can reuse the original task ID for the next open occurrence and create a
+separate completed-history task. The original task's modification timestamp can
+precede Mission Control's write-through `lastSyncedAt`, because recurrence advances
+inside the completion request. Pull reconciliation must accept a provider-owned
+recurring task changing from done to todo with a later due date even in that
+timestamp window. Pending, failed, and in-flight local pushes remain protected;
+same-date or older payloads do not qualify for this timestamp exception.
+
 Mission Control only performs recurrence cleanup or materialization for canonical
 rules whose occurrence owner is `mission-control`, such as completion-anchored
 local tasks.

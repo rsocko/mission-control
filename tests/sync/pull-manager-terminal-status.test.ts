@@ -257,6 +257,7 @@ vi.mock('crypto', async (importOriginal) => {
 
 import { upsertTasks } from '@/lib/sync/pull-manager';
 import { detectDeletions } from '@/lib/sync/deletion-detector';
+import { canonicalizeLegacyRecurrence } from '@/lib/recurrence/canonical';
 
 describe('pull-manager terminal status sync', () => {
   const connectorId = 'gh-conn-1';
@@ -372,6 +373,172 @@ describe('pull-manager terminal status sync', () => {
     expect(mockUpdateSets.every((update) =>
       !(update && typeof update === 'object' && 'localDisposition' in update),
     )).toBe(true);
+  });
+
+  describe('To Do same-ID recurring advancement', () => {
+    const todoConnectorId = 'todo-1';
+    const todoConnector = { ...mockConnector, type: 'microsoft-todo' };
+
+    function makeRecurringRemote(overrides: Partial<TaskItem> = {}) {
+      return makeRemoteTask({
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: todoConnectorId,
+        sourceId: 'list-1:original-task',
+        sourceListId: 'list-1',
+        title: 'Biweekly chore',
+        status: 'todo',
+        statusReason: undefined,
+        dueDate: '2026-11-09',
+        completedAt: undefined,
+        updatedAt: '2026-10-27T04:03:36.515Z',
+        metadata: { recurrence: 'biweekly' },
+        ...overrides,
+      });
+    }
+
+    beforeEach(() => {
+      mockCapabilities = {
+        read: true,
+        write: true,
+        delete: false,
+        sync: true,
+        subtasks: true,
+        lists: true,
+        tags: true,
+        tagWriteBack: false,
+        dueDate: true,
+      };
+      mockExistingTasks.push(makeExistingTask({
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: todoConnectorId,
+        sourceId: 'list-1:original-task',
+        sourceListId: 'list-1',
+        title: 'Biweekly chore',
+        status: 'done',
+        dueDate: '2026-10-26',
+        completedAt: '2026-10-27T04:03:32.965Z',
+        updatedAt: '2026-10-27T04:03:32.965Z',
+        lastSyncedAt: '2026-10-27T04:03:36.877Z',
+        metadata: { recurrence: 'biweekly' },
+      }));
+    });
+
+    it.each([false, true])(
+      'recovers the advanced occurrence when full sync is %s without creating a task',
+      async (isFullSync) => {
+        const result = await upsertTasks(
+          todoConnectorId, todoConnector, [makeRecurringRemote()], isFullSync, [],
+        );
+
+        expect(result.added).toBe(0);
+        expect(result.updated).toBe(1);
+        expect(mockExistingTasks).toHaveLength(1);
+        expect(mockExistingTasks[0]).toEqual(expect.objectContaining({
+          id: 'task-1',
+          sourceId: 'list-1:original-task',
+          status: 'todo',
+          dueDate: '2026-11-09',
+          completedAt: null,
+          localDisposition: 'handled',
+        }));
+      },
+    );
+
+    it.each(['pending_push', 'push_error', 'pushing'])(
+      'preserves a %s local mutation',
+      async (syncStatus) => {
+        Object.assign(mockExistingTasks[0]!, { syncStatus });
+
+        const result = await upsertTasks(
+          todoConnectorId, todoConnector, [makeRecurringRemote()], false, [],
+        );
+
+        expect(result.updated).toBe(0);
+        expect(mockUpdateSets).toHaveLength(0);
+        expect(mockExistingTasks[0]).toEqual(expect.objectContaining({
+          status: 'done', dueDate: '2026-10-26', syncStatus,
+        }));
+      },
+    );
+
+    const excludedCases: Array<{
+      name: string;
+      existing?: Record<string, unknown>;
+      remote?: Partial<TaskItem>;
+    }> = [
+      { name: 'same occurrence date', remote: { dueDate: '2026-10-26' } },
+      { name: 'older occurrence date', remote: { dueDate: '2026-10-12' } },
+      { name: 'missing remote date', remote: { dueDate: undefined } },
+      { name: 'missing local date', existing: { dueDate: null } },
+      { name: 'non-recurring task', remote: { metadata: {} } },
+      { name: 'cancelled task', existing: { status: 'cancelled' } },
+      { name: 'already open task', existing: { status: 'todo' } },
+      { name: 'local checklist item', existing: { isChecklistItem: true } },
+      { name: 'remote checklist item', remote: { isChecklistItem: true } },
+      {
+        name: 'another connector',
+        existing: { connectorType: 'custom-rest' },
+        remote: { connectorType: 'custom-rest' },
+      },
+      {
+        name: 'Mission Control-owned recurrence',
+        remote: {
+          metadata: {
+            recurrence: 'biweekly',
+            canonicalRecurrence: canonicalizeLegacyRecurrence({
+              recurrence: 'biweekly',
+              mode: 'schedule',
+              startDate: '2026-10-26',
+              timezone: 'UTC',
+              seriesIdentity: { kind: 'mission-control', stableId: 'mc-series' },
+            }),
+          },
+        },
+      },
+    ];
+
+    it.each(excludedCases)(
+      'does not bypass timestamps for $name',
+      async ({ existing, remote }) => {
+        Object.assign(mockExistingTasks[0]!, existing);
+
+        const result = await upsertTasks(
+          todoConnectorId, todoConnector, [makeRecurringRemote(remote)], false, [],
+        );
+
+        expect(result.updated).toBe(0);
+        expect(mockUpdateSets).toHaveLength(0);
+      },
+    );
+
+    it('does not reapply the same occurrence on replay', async () => {
+      const remote = makeRecurringRemote();
+      await upsertTasks(todoConnectorId, todoConnector, [remote], false, []);
+      mockUpdateSets.length = 0;
+
+      const result = await upsertTasks(todoConnectorId, todoConnector, [remote], false, []);
+
+      expect(result.updated).toBe(0);
+      expect(mockUpdateSets).toHaveLength(0);
+    });
+
+    it('preserves local edits that start while applying the recovered occurrence', async () => {
+      mockRemoteUpdateFailuresRemaining = 1;
+      mockRemoteUpdateFailureMutation = {
+        syncStatus: 'pending_push',
+        updatedAt: '2026-11-09T12:00:00Z',
+      };
+
+      const result = await upsertTasks(
+        todoConnectorId, todoConnector, [makeRecurringRemote()], false, [],
+      );
+
+      expect(result.updated).toBe(0);
+      expect(mockUpdateSets).toHaveLength(0);
+      expect(mockExistingTasks[0]).toEqual(expect.objectContaining({
+        status: 'done', syncStatus: 'pending_push',
+      }));
+    });
   });
 
   it('defers only the conflicted list when repeated remote CAS attempts fail', async () => {

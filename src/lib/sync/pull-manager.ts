@@ -17,6 +17,7 @@ import { applyExplicitDeletions, detectDeletions } from './deletion-detector';
 import { archiveAndDeleteTask } from './deletion-recovery';
 import {
   getRecurringSeriesKey,
+  hasRecurrenceEvidence,
   isMissionControlOwnedRecurrence,
 } from './recurring-task-reconciliation';
 import {
@@ -658,6 +659,20 @@ export async function upsertTasks(
             // status changes (e.g. an issue closed on GitHub) from being applied.
             const baseline = existing.lastSyncedAt || existing.updatedAt;
             const remoteNewer = remoteTask.updatedAt > baseline;
+            // To Do advances the original task during completion, before our
+            // write-through records lastSyncedAt. A later occurrence is still
+            // authoritative even when that timestamp falls inside the push.
+            const recurringOccurrenceAdvanced = existing.connectorType === 'microsoft-todo'
+              && remoteTask.connectorType === 'microsoft-todo'
+              && existing.status === 'done'
+              && remoteTask.status === 'todo'
+              && !existing.isChecklistItem
+              && !remoteTask.isChecklistItem
+              && hasRecurrenceEvidence(remoteTask)
+              && !isMissionControlOwnedRecurrence(remoteTask.metadata)
+              && !!existing.dueDate
+              && !!remoteTask.dueDate
+              && remoteTask.dueDate > existing.dueDate;
             const existingMetadata = parseTaskMetadata(existing.metadata);
             const needsRemoteHydration = existing.connectorType === 'microsoft-todo'
               && Object.keys(existingMetadata).length === 0
@@ -681,6 +696,7 @@ export async function upsertTasks(
             if (
               remoteNewer
               || forceTerminalSync
+              || recurringOccurrenceAdvanced
               || needsRemoteHydration
               || needsLinkedResourceHydration
               || needsDocumentDateHydration
